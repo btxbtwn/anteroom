@@ -69,11 +69,79 @@ OUTCOME_LABEL = {
 
 # --- GitHub and git ---------------------------------------------------------
 
+# A failed GitHub or git call is reported only as one of these fixed
+# categories under a fixed operation name. The command's own output and its
+# arguments can carry anything, so they never reach logs, comments or state.
+FAILURE_CATEGORIES = ("permission denied", "not found", "rate limited", "unknown")
+GRAPHQL_ERROR_CATEGORY = {
+    "FORBIDDEN": "permission denied",
+    "INSUFFICIENT_SCOPES": "permission denied",
+    "NOT_FOUND": "not found",
+    "RATE_LIMITED": "rate limited",
+}
+HTTP_STATUS_CATEGORY = {401: "permission denied", 403: "permission denied", 404: "not found", 429: "rate limited"}
+HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")
+OPERATION = {"gh": "GitHub CLI call", "git": "git command"}
+
+
+def graphql_error_category(errors: object) -> str:
+    """Category from GraphQL error type codes only; messages are never read."""
+    types = {e.get("type") for e in errors if isinstance(e, dict)} if isinstance(errors, list) else set()
+    for code, category in GRAPHQL_ERROR_CATEGORY.items():
+        if code in types:
+            return category
+    return "unknown"
+
+
+def failure_category(stdout: str, stderr: str) -> str:
+    """Classify a failed gh call by GraphQL error types or gh's HTTP status line."""
+    try:
+        errors = json.loads(stdout).get("errors") if stdout.strip() else None
+    except (ValueError, AttributeError):
+        errors = None
+    if errors:
+        category = graphql_error_category(errors)
+        if category != "unknown":
+            return category
+    if "rate limit" in (stderr or "").lower():
+        return "rate limited"
+    for status in HTTP_STATUS.findall(stderr or ""):
+        if int(status) in HTTP_STATUS_CATEGORY:
+            return HTTP_STATUS_CATEGORY[int(status)]
+    return "unknown"
+
+
+def known_category(value: object) -> str:
+    return value if value in FAILURE_CATEGORIES else "unknown"
+
+
+class CommandError(subprocess.CalledProcessError):
+    """A failed command: fixed operation name, exit status and category only."""
+
+    def __init__(self, operation: str, returncode: int, category: str):
+        super().__init__(returncode, [operation])
+        self.operation = operation
+        self.category = known_category(category)
+
+    def __str__(self) -> str:
+        return f"{self.operation} failed ({self.category}, exit status {self.returncode})"
+
+
+class GraphQLError(RuntimeError):
+    """GraphQL errors in a successful response, reported by category only."""
+
+    def __init__(self, category: str):
+        self.category = known_category(category)
+        super().__init__(f"GitHub GraphQL request failed ({self.category})")
+
 
 def run(*args: str, input: str | None = None, env: dict | None = None) -> str:
     result = subprocess.run(
-        list(args), check=True, capture_output=True, text=True, input=input, env=env
+        list(args), check=False, capture_output=True, text=True, input=input, env=env
     )
+    if result.returncode:
+        category = failure_category(result.stdout or "", result.stderr or "") if args[0] == "gh" else "unknown"
+        raise CommandError(OPERATION.get(args[0], "command"), result.returncode, category)
     return result.stdout
 
 
@@ -98,7 +166,7 @@ def graphql(query: str, **variables):
     body = json.dumps({"query": query, "variables": variables})
     out = json.loads(run("gh", "api", "graphql", "--input", "-", input=body))
     if out.get("errors"):
-        raise RuntimeError(f"GraphQL error: {out['errors']}")
+        raise GraphQLError(graphql_error_category(out["errors"]))
     return out["data"]
 
 
@@ -288,9 +356,15 @@ def render_review_info(ctx: dict) -> str:
     )
 
 
-def render_summary(data: dict, ctx: dict, *, posted: int, review_url: str | None) -> str:
+def render_summary(
+    data: dict, ctx: dict, *, posted: int, review_url: str | None, unresolved: dict | None = None
+) -> str:
     head7 = ctx["head"][:7]
-    out = [marker(REVIEW_STATE, {"reviewed_sha": ctx["head"]}), "## Claude review"]
+    state: dict = {"reviewed_sha": ctx["head"]}
+    if unresolved:
+        # Threads GitHub would not resolve keep the check red on reruns of this commit.
+        state |= {"unresolved_threads": unresolved["ids"], "unresolved_categories": unresolved["categories"]}
+    out = [marker(REVIEW_STATE, state), "## Claude review"]
     if posted:
         link = f" in the [latest review]({review_url})" if review_url else ""
         out.append(f"**Actionable comments posted: {posted}**{link}")
@@ -599,15 +673,41 @@ def review_scope(pr_files: list[str], new_paths: list[str] | None, open_paths: l
     return sorted(pr & new), sorted((set(open_paths) & new) - pr)
 
 
+def unresolved_failure(count: int, categories: list[str]) -> str:
+    return f"Could not resolve {count} addressed thread(s): {', '.join(categories)}"
+
+
+def still_open(thread_ids: list[str], threads: list[dict]) -> list[str]:
+    """The given threads that are still unresolved on the pull request."""
+    open_now = {t["id"] for t in threads if not t["isResolved"]}
+    return [tid for tid in thread_ids if tid in open_now]
+
+
 def prepare_review(args) -> None:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     head = git("rev-parse", "HEAD").strip()
     merge_base = git("merge-base", f"origin/{args.base}", head).strip()
     summaries = bot_issue_comments(args.pr, REVIEW_STATE)
-    reviewed = summaries[-1][1].get("reviewed_sha") if summaries else None
-    if reviewed == head:
+    state = summaries[-1][1] if summaries else {}
+    reviewed = state.get("reviewed_sha")
+    pending_ids = list(state.get("unresolved_threads") or [])
+    threads = review_threads(args.pr) if pending_ids else None
+    pending = still_open(pending_ids, threads) if threads is not None else []
+    stored = state.get("unresolved_categories")
+    pending_categories = list(dict.fromkeys(known_category(c) for c in stored)) if isinstance(stored, list) else []
+    pending_categories = pending_categories or ["unknown"]
+
+    def skip() -> None:
         set_output(skip="true")
+        # Skipping must not turn a check that failed on unresolved threads green.
+        if pending:
+            failure = unresolved_failure(len(pending), pending_categories)
+            print(f"::error title=Claude review::{failure}")
+            sys.exit(f"{failure}. Resolve them by hand after checking.")
+
+    if reviewed == head:
+        skip()
         return
     since = None
     if reviewed and subprocess.run(["git", "cat-file", "-e", reviewed]).returncode == 0 and is_ancestor(reviewed, head):
@@ -619,7 +719,7 @@ def prepare_review(args) -> None:
             "line": t["line"],
             "body": t["comments"]["nodes"][0]["body"],
         }
-        for t in review_threads(args.pr)
+        for t in (threads if threads is not None else review_threads(args.pr))
         if not t["isResolved"] and t["comments"]["nodes"] and is_claude_finding(t["comments"]["nodes"][0])
     ]
     files, restored = review_scope(
@@ -629,7 +729,7 @@ def prepare_review(args) -> None:
     )
     if not files and not restored:
         # Only a merge from the base branch: nothing new of this PR's to review.
-        set_output(skip="true")
+        skip()
         return
     (out / "pr.diff").write_text(git("diff", "--no-color", "--no-ext-diff", merge_base, head))
     increment = git(
@@ -637,7 +737,10 @@ def prepare_review(args) -> None:
     )
     (out / "increment.diff").write_text(increment)
     (out / "open-findings.json").write_text(json.dumps(open_findings, indent=2))
-    ctx = {"pr": args.pr, "head": head, "merge_base": merge_base, "since": since, "files": files, "restored": restored}
+    ctx = {
+        "pr": args.pr, "head": head, "merge_base": merge_base, "since": since, "files": files, "restored": restored,
+        "pending_unresolved": pending, "pending_categories": pending_categories if pending else [],
+    }
     (out / "context.json").write_text(json.dumps(ctx, indent=2))
     set_output(skip="false", files=len(files), incremental="true" if since else "false")
 
@@ -678,8 +781,17 @@ def post_review(args) -> None:
 
     open_ids = {f["comment_id"] for f in json.loads((ctx_dir / "open-findings.json").read_text())}
     addressed = {a["comment_id"]: a["commit"] for a in data.get("addressed", []) if a["comment_id"] in open_ids}
-    if addressed:
-        for thread in review_threads(ctx["pr"]):
+    # A thread that cannot be resolved must not stop the summary and the
+    # reviewed-commit record from posting; the job still fails at the end.
+    # Threads an earlier run could not resolve keep failing until they are.
+    pending = list(ctx.get("pending_unresolved") or [])
+    failed_ids: list[str] = []
+    categories: list[str] = []
+    resolved_ids: set[str] = set()
+    carried: list[str] = []
+    if addressed or pending:
+        threads = review_threads(ctx["pr"])
+        for thread in threads:
             root = thread["comments"]["nodes"][0] if thread["comments"]["nodes"] else None
             if root and root["databaseId"] in addressed:
                 api(
@@ -687,9 +799,27 @@ def post_review(args) -> None:
                     "PATCH",
                     {"body": addressed_body(root["body"], addressed[root["databaseId"]] or ctx["head"])},
                 )
-                resolve_thread(thread["id"])
+                try:
+                    resolve_thread(thread["id"])
+                    resolved_ids.add(thread["id"])
+                except (subprocess.CalledProcessError, RuntimeError) as error:
+                    category = known_category(getattr(error, "category", "unknown"))
+                    print(f"Could not resolve thread {thread['id']}: {category}", file=sys.stderr)
+                    failed_ids.append(thread["id"])
+                    categories.append(category)
+        carried = [tid for tid in still_open(pending, threads) if tid not in resolved_ids and tid not in failed_ids]
+        if carried:
+            categories += [known_category(c) for c in ctx.get("pending_categories") or ["unknown"]]
+    unresolved_ids = failed_ids + carried
+    failure = None
+    unresolved = None
+    if unresolved_ids:
+        unresolved = {"ids": unresolved_ids, "categories": list(dict.fromkeys(categories))}
+        failure = unresolved_failure(len(unresolved_ids), unresolved["categories"])
 
-    body = render_summary(data, ctx, posted=len(findings), review_url=review_url)
+    body = render_summary(data, ctx, posted=len(findings), review_url=review_url, unresolved=unresolved)
+    if failure:
+        body += f"\n\n> ⚠️ {failure}. They are marked addressed; resolve them by hand after checking."
     summaries = bot_issue_comments(ctx["pr"], REVIEW_STATE)
     if summaries:
         api(f"repos/{repo()}/issues/comments/{summaries[-1][0]['id']}", "PATCH", {"body": body})
@@ -698,6 +828,9 @@ def post_review(args) -> None:
     upsert_pr_body_summary(ctx["pr"], data)
     print(f"Posted {len(findings)} findings in threads and {len(outside)} outside the diff; "
           f"{len(addressed)} addressed.")
+    if failure:
+        print(f"::error title=Claude review::{failure}")
+        sys.exit(failure)
 
 
 def prepare_autofix(args) -> None:
