@@ -284,6 +284,25 @@ def test_needs_attention_reads_latest_job_status_without_listing_snapshots():
     assert all("listing_snapshot" not in statement.lower() for statement in job_reads)
 
 
+def test_needs_attention_failed_job_without_updated_at_uses_created_at():
+    created = (datetime.now(UTC) - timedelta(hours=1)).replace(tzinfo=None, microsecond=0)
+    with SessionLocal() as db:
+        db.add(Conversation(id="no-updated-at", title="No updated at"))
+        db.flush()
+        db.add(Job(id="null-updated", conversation_id="no-updated-at", approved_revision_id="rev",
+                   listing_snapshot={}, status="failed", last_error="Broke", created_at=created))
+        db.commit()
+        db.execute(text("UPDATE jobs SET updated_at = NULL WHERE id = 'null-updated'"))
+        db.commit()
+
+    response = TestClient(app).get("/api/home?timezone=UTC")
+
+    assert response.status_code == 200
+    failures = [item for item in response.json()["needs_attention"] if item["kind"] == "failed_job"]
+    assert len(failures) == 1
+    assert failures[0]["occurred_at"].startswith(created.isoformat())
+
+
 def test_needs_attention_categories_dismiss_and_seven_day_expiry():
     client = TestClient(app)
     now = datetime.now(UTC).replace(tzinfo=None)

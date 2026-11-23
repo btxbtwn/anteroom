@@ -417,7 +417,7 @@ def _collect_attention_items(db: Session, *, now_utc: datetime, dismissed_keys: 
     # each, and the inbox only needs the latest status and error text.
     seen_failed_convs: set[str] = set()
     latest_jobs = (
-        db.query(Job.id, Job.conversation_id, Job.status, Job.last_error, Job.updated_at)
+        db.query(Job.id, Job.conversation_id, Job.status, Job.last_error, Job.updated_at, Job.created_at)
         .order_by(Job.created_at.desc())
     )
     latest_job_by_conv = {}
