@@ -423,6 +423,85 @@ class AutofixTests(unittest.TestCase):
             finally:
                 os.chdir(old)
 
+    def _conflict_fixture(self, root, pr_files, main_files):
+        """Bare origin with main and a PR branch editing the same files; returns the clone."""
+        def git(cwd, *args):
+            return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+        origin, work = os.path.join(root, "origin.git"), os.path.join(root, "work")
+        git(root, "init", "-q", "--bare", "-b", "main", origin)
+        git(root, "clone", "-q", origin, work)
+        git(work, "config", "user.name", "t")
+        git(work, "config", "user.email", "t@example.com")
+        base = {path: "base\n" for path in {**pr_files, **main_files}}
+        for files, message in ((base, "base"), (main_files, "main")):
+            for path, text in files.items():
+                (Path(work) / path).parent.mkdir(parents=True, exist_ok=True)
+                (Path(work) / path).write_text(text)
+            git(work, "add", "-A")
+            git(work, "commit", "-qm", message)
+            if message == "base":
+                git(work, "branch", "pr")
+        git(work, "push", "-q", "origin", "main")
+        git(work, "checkout", "-q", "pr")
+        for path, text in pr_files.items():
+            (Path(work) / path).write_text(text)
+        git(work, "commit", "-qam", "pr")
+        return work, (lambda *a: git(work, *a))
+
+    def _prepare(self, work, out, states=()):
+        outputs, posts = {}, []
+        old = os.getcwd()
+        os.chdir(work)
+        try:
+            with (
+                patch.object(bot, "review_threads", return_value=[]),
+                patch.object(bot, "open_autofix_findings", return_value=[]),
+                patch.object(bot, "bot_issue_comments", return_value=[({}, s) for s in states]),
+                patch.object(bot, "pull_mergeable_state", return_value="dirty"),
+                patch.object(bot, "collect_ci_failures", return_value=([], "")),
+                patch.object(bot, "api", side_effect=lambda *a, **k: posts.append(a)),
+                patch.object(bot, "repo", return_value="o/r"),
+                patch.object(bot, "set_output", side_effect=outputs.update),
+            ):
+                bot.prepare_autofix(SimpleNamespace(pr=7, out=out))
+        finally:
+            os.chdir(old)
+        return outputs, posts
+
+    def test_prepare_starts_the_main_merge_for_product_conflicts(self):
+        with tempfile.TemporaryDirectory() as root:
+            work, git = self._conflict_fixture(
+                root,
+                {"app.py": "pr\n", "anteroom/uv.lock": "pr\n"},
+                {"app.py": "main\n", "anteroom/uv.lock": "main\n"},
+            )
+            out = os.path.join(root, "ctx")
+            outputs, posts = self._prepare(work, out)
+            self.assertEqual(outputs["skip"], "false")
+            self.assertEqual(outputs["lockfile_conflict"], "true")
+            self.assertEqual(posts, [])
+            ctx = json.loads(Path(out, "context.json").read_text())
+            self.assertEqual(sorted(ctx["conflict_files"]), ["anteroom/uv.lock", "app.py"])
+            self.assertEqual(ctx["main_sha"], git("rev-parse", "origin/main"))
+            self.assertFalse(ctx["dependencies_installed"])
+            # The merge is left in progress for Claude to finish.
+            self.assertTrue(Path(work, ".git", "MERGE_HEAD").exists())
+
+    def test_prepare_leaves_protected_only_conflicts_and_notes_them_once(self):
+        with tempfile.TemporaryDirectory() as root:
+            work, git = self._conflict_fixture(root, {"CHANGELOG.md": "pr\n"}, {"CHANGELOG.md": "main\n"})
+            head = git("rev-parse", "HEAD")
+            outputs, posts = self._prepare(work, os.path.join(root, "ctx"))
+            self.assertEqual(outputs, {"skip": "true"})
+            self.assertEqual(len(posts), 1)
+            self.assertFalse(Path(work, ".git", "MERGE_HEAD").exists())
+            self.assertEqual(git("rev-parse", "HEAD"), head)
+            noted = [{"head": head, "reason": "protected_conflicts", "conflict_files": ["CHANGELOG.md"]}]
+            outputs, posts = self._prepare(work, os.path.join(root, "ctx2"), states=noted)
+            self.assertEqual(outputs, {"skip": "true"})
+            self.assertEqual(posts, [])
+
 
 if __name__ == "__main__":
     unittest.main()
