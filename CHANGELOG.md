@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1177 — 2026-11-23
+
+- Auto-Relist works through a long backlog a little at a time, so scheduled listings and automations no longer wait hours behind it.
+
+## 0.1.1176 — 2026-11-23
+
+- An agent connecting to Anteroom on your Mac over Tailscale now needs its MCP access token, so the permissions you chose for that token always apply.
+
 ## 0.1.1175 — 2026-11-23
 
 - A Pixelate, blur, arrow or other mark drawn quickly on a photo is no longer sometimes lost when you let go.

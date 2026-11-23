@@ -1,1 +1,0 @@
-- An agent connecting to Anteroom on your Mac over Tailscale now needs its MCP access token, so the permissions you chose for that token always apply.
