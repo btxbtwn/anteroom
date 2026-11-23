@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1157 — 2026-11-23
+
+- Show the same Getting things ready startup screen in the Mac app as on the web.
+
 ## 0.1.1156 — 2026-11-23
 
 - Prevent scheduled drafts from publishing items that have already sold, and unschedule drafts when photos or active pricing rules change.
