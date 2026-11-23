@@ -413,14 +413,14 @@ def _collect_attention_items(db: Session, *, now_utc: datetime, dismissed_keys: 
     conversations = db.query(Conversation).all()
     conv_by_id = {conv.id: conv for conv in conversations}
 
-    # 3. Failed jobs / listing publish errors
+    # 3. Failed jobs / listing publish errors. Job snapshots can be megabytes
+    # each, and the inbox only needs the latest status and error text.
     seen_failed_convs: set[str] = set()
     latest_jobs = (
-        db.query(Job)
+        db.query(Job.id, Job.conversation_id, Job.status, Job.last_error, Job.updated_at, Job.created_at)
         .order_by(Job.created_at.desc())
-        .all()
     )
-    latest_job_by_conv: dict[str, Job] = {}
+    latest_job_by_conv = {}
     for job in latest_jobs:
         if job.conversation_id not in latest_job_by_conv:
             latest_job_by_conv[job.conversation_id] = job
