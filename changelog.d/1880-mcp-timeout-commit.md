@@ -1,0 +1,1 @@
+- When an agent's change to Anteroom times out, it is no longer saved afterwards, so trying again doesn't make a second draft.
