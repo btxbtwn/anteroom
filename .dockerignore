@@ -22,13 +22,16 @@ anteroom/server/*
 !anteroom/tsconfig.json
 !anteroom/src/
 !anteroom/src/**
-# The browser tab icon the hosted server serves at /favicon.png.
+# Public pages, the browser tab icon, and the startup script loaded before the bundle.
 !anteroom/public/
 anteroom/public/*
 !anteroom/public/favicon.png
 !anteroom/public/privacy.html
 !anteroom/public/terms.html
 !anteroom/public/robots.txt
+!anteroom/public/assets/
+anteroom/public/assets/*
+!anteroom/public/assets/theme-boot.js
 # The startup screen shows the app icon.
 !anteroom/desktop/
 anteroom/desktop/*

@@ -1,0 +1,1 @@
+- Anteroom now offers a reload if the opening screen gets stuck while the web app loads.
