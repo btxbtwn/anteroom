@@ -1,7 +1,7 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["results", "ci_results", "blocking"],
+  "required": ["results", "ci_results", "conflict_result", "blocking"],
   "properties": {
     "results": {
       "type": "array",
@@ -29,6 +29,16 @@
           "explanation": {"type": "string"},
           "validation": {"type": "string"}
         }
+      }
+    },
+    "conflict_result": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["outcome", "explanation", "validation"],
+      "properties": {
+        "outcome": {"type": "string", "enum": ["fixed", "already_addressed", "inapplicable", "not_fixed"]},
+        "explanation": {"type": "string"},
+        "validation": {"type": "string"}
       }
     },
     "blocking": {"type": ["string", "null"]}

@@ -4,6 +4,8 @@ python3 .github/review-bot/test_review_bot.py"""
 import contextlib
 import io
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import traceback
@@ -447,15 +449,30 @@ class AutofixTests(unittest.TestCase):
         self.assertEqual(bot.autofix_decision([], [], "h"), ("skip", None))
         self.assertEqual(bot.autofix_decision([], [1], "h"), ("run", None))
         self.assertEqual(bot.autofix_decision([], [], "h", ci_open=["Studio frontend"]), ("run", None))
+        self.assertEqual(bot.autofix_decision([], [], "h", conflict_files=["app.py"]), ("run", None))
+        self.assertEqual(bot.autofix_decision([], [], "h", merge_clean=True), ("run", None))
         pushed = [{"head": f"h{i}", "pushed": True} for i in range(bot.MAX_ROUNDS)]
         self.assertEqual(bot.autofix_decision(pushed, [1], "h9"), ("skip", "max_rounds"))
         self.assertEqual(bot.autofix_decision(pushed, [], "h9", ci_open=["Studio frontend"]), ("skip", "max_rounds"))
+        self.assertEqual(
+            bot.autofix_decision(pushed, [], "h9", conflict_files=["app.py"]),
+            ("skip", "max_rounds"),
+        )
         stopped = pushed + [{"head": "h9", "reason": "max_rounds"}]
         self.assertEqual(bot.autofix_decision(stopped, [1], "h9"), ("skip", None))
         tried = [{"head": "h", "pushed": False, "open": [1, 2]}]
         self.assertEqual(bot.autofix_decision(tried, [1], "h"), ("skip", "same_blockers"))
         self.assertEqual(bot.autofix_decision(tried, [1, 3], "h"), ("run", None))
         self.assertEqual(bot.autofix_decision(tried, [1], "h2"), ("run", None))
+        self.assertEqual(
+            bot.autofix_decision(tried, [1], "h", conflict_files=["app.py"]),
+            ("run", None),
+        )
+        tried_conflict = [{"head": "h", "pushed": False, "open": [], "conflict_files": ["app.py"]}]
+        self.assertEqual(
+            bot.autofix_decision(tried_conflict, [], "h", conflict_files=["app.py"]),
+            ("skip", "same_blockers"),
+        )
         # New CI failures at the same head still run even if findings shrank.
         self.assertEqual(
             bot.autofix_decision(tried, [1], "h", ci_open=["Studio frontend"]),
@@ -481,6 +498,22 @@ class AutofixTests(unittest.TestCase):
         self.assertTrue(bot.truncate_log("x" * 10, limit=4).startswith("...(truncated"))
         self.assertEqual(bot.truncate_log("short", limit=100), "short")
 
+    def test_lockfile_conflicts_skip_the_dependency_install(self):
+        self.assertTrue(bot.lockfile_conflict(["app.py", "anteroom/package-lock.json"]))
+        self.assertTrue(bot.lockfile_conflict(["anteroom/uv.lock"]))
+        self.assertFalse(bot.lockfile_conflict(["anteroom/package.json", "uv.lock"]))
+        self.assertFalse(bot.lockfile_conflict([]))
+
+    def test_protected_conflict_note_posts_once_per_head(self):
+        files = [".github/workflows/ci.yml"]
+        self.assertTrue(bot.protected_conflict_note_needed([], "h", files))
+        noted = [{"head": "h", "reason": "protected_conflicts", "conflict_files": files}]
+        self.assertFalse(bot.protected_conflict_note_needed(noted, "h", files))
+        self.assertTrue(bot.protected_conflict_note_needed(noted, "h2", files))
+        self.assertTrue(bot.protected_conflict_note_needed(noted, "h", files + ["CHANGELOG.md"]))
+        later = noted + [{"head": "h", "reason": "blocked", "conflict_files": files}]
+        self.assertTrue(bot.protected_conflict_note_needed(later, "h", files))
+
     def test_reply_and_result_text(self):
         reply = bot.render_autofix_reply(
             {"outcome": "fixed", "explanation": "Clamped y.", "validation": "pytest passed."},
@@ -489,7 +522,7 @@ class AutofixTests(unittest.TestCase):
         self.assertIn("Fixed in commit abc1234.", reply)
         self.assertEqual(bot.read_marker(bot.AUTOFIX_REPLY, reply), {"head": "abc1234567", "outcome": "fixed"})
         result = bot.render_autofix_result(
-            {"head": "h", "round": 2, "ci_open": ["Studio frontend"]},
+            {"head": "h", "round": 2, "ci_open": ["Studio frontend"], "conflict_files": ["app.py"]},
             blocking="stuck",
             auto_merge_disabled=True,
         )
@@ -497,6 +530,7 @@ class AutofixTests(unittest.TestCase):
         self.assertIn("Auto-merge was turned off", result)
         self.assertIn("Round 2 of 3", result)
         self.assertIn("Open CI failures: `Studio frontend`.", result)
+        self.assertIn("Open merge conflicts: `app.py`.", result)
         self.assertEqual(
             bot.read_marker(bot.AUTOFIX_STATE, result)["ci_open"],
             ["Studio frontend"],
@@ -516,6 +550,158 @@ class AutofixTests(unittest.TestCase):
             bot.protected_changes([".github/workflows/ci.yml", "anteroom/VERSION", "anteroom/VERSIONS.md", "CHANGELOG.md", "docs/x.md"]),
             [".github/workflows/ci.yml", "anteroom/VERSION", "CHANGELOG.md"],
         )
+
+    def test_main_merge_changes_are_not_counted_as_protected_edits(self):
+        def git(*args):
+            return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+
+        def write(path, text):
+            (Path(root) / path).parent.mkdir(parents=True, exist_ok=True)
+            (Path(root) / path).write_text(text)
+
+        with tempfile.TemporaryDirectory() as root:
+            git("init", "-q", "-b", "main")
+            git("config", "user.name", "t")
+            git("config", "user.email", "t@example.com")
+            for path, text in {"app.py": "x = 1\n", "CHANGELOG.md": "# 1\n", "anteroom/VERSION": "1\n",
+                               ".github/ci.yml": "a\n"}.items():
+                write(path, text)
+            git("add", "-A")
+            git("commit", "-qm", "base")
+            git("checkout", "-qb", "pr")
+            write("app.py", "x = 2\n")
+            write(".github/ci.yml", "pr\n")
+            git("commit", "-qam", "pr")
+            git("checkout", "-q", "main")
+            write("app.py", "x = 3\n")
+            write("CHANGELOG.md", "# 2\n")
+            write("anteroom/VERSION", "2\n")
+            git("commit", "-qam", "release")
+            main_sha = git("rev-parse", "HEAD")
+            git("checkout", "-q", "pr")
+            head_before = git("rev-parse", "HEAD")
+            subprocess.run(["git", "merge", "-q", "main"], cwd=root, capture_output=True, check=False)
+            write("app.py", "x = 4\n")
+            git("commit", "-qam", "merge main")
+            merged = git("rev-parse", "HEAD")
+            old = os.getcwd()
+            os.chdir(root)
+            try:
+                self.assertEqual(bot.protected_changes(bot.repair_changed_paths(head_before, merged, main_sha)), [])
+                self.assertEqual(bot.repair_changed_paths(head_before, merged, main_sha), ["app.py"])
+                # Without the merge, the same diff would wrongly flag main's release files.
+                self.assertEqual(
+                    bot.protected_changes(bot.repair_changed_paths(head_before, merged, None)),
+                    ["CHANGELOG.md", "anteroom/VERSION"],
+                )
+                write("CHANGELOG.md", "# edited\n")
+                git("commit", "-qam", "touch changelog")
+                edited = git("rev-parse", "HEAD")
+                self.assertEqual(
+                    bot.protected_changes(bot.repair_changed_paths(head_before, edited, main_sha)),
+                    ["CHANGELOG.md"],
+                )
+            finally:
+                os.chdir(old)
+
+    def _conflict_fixture(self, root, pr_files, main_files):
+        """Bare origin with main and a PR branch editing the same files; returns the clone."""
+        def git(cwd, *args):
+            return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+        origin, work = os.path.join(root, "origin.git"), os.path.join(root, "work")
+        git(root, "init", "-q", "--bare", "-b", "main", origin)
+        git(root, "clone", "-q", origin, work)
+        git(work, "config", "user.name", "t")
+        git(work, "config", "user.email", "t@example.com")
+        base = {path: "base\n" for path in {**pr_files, **main_files}}
+        for files, message in ((base, "base"), (main_files, "main")):
+            for path, text in files.items():
+                (Path(work) / path).parent.mkdir(parents=True, exist_ok=True)
+                (Path(work) / path).write_text(text)
+            git(work, "add", "-A")
+            git(work, "commit", "-qm", message)
+            if message == "base":
+                git(work, "branch", "pr")
+        git(work, "push", "-q", "origin", "main")
+        git(work, "checkout", "-q", "pr")
+        for path, text in pr_files.items():
+            (Path(work) / path).write_text(text)
+        git(work, "commit", "-qam", "pr")
+        return work, (lambda *a: git(work, *a))
+
+    def _prepare(self, work, out, states=()):
+        outputs, posts = {}, []
+        old = os.getcwd()
+        os.chdir(work)
+        try:
+            with (
+                patch.object(bot, "review_threads", return_value=[]),
+                patch.object(bot, "open_autofix_findings", return_value=[]),
+                patch.object(bot, "bot_issue_comments", return_value=[({}, s) for s in states]),
+                patch.object(bot, "pull_mergeable_state", return_value="dirty"),
+                patch.object(bot, "collect_ci_failures", return_value=([], "")),
+                patch.object(bot, "api", side_effect=lambda *a, **k: posts.append(a)),
+                patch.object(bot, "repo", return_value="o/r"),
+                patch.object(bot, "set_output", side_effect=outputs.update),
+            ):
+                bot.prepare_autofix(SimpleNamespace(pr=7, out=out))
+        finally:
+            os.chdir(old)
+        return outputs, posts
+
+    def test_prepare_starts_the_main_merge_for_product_conflicts(self):
+        with tempfile.TemporaryDirectory() as root:
+            work, git = self._conflict_fixture(
+                root,
+                {"app.py": "pr\n", "anteroom/uv.lock": "pr\n"},
+                {"app.py": "main\n", "anteroom/uv.lock": "main\n"},
+            )
+            out = os.path.join(root, "ctx")
+            outputs, posts = self._prepare(work, out)
+            self.assertEqual(outputs["skip"], "false")
+            self.assertEqual(outputs["lockfile_conflict"], "true")
+            self.assertEqual(posts, [])
+            ctx = json.loads(Path(out, "context.json").read_text())
+            self.assertEqual(sorted(ctx["conflict_files"]), ["anteroom/uv.lock", "app.py"])
+            self.assertEqual(ctx["main_sha"], git("rev-parse", "origin/main"))
+            self.assertFalse(ctx["dependencies_installed"])
+            # The merge is left in progress for Claude to finish.
+            self.assertTrue(Path(work, ".git", "MERGE_HEAD").exists())
+
+    def test_prepare_leaves_protected_only_conflicts_and_notes_them_once(self):
+        with tempfile.TemporaryDirectory() as root:
+            work, git = self._conflict_fixture(root, {"CHANGELOG.md": "pr\n"}, {"CHANGELOG.md": "main\n"})
+            head = git("rev-parse", "HEAD")
+            outputs, posts = self._prepare(work, os.path.join(root, "ctx"))
+            self.assertEqual(outputs, {"skip": "true"})
+            self.assertEqual(len(posts), 1)
+            self.assertFalse(Path(work, ".git", "MERGE_HEAD").exists())
+            self.assertEqual(git("rev-parse", "HEAD"), head)
+            noted = [{"head": head, "reason": "protected_conflicts", "conflict_files": ["CHANGELOG.md"]}]
+            outputs, posts = self._prepare(work, os.path.join(root, "ctx2"), states=noted)
+            self.assertEqual(outputs, {"skip": "true"})
+            self.assertEqual(posts, [])
+
+    def test_prepare_leaves_mixed_protected_and_product_conflicts_and_notes_them_once(self):
+        # Claude cannot edit the protected file, so running it could never finish the merge.
+        with tempfile.TemporaryDirectory() as root:
+            work, git = self._conflict_fixture(
+                root,
+                {"app.py": "pr\n", "CHANGELOG.md": "pr\n"},
+                {"app.py": "main\n", "CHANGELOG.md": "main\n"},
+            )
+            head = git("rev-parse", "HEAD")
+            outputs, posts = self._prepare(work, os.path.join(root, "ctx"))
+            self.assertEqual(outputs, {"skip": "true"})
+            self.assertEqual(len(posts), 1)
+            self.assertIn("Merge conflicts include protected paths", posts[0][2]["body"])
+            self.assertFalse(Path(work, ".git", "MERGE_HEAD").exists())
+            self.assertEqual(git("rev-parse", "HEAD"), head)
+            noted = [{"head": head, "reason": "protected_conflicts", "conflict_files": ["CHANGELOG.md", "app.py"]}]
+            outputs, posts = self._prepare(work, os.path.join(root, "ctx2"), states=noted)
+            self.assertEqual(outputs, {"skip": "true"})
+            self.assertEqual(posts, [])
 
 
 if __name__ == "__main__":

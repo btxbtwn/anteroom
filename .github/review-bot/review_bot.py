@@ -11,10 +11,12 @@ the model a write token:
   post-review      upsert Summary by Claude into the PR description, update
                    the sticky walkthrough comment, post one review with
                    inline findings, mark fixed findings "Addressed"
-  prepare-autofix  collect open Claude and Codex findings and failed CI jobs,
-                   enforce the repair-round limit
+  prepare-autofix  collect open Claude and Codex findings, failed CI jobs and
+                   main-merge conflicts, enforce the repair-round limit
   post-autofix     check that Claude's fix commit reached the branch, reply to
                    every finding and post the round's result
+  list-conflict-prs
+                   print open same-repo PRs whose mergeable_state is dirty
 
 See docs/pr-review-bots.md.
 """
@@ -27,6 +29,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 # Comments this script posts are authored by the workflow token.
@@ -50,6 +53,8 @@ CODERABBIT_NOTES_BLOCK = re.compile(
 MAX_ROUNDS = 3
 # Failed CI log kept for the model; enough for the failure, not the whole run.
 CI_LOG_CHARS = 80_000
+# The auto-fix job installs from these; with conflict markers it cannot.
+LOCKFILES = ("anteroom/package-lock.json", "anteroom/uv.lock")
 # Auto-fix never pushes changes to these; they are release and CI controls.
 PROTECTED_PATHS = (".github/", "anteroom/VERSION", "CHANGELOG.md")
 SEVERITY_ICON = {"Critical": "🔴", "Major": "🟠", "Minor": "🟡"}
@@ -508,10 +513,13 @@ def autofix_decision(
     head: str,
     *,
     ci_open: list[str] | None = None,
+    conflict_files: list[str] | None = None,
+    merge_clean: bool = False,
 ) -> tuple[str, str | None]:
     """Return ("run", None) or ("skip", message-or-None) for this auto-fix trigger."""
     ci_open = list(ci_open or [])
-    if not open_ids and not ci_open:
+    conflict_files = list(conflict_files or [])
+    if not open_ids and not ci_open and not conflict_files and not merge_clean:
         return "skip", None
     rounds = sum(1 for s in states if s.get("pushed"))
     if rounds >= MAX_ROUNDS:
@@ -522,11 +530,87 @@ def autofix_decision(
     if last and last.get("head") == head:
         same_findings = set(open_ids) <= set(last.get("open") or [])
         same_ci = set(ci_open) <= set(last.get("ci_open") or [])
-        if same_findings and same_ci:
+        same_conflicts = set(conflict_files) <= set(last.get("conflict_files") or [])
+        same_merge = (not merge_clean) or bool(last.get("merge_clean"))
+        if same_findings and same_ci and same_conflicts and same_merge:
             if last.get("reason") == "same_blockers":
                 return "skip", None
             return "skip", "same_blockers"
     return "run", None
+
+
+def protected_conflict_note_needed(states: list[dict], head: str, conflict_files: list[str]) -> bool:
+    """False when the last round already reported these protected-path conflicts at this head."""
+    last = states[-1] if states else None
+    return not (
+        last
+        and last.get("head") == head
+        and last.get("reason") == "protected_conflicts"
+        and set(conflict_files) <= set(last.get("conflict_files") or [])
+    )
+
+
+def pull_mergeable_state(pr: int, *, attempts: int = 6, delay_s: float = 2.0) -> str:
+    """GitHub mergeable_state; `dirty` means real conflicts. Retries `unknown`."""
+    state = "unknown"
+    for _ in range(attempts):
+        data = api(f"repos/{repo()}/pulls/{pr}") or {}
+        state = (data.get("mergeable_state") or "unknown").strip()
+        if state != "unknown":
+            return state
+        time.sleep(delay_s)
+    return state
+
+
+def unmerged_paths() -> list[str]:
+    return [p for p in git("diff", "--name-only", "--diff-filter=U").splitlines() if p]
+
+
+def begin_main_merge(pr: int) -> tuple[bool, list[str], str]:
+    """Merge origin/main into HEAD.
+
+    Returns (merge_commit_created, conflicted paths, merged main commit).
+    """
+    git("fetch", "--quiet", "origin", "main")
+    main_sha = git("rev-parse", "origin/main").strip()
+    result = subprocess.run(
+        ["git", "merge", main_sha, "--no-edit", "-m", f"Merge origin/main into #{pr}"],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    conflicts = unmerged_paths()
+    if result.returncode == 0:
+        return True, [], main_sha
+    if conflicts:
+        return False, conflicts, main_sha
+    raise RuntimeError(
+        f"git merge origin/main failed without conflict markers: {result.stderr.strip() or result.stdout.strip()}"
+    )
+
+
+def lockfile_conflict(conflict_files: list[str]) -> bool:
+    return any(path in LOCKFILES for path in conflict_files)
+
+
+def expected_merge_tree(head_before: str, main_sha: str) -> str:
+    """Tree git itself produces merging main into head_before (conflicted paths keep markers)."""
+    result = subprocess.run(
+        ["git", "merge-tree", "--write-tree", head_before, main_sha],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    # Exit 1 only means the merge has conflicts; the tree is still written.
+    if result.returncode not in (0, 1) or not result.stdout.strip():
+        raise RuntimeError(f"git merge-tree failed: {result.stderr.strip()}")
+    return result.stdout.splitlines()[0].strip()
+
+
+def repair_changed_paths(head_before: str, local: str, main_sha: str | None) -> list[str]:
+    """Paths the repair itself changed. Changes a main merge brings in do not count."""
+    base = expected_merge_tree(head_before, main_sha) if main_sha else head_before
+    return changed_paths(base, local)
 
 
 def failed_ci_jobs(jobs: list[dict]) -> list[dict]:
@@ -585,6 +669,10 @@ def collect_ci_failures(*, head: str, run_id: int | None = None) -> tuple[list[d
 BLOCKING_TEXT = {
     "max_rounds": f"The configured maximum number of repair rounds ({MAX_ROUNDS}) was reached with unresolved issues.",
     "same_blockers": "The same blockers remain after the previous repair round.",
+    "protected_conflicts": (
+        "Merge conflicts include protected paths (.github/, anteroom/VERSION, CHANGELOG.md); "
+        "resolve the merge by hand."
+    ),
 }
 
 
@@ -600,6 +688,9 @@ def render_autofix_result(state: dict, *, blocking: str | None, auto_merge_disab
     ci_open = state.get("ci_open") or []
     if ci_open:
         lines.append("Open CI failures: " + ", ".join(f"`{name}`" for name in ci_open) + ".")
+    conflicts = state.get("conflict_files") or []
+    if conflicts:
+        lines.append("Open merge conflicts: " + ", ".join(f"`{p}`" for p in conflicts) + ".")
     if auto_merge_disabled:
         lines.append(
             "Auto-merge was turned off for this round and stays off. Queue the PR again once "
@@ -838,12 +929,48 @@ def prepare_autofix(args) -> None:
     out.mkdir(parents=True, exist_ok=True)
     head = git("rev-parse", "HEAD").strip()
     findings = open_autofix_findings(review_threads(args.pr), head)
+    states = [state for _, state in bot_issue_comments(args.pr, AUTOFIX_STATE)]
+    merge_state = pull_mergeable_state(args.pr)
+    conflict_files: list[str] = []
+    merge_clean = False
+    main_sha: str | None = None
+    # Only merge main when GitHub reports real conflicts — never for "behind".
+    if merge_state == "dirty":
+        merge_clean, conflict_files, main_sha = begin_main_merge(args.pr)
+        if protected_changes(conflict_files):
+            # Claude cannot edit protected paths, so any conflict there needs a
+            # person; main moves often, so say this once per head, not on every push.
+            if protected_conflict_note_needed(states, head, conflict_files):
+                state = {
+                    "head": head,
+                    "pushed": False,
+                    "open": [f["comment_id"] for f in findings],
+                    "conflict_files": conflict_files,
+                    "reason": "protected_conflicts",
+                    "round": sum(1 for s in states if s.get("pushed")),
+                }
+                api(
+                    f"repos/{repo()}/issues/{args.pr}/comments",
+                    "POST",
+                    {
+                        "body": render_autofix_result(
+                            state, blocking=BLOCKING_TEXT["protected_conflicts"], auto_merge_disabled=False
+                        )
+                    },
+                )
+            subprocess.run(["git", "merge", "--abort"], check=False, capture_output=True)
+            set_output(skip="true")
+            return
     run_id = int(os.environ["CI_RUN_ID"]) if os.environ.get("CI_RUN_ID", "").strip().isdigit() else None
     ci_failures, ci_log = collect_ci_failures(head=head, run_id=run_id)
     ci_names = [f["name"] for f in ci_failures]
-    states = [state for _, state in bot_issue_comments(args.pr, AUTOFIX_STATE)]
     decision, reason = autofix_decision(
-        states, [f["comment_id"] for f in findings], head, ci_open=ci_names
+        states,
+        [f["comment_id"] for f in findings],
+        head,
+        ci_open=ci_names,
+        conflict_files=conflict_files,
+        merge_clean=merge_clean,
     )
     if decision == "skip":
         if reason:
@@ -852,16 +979,21 @@ def prepare_autofix(args) -> None:
                 "pushed": False,
                 "open": [f["comment_id"] for f in findings],
                 "ci_open": ci_names,
+                "conflict_files": conflict_files,
+                "merge_clean": merge_clean,
                 "reason": reason,
                 "round": sum(1 for s in states if s.get("pushed")),
             }
             api(f"repos/{repo()}/issues/{args.pr}/comments", "POST",
                 {"body": render_autofix_result(state, blocking=BLOCKING_TEXT[reason], auto_merge_disabled=False)})
+        if conflict_files:
+            subprocess.run(["git", "merge", "--abort"], check=False, capture_output=True)
         set_output(skip="true")
         return
     (out / "open-findings.json").write_text(json.dumps(findings, indent=2))
     (out / "ci-failures.json").write_text(json.dumps(ci_failures, indent=2))
     (out / "ci-failed.log").write_text(ci_log)
+    (out / "conflict-files.json").write_text(json.dumps(conflict_files, indent=2))
     round_no = sum(1 for s in states if s.get("pushed")) + 1
     (out / "context.json").write_text(
         json.dumps(
@@ -871,11 +1003,24 @@ def prepare_autofix(args) -> None:
                 "round": round_no,
                 "ci_run_id": run_id,
                 "ci_jobs": ci_names,
+                "mergeable_state": merge_state,
+                "merge_clean": merge_clean,
+                "conflict_files": conflict_files,
+                "main_sha": main_sha,
+                "dependencies_installed": not lockfile_conflict(conflict_files),
             },
             indent=2,
         )
     )
-    set_output(skip="false", round=round_no, findings=len(findings), ci_failures=len(ci_failures))
+    set_output(
+        skip="false",
+        round=round_no,
+        findings=len(findings),
+        ci_failures=len(ci_failures),
+        conflicts=len(conflict_files),
+        merge_clean=str(merge_clean).lower(),
+        lockfile_conflict=str(lockfile_conflict(conflict_files)).lower(),
+    )
 
 
 def post_autofix(args) -> None:
@@ -883,8 +1028,11 @@ def post_autofix(args) -> None:
     ctx = json.loads((ctx_dir / "context.json").read_text())
     findings = {f["comment_id"]: f for f in json.loads((ctx_dir / "open-findings.json").read_text())}
     ci_jobs = {f["name"]: f for f in json.loads((ctx_dir / "ci-failures.json").read_text())}
+    conflict_files = list(ctx.get("conflict_files") or [])
+    if (ctx_dir / "conflict-files.json").exists():
+        conflict_files = json.loads((ctx_dir / "conflict-files.json").read_text())
     raw = os.environ.get("AUTOFIX_OUTPUT", "").strip()
-    data = json.loads(raw) if raw else {"results": [], "ci_results": []}
+    data = json.loads(raw) if raw else {"results": [], "ci_results": [], "conflict_result": None}
     results = {r["comment_id"]: r for r in data.get("results", []) if r["comment_id"] in findings}
     for comment_id in findings:
         results.setdefault(comment_id, {"comment_id": comment_id, "outcome": "not_fixed",
@@ -901,17 +1049,29 @@ def post_autofix(args) -> None:
                 "validation": "None.",
             },
         )
+    conflict_result = data.get("conflict_result")
+    if (conflict_files or ctx.get("merge_clean")) and not isinstance(conflict_result, dict):
+        conflict_result = {
+            "outcome": "not_fixed",
+            "explanation": "Claude returned no result for the main merge.",
+            "validation": "None.",
+        }
 
     # Claude pushes from inside the action: its Claude App token starts CI and
     # is revoked when the action ends, so this script cannot push for it.
     head_before = ctx["head"]
+    still_conflicted = unmerged_paths()
     git("fetch", "--quiet", "origin", f"refs/heads/{args.branch}")
     remote = git("rev-parse", "FETCH_HEAD").strip()
     local = git("rev-parse", "HEAD").strip()
     pushed, blocking = classify_push(head_before, local, remote, is_ancestor(local, remote))
     head_after = local if pushed else head_before
-    if pushed:
-        forbidden = protected_changes(changed_paths(head_before, local))
+    if still_conflicted:
+        blocking = f"Merge conflicts remain in: {', '.join(still_conflicted)}."
+        pushed = False
+        head_after = head_before
+    elif pushed:
+        forbidden = protected_changes(repair_changed_paths(head_before, local, ctx.get("main_sha")))
         if forbidden:
             blocking = f"The fix changed protected paths ({', '.join(forbidden)}); revert those changes."
     else:
@@ -923,6 +1083,9 @@ def post_autofix(args) -> None:
             if r["outcome"] == "fixed":
                 r["outcome"] = "not_fixed"
                 r["explanation"] += " (The fix was not pushed.)"
+        if isinstance(conflict_result, dict) and conflict_result.get("outcome") == "fixed":
+            conflict_result["outcome"] = "not_fixed"
+            conflict_result["explanation"] = conflict_result.get("explanation", "") + " (The fix was not pushed.)"
 
     for comment_id, result in results.items():
         body = render_autofix_reply(result, head=head_after, fixed_in=head_after if pushed else None)
@@ -930,12 +1093,19 @@ def post_autofix(args) -> None:
 
     unresolved = [cid for cid, r in results.items() if r["outcome"] == "not_fixed"]
     unresolved_ci = [name for name, r in ci_results.items() if r["outcome"] == "not_fixed"]
-    if not blocking and (unresolved or unresolved_ci):
+    unresolved_conflicts = still_conflicted or (
+        conflict_files
+        if isinstance(conflict_result, dict) and conflict_result.get("outcome") == "not_fixed"
+        else []
+    )
+    if not blocking and (unresolved or unresolved_ci or unresolved_conflicts):
         parts = []
         if unresolved:
             parts.append(f"{len(unresolved)} finding(s)")
         if unresolved_ci:
             parts.append(f"{len(unresolved_ci)} CI job(s) ({', '.join(unresolved_ci)})")
+        if unresolved_conflicts:
+            parts.append(f"{len(unresolved_conflicts)} conflicted file(s)")
         blocking = data.get("blocking") or (
             " and ".join(parts) + " could not be fixed automatically."
         )
@@ -948,11 +1118,29 @@ def post_autofix(args) -> None:
         "pushed": pushed,
         "open": unresolved,
         "ci_open": unresolved_ci,
+        "conflict_files": unresolved_conflicts,
+        "merge_clean": bool(ctx.get("merge_clean")) and pushed and not unresolved_conflicts,
         "round": ctx["round"],
         "reason": "blocked" if blocking else "ready",
     }
     api(f"repos/{repo()}/issues/{ctx['pr']}/comments", "POST",
         {"body": render_autofix_result(state, blocking=blocking, auto_merge_disabled=auto_merge_off)})
+
+
+def list_conflict_prs(_args) -> None:
+    """Open, non-draft, same-repo PRs with mergeable_state dirty (real conflicts)."""
+    numbers = []
+    for pr in api_list(f"repos/{repo()}/pulls?state=open&per_page=100"):
+        if pr.get("draft"):
+            continue
+        head_repo = (pr.get("head") or {}).get("repo") or {}
+        if head_repo.get("full_name") != repo():
+            continue
+        number = int(pr["number"])
+        if pull_mergeable_state(number) == "dirty":
+            numbers.append(number)
+    set_output(prs=json.dumps(numbers))
+    print(json.dumps(numbers))
 
 
 def main() -> None:
@@ -974,6 +1162,8 @@ def main() -> None:
     p.add_argument("--context", required=True)
     p.add_argument("--branch", required=True)
     p.set_defaults(func=post_autofix)
+    p = sub.add_parser("list-conflict-prs")
+    p.set_defaults(func=list_conflict_prs)
     args = parser.parse_args()
     args.func(args)
 
