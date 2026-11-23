@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1185 — 2026-11-23
+
+- Auto-Relist no longer raises a listing's price when pricing rules are on. A relist now changes only that marketplace's price, and a relist that couldn't delist leaves your saved prices as they were.
+
 ## 0.1.1184 — 2026-11-23
 
 - Behind the scenes: an iPhone Safari check that sometimes failed for no real reason no longer holds up updates.
