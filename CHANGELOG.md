@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1159 — 2026-11-23
+
+- Fix “Run due relists” showing “That automation is gone” on the web.
+
+## 0.1.1158 — 2026-11-23
+
+- Dismissing a Needs attention alert responds right away instead of waiting for the whole Today page to rebuild
+
 ## 0.1.1157 — 2026-11-23
 
 - Show the same Getting things ready startup screen in the Mac app as on the web.
