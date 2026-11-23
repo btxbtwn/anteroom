@@ -1,0 +1,1 @@
+- Fix “Run due relists” showing “That automation is gone” on the web.

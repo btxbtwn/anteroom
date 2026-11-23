@@ -1,4 +1,4 @@
-"""Automations on the web: owned tasks, per-seller scheduled runs, and no marketplace writes."""
+"""Seller-scoped automations and relisting on the web."""
 import asyncio
 from datetime import timedelta
 
@@ -11,6 +11,7 @@ from anteroom.models.automation import Automation
 from anteroom.models.background_task import BackgroundTask
 from anteroom.models.conversation import utcnow
 from anteroom.models.job import Job
+from anteroom.models.marketplace_listing import MarketplaceListing
 from anteroom.services import automation_actions, hosted_automation_scheduler
 from anteroom.services.hosted_context import for_seller
 from anteroom.services.service_context import use
@@ -93,3 +94,41 @@ def test_web_regenerate_action_queues_the_sellers_draft_task(cloud, signing_keys
     assert result == {'ok': False, 'error': 'Regenerate was still running when this automation stopped waiting.'}
     with Session(engine) as db:
         assert [(row.conversation_id, row.kind, row.status) for row in db.query(BackgroundTask)] == [(coat, 'generate', 'queued')]
+
+
+def test_web_run_due_relists_uses_the_signed_in_sellers_opt_in_rules(cloud, signing_keys):  # noqa: F811
+    client, engine = cloud
+    alice, bob = headers(signing_keys), headers(signing_keys, BOB)
+    coat = item(client, alice, 'Alice coat', 100)
+    with Session(engine) as db:
+        db.add(MarketplaceListing(
+            user_id=USER_ID, conversation_id=coat, marketplace='poshmark', state='published',
+            listing_id='5f0000000000000000000001',
+            listing_url='https://poshmark.com/listing/5f0000000000000000000001',
+            listed_at=utcnow() - timedelta(days=90),
+            listed_price=100, inventory_observation={'has_active_offer': True},
+        ))
+        db.commit()
+
+    run_path = '/api/automations/auto-relist/run'
+    assert client.post(run_path).status_code == 401
+    disabled = client.post(run_path, headers=alice)
+    assert disabled.status_code == 200, disabled.text
+    assert disabled.json()['outcomes'] == []
+
+    enabled = client.put('/api/automations/auto-relist/poshmark', headers=alice, json={
+        'enabled': True, 'confirm': True,
+    })
+    assert enabled.status_code == 200, enabled.text
+    response = client.post(run_path, headers=alice)
+    assert response.status_code == 200, response.text
+    (outcome,) = response.json()['outcomes']
+    assert outcome['conversation_id'] == coat
+    assert outcome['status'] == 'skipped_active_offer'
+    (log,) = client.get('/api/automations/auto-relist/logs', headers=alice).json()['logs']
+    assert log['conversation_id'] == coat
+    assert log['status'] == 'skipped_active_offer'
+
+    other_seller = client.post(run_path, headers=bob)
+    assert other_seller.status_code == 200, other_seller.text
+    assert other_seller.json()['outcomes'] == []
