@@ -1,1 +1,0 @@
-- Retry hosted deployments when a short-lived database lock interrupts a schema update.
