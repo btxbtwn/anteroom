@@ -20,8 +20,10 @@ async function mcpTools(page: Page, token: string): Promise<{ status: number; to
 }
 
 test("an app signs in, gets only the access the seller chose, and stops working once disconnected", async ({ page }, info) => {
-  // Bob on phone, Alice on desktop: each project starts from its own grant.
-  const email = info.project.name === "phone" ? "bob@sandbox.test" : "alice@sandbox.test";
+  // Alice in both projects: account-menu.e2e.ts deletes Bob's account, and the
+  // deletion fence then refuses every write for him, including this approval.
+  // Approving sets the app's access afresh, so the desktop run leaves nothing behind.
+  const email = "alice@sandbox.test";
   let returned = "";
   await page.route(`${CALLBACK}**`, route => { returned = route.request().url(); return route.fulfill({ body: "Back in Claude" }); });
 
