@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1169 — 2026-11-23
+
+- Connect Mercari in Cloud now works when Chrome is signed in to Mercari, instead of asking you to sign in again.
+
 ## 0.1.1168 — 2026-11-23
 
 - Hosted beta usage of Anteroom's OpenRouter and Photoroom accounts is recorded per seller so each account can be invoiced the exact API cost.
