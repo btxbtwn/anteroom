@@ -425,11 +425,17 @@ workflow instead waits for `/api/ready` after the new version is live and
 fails the run if it never becomes ready. A model outage does not fail
 `/api/health`.
 
-`alembic upgrade head` runs on every deploy. `migrations/env.py` sets
-`lock_timeout = '5s'` on the migration connection (`ANTEROOM_MIGRATION_LOCK_TIMEOUT` overrides it; the test suite sets `0` because its workers migrate fresh databases at once), so a revision that cannot
-get its table lock fails the deploy (before Fly is touched) instead of queueing
-every seller's queries behind it. Retry when traffic is quieter rather than
-raising the timeout. Revisions after `e3bea75f1b9b` that build an index on an
+`migrations/env.py` sets `lock_timeout = '5s'` on the migration connection.
+`ANTEROOM_MIGRATION_LOCK_TIMEOUT` overrides it. The test suite sets `0`
+because its workers migrate fresh databases in parallel. The hosted
+workflow runs `alembic -x retry_lock_timeouts=1 upgrade head`. It retries a
+rolled-back PostgreSQL lock failure (`55P03`) after 10, 20 and 40 seconds.
+Each backoff starts after Alembic has released its transaction and connection.
+A lock failure after a commit (including an Alembic autocommit block), any
+other error, or a fourth lock failure stops the deploy before the Fly rollout.
+For persistent contention, retry after traffic quiets.
+
+Revisions after `e3bea75f1b9b` that build an index on an
 existing table must use `op.create_index(..., postgresql_concurrently=True)`
 inside `with op.get_context().autocommit_block():`
 (`tests/test_migration_locking.py` enforces it). A concurrent build that fails
