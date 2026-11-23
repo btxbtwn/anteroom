@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { DelistMarketplace, MarketplaceListings } from "../api/marketplaceListings";
@@ -29,6 +29,21 @@ const REGENERATE_WARNING = [
 ].join("\n");
 
 const REGENERATE_DELIST_LEAD = "The listing will be rewritten in Anteroom. Live listings keep the old copy unless you delist or update them.";
+
+/** Items with a rewrite between its confirm and the end of its reset. Shared by every
+    Regenerate button, since the editor rail and the empty chat can both show one for an item. */
+const rewriting = new Set<string>();
+
+/** Takes the item's rewrite hold; false when another rewrite of it already holds it. */
+export function holdRewrite(convId: string): boolean {
+  if (rewriting.has(convId)) return false;
+  rewriting.add(convId);
+  return true;
+}
+
+export function releaseRewrite(convId: string): void {
+  rewriting.delete(convId);
+}
 
 /** After the seller confirms Regenerate: the marketplaces they also chose to delist from.
     Nothing live there means no question; "Keep them listed" means none. */
@@ -121,7 +136,7 @@ export function RegenerateListingButton({
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
   // Held from the rewrite confirm through the delist question until the reset starts.
   const [preparing, setPreparing] = useState(false);
-  const preparingRef = useRef(false);
+
   const { data: photos } = useQuery({
     queryKey: ["photos", convId],
     queryFn: ({ signal }) => api.conversations.photos(convId, undefined, { signal }),
@@ -183,9 +198,9 @@ export function RegenerateListingButton({
   async function rewriteAskingDelist() {
     // One rewrite per item: held from here until the reset settles, so a second
     // Rewrite while this one asks or resets is ignored.
-    if (preparingRef.current) return;
+    if (!holdRewrite(convId)) return;
     const hold = (held: boolean) => {
-      preparingRef.current = held;
+      if (!held) releaseRewrite(convId);
       setPreparing(held);
     };
     hold(true);

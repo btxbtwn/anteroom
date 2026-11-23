@@ -7,7 +7,7 @@ import {
   registerConfirmDialogHost,
   respondToConfirmDialog,
 } from "../ui/confirmDialog";
-import { askDelistOnRegenerate } from "./ClearListingButton";
+import { askDelistOnRegenerate, holdRewrite, releaseRewrite } from "./ClearListingButton";
 
 let unregister: (() => void) | null = null;
 afterEach(() => {
@@ -71,5 +71,19 @@ describe("Regenerate asks whether to delist the item too", () => {
     await expect(askDelistOnRegenerate("Wool coat", { ebay: entry({ state: "deleted" }) }, everywhere)).resolves.toEqual([]);
     await expect(askDelistOnRegenerate("Wool coat", { etsy: entry() }, (marketplace) => marketplace !== "etsy")).resolves.toEqual([]);
     expect(readConfirmDialogState().status).not.toBe("confirming");
+  });
+});
+
+describe("one rewrite per item", () => {
+  it("lets only one Regenerate button hold an item until it is released", () => {
+    expect(holdRewrite("coat")).toBe(true);
+    // The other button for the same item (editor rail vs. empty chat) is turned away.
+    expect(holdRewrite("coat")).toBe(false);
+    // Another item is independent.
+    expect(holdRewrite("hat")).toBe(true);
+    releaseRewrite("coat");
+    expect(holdRewrite("coat")).toBe(true);
+    releaseRewrite("coat");
+    releaseRewrite("hat");
   });
 });
