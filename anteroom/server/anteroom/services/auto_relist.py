@@ -14,6 +14,7 @@ Approved by the seller on 2026-11-22 (see AGENTS.md Invariant):
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -33,6 +34,13 @@ from anteroom.services import listing_mode, listing_persistence
 from anteroom.services.automation_age import load_listed_index, resolve_listed_at
 from anteroom.services.marketplace_delist import listings_for
 from anteroom.services.marketplace_identity import listing_id as extract_listing_id
+from anteroom.services.seller_overrides import (
+    CANONICAL_PRICE,
+    _write_locks,
+    locked_paths,
+    price_for,
+    set_path,
+)
 from anteroom.services.vendoo_import import merge_notes, parse_notes
 
 log = logging.getLogger("anteroom.auto_relist")
@@ -603,10 +611,12 @@ def _eligible_candidates(
             else {}
         )
         likes = obs.get("likes") if isinstance(obs.get("likes"), int) else obs.get("watchers")
+        # Start from what this marketplace shows, never the General price: with
+        # pricing rules on, the two differ.
         price_raw = (
             matched_ml.listed_price
             if (matched_ml is not None and matched_ml.listed_price is not None)
-            else data.get("price")
+            else price_for(data, rule.marketplace)
         )
         try:
             price = float(price_raw) if price_raw is not None else None
@@ -634,20 +644,26 @@ def _eligible_candidates(
     return candidates[:remaining]
 
 
-def _prepare_price_revision(db: Session, conv_id: str, new_price: float | None, current_revision_id: str | None) -> str | None:
+def _prepare_price_revision(
+    db: Session, conv_id: str, marketplace: str, new_price: float | None, current_revision_id: str | None,
+) -> str | None:
+    """Save the relist price as this marketplace's own price.
+
+    The item price and the other marketplaces stay as they are. Writing General
+    would send the price back through the pricing rules and raise it again.
+    """
     if new_price is None or current_revision_id is None:
         return current_revision_id
     rev = db.get(ListingRevision, current_revision_id)
     if rev is None or not isinstance(rev.listing_json, dict):
         return current_revision_id
-    current_val = rev.listing_json.get("price")
-    try:
-        if current_val is not None and round(float(current_val), 2) == round(new_price, 2):
-            return current_revision_id
-    except (TypeError, ValueError):
-        pass
-    updated = dict(rev.listing_json)
-    updated["price"] = round(new_price, 2)
+    current_val = price_for(rev.listing_json, marketplace)
+    if current_val is not None and round(float(current_val), 2) == round(new_price, 2):
+        return current_revision_id
+    updated = copy.deepcopy(rev.listing_json)
+    path = CANONICAL_PRICE[marketplace]
+    set_path(updated, path, round(new_price, 2))
+    _write_locks(updated, locked_paths(updated) | {path})
     saved = listing_persistence.save_revision(
         db,
         conv_id,
@@ -658,6 +674,25 @@ def _prepare_price_revision(db: Session, conv_id: str, new_price: float | None, 
         commit=True,
     )
     return saved.id
+
+
+def _restore_price_revision(db: Session, conv_id: str, price_revision_id: str, original_revision_id: str) -> None:
+    """Put back the prices from before a relist that never delisted, unless the listing changed since."""
+    if price_revision_id == original_revision_id:
+        return
+    listing_row = db.query(Listing).filter(Listing.conversation_id == conv_id).first()
+    original = db.get(ListingRevision, original_revision_id)
+    if listing_row is None or listing_row.current_revision_id != price_revision_id or original is None:
+        return
+    listing_persistence.save_revision(
+        db,
+        conv_id,
+        copy.deepcopy(original.listing_json),
+        source="auto_relist",
+        parent_revision_id=price_revision_id,
+        expected_revision_id=price_revision_id,
+        commit=True,
+    )
 
 
 PENDING_STAGE_DELETING = "stage:deleting"
@@ -968,7 +1003,7 @@ def _reserve_relist_attempt(
         ):
             return {"reserved": False, "outcome": None}
 
-        revision_id = _prepare_price_revision(db, conv_id, new_price, current_revision_id)
+        revision_id = _prepare_price_revision(db, conv_id, marketplace, new_price, current_revision_id)
         if not revision_id:
             outcome = _record_log(
                 db,
@@ -998,7 +1033,8 @@ def _reserve_relist_attempt(
             reason=f"{PENDING_STAGE_DELETING} | Delisting old listing before relist.",
             moment=moment,
         )
-        return {"reserved": True, "attempt_id": attempt_id, "revision_id": revision_id}
+        return {"reserved": True, "attempt_id": attempt_id, "revision_id": revision_id,
+                "original_revision_id": current_revision_id}
 
 
 def _update_attempt_stage(
@@ -1258,6 +1294,10 @@ async def run_auto_relist(
 
         delist_res = await _run_delist(conv_id, market, old_id, rule_id)
         if not delist_res.get("ok"):
+            # Nothing was relisted, so the relist price must not stay saved.
+            await in_worker_session(
+                _restore_price_revision, conv_id, revision_id, reservation["original_revision_id"],
+            )
             delist_status = "skipped_rule_disabled" if delist_res.get("skipped") else "failed"
             outcomes.append(await in_worker_session(_record_log_payload, {
                 "attempt_id": attempt_id, "conv_id": conv_id,
