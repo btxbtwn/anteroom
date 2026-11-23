@@ -86,6 +86,9 @@ def _run_mcp_call(
             raise TimeoutError
 
     event.listen(db, "before_commit", refuse_late_commit)
+    # A commit flushes after before_commit, and a flush can wait on a locked
+    # database. Check again once the writes are flushed, just before COMMIT.
+    event.listen(db, "after_flush", lambda session, _context: refuse_late_commit(session))
     token_id = hosted_token_id
     if not is_hosted and bearer_token is not None:
         if not bearer_token:
