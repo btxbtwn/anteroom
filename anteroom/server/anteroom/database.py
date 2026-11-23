@@ -262,6 +262,7 @@ def load_models() -> None:
         ScheduledPublishLog,
     )
     from anteroom.models.generation_timing import GenerationTiming  # noqa: F401
+    from anteroom.models.api_usage import ApiUsageEvent  # noqa: F401
     from anteroom.models.cloud_session import (  # noqa: F401
         CloudMarketplaceSession,
         CloudOperationJournal,

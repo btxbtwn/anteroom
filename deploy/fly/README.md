@@ -356,3 +356,29 @@ always uses the platform key (seller Vault Photoroom keys are ignored),
 PUT/DELETE `/api/settings/photoroom` return `403`, and Settings does not offer a
 Photoroom key field. The desktop Mac app is unaffected and keeps Keychain BYOK.
 Edits are billed to the Photoroom account behind the managed key.
+
+### Per-seller usage (beta invoicing)
+
+When managed OpenRouter and/or Photoroom keys are set, each successful call is
+recorded against the seller who made it. OpenRouter costs come from the
+provider's `usage.cost`; Photoroom uses a flat rate card
+(`ANTEROOM_PHOTOROOM_COST_USD`, default `0.10` per successful edit).
+
+Set `ANTEROOM_OPERATOR_USER_ID` to your Supabase user id, then export:
+
+```sh
+# JSON totals + events for the last 30 days
+curl -sS -H "Authorization: Bearer <operator-access-token>" \
+  "https://api.myanteroom.com/api/operator/usage"
+
+# CSV for a date range
+curl -sS -H "Authorization: Bearer <operator-access-token>" \
+  "https://api.myanteroom.com/api/operator/usage?since=2026-11-01T00:00:00Z&until=2026-12-01T00:00:00Z&format=csv" \
+  -o anteroom-api-usage.csv
+```
+
+Or via the CLI against a signed-in operator session:
+
+```sh
+anteroom api request GET /api/operator/usage --query format=csv
+```
