@@ -102,6 +102,9 @@ changelog says what. Apple's lookup API returns the same as JSON:
 | OneShop | — | — | [pcapaniacmdmabfopeeimmpjkkjpeiok](https://chromewebstore.google.com/detail/pcapaniacmdmabfopeeimmpjkkjpeiok) (not updated since 2021) | [1577487407](https://apps.apple.com/us/app/id1577487407) |
 | Sell The Flip | — | — | [cnldmcpgoipcimgjjklpbnhikcnglmhm](https://chromewebstore.google.com/detail/cnldmcpgoipcimgjjklpbnhikcnglmhm) | — |
 
+What their customers complain about and ask for, and where to read it, is in
+[competitor feedback](competitor-feedback.md).
+
 Comparison posts on competitors' blogs are marketing; use them to learn what
 a competitor claims, not as evidence of what it does. Check a claim in the
 product's own help center, store listing or changelog.
