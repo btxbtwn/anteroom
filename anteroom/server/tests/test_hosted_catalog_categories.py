@@ -51,6 +51,12 @@ def test_loaded_trees_enable_verified_category_pickers_and_bulk_writes(cloud, si
     tree = client.get('/api/catalog/categories?marketplace=ebay', headers=alice)
     assert tree.status_code == 200, tree.text
     assert tree.json()['complete'] and LEAVES['ebay'][0] in {node['id'] for node in tree.json()['nodes']}
+    # A seller on another eBay site searches that site's categories instead of the US tree.
+    assert client.put('/api/settings/seller-region', headers=alice, json={'country': 'GB'}).status_code == 200
+    abroad = client.get('/api/catalog/categories?marketplace=ebay', headers=alice).json()
+    assert abroad['nodes'] == [] and abroad['complete'] is False
+    assert client.get('/api/catalog/categories?marketplace=depop', headers=alice).json()['nodes']
+    assert client.put('/api/settings/seller-region', headers=alice, json={'country': 'US'}).status_code == 200
     found = client.get('/api/catalog/search', headers=alice, params={'q': 'womenswear coats', 'marketplace': 'depop', 'kind': 'category'})
     assert found.status_code == 200, found.text
     assert [row['id'] for row in found.json()['results']] == [LEAVES['depop'][0]]
