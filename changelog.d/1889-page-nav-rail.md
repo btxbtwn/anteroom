@@ -1,1 +1,0 @@
-- Move the page buttons (Today, Assistant, Sourcing, Analytics, Marketplaces, Automations, Settings) out of the bottom of the listings sidebar into a slim rail on the left edge. Rest the mouse on it to see page names, or pin it open with the pin button or the [ key, and the page moves over to make room.
