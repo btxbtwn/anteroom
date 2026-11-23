@@ -10,8 +10,8 @@ the model a write token:
                    findings still open from earlier reviews
   post-review      update the sticky summary comment, post one review with
                    inline findings, mark fixed findings "Addressed"
-  prepare-autofix  collect open Claude and Codex findings, enforce the
-                   repair-round limit
+  prepare-autofix  collect open Claude and Codex findings and failed CI jobs,
+                   enforce the repair-round limit
   post-autofix     check that Claude's fix commit reached the branch, reply to
                    every finding and post the round's result
 
@@ -36,6 +36,8 @@ AUTOFIX_STATE = "claude-autofix:v1"
 AUTOFIX_REPLY = "claude-autofix-reply:v1"
 FINDING_MARK = "<!-- claude-review-finding -->"
 MAX_ROUNDS = 3
+# Failed CI log kept for the model; enough for the failure, not the whole run.
+CI_LOG_CHARS = 80_000
 # Auto-fix never pushes changes to these; they are release and CI controls.
 PROTECTED_PATHS = (".github/", "anteroom/VERSION", "CHANGELOG.md")
 SEVERITY_ICON = {"Critical": "🔴", "Major": "🟠", "Minor": "🟡"}
@@ -375,9 +377,16 @@ def open_autofix_findings(threads: list[dict], head: str) -> list[dict]:
     return found
 
 
-def autofix_decision(states: list[dict], open_ids: list[int], head: str) -> tuple[str, str | None]:
+def autofix_decision(
+    states: list[dict],
+    open_ids: list[int],
+    head: str,
+    *,
+    ci_open: list[str] | None = None,
+) -> tuple[str, str | None]:
     """Return ("run", None) or ("skip", message-or-None) for this auto-fix trigger."""
-    if not open_ids:
+    ci_open = list(ci_open or [])
+    if not open_ids and not ci_open:
         return "skip", None
     rounds = sum(1 for s in states if s.get("pushed"))
     if rounds >= MAX_ROUNDS:
@@ -385,11 +394,67 @@ def autofix_decision(states: list[dict], open_ids: list[int], head: str) -> tupl
             return "skip", None
         return "skip", "max_rounds"
     last = states[-1] if states else None
-    if last and last.get("head") == head and set(open_ids) <= set(last.get("open", [])):
-        if last.get("reason") == "same_blockers":
-            return "skip", None
-        return "skip", "same_blockers"
+    if last and last.get("head") == head:
+        same_findings = set(open_ids) <= set(last.get("open") or [])
+        same_ci = set(ci_open) <= set(last.get("ci_open") or [])
+        if same_findings and same_ci:
+            if last.get("reason") == "same_blockers":
+                return "skip", None
+            return "skip", "same_blockers"
     return "run", None
+
+
+def failed_ci_jobs(jobs: list[dict]) -> list[dict]:
+    """Leaf CI jobs that failed. Skip the aggregate `CI` gate (it only mirrors them)."""
+    out = []
+    for job in jobs:
+        if job.get("conclusion") != "failure":
+            continue
+        name = (job.get("name") or "").strip()
+        if not name or name == "CI":
+            continue
+        out.append(
+            {
+                "name": name,
+                "id": job.get("id"),
+                "html_url": job.get("html_url") or "",
+            }
+        )
+    return out
+
+
+def truncate_log(text: str, limit: int = CI_LOG_CHARS) -> str:
+    cleaned = (text or "").replace("\x00", "")
+    if len(cleaned) <= limit:
+        return cleaned
+    return f"...(truncated to last {limit} characters)...\n" + cleaned[-limit:]
+
+
+def latest_ci_run_id(head: str) -> int | None:
+    """Most recent CI workflow run for this head on a pull_request event."""
+    path = f"repos/{repo()}/actions/workflows/ci.yml/runs?head_sha={head}&event=pull_request&per_page=5"
+    payload = api(path) or {}
+    runs = payload.get("workflow_runs") or []
+    for item in runs:
+        if item.get("id"):
+            return int(item["id"])
+    return None
+
+
+def collect_ci_failures(*, head: str, run_id: int | None = None) -> tuple[list[dict], str]:
+    """Failed leaf jobs for a CI run, plus truncated failed-log text for the model."""
+    resolved = run_id or latest_ci_run_id(head)
+    if not resolved:
+        return [], ""
+    payload = api(f"repos/{repo()}/actions/runs/{resolved}/jobs?per_page=100") or {}
+    failures = failed_ci_jobs(list(payload.get("jobs") or []))
+    if not failures:
+        return [], ""
+    try:
+        log = run("gh", "run", "view", str(resolved), "--repo", repo(), "--log-failed")
+    except subprocess.CalledProcessError:
+        log = "(failed job log unavailable)"
+    return failures, truncate_log(log)
 
 
 BLOCKING_TEXT = {
@@ -407,6 +472,9 @@ def render_autofix_result(state: dict, *, blocking: str | None, auto_merge_disab
         ]
     else:
         lines = ["**Auto-fix finished and the readiness conditions were satisfied.**"]
+    ci_open = state.get("ci_open") or []
+    if ci_open:
+        lines.append("Open CI failures: " + ", ".join(f"`{name}`" for name in ci_open) + ".")
     if auto_merge_disabled:
         lines.append(
             "Auto-merge was turned off for this round and stays off. Queue the PR again once "
@@ -585,33 +653,69 @@ def prepare_autofix(args) -> None:
     out.mkdir(parents=True, exist_ok=True)
     head = git("rev-parse", "HEAD").strip()
     findings = open_autofix_findings(review_threads(args.pr), head)
+    run_id = int(os.environ["CI_RUN_ID"]) if os.environ.get("CI_RUN_ID", "").strip().isdigit() else None
+    ci_failures, ci_log = collect_ci_failures(head=head, run_id=run_id)
+    ci_names = [f["name"] for f in ci_failures]
     states = [state for _, state in bot_issue_comments(args.pr, AUTOFIX_STATE)]
-    decision, reason = autofix_decision(states, [f["comment_id"] for f in findings], head)
+    decision, reason = autofix_decision(
+        states, [f["comment_id"] for f in findings], head, ci_open=ci_names
+    )
     if decision == "skip":
         if reason:
-            state = {"head": head, "pushed": False, "open": [f["comment_id"] for f in findings], "reason": reason,
-                     "round": sum(1 for s in states if s.get("pushed"))}
+            state = {
+                "head": head,
+                "pushed": False,
+                "open": [f["comment_id"] for f in findings],
+                "ci_open": ci_names,
+                "reason": reason,
+                "round": sum(1 for s in states if s.get("pushed")),
+            }
             api(f"repos/{repo()}/issues/{args.pr}/comments", "POST",
                 {"body": render_autofix_result(state, blocking=BLOCKING_TEXT[reason], auto_merge_disabled=False)})
         set_output(skip="true")
         return
     (out / "open-findings.json").write_text(json.dumps(findings, indent=2))
+    (out / "ci-failures.json").write_text(json.dumps(ci_failures, indent=2))
+    (out / "ci-failed.log").write_text(ci_log)
     round_no = sum(1 for s in states if s.get("pushed")) + 1
-    (out / "context.json").write_text(json.dumps({"pr": args.pr, "head": head, "round": round_no}, indent=2))
-    set_output(skip="false", round=round_no, findings=len(findings))
+    (out / "context.json").write_text(
+        json.dumps(
+            {
+                "pr": args.pr,
+                "head": head,
+                "round": round_no,
+                "ci_run_id": run_id,
+                "ci_jobs": ci_names,
+            },
+            indent=2,
+        )
+    )
+    set_output(skip="false", round=round_no, findings=len(findings), ci_failures=len(ci_failures))
 
 
 def post_autofix(args) -> None:
     ctx_dir = Path(args.context)
     ctx = json.loads((ctx_dir / "context.json").read_text())
     findings = {f["comment_id"]: f for f in json.loads((ctx_dir / "open-findings.json").read_text())}
+    ci_jobs = {f["name"]: f for f in json.loads((ctx_dir / "ci-failures.json").read_text())}
     raw = os.environ.get("AUTOFIX_OUTPUT", "").strip()
-    data = json.loads(raw) if raw else {"results": []}
+    data = json.loads(raw) if raw else {"results": [], "ci_results": []}
     results = {r["comment_id"]: r for r in data.get("results", []) if r["comment_id"] in findings}
     for comment_id in findings:
         results.setdefault(comment_id, {"comment_id": comment_id, "outcome": "not_fixed",
                                         "explanation": "Claude returned no result for this finding.",
                                         "validation": "None."})
+    ci_results = {r["job"]: r for r in data.get("ci_results", []) if r.get("job") in ci_jobs}
+    for name in ci_jobs:
+        ci_results.setdefault(
+            name,
+            {
+                "job": name,
+                "outcome": "not_fixed",
+                "explanation": "Claude returned no result for this CI failure.",
+                "validation": "None.",
+            },
+        )
 
     # Claude pushes from inside the action: its Claude App token starts CI and
     # is revoked when the action ends, so this script cannot push for it.
@@ -630,20 +734,38 @@ def post_autofix(args) -> None:
             if r["outcome"] == "fixed":
                 r["outcome"] = "not_fixed"
                 r["explanation"] += " (The fix was not pushed.)"
+        for r in ci_results.values():
+            if r["outcome"] == "fixed":
+                r["outcome"] = "not_fixed"
+                r["explanation"] += " (The fix was not pushed.)"
 
     for comment_id, result in results.items():
         body = render_autofix_reply(result, head=head_after, fixed_in=head_after if pushed else None)
         api(f"repos/{repo()}/pulls/{ctx['pr']}/comments/{comment_id}/replies", "POST", {"body": body})
 
     unresolved = [cid for cid, r in results.items() if r["outcome"] == "not_fixed"]
-    if not blocking and unresolved:
-        blocking = data.get("blocking") or f"{len(unresolved)} finding(s) could not be fixed automatically."
+    unresolved_ci = [name for name, r in ci_results.items() if r["outcome"] == "not_fixed"]
+    if not blocking and (unresolved or unresolved_ci):
+        parts = []
+        if unresolved:
+            parts.append(f"{len(unresolved)} finding(s)")
+        if unresolved_ci:
+            parts.append(f"{len(unresolved_ci)} CI job(s) ({', '.join(unresolved_ci)})")
+        blocking = data.get("blocking") or (
+            " and ".join(parts) + " could not be fixed automatically."
+        )
     # Auto-merge was paused before Claude ran and stays off: another review
     # can land on this commit at any moment, so only a person (or agent)
     # who has checked every finding queues the PR again (AGENTS.md).
     auto_merge_off = os.environ.get("WAS_QUEUED") == "true"
-    state = {"head": head_after, "pushed": pushed, "open": unresolved,
-             "round": ctx["round"], "reason": "blocked" if blocking else "ready"}
+    state = {
+        "head": head_after,
+        "pushed": pushed,
+        "open": unresolved,
+        "ci_open": unresolved_ci,
+        "round": ctx["round"],
+        "reason": "blocked" if blocking else "ready",
+    }
     api(f"repos/{repo()}/issues/{ctx['pr']}/comments", "POST",
         {"body": render_autofix_result(state, blocking=blocking, auto_merge_disabled=auto_merge_off)})
 

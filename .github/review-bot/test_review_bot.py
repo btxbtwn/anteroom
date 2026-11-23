@@ -175,14 +175,40 @@ class AutofixTests(unittest.TestCase):
     def test_decision(self):
         self.assertEqual(bot.autofix_decision([], [], "h"), ("skip", None))
         self.assertEqual(bot.autofix_decision([], [1], "h"), ("run", None))
+        self.assertEqual(bot.autofix_decision([], [], "h", ci_open=["Studio frontend"]), ("run", None))
         pushed = [{"head": f"h{i}", "pushed": True} for i in range(bot.MAX_ROUNDS)]
         self.assertEqual(bot.autofix_decision(pushed, [1], "h9"), ("skip", "max_rounds"))
+        self.assertEqual(bot.autofix_decision(pushed, [], "h9", ci_open=["Studio frontend"]), ("skip", "max_rounds"))
         stopped = pushed + [{"head": "h9", "reason": "max_rounds"}]
         self.assertEqual(bot.autofix_decision(stopped, [1], "h9"), ("skip", None))
         tried = [{"head": "h", "pushed": False, "open": [1, 2]}]
         self.assertEqual(bot.autofix_decision(tried, [1], "h"), ("skip", "same_blockers"))
         self.assertEqual(bot.autofix_decision(tried, [1, 3], "h"), ("run", None))
         self.assertEqual(bot.autofix_decision(tried, [1], "h2"), ("run", None))
+        # New CI failures at the same head still run even if findings shrank.
+        self.assertEqual(
+            bot.autofix_decision(tried, [1], "h", ci_open=["Studio frontend"]),
+            ("run", None),
+        )
+        tried_ci = [{"head": "h", "pushed": False, "open": [], "ci_open": ["Studio frontend"]}]
+        self.assertEqual(
+            bot.autofix_decision(tried_ci, [], "h", ci_open=["Studio frontend"]),
+            ("skip", "same_blockers"),
+        )
+
+    def test_failed_ci_jobs_skip_aggregate_gate(self):
+        jobs = [
+            {"name": "Studio frontend", "conclusion": "failure", "id": 1, "html_url": "https://example/1"},
+            {"name": "CI", "conclusion": "failure", "id": 2, "html_url": "https://example/2"},
+            {"name": "Extension", "conclusion": "success", "id": 3, "html_url": "https://example/3"},
+            {"name": "", "conclusion": "failure", "id": 4},
+        ]
+        self.assertEqual(
+            bot.failed_ci_jobs(jobs),
+            [{"name": "Studio frontend", "id": 1, "html_url": "https://example/1"}],
+        )
+        self.assertTrue(bot.truncate_log("x" * 10, limit=4).startswith("...(truncated"))
+        self.assertEqual(bot.truncate_log("short", limit=100), "short")
 
     def test_reply_and_result_text(self):
         reply = bot.render_autofix_reply(
@@ -191,10 +217,19 @@ class AutofixTests(unittest.TestCase):
         self.assertIn("**Bring PR to ready — fixed**", reply)
         self.assertIn("Fixed in commit abc1234.", reply)
         self.assertEqual(bot.read_marker(bot.AUTOFIX_REPLY, reply), {"head": "abc1234567", "outcome": "fixed"})
-        result = bot.render_autofix_result({"head": "h", "round": 2}, blocking="stuck", auto_merge_disabled=True)
+        result = bot.render_autofix_result(
+            {"head": "h", "round": 2, "ci_open": ["Studio frontend"]},
+            blocking="stuck",
+            auto_merge_disabled=True,
+        )
         self.assertIn("Blocking condition: stuck", result)
         self.assertIn("Auto-merge was turned off", result)
         self.assertIn("Round 2 of 3", result)
+        self.assertIn("Open CI failures: `Studio frontend`.", result)
+        self.assertEqual(
+            bot.read_marker(bot.AUTOFIX_STATE, result)["ci_open"],
+            ["Studio frontend"],
+        )
 
     def test_fixed_needs_claudes_own_commit_on_the_branch(self):
         self.assertEqual(bot.classify_push("a", "fix", "fix", True), (True, None))
