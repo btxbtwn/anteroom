@@ -326,7 +326,7 @@ def compute_goal_progress(
     }
 
 
-def _delist_resolved(job: Job, raw_notes: str | None) -> bool:
+def _delist_resolved(current_step: str | None, last_error: str | None, raw_notes: str | None) -> bool:
     """Whether a failed delist has since been resolved on every marketplace it failed on.
 
     That delist recorded each failure in ``marketplaceDelists``. A later delete
@@ -337,7 +337,7 @@ def _delist_resolved(job: Job, raw_notes: str | None) -> bool:
     from anteroom.services.marketplace_delist import DELIST_INCOMPLETE
     from anteroom.services.vendoo_import import parse_notes
 
-    if job.current_step != "native_delist" or job.last_error != DELIST_INCOMPLETE:
+    if current_step != "native_delist" or last_error != DELIST_INCOMPLETE:
         return False
     notes = parse_notes(raw_notes)
     delists = notes.get("marketplaceDelists")
@@ -447,11 +447,11 @@ def _collect_attention_items(db: Session, *, now_utc: datetime, dismissed_keys: 
     conversations = db.query(Conversation).all()
     conv_by_id = {conv.id: conv for conv in conversations}
 
-    # 3. Failed jobs / listing publish errors. Job snapshots can be megabytes
-    # each, and the inbox only needs the latest status and error text.
+    # 3. Failed jobs / listing publish errors. Read job metadata only because
+    # listing snapshots can be megabytes each.
     seen_failed_convs: set[str] = set()
     latest_jobs = (
-        db.query(Job.id, Job.conversation_id, Job.status, Job.last_error, Job.updated_at, Job.created_at)
+        db.query(Job.id, Job.conversation_id, Job.status, Job.current_step, Job.last_error, Job.updated_at, Job.created_at)
         .order_by(Job.created_at.desc())
     )
     latest_job_by_conv = {}
@@ -461,7 +461,7 @@ def _collect_attention_items(db: Session, *, now_utc: datetime, dismissed_keys: 
     for conv_id, job in latest_job_by_conv.items():
         if job.status == "failed" and conv_id in conv_by_id:
             conv = conv_by_id[conv_id]
-            if _delist_resolved(job, conv.notes):
+            if _delist_resolved(job.current_step, job.last_error, conv.notes):
                 continue
             seen_failed_convs.add(conv_id)
             detail = (job.last_error or "A recent listing job failed.").strip()
