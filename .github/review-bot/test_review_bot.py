@@ -61,6 +61,22 @@ class DiffTests(unittest.TestCase):
         self.assertNotIn("start_line", bot.review_comment(FINDING | {"start_line": 1, "line": 9}, allowed))
 
 
+class ReviewScopeTests(unittest.TestCase):
+    def test_first_review_covers_the_whole_pr(self):
+        self.assertEqual(bot.review_scope(["a.py", "b.py"], None, ["a.py"]), (["a.py", "b.py"], []))
+
+    def test_incremental_review_keeps_only_this_prs_new_changes(self):
+        # c.py changed only through a merge from the base branch.
+        self.assertEqual(bot.review_scope(["a.py", "b.py"], ["b.py", "c.py"], []), (["b.py"], []))
+
+    def test_file_restored_to_base_is_reassessed_for_its_open_findings(self):
+        files, restored = bot.review_scope(["b.py"], ["a.py", "c.py"], ["a.py"])
+        self.assertEqual((files, restored), ([], ["a.py"]))
+
+    def test_base_merge_alone_reviews_nothing(self):
+        self.assertEqual(bot.review_scope(["b.py"], ["c.py"], ["a.py"]), ([], []))
+
+
 class RenderTests(unittest.TestCase):
     def test_marker_round_trip(self):
         body = "hi\n" + bot.marker(bot.REVIEW_STATE, {"reviewed_sha": "abc"})

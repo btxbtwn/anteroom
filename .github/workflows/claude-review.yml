@@ -11,11 +11,6 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
-# A newer push replaces a review still running for the same pull request.
-concurrency:
-  group: claude-review-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
 
@@ -28,6 +23,12 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # A newer push replaces a review still running for the same pull request.
+    # Only the review: auto-fix's own push starts a new run, and cancelling
+    # auto-fix there would skip recording its replies and round count.
+    concurrency:
+      group: claude-review-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     permissions:
       contents: read
       pull-requests: write

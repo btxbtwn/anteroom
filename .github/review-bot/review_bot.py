@@ -466,6 +466,20 @@ def bot_issue_comments(pr: int, name: str) -> list[tuple[dict, dict]]:
     return found
 
 
+def review_scope(pr_files: list[str], new_paths: list[str] | None, open_paths: list[str]) -> tuple[list[str], list[str]]:
+    """Files to review now, and files with open findings that went back to the base.
+
+    On an incremental run (``new_paths`` set) only this PR's files that changed
+    since the last review are reviewed. A fix that restores a file to the base
+    drops it from the PR's files; it still has to be reviewed so its open
+    findings can be marked addressed.
+    """
+    if new_paths is None:
+        return pr_files, []
+    new, pr = set(new_paths), set(pr_files)
+    return sorted(pr & new), sorted((set(open_paths) & new) - pr)
+
+
 def prepare_review(args) -> None:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -479,15 +493,6 @@ def prepare_review(args) -> None:
     since = None
     if reviewed and subprocess.run(["git", "cat-file", "-e", reviewed]).returncode == 0 and is_ancestor(reviewed, head):
         since = reviewed
-    pr_files = changed_paths(merge_base, head)
-    files = sorted(set(pr_files) & set(changed_paths(since, head))) if since else pr_files
-    if not files:
-        # Only a merge from the base branch: nothing new of this PR's to review.
-        set_output(skip="true")
-        return
-    (out / "pr.diff").write_text(git("diff", "--no-color", "--no-ext-diff", merge_base, head))
-    increment = git("--literal-pathspecs", "diff", "--no-color", "--no-ext-diff", since or merge_base, head, "--", *files)
-    (out / "increment.diff").write_text(increment)
     open_findings = [
         {
             "comment_id": t["comments"]["nodes"][0]["databaseId"],
@@ -498,8 +503,22 @@ def prepare_review(args) -> None:
         for t in review_threads(args.pr)
         if not t["isResolved"] and t["comments"]["nodes"] and is_claude_finding(t["comments"]["nodes"][0])
     ]
+    files, restored = review_scope(
+        changed_paths(merge_base, head),
+        changed_paths(since, head) if since else None,
+        [f["path"] for f in open_findings],
+    )
+    if not files and not restored:
+        # Only a merge from the base branch: nothing new of this PR's to review.
+        set_output(skip="true")
+        return
+    (out / "pr.diff").write_text(git("diff", "--no-color", "--no-ext-diff", merge_base, head))
+    increment = git(
+        "--literal-pathspecs", "diff", "--no-color", "--no-ext-diff", since or merge_base, head, "--", *files, *restored
+    )
+    (out / "increment.diff").write_text(increment)
     (out / "open-findings.json").write_text(json.dumps(open_findings, indent=2))
-    ctx = {"pr": args.pr, "head": head, "merge_base": merge_base, "since": since, "files": files}
+    ctx = {"pr": args.pr, "head": head, "merge_base": merge_base, "since": since, "files": files, "restored": restored}
     (out / "context.json").write_text(json.dumps(ctx, indent=2))
     set_output(skip="false", files=len(files), incremental="true" if since else "false")
 
