@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1149 — 2026-11-23
+
+- Regenerate now asks whether to delist the item from the marketplaces where it's live, and delists only if you say so.
+
+## 0.1.1148 — 2026-11-23
+
+- Anteroom now offers a reload if the opening screen gets stuck while the web app loads.
+
 ## 0.1.1147 — 2026-11-23
 
 - Edit photos with AI Studio, powered by Photoroom: remove the background onto white or any colour, add a natural shadow, show clothing on a ghost mannequin or as a flat lay, or put it on a virtual model with your choice of model, scene and pose. Apply it to one photo or several at once, on the Mac and on the web. Add your Photoroom API key in Settings → Providers.
