@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1164 — 2026-11-23
+
+- Etsy listing settings reuse recent profile reads to reduce repeat requests and tell you when to wait and try again if requests are rate limited.
+
 ## 0.1.1163 — 2026-11-23
 
 - Assistants connected to Anteroom (MCP) no longer see marketplaces you already delisted, marked not listed or sold on as live.
