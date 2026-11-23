@@ -81,7 +81,7 @@ def describe() -> dict[str, Any]:
         ),
         "install_command": None if path else _INSTALL_COMMAND,
         "hint": _hint(installed=path is not None, on_path=on_path),
-        "clients": _clients(path or "anteroom"),
+        "clients": _clients(path or "anteroom", base_url),
         "remote_clients": _remote_clients(mcp_url, require_token=bool(remote)),
     }
 
@@ -224,13 +224,34 @@ def _hint(*, installed: bool, on_path: bool) -> str | None:
     return None
 
 
-def _clients(command: str) -> list[dict[str, Any]]:
+def _with_setup_prompts(
+    clients: list[dict[str, Any]], transport: str, guidance: str
+) -> list[dict[str, Any]]:
+    for client in clients:
+        parts = [
+            f"Set up my Anteroom MCP server using {transport}.",
+            f"{client['label']} setup\n{client['where']}",
+            guidance,
+        ]
+        if client["command"]:
+            parts.append(f"Terminal option\n```sh\n{client['command']}\n```")
+        parts.extend([
+            f"Configuration\n```\n{client['snippet']}\n```",
+            "Preserve my other MCP servers and settings. If you can't change the settings yourself, "
+            "walk me through the steps I need to take. Verify the connection by listing the Anteroom tools "
+            "and tell me what worked or what blocked setup. Keep my listing data unchanged during setup.",
+        ])
+        client["prompt"] = "\n\n".join(parts)
+    return clients
+
+
+def _clients(command: str, base_url: str) -> list[dict[str, Any]]:
     snippet = json.dumps(
         {"mcpServers": {"anteroom": {"command": command, "args": ["mcp", "serve"]}}},
         indent=2,
     )
     quoted = shlex.quote(command)
-    return [
+    clients = [
         {
             "id": "cursor",
             "label": "Cursor",
@@ -257,6 +278,13 @@ def _clients(command: str) -> list[dict[str, Any]]:
             "command": f"claude mcp add --transport stdio anteroom -- {quoted} mcp serve",
         },
     ]
+    return _with_setup_prompts(
+        clients,
+        "local stdio",
+        f"Run the server on the Mac running Anteroom. Use the executable in the configuration below. "
+        f"Set ANTEROOM_BASE_URL to {base_url} in the MCP server's environment to target this app. "
+        "If the anteroom command is missing, help me install it from Anteroom's Agents settings first.",
+    )
 
 
 def _remote_clients(mcp_url: str, *, require_token: bool) -> list[dict[str, Any]]:
@@ -274,59 +302,69 @@ def _remote_clients(mcp_url: str, *, require_token: bool) -> list[dict[str, Any]
         else f"claude mcp add --transport http anteroom {shlex.quote(mcp_url)}"
     )
 
-    chatgpt_snippet = json.dumps(
-        {
-            "name": "Anteroom",
-            "mcp_server_url": mcp_url,
-            "authentication": "Bearer token" if require_token else "None (local loopback) or Bearer token",
-            **({"headers": headers_block} if headers_block else {}),
-        },
-        indent=2,
-    )
+    codex_snippet = f"[mcp_servers.anteroom]\nurl = {json.dumps(mcp_url)}"
+    if require_token:
+        codex_snippet += '\nbearer_token_env_var = "ANTEROOM_MCP_TOKEN"'
 
-    gemini_entry: dict[str, Any] = {"httpUrl": mcp_url}
+    antigravity_entry: dict[str, Any] = {"serverUrl": mcp_url}
     if headers_block:
-        gemini_entry["headers"] = headers_block
-    gemini_snippet = json.dumps({"mcpServers": {"anteroom": gemini_entry}}, indent=2)
-    gemini_cmd = (
-        f"gemini mcp add --transport http anteroom {shlex.quote(mcp_url)} "
-        f'--header "Authorization: Bearer {token_placeholder}"'
-        if require_token
-        else f"gemini mcp add --transport http anteroom {shlex.quote(mcp_url)}"
-    )
+        antigravity_entry["headers"] = headers_block
+    antigravity_snippet = json.dumps({"mcpServers": {"anteroom": antigravity_entry}}, indent=2)
+    generic_snippet = f"Name: anteroom\nTransport: Streamable HTTP\nServer URL: {mcp_url}"
+    if require_token:
+        generic_snippet += f"\nAuthorization: Bearer {token_placeholder}"
 
-    return [
+    clients = [
         {
             "id": "claude",
             "label": "Claude",
             "where": (
-                "Claude.ai / Claude Desktop → Settings → Connectors → Add custom connector "
-                "using the Streamable HTTP URL and your access token, or add it via Claude Code."
+                "Use Claude Code, or add a personal custom connector in Claude for a public HTTPS endpoint. "
+                "In the connector, enter the URL and add Authorization under Request headers when required. "
+                "Use Claude Code for a local or private-network endpoint."
             ),
             "snippet": claude_snippet,
             "command": claude_cmd,
         },
         {
             "id": "chatgpt",
-            "label": "ChatGPT",
+            "label": "Codex / ChatGPT",
             "where": (
-                "ChatGPT → Settings → Connectors → Developer Mode → Create connector. "
-                "Paste the Streamable HTTP MCP URL and pass your access token as a Bearer header."
+                "Merge this into the Codex config.toml. For an authenticated endpoint, set ANTEROOM_MCP_TOKEN "
+                "in the environment that launches Codex. ChatGPT’s connector settings require OAuth for "
+                "authenticated servers, so use Codex for this token-based setup."
             ),
-            "snippet": chatgpt_snippet,
+            "snippet": codex_snippet,
             "command": None,
         },
         {
-            "id": "gemini",
-            "label": "Gemini",
+            "id": "antigravity",
+            "label": "Google Antigravity",
             "where": (
-                "Gemini CLI (~/.gemini/settings.json) or Gemini MCP extensions: "
-                "merge this httpUrl entry into mcpServers or run the command below."
+                "In Antigravity IDE, open MCP Servers → Manage MCP Servers → View raw config. "
+                "Merge the anteroom entry into mcpServers in mcp_config.json."
             ),
-            "snippet": gemini_snippet,
-            "command": gemini_cmd,
+            "snippet": antigravity_snippet,
+            "command": None,
+        },
+        {
+            "id": "generic",
+            "label": "Other MCP clients",
+            "where": "Use your client's setup format for a Streamable HTTP MCP server.",
+            "snippet": generic_snippet,
+            "command": None,
         },
     ]
+    guidance = (
+        "In Anteroom → Settings → Agents → Access tokens, use Create token. "
+        f"I’ll enter the token in the client's private settings or secret store where {token_placeholder} "
+        "or a token environment variable is referenced. Keep the token out of chat, logs, and shared configuration. "
+        "If the client cannot reach the URL or send the bearer token, explain what is missing."
+        if require_token
+        else "This loopback endpoint is for a client running on the same Mac as Anteroom. "
+        "It needs no access token. If your client runs elsewhere, tell me it needs a reachable endpoint."
+    )
+    return _with_setup_prompts(clients, "Streamable HTTP", guidance)
 
 
 def _parse_stdout(text: str) -> dict[str, Any] | None:

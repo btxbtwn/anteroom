@@ -2,13 +2,14 @@ import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { CheckIcon, CopyIcon, KeyRoundIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { api } from "../../api/client";
-import type { McpAccessToken, McpTokenCreateResponse } from "../../api/agentConnection";
+import type { AgentClientSnippet, McpAccessToken, McpTokenCreateResponse } from "../../api/agentConnection";
 import { useWorkspaceRuntime } from "../../app/runtime";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Spinner } from "../ui/spinner";
+import { toastManager } from "../ui/toast";
 import { SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
 
 const EXPIRY_OPTIONS = [
@@ -18,19 +19,27 @@ const EXPIRY_OPTIONS = [
   { value: "365", label: "1 year" },
 ] as const;
 
-function CopyButton({ text, label }: { text: string; label: string }) {
+function CopyButton({ text, label, buttonText = "Copy" }: { text: string; label: string; buttonText?: string }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
-    if (!text || !navigator.clipboard) return;
-    await navigator.clipboard.writeText(text);
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      setCopied(false);
+      toastManager.add({ type: "error", title: "Could not copy", description: "Check clipboard permissions and try again." });
+      return;
+    }
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1600);
   };
   return (
-    <Button type="button" variant="outline" size="xs" onClick={() => void copy()} aria-label={label}>
-      {copied ? <CheckIcon className="text-success" /> : <CopyIcon />}
-      {copied ? "Copied" : "Copy"}
-    </Button>
+    <>
+      <Button type="button" variant="outline" size="xs" onClick={() => void copy()} aria-label={label}>
+        {copied ? <CheckIcon className="text-success" /> : <CopyIcon />}
+        {copied ? "Copied" : buttonText}
+      </Button>
+      <span role="status" className="sr-only">{copied ? "Copied to clipboard." : ""}</span>
+    </>
   );
 }
 
@@ -39,6 +48,32 @@ function CommandBlock({ text }: { text: string }) {
     <pre className="overflow-x-auto rounded-md border border-border bg-muted/50 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-foreground">
       {text}
     </pre>
+  );
+}
+
+function AgentClientRow({ id, client }: { id: string; client: AgentClientSnippet }) {
+  return (
+    <SettingsRow
+      id={id}
+      title={client.label}
+      description={client.where}
+      control={<CopyButton text={client.prompt} label={`Copy setup prompt for ${client.label}`} buttonText="Copy setup prompt" />}
+    >
+      {client.command ? (
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <CommandBlock text={client.command} />
+          </div>
+          <CopyButton text={client.command} label={`Copy ${client.label} command`} />
+        </div>
+      ) : null}
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <CommandBlock text={client.snippet} />
+        </div>
+        <CopyButton text={client.snippet} label={`Copy ${client.label} config`} />
+      </div>
+    </SettingsRow>
   );
 }
 
@@ -101,7 +136,7 @@ export function AgentSettings() {
         <SettingsRow
           id="agent-mcp-url"
           title="Streamable HTTP endpoint"
-          description="Connect Claude, ChatGPT, Gemini, or any MCP client. Agents can read inventory, analytics, offers, sourcing ROI, and Needs Attention — and stage local drafts or edits. They can never publish, update live marketplaces, or delist."
+          description="Agents can read inventory, analytics, offers, sourcing ROI, and Needs Attention, and stage local drafts or edits. They can never publish, update live marketplaces, or delist."
         >
           {data?.mcp_url ? (
             <div className="flex items-start gap-2">
@@ -226,24 +261,9 @@ export function AgentSettings() {
       </SettingsSection>
 
       {remoteClients.length > 0 ? (
-        <SettingsSection id="agent-remote-clients" title="Claude, ChatGPT, and Gemini setup">
+        <SettingsSection id="agent-remote-clients" title="HTTP client setup">
           {remoteClients.map((client) => (
-            <SettingsRow key={client.id} id={`agent-remote-${client.id}`} title={client.label} description={client.where}>
-              {client.command ? (
-                <div className="flex items-start gap-2">
-                  <div className="min-w-0 flex-1">
-                    <CommandBlock text={client.command} />
-                  </div>
-                  <CopyButton text={client.command} label={`Copy ${client.label} command`} />
-                </div>
-              ) : null}
-              <div className="flex items-start gap-2">
-                <div className="min-w-0 flex-1">
-                  <CommandBlock text={client.snippet} />
-                </div>
-                <CopyButton text={client.snippet} label={`Copy ${client.label} config`} />
-              </div>
-            </SettingsRow>
+            <AgentClientRow key={client.id} id={`agent-remote-${client.id}`} client={client} />
           ))}
         </SettingsSection>
       ) : null}
@@ -338,22 +358,7 @@ export function AgentSettings() {
           </SettingsSection>
           <SettingsSection id="agent-clients" title="Agent apps">
             {(data?.clients ?? []).map((client) => (
-              <SettingsRow key={client.id} id={`agent-${client.id}`} title={client.label} description={client.where}>
-                {client.command ? (
-                  <div className="flex items-start gap-2">
-                    <div className="min-w-0 flex-1">
-                      <CommandBlock text={client.command} />
-                    </div>
-                    <CopyButton text={client.command} label={`Copy ${client.label} command`} />
-                  </div>
-                ) : null}
-                <div className="flex items-start gap-2">
-                  <div className="min-w-0 flex-1">
-                    <CommandBlock text={client.snippet} />
-                  </div>
-                  <CopyButton text={client.snippet} label={`Copy ${client.label} config`} />
-                </div>
-              </SettingsRow>
+              <AgentClientRow key={client.id} id={`agent-${client.id}`} client={client} />
             ))}
             {!isPending && data && data.clients.length === 0 ? (
               <SettingsRow title="No setup yet" description="The app did not return a client snippet." />

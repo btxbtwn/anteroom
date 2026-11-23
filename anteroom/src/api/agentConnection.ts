@@ -3,6 +3,7 @@ export interface AgentClientSnippet {
   label: string;
   where: string;
   snippet: string;
+  prompt: string;
   command: string | null;
 }
 

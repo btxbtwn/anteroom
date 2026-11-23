@@ -43,9 +43,14 @@ def test_agent_status_describes_a_found_command(monkeypatch, tmp_path):
         assert str(binary) in client["snippet"]
         assert '"mcp"' in client["snippet"]
         assert '"serve"' in client["snippet"]
+        assert client["label"] in client["prompt"]
+        assert client["snippet"] in client["prompt"]
+        assert body["base_url"] in client["prompt"]
+        assert "stdio" in client["prompt"]
     claude = next(client for client in body["clients"] if client["id"] == "claude-code")
     assert claude["command"].startswith("claude mcp add --transport stdio anteroom -- ")
     assert "mcp serve" in claude["command"]
+    assert claude["command"] in claude["prompt"]
     assert is_destructive("GET", "/api/settings/agent", set()) is None
     assert is_destructive("POST", "/api/settings/agent/test", set()) is None
 
@@ -111,16 +116,22 @@ def test_agent_connection_test_reports_a_failed_command(monkeypatch, tmp_path):
     assert os.access(binary, os.X_OK)
 
 
-def test_chatgpt_setup_without_token_omits_authorization():
+def test_http_setup_prompts_use_the_served_url_and_authentication():
     from anteroom.services.agent_connection import _remote_clients
 
-    for require_token in (False, True):
-        snippet = next(
-            client["snippet"] for client in _remote_clients("http://127.0.0.1:4318/api/mcp", require_token=require_token)
-            if client["id"] == "chatgpt"
-        )
-        setup = json.loads(snippet)
-        if require_token:
-            assert setup["headers"]["Authorization"] == "Bearer arm_your_access_token"
-        else:
-            assert "headers" not in setup
+    for url, require_token in [("http://127.0.0.1:4319/api/mcp", False), ("https://example.com/api/mcp", True)]:
+        clients = {client["id"]: client for client in _remote_clients(url, require_token=require_token)}
+        assert set(clients) == {"claude", "chatgpt", "antigravity", "generic"}
+        for client in clients.values():
+            assert url in client["prompt"]
+            assert "Streamable HTTP" in client["prompt"]
+            assert client["snippet"] in client["prompt"]
+            assert ("Create token" in client["prompt"]) is require_token
+        antigravity = json.loads(clients["antigravity"]["snippet"])["mcpServers"]["anteroom"]
+        assert antigravity == {
+            "serverUrl": url,
+            **({"headers": {"Authorization": "Bearer arm_your_access_token"}} if require_token else {}),
+        }
+        assert clients["antigravity"]["command"] is None
+        assert ("bearer_token_env_var" in clients["chatgpt"]["snippet"]) is require_token
+        assert ("Authorization: Bearer arm_your_access_token" in clients["generic"]["snippet"]) is require_token
