@@ -46,8 +46,12 @@ These override everything below.
   `~/.local/lib/heavy-gate`) lets one pytest run at a time across every
   worktree: a later run prints `[heavy-gate] waiting for a test slot` and
   sleeps, so a one-test reproduction can look hung while another worker's
-  suite runs. Leave it on for suites. For a single test file run serially
-  (`-p no:xdist`), `HEAVY_GATE_SLOTS=0` skips the queue (2026-11-21).
+  suite runs. Since 2026-11-22 it has no opt-out: `HEAVY_GATE_SLOTS=0`
+  counts as one slot, so every run waits its turn. `~/.cache/heavy-gate/slot-*.lock`
+  names the last holder, but the file keeps that text after the run ends; only
+  the lock itself shows the slot is taken. A queued run imports the code as it
+  is when it gets the slot, so don't apply a fix while its failing-before run
+  is still waiting: it would collect the fixed code (2026-11-23).
 - Run heavy suites one at a time. On 2026-11-12, four fix branches running
   `./check.sh --fast` alongside `./check.sh --all` pushed the load past 19:
   Playwright's web server missed its 120 s start, every iPhone test timed
@@ -68,6 +72,14 @@ These override everything below.
     python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]" && npm ci
   )
   ```
+
+  When disk is short, an APFS clone costs almost no space and is still a
+  separate install: `cp -c -R <worktree>/anteroom/.venv anteroom/.venv` (and
+  the same for `node_modules`) from a worktree on the same `uv.lock` and
+  `package-lock.json`, then `.venv/bin/python -m pip install --no-deps
+  --no-build-isolation -e .` in the fix worktree so the editable install
+  points at its own code. Compare the lock files first; a clone of a
+  different lock tests other packages (2026-11-23).
 
   Do not symlink another worktree's venv: pytest imports
   the fix worktree's `server`, but tests that start a subprocess (the
