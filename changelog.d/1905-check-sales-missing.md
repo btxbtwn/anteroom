@@ -1,1 +1,0 @@
-- Checking sales on a listing that was just deleted now says it wasn't found, instead of showing a server error.
