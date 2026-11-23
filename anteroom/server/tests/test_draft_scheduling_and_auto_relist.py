@@ -281,7 +281,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertFalse(auto_relist.matches_filters({**base_item, "condition": "Poor"}, row.filters))
         self.assertFalse(auto_relist.matches_filters({**base_item, "labels": ["Summer"]}, row.filters))
 
-    def test_run_auto_relist_enforces_cap_and_swaps_id_atomically(self):
+    def test_run_auto_relist_skips_active_offers_enforces_cap_and_swaps_id_atomically(self):
         now = _now()
         old_time = now - timedelta(days=45)
 
@@ -289,7 +289,6 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         old_posh_2 = "5f0000000000000000000002"
         old_posh_3 = "5f0000000000000000000003"
         new_posh_1 = "5f0000000000000000000099"
-        new_posh_2 = "5f0000000000000000000098"
 
         # Item 1: eligible stale Poshmark listing
         c1, _l1, _r1 = self._create_draft("Eligible Coat", price=100.0)
@@ -309,8 +308,8 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         floor1 = MarketplaceOfferFloor(marketplace="poshmark", listing_id=old_posh_1, floor_cents=7500)
         self.db.add_all([ml1, floor1])
 
-        # Item 2: older listing (and historically would have been offer-skipped); still eligible
-        c2, _l2, _r2 = self._create_draft("Older Coat", price=80.0)
+        # Item 2: has active incoming buyer offer -> MUST be skipped
+        c2, _l2, _r2 = self._create_draft("Active Offer Coat", price=80.0)
         ml2 = MarketplaceListing(
             id=new_id(),
             conversation_id=c2.id,
@@ -324,7 +323,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         )
         self.db.add(ml2)
 
-        # Item 3: eligible but daily_cap=2 excludes it after the two oldest run
+        # Item 3: eligible but daily_cap=2 (item 2 skipped + item 1 eligible; set daily_cap=2 and check item 3 excluded by cap)
         c3, _l3, _r3 = self._create_draft("Younger Stale Coat", price=90.0)
         ml3 = MarketplaceListing(
             id=new_id(),
@@ -339,6 +338,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.db.add(ml3)
         self.db.commit()
 
+        # Enable Poshmark rule with daily_cap=2 and $5 price drop with $70 floor
         auto_relist.save_rule(
             self.db,
             "poshmark",
@@ -349,13 +349,13 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
                 "price_adjust_mode": "amount",
                 "price_adjust_value": 5,
                 "price_floor": 70.0,
+                "skip_active_offers": True,
             },
             confirm=True,
         )
 
         delist_calls: list[tuple[str, str]] = []
         list_calls: list[tuple[str, str, str]] = []
-        new_ids = {c2.id: new_posh_2, c1.id: new_posh_1}
 
         async def fake_delister(conv_id: str, market: str) -> dict:
             delist_calls.append((conv_id, market))
@@ -363,22 +363,35 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
 
         async def fake_lister(conv_id: str, market: str, rev_id: str) -> dict:
             list_calls.append((conv_id, market, rev_id))
-            nid = new_ids[conv_id]
             return {
                 "ok": True,
-                "listing_id": nid,
-                "listing_url": f"https://poshmark.com/listing/{nid}",
+                "listing_id": new_posh_1,
+                "listing_url": f"https://poshmark.com/listing/{new_posh_1}",
             }
 
-        # Oldest first under daily_cap=2: c2 then c1. Offer observations no longer block.
-        outcomes = asyncio.run(auto_relist.run_auto_relist(now=now, delister=fake_delister, lister=fake_lister))
+        blocked = asyncio.run(auto_relist.run_auto_relist(now=now, delister=fake_delister, lister=fake_lister))
+        self.assertIn("skipped_offer_unverified", {item["status"] for item in blocked})
+        self.assertEqual(delist_calls, [])
+
+        from unittest.mock import AsyncMock
+        with (
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+            patch("anteroom.services.cloud_marketplace.execute", AsyncMock(return_value={
+                "ok": True, "verified": True, "has_active_offer": False,
+            })),
+        ):
+            # Advance past M3 retry backoff so c1 and c2 are evaluated again under daily_cap=2.
+            outcomes = asyncio.run(auto_relist.run_auto_relist(
+                now=now + timedelta(hours=7), delister=fake_delister, lister=fake_lister,
+            ))
         self.assertEqual(len(outcomes), 2)
         statuses = {o["conversation_id"]: o["status"] for o in outcomes}
-        self.assertEqual(statuses[c2.id], "completed")
+        self.assertEqual(statuses[c2.id], "skipped_active_offer")
         self.assertEqual(statuses[c1.id], "completed")
-        self.assertEqual(delist_calls, [(c2.id, "poshmark"), (c1.id, "poshmark")])
-        self.assertEqual(len(list_calls), 2)
+        self.assertEqual(delist_calls, [(c1.id, "poshmark")])
+        self.assertEqual(len(list_calls), 1)
 
+        # Verify atomic listing ID swap across MarketplaceListing, offer floor, and notes!
         self.db.expire_all()
         updated_ml = self.db.query(MarketplaceListing).filter_by(conversation_id=c1.id, marketplace="poshmark").one()
         self.assertEqual(updated_ml.listing_id, new_posh_1)
@@ -386,14 +399,12 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         swapped_floor = self.db.query(MarketplaceOfferFloor).filter_by(marketplace="poshmark", listing_id=new_posh_1).first()
         assert swapped_floor is not None
         self.assertEqual(swapped_floor.floor_cents, 7500)
-        updated_c2 = self.db.query(MarketplaceListing).filter_by(conversation_id=c2.id, marketplace="poshmark").one()
-        self.assertEqual(updated_c2.listing_id, new_posh_2)
 
+        # Audit logs recorded
         logs = self.db.query(MarketplaceRelistLog).all()
-        self.assertEqual(len(logs), 2)
-        self.assertEqual({row.status for row in logs}, {"completed"})
+        self.assertEqual(len(logs), 4)
 
-    def test_scheduled_relist_completes_without_offer_gate(self):
+    def test_scheduled_relist_uses_marketplace_verification_before_delist(self):
         from unittest.mock import AsyncMock
         from anteroom.services.automation_scheduler import _run_auto_relist
 
@@ -408,6 +419,10 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.db.add(MarketplaceRelistRule(id=new_id(), marketplace="poshmark", enabled=True))
         self.db.commit()
         with (
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+            patch("anteroom.services.cloud_marketplace.execute", AsyncMock(return_value={
+                "ok": True, "verified": True,
+            })) as check,
             patch("anteroom.services.marketplace_delist.delist", AsyncMock(return_value={
                 "poshmark": {"state": "deleted"},
             })) as delete,
@@ -415,7 +430,23 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
                 "state": "published", "listing_id": "5f0000000000000000000082",
             })),
         ):
-            self.assertEqual(asyncio.run(_run_auto_relist(t0)), 1)
+            self.assertEqual(asyncio.run(_run_auto_relist(t0)), 0)
+            delete.assert_not_awaited()
+            # A seller turning the rule off during the external check revokes the planned deletion.
+            def pause(*args, **kwargs):
+                with self.Session() as db:
+                    db.query(MarketplaceRelistRule).update({"enabled": False})
+                    db.commit()
+                return {"ok": True, "verified": True, "has_active_offer": False}
+
+            check.side_effect = pause
+            self.assertEqual(asyncio.run(_run_auto_relist(t0 + timedelta(hours=7))), 0)
+            delete.assert_not_awaited()
+            self.db.query(MarketplaceRelistRule).update({"enabled": True})
+            self.db.commit()
+            check.side_effect = None
+            check.return_value = {"ok": True, "verified": True, "has_active_offer": False}
+            self.assertEqual(asyncio.run(_run_auto_relist(t0 + timedelta(hours=7, minutes=10))), 1)
             delete.assert_awaited_once()
         self.assertEqual(self.db.query(MarketplaceRelistLog).filter_by(status="completed").count(), 1)
 
@@ -462,7 +493,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
                 "state": "published", "listing_id": "5f0000000000000000000082",
             })) as publish,
         ):
-            outcomes = asyncio.run(auto_relist.run_auto_relist())
+            outcomes = asyncio.run(auto_relist.run_auto_relist(offer_checker=AsyncMock(return_value=False)))
             self.assertEqual([entry["status"] for entry in outcomes], ["skipped_rule_disabled"])
             publish.assert_not_awaited()
             if disable_during_delete_start:
@@ -475,6 +506,146 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
 
     def test_auto_relist_opt_out_while_waiting_for_publish_turn(self):
         self._relist_after_opt_out(disable_during_delete_start=False)
+
+    def test_check_active_buyer_offer_ebay_poshmark_and_mercari(self):
+        import xml.etree.ElementTree as ET
+        from unittest.mock import AsyncMock, patch
+        from anteroom.services.ebay_client import EbayFailure
+
+        ns = "urn:ebay:apis:eBLBaseComponents"
+
+        class FakeEbayClient:
+            def __init__(self, xml_text=None, exc=None):
+                self._xml_text = xml_text
+                self._exc = exc
+
+            async def trading(self, call, fields):
+                assert call == "GetBestOffers"
+                assert fields["BestOfferStatus"] == "Active"
+                if self._exc is not None:
+                    raise self._exc
+                assert self._xml_text is not None
+                return {"xml": ET.fromstring(self._xml_text)}
+
+        # 1. eBay active buyer offer -> True
+        active_xml = f'<GetBestOffersResponse xmlns="{ns}"><BestOfferArray><BestOffer><Status>Pending</Status></BestOffer></BestOfferArray></GetBestOffersResponse>'
+        with patch("anteroom.services.ebay_client.EbayClient.connect", AsyncMock(return_value=FakeEbayClient(active_xml))):
+            self.assertIs(asyncio.run(auto_relist.check_active_buyer_offer("ebay", "123456789012")), True)
+
+        # 2. eBay no active offers -> False
+        empty_xml = f'<GetBestOffersResponse xmlns="{ns}"><BestOfferArray/></GetBestOffersResponse>'
+        with patch("anteroom.services.ebay_client.EbayClient.connect", AsyncMock(return_value=FakeEbayClient(empty_xml))):
+            self.assertIs(asyncio.run(auto_relist.check_active_buyer_offer("ebay", "123456789012")), False)
+
+        # 3. eBay Best Offer not enabled (21916260) -> False
+        not_enabled = EbayFailure("Best Offer is not enabled.", code="rejected", marketplace_message="21916260: Best Offer is not enabled")
+        with patch("anteroom.services.ebay_client.EbayClient.connect", AsyncMock(return_value=FakeEbayClient(exc=not_enabled))):
+            self.assertIs(asyncio.run(auto_relist.check_active_buyer_offer("ebay", "123456789012")), False)
+
+        # 4. eBay transient error -> None (fail closed)
+        transient = EbayFailure("Timeout", code="network")
+        with patch("anteroom.services.ebay_client.EbayClient.connect", AsyncMock(return_value=FakeEbayClient(exc=transient))):
+            self.assertIsNone(asyncio.run(auto_relist.check_active_buyer_offer("ebay", "123456789012")))
+
+        # 5. Poshmark Cloud Runner verified active offer vs verified clean
+        with (
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+            patch(
+                "anteroom.services.cloud_marketplace.execute",
+                AsyncMock(return_value={"ok": True, "verified": True, "has_active_offer": True}),
+            ),
+        ):
+            self.assertIs(asyncio.run(auto_relist.check_active_buyer_offer("poshmark", "5f0000000000000000000001")), True)
+
+        with (
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+            patch(
+                "anteroom.services.cloud_marketplace.execute",
+                AsyncMock(return_value={"ok": True, "verified": True, "has_active_offer": False}),
+            ),
+        ):
+            self.assertIs(asyncio.run(auto_relist.check_active_buyer_offer("poshmark", "5f0000000000000000000001")), False)
+
+        # 6. Mercari unverified -> None (fail closed)
+        with (
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+            patch(
+                "anteroom.services.cloud_marketplace.execute",
+                AsyncMock(return_value={"ok": True, "verified": False, "has_active_offer": False}),
+            ),
+        ):
+            self.assertIsNone(asyncio.run(auto_relist.check_active_buyer_offer("mercari", "m123456789")))
+
+    def test_offer_gate_known_active_unknown_and_clear_with_mocks_only(self):
+        """Known active skips; unknown fails closed; only a verified-clear mock may delist."""
+        now = _now()
+        cases = (
+            ("known-active", "5f0000000000000000000a01", True, "skipped_active_offer"),
+            ("unknown", "5f0000000000000000000a02", None, "skipped_offer_unverified"),
+            ("clear", "5f0000000000000000000a03", False, "completed"),
+        )
+        conv_by_lid: dict[str, str] = {}
+        for title, lid, _offer, _status in cases:
+            conv, _listing, _rev = self._create_draft(title, price=55.0)
+            conv.status = "listed"
+            self.db.add(MarketplaceListing(
+                id=new_id(),
+                conversation_id=conv.id,
+                marketplace="poshmark",
+                state="published",
+                listing_id=lid,
+                listing_url=f"https://poshmark.com/listing/{lid}",
+                listed_at=now - timedelta(days=45),
+                listed_price=55.0,
+            ))
+            conv_by_lid[lid] = conv.id
+        auto_relist.save_rule(
+            self.db,
+            "poshmark",
+            {"enabled": True, "min_age_days": 30, "daily_cap": 10},
+            confirm=True,
+        )
+        self.db.commit()
+
+        offer_by_lid = {lid: offer for _title, lid, offer, _status in cases}
+
+        async def mock_offer_checker(marketplace: str, listing_id: str):
+            self.assertEqual(marketplace, "poshmark")
+            return offer_by_lid[listing_id]
+
+        delist_calls: list[str] = []
+
+        async def fake_delister(conv_id: str, market: str) -> dict:
+            self.assertEqual(market, "poshmark")
+            delist_calls.append(conv_id)
+            return {"ok": True}
+
+        async def fake_lister(conv_id: str, market: str, rev_id: str) -> dict:
+            return {
+                "ok": True,
+                "listing_id": "5f0000000000000000000b01",
+                "listing_url": "https://poshmark.com/listing/5f0000000000000000000b01",
+            }
+
+        outcomes = asyncio.run(auto_relist.run_auto_relist(
+            now=now,
+            marketplace="poshmark",
+            offer_checker=mock_offer_checker,
+            delister=fake_delister,
+            lister=fake_lister,
+        ))
+        by_conv = {row["conversation_id"]: row for row in outcomes}
+        for _title, lid, _offer, expected_status in cases:
+            row = by_conv[conv_by_lid[lid]]
+            self.assertEqual(row["status"], expected_status)
+            if expected_status == "skipped_active_offer":
+                self.assertIn("active incoming buyer offer", row["reason"])
+            elif expected_status == "skipped_offer_unverified":
+                self.assertIn("could not verify", row["reason"])
+            else:
+                self.assertIsNone(row["reason"])
+        # Only the verified-clear listing may be delisted.
+        self.assertEqual(delist_calls, [conv_by_lid["5f0000000000000000000a03"]])
 
     def test_settle_publish_does_not_overwrite_replacement_schedule(self):
         c1, l1, _r1 = self._create_draft("Rescheduled Draft")
@@ -577,6 +748,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
             marketplace="poshmark",
             delister=fake_delister,
             lister=fake_timeout_lister,
+            offer_checker=AsyncMock(return_value=False),
         ))
         self.assertEqual(len(res), 1)
         self.assertEqual(res[0]["status"], "relist_pending")
@@ -706,10 +878,10 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertEqual(self.db.query(Listing).filter_by(conversation_id=c_live.id).one().scheduled_status, "published")
         self.assertEqual(self.db.query(Listing).filter_by(conversation_id=c_unk.id).one().scheduled_status, "needs_review")
 
-    def test_auto_relist_ebay_upper_bound_and_rechecks_disabled_rule(self):
+    def test_auto_relist_enforces_offer_check_ebay_upper_bound_and_rechecks_disabled_rule(self):
         from unittest.mock import AsyncMock
 
-        # API still reports skip_active_offers=True for clients; it no longer gates relists.
+        # Finding #7: save_rule forces skip_active_offers=True even if caller sends False
         saved = auto_relist.save_rule(
             self.db,
             "poshmark",
@@ -718,7 +890,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         )
         self.assertTrue(saved["skip_active_offers"])
 
-        # eBay GTC is NOT due once age >= 30 days
+        # Finding #10: eBay GTC is NOT due once age >= 30 days
         ebay_rule = MarketplaceRelistRule(
             id=new_id(),
             marketplace="ebay",
@@ -733,6 +905,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertFalse(auto_relist.is_due_for_relist("ebay", now - timedelta(days=30), ebay_rule, now))
         self.assertFalse(auto_relist.is_due_for_relist("ebay", now - timedelta(days=35), ebay_rule, now))
 
+        # Finding #7 + #26: legacy skip_active_offers=False row still checks offers; disabling mid-run skips cleanly
         conv, _l, _r = self._create_draft("Disable Mid Run Jacket")
         conv.status = "listed"
         posh_id = "5f0000000000000000000777"
@@ -746,36 +919,48 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
             listed_at=now - timedelta(days=45),
             listed_price=58.0,
         ))
+        rule = self.db.query(MarketplaceRelistRule).filter_by(marketplace="poshmark").one()
+        rule.skip_active_offers = False  # simulate legacy DB row
         self.db.commit()
 
-        # Disabling the rule after reservation, before delist, stops cleanly.
-        delister_called = False
-        original_reserve = auto_relist._reserve_relist_attempt
+        # Active offer blocks relist even when DB row has skip_active_offers=False
+        offer_checker = AsyncMock(return_value=True)
+        skipped_offer = asyncio.run(auto_relist.run_auto_relist(
+            marketplace="poshmark",
+            offer_checker=offer_checker,
+            delister=AsyncMock(return_value={"ok": True}),
+            lister=AsyncMock(return_value={"ok": True, "listing_id": "5f0000000000000000000778"}),
+        ))
+        offer_checker.assert_awaited_once_with("poshmark", posh_id)
+        self.assertEqual(skipped_offer[0]["status"], "skipped_active_offer")
 
-        def reserve_then_disable(db, entry, moment):
-            result = original_reserve(db, entry, moment)
-            if result.get("reserved"):
-                rule = db.query(MarketplaceRelistRule).filter_by(marketplace="poshmark").one()
-                rule.enabled = False
-                db.commit()
-            return result
+        # Disabling the rule immediately before delist stops cleanly with skipped_rule_disabled (no failure)
+        delister_called = False
 
         async def should_not_delist(*_args):
             nonlocal delister_called
             delister_called = True
             return {"ok": True}
 
-        with patch.object(auto_relist, "_reserve_relist_attempt", side_effect=reserve_then_disable):
-            disabled_res = asyncio.run(auto_relist.run_auto_relist(
-                marketplace="poshmark",
-                delister=should_not_delist,
-                lister=AsyncMock(return_value={"ok": True}),
-                respect_backoff=False,
-            ))
+        async def disable_during_offer_check(_market: str, _lid: str) -> bool:
+            with self.Session() as s:
+                r = s.query(MarketplaceRelistRule).filter_by(marketplace="poshmark").one()
+                r.enabled = False
+                s.commit()
+            return False
+
+        disabled_res = asyncio.run(auto_relist.run_auto_relist(
+            marketplace="poshmark",
+            offer_checker=disable_during_offer_check,
+            delister=should_not_delist,
+            lister=AsyncMock(return_value={"ok": True}),
+            respect_backoff=False,
+        ))
         self.assertFalse(delister_called)
         self.assertEqual(disabled_res[0]["status"], "skipped_rule_disabled")
 
     def test_auto_relist_default_delister_pins_expected_listing_id_and_persists_job_id_before_wait(self):
+        from unittest.mock import AsyncMock
 
         from anteroom.services import automation_actions, native_marketplaces
 
@@ -830,6 +1015,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         ):
             res = asyncio.run(auto_relist.run_auto_relist(
                 marketplace="poshmark",
+                offer_checker=AsyncMock(return_value=False),
             ))
 
         self.assertEqual(captured_expected, {"poshmark": posh_id})
@@ -1290,13 +1476,14 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
 
         failing_delist = AsyncMock(return_value={"ok": False, "error": "boom"})
         first = asyncio.run(auto_relist.run_auto_relist(
-            now=now, marketplace="poshmark",
+            now=now, marketplace="poshmark", offer_checker=AsyncMock(return_value=False),
             delister=failing_delist, lister=AsyncMock(return_value={"ok": True}),
         ))
         self.assertEqual(first[0]["status"], "failed")
         # Daily cap=1 is now consumed by the failed attempt (M3), so even with respect_backoff=False nothing runs today.
         second = asyncio.run(auto_relist.run_auto_relist(
             now=now + timedelta(minutes=1), marketplace="poshmark",
+            offer_checker=AsyncMock(return_value=False),
             delister=failing_delist, lister=AsyncMock(return_value={"ok": True}),
             respect_backoff=False,
         ))
