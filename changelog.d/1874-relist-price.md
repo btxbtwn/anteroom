@@ -1,0 +1,1 @@
+- Auto-Relist no longer raises a listing's price when pricing rules are on. A relist now changes only that marketplace's price, and a relist that couldn't delist leaves your saved prices as they were.

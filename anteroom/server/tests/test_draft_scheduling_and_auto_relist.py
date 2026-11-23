@@ -1551,6 +1551,170 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertEqual(found_url[0]["listing_id"], url_only_id)
 
 
+    def _pricing_rules_on(self) -> None:
+        from anteroom.services import pricing_rules
+        from anteroom.services.pricing_rules import PRICING_RULES_KEY
+        from anteroom.services.user_settings import update_settings
+
+        self.addCleanup(update_settings, lambda payload: payload.pop(PRICING_RULES_KEY, None))
+        config = pricing_rules.normalize({"enabled": True, "anchor": "general"})
+        config["rules"]["poshmark"] = {"percent": 25.0, "fixed": 0.0, "rounding": "whole"}
+        pricing_rules.set_pricing_rules(enabled=True, anchor="general", rules=config["rules"])
+
+    def _stale_poshmark_draft(self, *, general: float, listed_price: float | None, drop: float | None):
+        from anteroom.services.seller_overrides import price_for
+
+        conv, _listing, rev = self._create_draft("Priced Coat", price=general)
+        old_id = "5f00000000000000000000a1"
+        self.db.add(MarketplaceListing(
+            id=new_id(), conversation_id=conv.id, marketplace="poshmark", state="published",
+            listing_id=old_id, listing_url=f"https://poshmark.com/listing/{old_id}",
+            listed_at=_now() - timedelta(days=45), listed_price=listed_price,
+        ))
+        self.db.commit()
+        auto_relist.save_rule(self.db, "poshmark", {
+            "enabled": True, "min_age_days": 30, "daily_cap": 5,
+            **({"price_adjust_mode": "amount", "price_adjust_value": drop, "price_floor": 1.0} if drop else {}),
+        }, confirm=True)
+        return conv, rev, {market: price_for(rev.listing_json, market) for market in ("poshmark", "ebay", "mercari")}
+
+    def _relist(self, *, delist_ok: bool = True):
+        listed: list[str] = []
+
+        async def delister(conv_id: str, market: str) -> dict:
+            return {"ok": True} if delist_ok else {"ok": False, "error": "Poshmark refused the delete."}
+
+        async def lister(conv_id: str, market: str, rev_id: str) -> dict:
+            listed.append(rev_id)
+            return {"ok": True, "listing_id": "5f00000000000000000000b2"}
+
+        async def no_offers(market: str, listing_id: str) -> bool:
+            return False
+
+        outcomes = asyncio.run(auto_relist.run_auto_relist(
+            now=_now(), delister=delister, lister=lister, offer_checker=no_offers,
+        ))
+        self.db.expire_all()
+        return outcomes, listed
+
+    def test_relist_with_pricing_rules_keeps_the_live_price(self):
+        from anteroom.services.seller_overrides import price_for
+
+        self._pricing_rules_on()
+        conv, rev, before = self._stale_poshmark_draft(general=20.0, listed_price=25.0, drop=None)
+        self.assertEqual(before["poshmark"], 25)
+
+        outcomes, listed = self._relist()
+
+        self.assertEqual([o["status"] for o in outcomes], ["completed"])
+        published = self.db.get(ListingRevision, listed[0])
+        assert published is not None
+        self.assertEqual(price_for(published.listing_json, "poshmark"), 25)
+        self.assertEqual(published.listing_json["price"], 20.0)
+        self.assertEqual({m: price_for(published.listing_json, m) for m in before}, before)
+
+    def test_relist_price_drop_changes_only_the_relisted_marketplace(self):
+        from anteroom.services.seller_overrides import price_for
+
+        self._pricing_rules_on()
+        conv, rev, before = self._stale_poshmark_draft(general=30.0, listed_price=38.0, drop=5)
+        self.assertEqual(before["poshmark"], 38)
+
+        outcomes, listed = self._relist()
+
+        self.assertEqual([o["status"] for o in outcomes], ["completed"])
+        published = self.db.get(ListingRevision, listed[0])
+        assert published is not None
+        self.assertEqual(price_for(published.listing_json, "poshmark"), 33)
+        self.assertEqual(published.listing_json["price"], 30.0)
+        self.assertEqual(price_for(published.listing_json, "ebay"), before["ebay"])
+        self.assertEqual(price_for(published.listing_json, "mercari"), before["mercari"])
+
+    def test_relist_without_a_recorded_live_price_starts_from_the_marketplace_price(self):
+        from anteroom.services.seller_overrides import price_for
+
+        self._pricing_rules_on()
+        conv, rev, before = self._stale_poshmark_draft(general=30.0, listed_price=None, drop=5)
+
+        outcomes, listed = self._relist()
+
+        self.assertEqual([o["status"] for o in outcomes], ["completed"])
+        published = self.db.get(ListingRevision, listed[0])
+        assert published is not None
+        # 38 on Poshmark minus the $5 drop, never the $30 General price minus it.
+        self.assertEqual(price_for(published.listing_json, "poshmark"), 33)
+
+    def test_failed_delist_leaves_the_saved_prices_as_they_were(self):
+        from anteroom.services.seller_overrides import price_for
+
+        self._pricing_rules_on()
+        conv, rev, before = self._stale_poshmark_draft(general=30.0, listed_price=38.0, drop=5)
+
+        outcomes, listed = self._relist(delist_ok=False)
+
+        self.assertEqual([o["status"] for o in outcomes], ["failed"])
+        self.assertEqual(listed, [])
+        current = self.db.query(Listing).filter_by(conversation_id=conv.id).one()
+        saved = self.db.get(ListingRevision, current.current_revision_id)
+        assert saved is not None
+        self.assertEqual(saved.listing_json.get("price"), 30.0)
+        self.assertEqual({m: price_for(saved.listing_json, m) for m in before}, before)
+        self.assertNotIn("poshmark_specifics.poshmarkPrice", saved.listing_json.get("seller_fields") or [])
+
+
+    def _poshmark_form_draft(self, *, general: float, listed_price: float, locked_poshmark: float | None = None):
+        from anteroom.services import native_contract
+
+        extra: dict = {native_contract.KEY: {"poshmark": {"fields": [
+            {"path": "poshmark_specifics.brand", "label": "Brand", "input_type": "text"},
+        ]}}, "poshmark_specifics": {"brand": "Patagonia"}}
+        if locked_poshmark is not None:
+            extra["poshmark_specifics"]["poshmarkPrice"] = locked_poshmark
+            extra["seller_fields"] = ["poshmark_specifics.poshmarkPrice"]
+        conv, _listing, rev = self._create_draft("Form Coat", price=general, **extra)
+        self.assertIn(native_contract.KEY, rev.listing_json)
+        old_id = "5f00000000000000000000e1"
+        self.db.add(MarketplaceListing(
+            id=new_id(), conversation_id=conv.id, marketplace="poshmark", state="published",
+            listing_id=old_id, listing_url=f"https://poshmark.com/listing/{old_id}",
+            listed_at=_now() - timedelta(days=45), listed_price=listed_price,
+        ))
+        self.db.commit()
+        auto_relist.save_rule(self.db, "poshmark", {
+            "enabled": True, "min_age_days": 30, "daily_cap": 5,
+            "price_adjust_mode": "amount", "price_adjust_value": 5, "price_floor": 1.0,
+        }, confirm=True)
+        return conv
+
+    def test_relist_price_survives_a_listing_with_captured_marketplace_forms(self):
+        from anteroom.services.seller_overrides import price_for
+
+        self._pricing_rules_on()
+        self._poshmark_form_draft(general=30.0, listed_price=38.0)
+
+        outcomes, listed = self._relist()
+
+        self.assertEqual([o["status"] for o in outcomes], ["completed"])
+        published = self.db.get(ListingRevision, listed[0])
+        assert published is not None
+        self.assertEqual(price_for(published.listing_json, "poshmark"), 33)
+        self.assertEqual(published.listing_json["price"], 30.0)
+        self.assertEqual(published.listing_json["poshmark_specifics"]["brand"], "Patagonia")
+
+    def test_relist_price_replaces_a_price_the_seller_locked_on_that_marketplace(self):
+        from anteroom.services.seller_overrides import price_for
+
+        self._pricing_rules_on()
+        self._poshmark_form_draft(general=30.0, listed_price=40.0, locked_poshmark=40.0)
+
+        outcomes, listed = self._relist()
+
+        self.assertEqual([o["status"] for o in outcomes], ["completed"])
+        published = self.db.get(ListingRevision, listed[0])
+        assert published is not None
+        self.assertEqual(price_for(published.listing_json, "poshmark"), 35)
+
+
     def test_one_relist_pass_stops_starting_relists_when_its_time_is_up(self):
         old_time = _now() - timedelta(days=45)
         for index in range(3):
