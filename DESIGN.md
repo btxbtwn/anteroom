@@ -249,7 +249,9 @@ Before building or changing a visible element, look up how established design
 systems handle that element: Material Design 3, Apple's Human Interface
 Guidelines, Shopify Polaris, WCAG 2.2, and products the seller already uses.
 Look for sizes, spacing, touch targets, states and how the content is
-arranged. Apply what fits Anteroom. When a finding conflicts with a rule
+arranged. For behavior that research has measured (menu and hover timing,
+navigation, forms, search, filters, product lists, mobile), check Baymard
+Institute's e-commerce UX research and Nielsen Norman Group as well. Apply what fits Anteroom. When a finding conflicts with a rule
 here, say so in the PR and update this file in the same PR. List what you
 applied, what you did not and why, with links to the sources, in the PR and
 in your reply to the seller.
@@ -298,6 +300,9 @@ already there; it only shrinks. The rest of this list needs a person's eye.
   [Error-message guidelines](https://www.nngroup.com/articles/error-message-guidelines/)
 - Material Design 3, [Progress indicators](https://m3.material.io/components/progress-indicators/guidelines)
   and [Snackbar](https://m3.material.io/components/snackbar/guidelines)
+- Baymard Institute, [UX research articles](https://baymard.com/blog) and
+  [Drop-down menu flickering](https://baymard.com/blog/dropdown-menu-flickering-issue)
+  (300–500 ms hover delay)
 - Apple, [Human Interface Guidelines: Feedback](https://developer.apple.com/design/human-interface-guidelines/feedback)
 - Shopify Polaris, [Toast](https://polaris.shopify.com/components/feedback-indicators/toast)
 - W3C, [WCAG 2.2](https://www.w3.org/TR/WCAG22/) (2.5.8 Target Size, 4.1.3 Status Messages)
