@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tansta
 import { api } from "../api/client";
 import type { DelistMarketplace, MarketplaceListings } from "../api/marketplaceListings";
 import { useWorkspaceRuntime } from "../app/runtime";
-import { confirmDialog } from "../ui/confirmDialog";
+import { confirmDialog, whenConfirmDialogIdle } from "../ui/confirmDialog";
 import { toastManager } from "./ui/toast";
 import {
   isChatResetting,
@@ -39,6 +39,8 @@ export async function askDelistOnRegenerate(
 ): Promise<DelistMarketplace[]> {
   const targets = delistTargets(listings, canAct);
   if (!targets.length) return [];
+  // The Rewrite prompt is still closing; a second click on it must not land on Delist.
+  await whenConfirmDialogIdle();
   const { message, confirmLabel } = delistPrompt(title, targets, REGENERATE_DELIST_LEAD);
   const approved = await confirmDialog(message, { variant: "destructive", confirmLabel, cancelLabel: "Keep them listed" });
   return approved ? targets : [];
@@ -125,10 +127,6 @@ export function RegenerateListingButton({
     queryKey: ["listing", convId],
     queryFn: ({ signal }) => api.listings.get(convId, { signal }),
   });
-  const { data: liveListings } = useQuery({
-    queryKey: ["marketplace-listings", convId],
-    queryFn: ({ signal }) => api.marketplaceListings.get(convId, { signal }),
-  });
   const hasPhotos = Boolean(photos?.length);
   const hasPrice = listingHasPrice(listingData?.listing);
 
@@ -180,7 +178,12 @@ export function RegenerateListingButton({
       Keeping them listed still rewrites. */
   async function rewriteAskingDelist() {
     const title = String(listingData?.listing?.title || "this item");
-    const marketplaces = await askDelistOnRegenerate(title, liveListings ?? {},
+    // Read fresh: a listing that went live, or was delisted, since the page loaded changes the question.
+    const liveKey = ["marketplace-listings", convId];
+    const listings = await queryClient
+      .fetchQuery({ queryKey: liveKey, queryFn: ({ signal }) => api.marketplaceListings.get(convId, { signal }) })
+      .catch(() => queryClient.getQueryData<MarketplaceListings>(liveKey) ?? {});
+    const marketplaces = await askDelistOnRegenerate(title, listings,
       (marketplace) => runtime.actionMarketplaces.has(marketplace));
     regenerate.mutate({ title, marketplaces });
   }

@@ -82,6 +82,24 @@ export function respondToConfirmDialog(value: boolean) {
   emit();
 }
 
+/** Resolves once the previous prompt has finished closing, so a follow-up question never opens
+    under a click aimed at the one before it. Gives up waiting after a second. */
+export function whenConfirmDialogIdle(): Promise<void> {
+  if (state.status === "idle" || !hostRegistered) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      listeners.delete(check);
+      resolve();
+    };
+    const check = () => {
+      if (state.status === "idle") done();
+    };
+    const timer = setTimeout(done, 1000);
+    listeners.add(check);
+  });
+}
+
 export function completeConfirmDialogClose() {
   if (state.status !== "closing") return;
   state = { status: "idle" };
