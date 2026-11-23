@@ -1070,3 +1070,28 @@ def test_mcp_deferred_delete_survives_abnormal_completion(monkeypatch, ending):
         assert events == ["session closed", "seller/item/photo.jpg"]
 
     asyncio.run(exercise())
+def test_search_inventory_live_marketplaces_leave_out_delisted_and_sold_ones():
+    """Imported marketplaces Anteroom delisted, marked not listed or sold on are not live (#1825)."""
+    client = TestClient(app)
+    notes = {
+        "vendooMarketplaces": ["depop", "ebay", "etsy", "mercari", "poshmark"],
+        "vendooListingUrls": {"ebay": "https://www.ebay.com/itm/111", "mercari": "https://www.mercari.com/us/item/m222/"},
+        "marketplaceDelists": {"ebay": {"state": "deleted", "listing_id": "111", "url": "https://www.ebay.com/itm/111"}},
+        "marketplaceMarks": {"mercari": {"state": "not_listed", "listing_id": "m222",
+                                         "url": "https://www.mercari.com/us/item/m222/"}},
+        "vendooDates": {"soldByMarketplace": {"poshmark": "2026-11-01T00:00:00Z"}},
+    }
+    with SessionLocal() as db:
+        db.add(Conversation(id="conv-imported", title="Baroque Blouse", status="sold", notes=json.dumps(notes)))
+        db.commit()
+
+    inv, err = _call_tool(client, "search_inventory", {"query": "Baroque"})
+    assert not err
+    item = inv["items"][0]
+    assert item["live_marketplaces"] == ["depop", "etsy"]
+    assert item["sold_marketplaces"] == ["poshmark"]
+
+    delisted, err = _call_tool(client, "search_inventory", {"marketplace": "ebay"})
+    assert not err and delisted["total"] == 0
+    still_live, err = _call_tool(client, "search_inventory", {"marketplace": "etsy"})
+    assert not err and still_live["total"] == 1
