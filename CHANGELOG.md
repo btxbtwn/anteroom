@@ -6,6 +6,19 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1180 — 2026-11-23
+
+- When an agent's change to Anteroom times out, it is no longer saved afterwards, so trying again doesn't make a second draft.
+- If deleting a draft on your Mac doesn't go through, its photos and videos are no longer removed anyway.
+
+## 0.1.1179 — 2026-11-23
+
+- When the cloud runner is busy, Connect in Cloud for Mercari and Depop now gives up within seconds so you can try again, instead of checking your sign-in after the page has stopped waiting.
+
+## 0.1.1178 — 2026-11-23
+
+- On iPhone, a seller outside the US now searches their own eBay site's categories instead of picking from eBay US's list.
+
 ## 0.1.1177 — 2026-11-23
 
 - Auto-Relist works through a long backlog a little at a time, so scheduled listings and automations no longer wait hours behind it.

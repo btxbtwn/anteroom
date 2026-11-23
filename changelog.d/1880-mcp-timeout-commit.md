@@ -1,2 +1,0 @@
-- When an agent's change to Anteroom times out, it is no longer saved afterwards, so trying again doesn't make a second draft.
-- If deleting a draft on your Mac doesn't go through, its photos and videos are no longer removed anyway.
