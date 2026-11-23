@@ -59,6 +59,10 @@ _active_lock = threading.Lock()
 _active_processes: dict[tuple[str, str], asyncio.subprocess.Process] = {}
 
 
+# How long a sign-in upload check waits for a free runner (see verify_upload_local).
+_VERIFY_SLOT_WAIT_S = 10.0
+
+
 class CloudExecutionUnavailable(RuntimeError):
     """Raised when the worker cannot be reached or Node runtime is missing."""
 
@@ -657,12 +661,21 @@ async def verify_upload_local(
     from anteroom.services.seller_region import seller_region
 
     region = (await asyncio.to_thread(seller_region)).country
-    async with _loop_semaphore():
+    slot = _loop_semaphore()
+    try:
+        # The web side stops waiting after 40 s. Give up on a busy runner in
+        # time, rather than checking cookies for a request nobody waits for.
+        await asyncio.wait_for(slot.acquire(), timeout=_VERIFY_SLOT_WAIT_S)
+    except TimeoutError:
+        raise CloudExecutionUnavailable("Every cloud runner is busy. Try connecting again in a minute.") from None
+    try:
         return await _run_subprocess(marketplace, _seller_id(), "", {
             "type": "run",
             "command": {"type": "marketplace.verify_session", "payload": {"marketplace": marketplace, "seller_region": region}},
             "cookies": cookies, "user_agent": user_agent, "proxy_url": cloud_sessions.proxy_url_for(proxy_session_id),
         }, 25.0)
+    finally:
+        slot.release()
 
 
 async def verify_session(marketplace: str = "poshmark", timeout: float = 25.0) -> dict[str, Any]:

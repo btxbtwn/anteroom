@@ -1,0 +1,1 @@
+- When the cloud runner is busy, Connect in Cloud for Mercari and Depop now gives up within seconds so you can try again, instead of checking your sign-in after the page has stopped waiting.
