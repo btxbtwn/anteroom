@@ -540,7 +540,7 @@ def autofix_decision(
 
 
 def protected_conflict_note_needed(states: list[dict], head: str, conflict_files: list[str]) -> bool:
-    """False when the last round already reported these protected-only conflicts at this head."""
+    """False when the last round already reported these protected-path conflicts at this head."""
     last = states[-1] if states else None
     return not (
         last
@@ -670,8 +670,8 @@ BLOCKING_TEXT = {
     "max_rounds": f"The configured maximum number of repair rounds ({MAX_ROUNDS}) was reached with unresolved issues.",
     "same_blockers": "The same blockers remain after the previous repair round.",
     "protected_conflicts": (
-        "Merge conflicts are only in protected paths (.github/, anteroom/VERSION, CHANGELOG.md); "
-        "resolve those by hand."
+        "Merge conflicts include protected paths (.github/, anteroom/VERSION, CHANGELOG.md); "
+        "resolve the merge by hand."
     ),
 }
 
@@ -937,8 +937,9 @@ def prepare_autofix(args) -> None:
     # Only merge main when GitHub reports real conflicts — never for "behind".
     if merge_state == "dirty":
         merge_clean, conflict_files, main_sha = begin_main_merge(args.pr)
-        if conflict_files and not (set(conflict_files) - set(protected_changes(conflict_files))):
-            # main moves often; say this once per head, not on every push.
+        if protected_changes(conflict_files):
+            # Claude cannot edit protected paths, so any conflict there needs a
+            # person; main moves often, so say this once per head, not on every push.
             if protected_conflict_note_needed(states, head, conflict_files):
                 state = {
                     "head": head,

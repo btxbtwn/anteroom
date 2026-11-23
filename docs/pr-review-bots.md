@@ -43,8 +43,8 @@ workflow.
    the Claude GitHub App token, so CI and the review run on the new commit (a
    push with the workflow token would start no CI), and the action's wrapper
    only pushes to the PR's branch. Claude cannot edit `.github/`,
-   `anteroom/VERSION` or `CHANGELOG.md`; conflicts only in those paths stay
-   human. `post-autofix` then:
+   `anteroom/VERSION` or `CHANGELOG.md`; a merge that conflicts in any of
+   those paths is left to a person, with one note per head. `post-autofix` then:
    - counts a finding, CI job or merge as fixed only when Claude's own commit
      is on the branch;
    - flags a pushed change to a protected path as blocking (changes the merge

@@ -683,6 +683,26 @@ class AutofixTests(unittest.TestCase):
             self.assertEqual(outputs, {"skip": "true"})
             self.assertEqual(posts, [])
 
+    def test_prepare_leaves_mixed_protected_and_product_conflicts_and_notes_them_once(self):
+        # Claude cannot edit the protected file, so running it could never finish the merge.
+        with tempfile.TemporaryDirectory() as root:
+            work, git = self._conflict_fixture(
+                root,
+                {"app.py": "pr\n", "CHANGELOG.md": "pr\n"},
+                {"app.py": "main\n", "CHANGELOG.md": "main\n"},
+            )
+            head = git("rev-parse", "HEAD")
+            outputs, posts = self._prepare(work, os.path.join(root, "ctx"))
+            self.assertEqual(outputs, {"skip": "true"})
+            self.assertEqual(len(posts), 1)
+            self.assertIn("Merge conflicts include protected paths", posts[0][2]["body"])
+            self.assertFalse(Path(work, ".git", "MERGE_HEAD").exists())
+            self.assertEqual(git("rev-parse", "HEAD"), head)
+            noted = [{"head": head, "reason": "protected_conflicts", "conflict_files": ["CHANGELOG.md", "app.py"]}]
+            outputs, posts = self._prepare(work, os.path.join(root, "ctx2"), states=noted)
+            self.assertEqual(outputs, {"skip": "true"})
+            self.assertEqual(posts, [])
+
 
 if __name__ == "__main__":
     unittest.main()

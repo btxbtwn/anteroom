@@ -71,9 +71,8 @@ For a main merge (`conflict-files.json` or `merge_clean`):
    intact. `git add` each resolved file, then `git commit` with no extra `-m`
    when completing the merge (or `--no-edit`) so the merge commit message
    stays. Never `git merge --abort`, never rebase, never force-push.
-3. Never edit `.github/`, `anteroom/VERSION` or `CHANGELOG.md` to resolve
-   conflicts — if those are the only conflicts, leave them and set
-   `conflict_result.outcome` to `not_fixed`.
+3. Never edit `.github/`, `anteroom/VERSION` or `CHANGELOG.md`. A merge that
+   conflicts in those paths is skipped before you run.
 4. Validate with the narrowest checks for the touched files. When
    `context.json` has `dependencies_installed: false`, a lockfile
    (`anteroom/package-lock.json` or `anteroom/uv.lock`) is conflicted and the
