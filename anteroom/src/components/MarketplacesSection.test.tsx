@@ -4,7 +4,8 @@ import type { MarketplaceListings } from "../api/marketplaceListings";
 import type { ListingData } from "../api/types";
 import type { MissingField, NativeDraft, NativeDrafts, PreflightGap } from "../api/nativeMarketplaces";
 import { ApiRequestError } from "../api/transport";
-import { MarketplacesLayout, MarketplacesSection, askChatPrompt, deletable, listChoice, markListedPrefill, relinkAfterDeletedRefusal, reconnectText, rowStatus, saidBesideList } from "./MarketplacesSection";
+import { MarketplacesLayout, MarketplacesSection, askChatPrompt, listChoice, markListedPrefill, relinkAfterDeletedRefusal, reconnectText, rowStatus, saidBesideList } from "./MarketplacesSection";
+import { deletable } from "./marketplaceDelist";
 import { readyMarketplaces } from "./ListEverywhereDialog";
 import { waitlist } from "./MarketplaceActivity";
 

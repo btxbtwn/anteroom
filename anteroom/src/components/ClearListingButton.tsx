@@ -14,7 +14,7 @@ import {
 } from "./chat/liveChatStore";
 import { RefreshCwIcon } from "lucide-react";
 import { waitlist } from "./MarketplaceActivity";
-import { delistPrompt, delistTargets } from "./MarketplacesSection";
+import { delistPrompt, delistTargets } from "./marketplaceDelist";
 import { RegeneratePriceDialog } from "./RegeneratePriceDialog";
 import { Button } from "./ui/button";
 
