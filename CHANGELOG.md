@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1173 — 2026-11-23
+
+- Connect Claude, ChatGPT or Gemini to Anteroom by signing in: add Anteroom as a custom connector, approve it, and choose what it can do. Manage or disconnect connected apps in Settings → Agents.
+
+## 0.1.1172 — 2026-11-23
+
+- On iPhone and other phones, pages fill the screen in one color, without the darker bands above the header and behind the browser's toolbar.
+
 ## 0.1.1171 — 2026-11-23
 
 - Keep the photo and crop handles visible while a new preview renders.

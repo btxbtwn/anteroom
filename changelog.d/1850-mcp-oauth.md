@@ -1,1 +1,0 @@
-- Connect Claude, ChatGPT or Gemini to Anteroom by signing in: add Anteroom as a custom connector, approve it, and choose what it can do. Manage or disconnect connected apps in Settings → Agents.
