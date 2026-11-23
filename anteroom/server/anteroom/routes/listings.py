@@ -24,11 +24,26 @@ from anteroom.services.hosted_limits import limit_seller_submissions
 from anteroom.services.validation import validate_listing
 from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
 from anteroom.repositories.queries import ListingRepo, ConversationRepo
-from anteroom.services import price_markdown
+from anteroom.services import generation_feedback, price_markdown
 from anteroom.services.price_drop import build_preview
 from anteroom.services.price_markdown import PriceDropError, current_listing, listing_busy
 
 router = APIRouter(tags=["listings"])
+
+
+@router.get("/api/generation-feedback")
+def generation_feedback_summary(db: Session = Depends(get_db)):
+    return generation_feedback.feedback_summary(db)
+
+
+@router.get("/api/conversations/{conv_id}/generation-feedback")
+def get_generation_feedback(conv_id: str, db: Session = Depends(get_db)):
+    return generation_feedback.feedback_for(db, conv_id)
+
+
+@router.put("/api/conversations/{conv_id}/generation-feedback")
+def put_generation_feedback(conv_id: str, body: generation_feedback.FeedbackInput, db: Session = Depends(get_db)):
+    return generation_feedback.save_feedback(db, conv_id, body)
 
 
 @router.get("/api/conversations/{conv_id}/listing", response_model=ListingDocument, responses=NOT_FOUND)
@@ -310,3 +325,65 @@ def preview_markdowns(body: MarkdownPreviewRequest, db: Session = Depends(get_db
 def apply_markdowns(body: MarkdownApply, db: Session = Depends(get_db)):
     """Save each confirmed price as a ``price_drop`` revision. Never sends to Vendoo."""
     return price_markdown.batch_apply([drop.model_dump() for drop in body.drops], db)
+
+
+class ReadyToListBody(BaseModel):
+    ready_to_list: bool
+
+
+class DraftScheduleBody(BaseModel):
+    publish_at: str = Field(min_length=1)
+    marketplaces: list[str] = Field(min_length=1, max_length=7)
+    confirm: bool = False
+
+
+@router.get("/api/conversations/{conv_id}/schedule")
+def get_draft_schedule(conv_id: str, db: Session = Depends(get_db, scope="function")):
+    """Return this draft's ready-to-list toggle and scheduled publish state."""
+    from anteroom.services import draft_scheduling
+
+    conv = ConversationRepo(db).get(conv_id)
+    if not conv:
+        raise HTTPException(404, "Conversation not found")
+    listing = ListingRepo(db).get_current(conv_id)
+    return draft_scheduling.schedule_view(listing, conv)
+
+
+@router.put("/api/conversations/{conv_id}/schedule/ready")
+def set_draft_ready_to_list(conv_id: str, body: ReadyToListBody, db: Session = Depends(get_db, scope="function")):
+    """Mark a validated draft ready to list (or turn it off, which clears any pending schedule)."""
+    from anteroom.services import draft_scheduling
+
+    try:
+        return draft_scheduling.set_ready_to_list(db, conv_id, body.ready_to_list)
+    except draft_scheduling.SchedulePublishError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+
+
+@router.post("/api/conversations/{conv_id}/schedule")
+def schedule_draft_publish(conv_id: str, body: DraftScheduleBody, db: Session = Depends(get_db, scope="function")):
+    """Schedule a validated draft for future publishing to named marketplaces."""
+    from anteroom.services import draft_scheduling
+
+    try:
+        return draft_scheduling.schedule_draft(
+            db,
+            conv_id,
+            publish_at=body.publish_at,
+            marketplaces=body.marketplaces,
+            confirm=body.confirm,
+        )
+    except draft_scheduling.SchedulePublishError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+
+
+@router.delete("/api/conversations/{conv_id}/schedule")
+def unschedule_draft_publish(conv_id: str, db: Session = Depends(get_db, scope="function")):
+    """Unschedule a pending draft publish."""
+    from anteroom.services import draft_scheduling
+
+    try:
+        return draft_scheduling.unschedule_draft(db, conv_id)
+    except draft_scheduling.SchedulePublishError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+

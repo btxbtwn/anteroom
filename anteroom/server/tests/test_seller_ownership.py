@@ -85,6 +85,16 @@ def seed_previous_release(engine):
 JOB_LEASE_DEFAULTS = {"lease_owner": None, "leased_until": None, "cancel_requested": False}
 # Revision d0e4f3a92b68: Finished items from older builds stay the seller's decision.
 CONVERSATION_SETTLEMENT_DEFAULTS = {"settled_by_seller": True}
+# Revision c2d9f4a8e103: Draft scheduling is opt-in and off by default.
+LISTING_SCHEDULE_DEFAULTS = {
+    "ready_to_list": False,
+    "scheduled_publish_at": None,
+    "scheduled_marketplaces": None,
+    "scheduled_revision_id": None,
+    "scheduled_confirmed_at": None,
+    "scheduled_status": None,
+    "scheduled_error": None,
+}
 
 
 def read_rows(engine, names):
@@ -123,12 +133,13 @@ def test_previous_release_upgrade_preserves_records_and_constraints(migration_en
     after = read_rows(engine, names)
     for name, rows in before.items():
         assert after[name] == [dict(row, user_id=LOCAL_USER_ID,
-                                   **({"inventory_quantity": None, "normalized_hash": None, "inventory_fields": {
+                                   **({"inventory_quantity": None, "normalized_hash": None, "generation_feedback": None, "inventory_fields": {
                                        "sku": None, "price": 42, "quantity": None, "cost": None, "brand": None,
                                        "category_path": None, "title": "Vintage coat", "type": None,
                                        "season": None, "material": None,
                                    }} if name == "listing_revisions" else {}), **(JOB_LEASE_DEFAULTS if name == "jobs" else {}),
-                                   **(CONVERSATION_SETTLEMENT_DEFAULTS if name == "conversations" else {})) for row in rows]
+                                   **(CONVERSATION_SETTLEMENT_DEFAULTS if name == "conversations" else {}),
+                                   **(LISTING_SCHEDULE_DEFAULTS if name == "listings" else {})) for row in rows]
 
     inspector = sa.inspect(engine)
     for table in Base.metadata.tables.values():
@@ -179,12 +190,13 @@ def test_pre_alembic_database_gets_ownership_without_losing_rows(migration_engin
     assert schema_migrations.ensure_schema(engine) == CURRENT_REVISION
     for name, rows in before.items():
         assert read_rows(engine, [name])[name] == [dict(row, user_id=LOCAL_USER_ID,
-            **({"inventory_quantity": None, "normalized_hash": None, "inventory_fields": {
+            **({"inventory_quantity": None, "normalized_hash": None, "generation_feedback": None, "inventory_fields": {
                 "sku": None, "price": 42, "quantity": None, "cost": None, "brand": None,
                 "category_path": None, "title": "Vintage coat", "type": None,
                 "season": None, "material": None,
             }} if name == "listing_revisions" else {}), **(JOB_LEASE_DEFAULTS if name == "jobs" else {}),
-                                   **(CONVERSATION_SETTLEMENT_DEFAULTS if name == "conversations" else {})) for row in rows]
+                                   **(CONVERSATION_SETTLEMENT_DEFAULTS if name == "conversations" else {}),
+                                   **(LISTING_SCHEDULE_DEFAULTS if name == "listings" else {})) for row in rows]
     assert schema_migrations.recorded_revision(engine) == CURRENT_REVISION
     assert len(backups.list_snapshots(backups.BACKUPS_DIR)) == 1
 
@@ -204,3 +216,30 @@ def test_upgrade_snapshot_keeps_the_previous_schema(migration_engine, tmp_path):
         assert schema_migrations.recorded_revision(snapshot_engine) == PREVIOUS_REVISION
     finally:
         snapshot_engine.dispose()
+
+
+def test_hosted_due_owners_include_schedule_and_relist_only_sellers(migration_engine):
+    from anteroom.services.hosted_automation_scheduler import due_owners
+
+    engine = migration_engine
+    if engine.dialect.name != "postgresql":
+        pytest.skip("Hosted discovery requires PostgreSQL")
+    command.upgrade(migration_config(engine), "8580524be7de")
+    schema_migrations.ensure_schema(engine)
+    drafts, relist, disabled = (str(uuid.uuid4()) for _ in range(3))
+    with engine.begin() as db:
+        db.execute(sa.text("INSERT INTO conversations (id, user_id) VALUES ('due-draft', :owner)"), {"owner": drafts})
+        db.execute(sa.text("""
+            INSERT INTO listings (user_id, conversation_id, ready_to_list, scheduled_status,
+                                  scheduled_confirmed_at, scheduled_publish_at)
+            VALUES (:owner, 'due-draft', true, 'scheduled', now(), (now() AT TIME ZONE 'utc') - interval '1 minute')
+        """), {"owner": drafts})
+        db.execute(sa.text("""
+            INSERT INTO marketplace_relist_rules (id, user_id, marketplace, enabled, filters, created_at, updated_at)
+            VALUES ('enabled', :enabled, 'poshmark', true, '{}', now(), now()),
+                   ('disabled', :disabled, 'poshmark', false, '{}', now(), now())
+        """), {"enabled": relist, "disabled": disabled})
+        assert not db.scalar(sa.text("""
+            SELECT has_function_privilege('anteroom_seller', 'anteroom_private.due_automation_owners()', 'EXECUTE')
+        """))
+    assert set(due_owners(engine)) == {drafts, relist}

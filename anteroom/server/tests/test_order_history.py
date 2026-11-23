@@ -28,6 +28,25 @@ def test_oversized_read_is_rejected_before_cleanup_can_run():
         parse_orders("depop", {"orders": [{}] * (MAX_ORDERS + 1)})
 
 
+@pytest.mark.parametrize(("region", "currency", "accepted"), [
+    ("CA", "CAD", True), ("CA", "USD", False), ("CA", "GBP", False),
+    (None, "USD", True), (None, "CAD", False),
+])
+def test_poshmark_history_validates_and_preserves_site_currency(region, currency, accepted):
+    raw = {"orders": [{
+        "order_id": "receipt", "status": "paid", "currency": currency,
+        "totals": {"item_revenue": "25.00"},
+        "lines": [{"line_id": "line-1", "listing_id": "a" * 24}],
+    }]}
+    if accepted:
+        [order] = parse_orders("poshmark", raw, seller_region=region)
+        assert order.currency == currency
+        assert order.totals["item_revenue"] == Decimal("25.00")
+    else:
+        with pytest.raises(HistoryError, match="unreadable order"):
+            parse_orders("poshmark", raw, seller_region=region)
+
+
 def test_bundle_amounts_preserve_totals_to_the_cent():
     order = Order("123", "paid", False, datetime(2026, 11, 1), "USD",
                   {field: Decimal("1.00") for field in

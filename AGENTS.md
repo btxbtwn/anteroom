@@ -13,26 +13,31 @@ auto-merge (`gh pr merge <n> --auto --merge`) only once it is ready to merge
 (see **Pull requests**), then stay with it until it merges. GitHub checks only
 CI before merging a queued PR; everything else is the agent's to confirm first.
 
-**Invariant:** Automation must never publish listings. Generation, category
+**Invariant:** Automation must never publish listings by default. Generation, category
 resolution and draft creation run unattended and stop at a saved draft.
-Publishing and delisting happen only when the seller asks for them: the
+Normal ad-hoc publishing, updating and delisting happen only when the seller asks for them: the
 `native-marketplaces/{marketplace}/list|update` and `marketplace-listings/delist`
 routes require the marketplaces to be named explicitly and the call to carry
-`confirm`. eBay actions require explicit seller confirmation too. Nothing in
-Anteroom calls publishing or delisting on its own. No code path may publish everywhere by default, on a queue, on
-a retry, or as a side effect of any other action. Delist after a sale is the one seller-enabled exception (approved by the seller
-2026-11-20): when the seller has turned on **Delist the other marketplaces** (Settings →
+`confirm`. eBay actions require explicit seller confirmation too. No code path may publish everywhere by default, on a queue, on
+a retry, or as a side effect of any other action. Three strictly scoped, seller-enabled opt-in exceptions (all **OFF by default**) are approved:
+1. **Delist after a sale & Auto-Adjust Quantity** (approved 2026-11-20; auto-adjust quantity added 2026-11-22): when the seller has turned on **Delist the other marketplaces** (Settings →
 Connections, off by default), a detected sale delists that item on the seller's other
 marketplaces where it is live, without a per-sale confirmation. It never delists the
 marketplace that sold, cancelled or refunded orders, or items with stock left, and the
-public privacy policy describes it. A post-sale delist that does not confirm is tried again
+public privacy policy describes it. When the seller also turns on **Auto-adjust quantity**
+(off by default), a detected sale on a multi-quantity listing with remaining stock (`remaining > 0`)
+decrements quantity on the other connected live marketplaces instead of delisting them (and on Mercari,
+which caps quantity at 1, relists a fresh single-quantity listing while stock remains). A post-sale delist that does not confirm is tried again
 on a widening schedule (`services/sale_delist_followup.py`, seller request 2026-11-21) for
 sales from the last two weeks, and every sold item still listed elsewhere is shown as an
 alert whether or not the setting is on. Those retries only reach the listing IDs each sale
 left up, pinned the first time the sale is seen; a relist or any listing that changed since is
 shown, never delisted automatically, and the setting is read again before each delist. A
 listing a marketplace reports already gone is recorded as absent, without saying who removed
-it, never as a sale. No other automatic delist is allowed.
+it, never as a sale.
+2. **Scheduled Draft Publishing** (approved by the seller 2026-11-22, off by default): when a seller explicitly marks a validated draft **Ready to list** and schedules a specific future publish date/time for named marketplace(s), the scheduler publishes that draft to those named marketplaces at the scheduled time (with `confirm` recorded at schedule time and re-checked before execution). Editing a scheduled draft unschedules it first so stale unreviewed edits are never published.
+3. **Unattended Auto-Relist & eBay Auto-Recreate** (approved by the seller 2026-11-22, off by default): when a seller explicitly turns on per-marketplace Auto-Relist / eBay Auto-Recreate, the scheduler may delist and relist eligible stale listings within the seller's daily cap (max 100/day/marketplace) and filters, updating the tracked listing ID atomically so post-sale auto-delisting stays pinned, while skipping any listing with open/pending buyer offers. General natural-language scheduled automations keep their approval-queue mode unless per-marketplace auto-relist is enabled.
+No other automatic publish or delist is allowed.
 
 ## Source of Truth
 
@@ -329,7 +334,7 @@ backend tests that inspect frontend, extension and skill sources.
 - Never commit API keys, OAuth credentials, listing photos, generated diagnostics, or private exports.
 - API keys and sign-in tokens never enter the database in plain text, logs, frontend responses, or extension messages. On the Mac they live in macOS Keychain. For hosted accounts they live in Supabase Vault, encrypted at rest and referenced per seller, and are never returned to any client.
 - On the Mac, bind Anteroom only to `127.0.0.1`. The hosted API on Fly.io is the only part that accepts connections from outside. It requires a Supabase session on every request except health and readiness checks, `GET /api/auth-config`, the web app's static files and marketplace webhooks. Machine-to-machine `/internal/` routes skip the seller session and authenticate with the shared process token (`ANTEROOM_PROCESS_TOKEN`); they must not be reachable from the public edge. The Mac worker connects to it outbound and binds nothing. Optional private Tailscale Serve (Settings → Connections) may proxy Tailnet HTTPS to that loopback port; never Funnel and never bind to `0.0.0.0`.
-- Publishing and delisting require the seller to name the marketplaces explicitly and provide `confirm`. Automation stops at a saved draft. The only exception is the seller-enabled delist after a sale described under **Invariant** above.
+- Normal ad-hoc publishing and delisting require the seller to name the marketplaces explicitly and provide `confirm`. Automation stops at a saved draft by default. The only exceptions are the seller-enabled opt-in features (all off by default) described under **Invariant** above: delist/auto-adjust quantity after a sale, scheduled draft publishing for named marketplaces, and per-marketplace unattended auto-relist / eBay auto-recreate.
 - Direct marketplace List, Update and Save draft actions may run side by side, one per marketplace, but never alongside a delist.
 - Do not introduce Redis, MongoDB, Celery, or provider substitutions unless explicitly requested.
 - Approved cloud services (2026-10-26, see `docs/cloud-architecture.md`):

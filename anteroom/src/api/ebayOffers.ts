@@ -1,3 +1,8 @@
+export interface EbayWaterfallStep {
+  discount_percent: number;
+  delay_minutes: number;
+}
+
 export interface EbayOfferListing {
   conversationId: string;
   listingId: string;
@@ -6,6 +11,7 @@ export interface EbayOfferListing {
   enabled: boolean;
   discountPercent: number;
   minimumPrice: string;
+  waterfallSteps?: EbayWaterfallStep[] | null;
 }
 
 export interface EbayOffer {
@@ -18,6 +24,7 @@ export interface EbayOffer {
   offerPrice?: string;
   minimumPrice?: string;
   discountPercent?: number;
+  waterfallStep?: number | null;
   eligible?: boolean;
   state: "preview" | "skipped" | "enabled" | "sending" | "sent" | "failed" | "unknown" | "checked";
   note: string | null;
@@ -28,7 +35,12 @@ export interface EbayOffer {
 
 export interface EbayOffersStatus {
   connected: boolean;
-  allListings: { enabled: boolean; discountPercent: number; minimumPrice: string };
+  allListings: {
+    enabled: boolean;
+    discountPercent: number;
+    minimumPrice: string;
+    waterfallSteps?: EbayWaterfallStep[];
+  };
   listings: EbayOfferListing[];
   history: EbayOffer[];
   checkIntervalMinutes: number;

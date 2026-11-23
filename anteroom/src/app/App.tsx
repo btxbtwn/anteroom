@@ -25,7 +25,6 @@ import { PhotoDropOverlay } from "../components/PhotoDropOverlay";
 import { canAddPhotos, DRAFT_ONLY_PHOTOS } from "../components/photoAdding";
 import { BulkUploadDialog } from "../components/BulkUploadDialog";
 import { useBulkRegenerate } from "../components/useBulkRegenerate";
-import { bulkRegenerateToast } from "../bulkRegenerate";
 import { PanelResizeHandle, usePanelCollapsed, usePanelWidth, type PanelWidthLimits } from "../components/PanelResizeHandle";
 import { WorkspaceTopbar, stopTitlebarDrag } from "../components/WorkspaceTopbar";
 import { MarketplaceActivity } from "../components/MarketplaceActivity";
@@ -38,6 +37,7 @@ import { toastManager } from "../components/ui/toast";
 import { clearComposerDraft } from "../components/chat/composerDrafts";
 import { takeMarketplaceSignIn } from "../lib/marketplaceSignIn";
 import { Button } from "../components/ui/button";
+import { Dialog, DialogHeader, DialogPanel, DialogPopup, DialogTitle, DialogTrigger } from "../components/ui/dialog";
 import { Empty, EmptyContent, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import {
   groupImageFilesByFolder,
@@ -107,7 +107,10 @@ export function App() {
   const [returnToSuggestions, setReturnToSuggestions] = useState(false);
   // The assistant is home, on the Mac and signed in alike; a listing link opens that listing.
   const home = listingFromUrl || !runtime.views.has("assistant") ? "listings" : "assistant";
-  const [activeView, setActiveView] = useState<WorkspaceView>(home);
+  const [activeView, setActiveView] = useState<WorkspaceView>(() =>
+    runtime.hosted && runtime.views.has("analytics") && new URLSearchParams(window.location.search).has("oauth_state_id")
+      ? "analytics" : home,
+  );
   const [marketplace, setMarketplace] = useState<Marketplace>("ebay");
   /** Where Analytics, Settings and the rest return: the assistant is home, inventory is the other place. */
   const shell = useRef<"listings" | "assistant">(home);
@@ -604,19 +607,39 @@ export function App() {
   };
 
   const bulk = useBulkRegenerate((id) => activeView === "listings" && selectedConvId === id);
+  const [bulkProgressOpen, setBulkProgressOpen] = useState(false);
+  const [bulkDrafts, setBulkDrafts] = useState<Record<string, { title: string; status: string; retry?: boolean }>>({});
   // Bulk-uploaded drafts already carry their SKUs and measurements, so they generate straight away.
-  const generateBatch = async (uploaded: BulkListingUploadResult[]) => {
+  const generateBatch = async (uploaded: BulkListingUploadResult[], retryTitle?: string) => {
     if (!runtime.features.has("generation")) return;
     const listings = uploaded.flatMap((listing) => (
       listing.convId && listing.count > 0
-        ? [{ convId: listing.convId, title: listingTitleForFolder(listing.folder) }]
+        ? [{ convId: listing.convId, title: retryTitle ?? listingTitleForFolder(listing.folder) }]
         : []
     ));
     if (!listings.length) return;
+    setBulkProgressOpen(true);
     const ids = listings.map((listing) => listing.convId);
     const titles = new Map(listings.map((listing) => [listing.convId, listing.title]));
-    const result = await bulk.start(ids, titles, "generate");
-    if (result) toastManager.add(bulkRegenerateToast(result, "generate"));
+    setBulkDrafts((previous) => ({
+      ...previous,
+      ...Object.fromEntries(listings.map(({ convId, title }) => [convId, { title, status: "Starting" }])),
+    }));
+    await Promise.all(ids.map(async (id) => {
+      const result = await bulk.start([id], titles, "generate");
+      if (!result) return;
+      const saved = result.completed.includes(id);
+      setBulkDrafts((previous) => ({
+        ...previous,
+        [id]: {
+          title: titles.get(id) || "Draft",
+          status: saved ? "Draft saved" : result.failed[0]?.message || "Generation stopped",
+          retry: !saved,
+        },
+      }));
+      void queryClient.invalidateQueries({ queryKey: ["listing", id] });
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    }));
   };
 
   // Photos dropped anywhere in the window land on the open listing; with no
@@ -1122,6 +1145,49 @@ export function App() {
           }}
         />
       ) : null}
+      {Object.keys(bulkDrafts).length > 0 && (
+        <Dialog open={bulkProgressOpen} onOpenChange={setBulkProgressOpen}>
+          <DialogTrigger render={<Button className="fixed bottom-16 right-4 z-20" variant="outline" />}>
+            Bulk generation
+          </DialogTrigger>
+          <DialogPopup>
+            <DialogHeader><DialogTitle>Bulk generation</DialogTitle></DialogHeader>
+            <DialogPanel>
+            <ul className="space-y-3">
+              {Object.entries(bulkDrafts).map(([id, row]) => {
+                const progress = bulk.run?.active.get(id);
+                const phase = progress?.phase;
+                const running = bulk.pendingIds.includes(id);
+                return (
+                  <li key={id} className="space-y-1">
+                    <Button variant="ghost" onClick={() => { setBulkProgressOpen(false); openListing(id); }}>
+                      {row.title}
+                    </Button>
+                    <p role="status">{phase === "finishing" ? "Finishing draft" : progress?.waiting ? "Waiting" : running ? "Generating" : row.status}</p>
+                    {phase === "generating" && (progress?.waiting || progress?.started) && (
+                      <Button variant="outline" onClick={() => {
+                        if (progress.waiting) {
+                          bulk.cancelSubmission(id);
+                          return;
+                        }
+                        void api.conversations.cancelGeneration(id).catch((error: unknown) => {
+                          toastManager.add({ type: "error", title: "Could not stop generation", description: String(error) });
+                        });
+                      }}>Cancel</Button>
+                    )}
+                    {row.retry && !running && (
+                      <Button variant="outline" onClick={() => {
+                        void generateBatch([{ convId: id, count: 1, errors: [], folder: null }], row.title);
+                      }}>Retry</Button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            </DialogPanel>
+          </DialogPopup>
+        </Dialog>
+      )}
       {isMobile ? (
         <MobileNav
           open={mobileNavOpen}

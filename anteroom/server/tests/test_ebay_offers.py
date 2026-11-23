@@ -542,7 +542,7 @@ def test_all_listings_covers_current_and_future_direct_listings_without_selectio
     assert enable_all(offers).status_code == 200
     assert offers.remote.sends == []  # Enabling waits for the timer.
     assert offers.client.get("/api/ebay-offers").json()["allListings"] == {
-        "enabled": True, "discountPercent": 10, "minimumPrice": "",
+        "enabled": True, "discountPercent": 10, "minimumPrice": "", "waterfallSteps": [],
     }
     asyncio.run(ebay_offers.run_automation())
     assert len(offers.remote.sends) == 1

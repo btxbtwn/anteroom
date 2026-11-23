@@ -148,11 +148,17 @@ def blocking_job(repo: JobRepo, marketplace: str | None):
     themselves. With no marketplace, only those exclusive jobs
     count.
     """
+    from types import SimpleNamespace
+
+    from anteroom.services.listing_promotions import has_active_account_send
+
     for job in repo.get_active():
         step = str(job.current_step or "")
         other = next((name for name in NAMES if step.startswith(f"native_{name}_")), None)
         if other is None or other == marketplace or step.removeprefix(f"native_{other}_") not in SIDE_BY_SIDE_STEPS:
             return job
+    if has_active_account_send(repo.db):
+        return SimpleNamespace(current_step="listing_promotion")
     return None
 
 
@@ -193,7 +199,7 @@ def draft_url(marketplace: str, value: str) -> str:
     pattern, host = (
         (r"/your/shops/me/listing-editor/edit/\d+/?", "www.etsy.com") if marketplace == "etsy"
         else (r"/sellinghub/drafts/edit/[A-Za-z0-9_-]{1,80}/?", "www.depop.com") if marketplace == "depop"
-        else (r"/edit-listing/[a-f0-9]{24}", "poshmark.com") if marketplace == "poshmark"
+        else (r"/edit-listing/[a-f0-9]{24}", "poshmark.ca" if parsed.netloc == "poshmark.ca" else "poshmark.com") if marketplace == "poshmark"
         else (r"/sell/draft/[A-Za-z0-9_-]+/", "www.mercari.com")
     )
     if (parsed.scheme != "https" or parsed.netloc != host or not re.fullmatch(pattern, parsed.path)
@@ -413,7 +419,8 @@ def _photos(db: Session, conv_id: str, snapshot: dict, marketplace: str) -> tupl
     return marketplace_media.photos_for(snapshot, ConversationRepo(db).get_all_photos(conv_id), marketplace)
 
 
-async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str) -> dict:
+async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str,
+                 relist_rule_id: str | None = None) -> dict:
     """Check, ask Chrome or eBay, then open the job. Each database step runs on a worker thread
     with its own session, so no pooled connection is held while Chrome or eBay answers."""
     snapshot, photos, deleted_here = await in_worker_session(_check_start, conv_id, marketplace, body, kind)
@@ -436,7 +443,7 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str) -
 
     async def open_and_launch() -> dict:
         record, job_id, steps = await in_worker_session(
-            _open_job, conv_id, marketplace, body, kind, snapshot, photos, deleted_here)
+            _open_job, conv_id, marketplace, body, kind, snapshot, photos, deleted_here, relist_rule_id)
         _launch(run_job(job_id, conv_id, marketplace, steps, options))
         record["running"] = True
         return record
@@ -494,7 +501,7 @@ def _after_preview(db: Session, marketplace: str, body: ListRequest, snapshot: d
 
 
 def _open_job(db: Session, conv_id: str, marketplace: str, body: ListRequest, kind: str, snapshot: dict,
-              photos: list, deleted_here: bool) -> tuple[dict, str, list[str]]:
+              photos: list, deleted_here: bool, relist_rule_id: str | None = None) -> tuple[dict, str, list[str]]:
     from anteroom.services import approved_photos, listing_mode
     from anteroom.services.pricing_rules import SNAPSHOT_RULES
 
@@ -502,6 +509,12 @@ def _open_job(db: Session, conv_id: str, marketplace: str, body: ListRequest, ki
     job = None
     try:
         with listing_mode.guard(db, "direct"):
+            if relist_rule_id is not None:
+                from anteroom.models.automation import MarketplaceRelistRule
+
+                rule = db.get(MarketplaceRelistRule, relist_rule_id, with_for_update=True)
+                if not rule or rule.marketplace != marketplace or not rule.enabled:
+                    raise NativeMarketplaceError(409, "The relist rule was turned off.", reason="relist_rule_disabled")
             record = _record(db, conv_id, marketplace)
             if record.get("state") in UNSETTLED_STATES:
                 raise NativeMarketplaceError(409, f"Check the last {name} action first; Anteroom has not confirmed it.")
@@ -616,9 +629,10 @@ def preflight(conv_id: str, db: Session) -> dict:
     return {"revision_id": revision.id, "marketplaces": out}
 
 
-async def list_now(conv_id: str, marketplace: Marketplace, body: ListRequest) -> dict:
+async def list_now(conv_id: str, marketplace: Marketplace, body: ListRequest, *,
+                   relist_rule_id: str | None = None) -> dict:
     """Start listing on one marketplace in one seller-confirmed step. Returns at once; poll status."""
-    return await _start(conv_id, marketplace, body, "list")
+    return await _start(conv_id, marketplace, body, "list", relist_rule_id)
 
 
 async def update_live(conv_id: str, marketplace: Marketplace, body: ListRequest) -> dict:
@@ -645,11 +659,15 @@ def _for_chrome(snapshot: dict, marketplace: str) -> dict:
     """The listing as Chrome receives it. The marketplaces' saved form contracts stay on the
     server: Chrome never reads them, and they can be megabytes, past what the Bridge accepts."""
     from anteroom.services.native_contract import KEY
-
     from anteroom.services.pricing_rules import SNAPSHOT_RULES
     from anteroom.services.seller_overrides import CANONICAL_PRICE, PRICE_FOLLOWERS
+    from anteroom.services.seller_region import seller_region
 
-    listing = {key: value for key, value in snapshot.items() if key not in {KEY, SNAPSHOT_RULES, PRICE_FOLLOWERS}}
+    listing = {
+        key: value
+        for key, value in snapshot.items()
+        if key not in {KEY, SNAPSHOT_RULES, PRICE_FOLLOWERS, "_seller_region"}
+    }
     if SNAPSHOT_RULES in snapshot and (price := price_for(snapshot, marketplace)) is not None:
         # The Bridge reads the legacy payload fields. Use the same frozen
         # price as the server, even when the saved native block was restored.
@@ -657,6 +675,9 @@ def _for_chrome(snapshot: dict, marketplace: str) -> dict:
         listing[block] = {**(listing[block] if isinstance(listing.get(block), dict) else {}), key: price}
         if marketplace == "depop":
             listing["price"] = price
+    region = seller_region().country
+    if region != "US":
+        listing["_seller_region"] = region
     return listing
 
 
@@ -827,7 +848,7 @@ async def _execute_step(job_id: str, conv_id: str, marketplace: str, step: str, 
             if checked is not None:
                 stored = await _joined_worker_session(_apply_result, conv_id, marketplace, job_id, step, checked)
         return stored
-    payload = _execute_payload(marketplace, step, binding, snapshot, photos, warning)
+    payload = await asyncio.to_thread(_execute_payload, marketplace, step, binding, snapshot, photos, warning)
     if binding.get("executor") == "cloud":
         from anteroom.services import cloud_marketplace
 

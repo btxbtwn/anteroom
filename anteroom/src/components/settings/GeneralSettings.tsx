@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../../api/client";
+import { api, type SellerCountry } from "../../api/client";
 import { settingsUiQuery } from "../../api/pageQueries";
 import type { ListingNames } from "../../api/types";
 import { frontendBuildState } from "../buildStamp";
@@ -153,6 +153,32 @@ function PreviousVersionsRow() {
   );
 }
 
+function SellerRegionSection() {
+  const client = useQueryClient();
+  const region = useQuery({ queryKey: ["seller-region"], queryFn: api.settings.sellerRegion });
+  const save = useMutation({
+    mutationFn: api.settings.setSellerRegion,
+    onSuccess: (value) => {
+      client.setQueryData(["seller-region"], value);
+      void client.invalidateQueries({ queryKey: ["settings-marketplaces"] });
+      void client.invalidateQueries({ queryKey: ["native-editor-form"] });
+      void client.invalidateQueries({ queryKey: ["marketplace-sessions"] });
+    },
+  });
+  return (
+    <SettingsSection id="seller-region" title="Seller region">
+      <SettingsRow title="Country" description={region.data ? `Listing currency ${region.data.currency}` : undefined}
+        control={<SettingsSelect<SellerCountry> aria-label="Seller country" value={region.data?.country ?? "US"}
+          disabled={!region.data || save.isPending} onChange={(country) => save.mutate(country)}
+          options={[
+            { value: "US", label: "United States" }, { value: "CA", label: "Canada" },
+            { value: "GB", label: "United Kingdom" }, { value: "AU", label: "Australia" },
+          ]} />} />
+      {(region.error || save.error) && <SettingsNote tone="error">{(region.error || save.error)?.message}</SettingsNote>}
+    </SettingsSection>
+  );
+}
+
 export function GeneralSettings({ onOpenSetupGuide }: { onOpenSetupGuide?: () => void }) {
   const { hosted } = useWorkspaceRuntime();
   const { data: status } = useQuery({
@@ -162,6 +188,7 @@ export function GeneralSettings({ onOpenSetupGuide }: { onOpenSetupGuide?: () =>
   return (
     <>
       <AppearanceSection />
+      <SellerRegionSection />
       <ErrorEmailStatus />
       {!hosted ? <SettingsSection id="setup-guide" title="Setup guide">
         <SettingsRow

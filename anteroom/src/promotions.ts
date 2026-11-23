@@ -71,10 +71,11 @@ export function promotionOutcomeLabel(row: Pick<Promotion, "state" | "action" | 
     return { preview: "Ready to review", skipped: "skipped", sending: "Sending…", failed: "Not completed", unknown: "Result not confirmed", checked: "Checked by you" }[row.state];
   }
   if (row.action === "share") return "Shared";
+  if (row.action === "follow") return "Follow round completed";
   if (row.confirmation === "request_accepted") return "Request accepted";
-  if (row.confirmation === "job_completed") return "Offer batch completed";
+  if (row.confirmation === "job_completed") return row.action === "bundle_offer" ? "Private bundle offer sent" : "Offer batch completed";
   if (row.confirmation === "recipients_created" && row.recipient_count != null && row.recipient_count > 0) {
-    return `Offers created for ${row.recipient_count} ${row.recipient_count === 1 ? "buyer" : "buyers"}`;
+    return `${row.action === "bundle_offer" ? "Bundle offers" : "Offers"} created for ${row.recipient_count} ${row.recipient_count === 1 ? "buyer" : "buyers"}`;
   }
   return "Delivery not verified";
 }

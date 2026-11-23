@@ -11,7 +11,7 @@ from test_hosted_drafts import BOB, cloud, headers  # noqa: F401
 from test_seller_ownership import migration_engine  # noqa: F401
 from test_seller_sessions import USER_ID, jwks, signing_keys  # noqa: F401
 from anteroom.services import browser_bridge, hosted_browser_relay, listing_mode
-from anteroom.services.extension_connection import MARKETPLACE_ACTIONS, current_extension, extension_manager
+from anteroom.services.extension_connection import MARKETPLACE_ACTIONS, MARKETPLACE_REGIONS, current_extension, extension_manager
 from anteroom.services.hosted_context import for_seller
 from anteroom.services.service_context import use
 
@@ -23,6 +23,47 @@ def direct_mode(monkeypatch):
     check = Mock()
     monkeypatch.setattr(listing_mode, 'require', check)
     return check
+
+
+@pytest.mark.parametrize(("command", "extra"), [
+    ("marketplace.delete", {"listing_id": "a" * 24, "seller_region": "CA", "confirm": True}),
+    ("marketplace.result", {"context": {"listing": {"_seller_region": "CA"}}}),
+])
+def test_old_bridge_can_poll_past_regional_command_without_consuming_it(command, extra):
+    async def scenario():
+        relay = hosted_browser_relay.BrowserRelay(USER_ID)
+        current_caps = {MARKETPLACE_ACTIONS, MARKETPLACE_REGIONS}
+        relay.note_seen(current_caps)
+        regional = {"type": command, "job_id": "job1", "message_id": "one",
+                    "payload": {"marketplace": "poshmark", **extra}}
+        local = {**regional, "message_id": "two", "payload": {"marketplace": "poshmark"}}
+        assert await relay.deliver_local(regional)
+        assert await relay.deliver_local(local)
+        old_command = await relay.next_message({MARKETPLACE_ACTIONS}, 0)
+        assert old_command is not None and old_command["message_id"] == "two"
+        assert await relay.next_message({MARKETPLACE_ACTIONS}, 0.01) is None
+        new_command = await relay.next_message(current_caps, 0)
+        assert new_command is not None and new_command["message_id"] == "one"
+
+    asyncio.run(scenario())
+
+
+def test_regional_request_timeout_removes_command_skipped_by_old_bridge():
+    async def scenario():
+        relay = hosted_browser_relay.BrowserRelay(USER_ID)
+        current_caps = {MARKETPLACE_ACTIONS, MARKETPLACE_REGIONS}
+        relay.note_seen(current_caps)
+        request = asyncio.create_task(relay.request_local(
+            {"type": "marketplace.delete", "job_id": "job1", "message_id": "one",
+             "payload": {"marketplace": "poshmark", "listing_id": "a" * 24,
+                         "seller_region": "CA", "confirm": True}}, timeout=0.05))
+        await asyncio.sleep(0)
+        assert await relay.next_message({MARKETPLACE_ACTIONS}, 0) is None
+        with pytest.raises(hosted_browser_relay.ChromeReadError, match="did not answer in time"):
+            await request
+        assert await relay.next_message(current_caps, 0) is None
+
+    asyncio.run(scenario())
 
 
 def test_relay_is_per_seller_and_refuses_other_commands(direct_mode):

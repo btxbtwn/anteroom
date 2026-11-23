@@ -27,6 +27,7 @@ SKIPPED_TABLES = frozenset({
     'cloud_marketplace_sessions', 'cloud_session_audit', 'cloud_operation_journals',
     'mcp_access_tokens',
     'listing_videos', 'photo_fingerprints',
+    'plaid_connections', 'plaid_transactions',
 })
 MAX_ROWS = 500
 
@@ -227,8 +228,10 @@ ALLOWED_SETTINGS_KEYS = frozenset({
     'listing_formulas',
     'sale_detection',
     'sale_autodelist',
+    'sale_auto_adjust_quantity',
     'business_note',
     'marketplaces',
+    'seller_region',
     'hidden_fields',
     'vendoo_sales_archived_at',
     'brave_quota_exhausted',

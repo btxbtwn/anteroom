@@ -29,7 +29,12 @@ const promotion = (overrides: Partial<PromotionAutomation> = {}): PromotionAutom
 describe("automation rows", () => {
   it("offers every kind in the type picker with a one-line description", () => {
     expect(AUTOMATION_KINDS.map((kind) => kind.label)).toEqual([
-      "Price drop, relist or regenerate", "eBay offers", "Poshmark sharing", "Offers to likers",
+      "Price drop, relist or regenerate",
+      "eBay offers",
+      "Poshmark sharing",
+      "Offers to likers & waterfall offers",
+      "Poshmark private bundle offers",
+      "Poshmark automatic follows",
     ]);
     for (const kind of AUTOMATION_KINDS) expect(kind.description).not.toContain("\n");
   });

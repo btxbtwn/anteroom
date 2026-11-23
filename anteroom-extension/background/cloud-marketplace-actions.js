@@ -1,11 +1,11 @@
 // Named commands other than marketplace actions: read-only choices for the seller's
 // editor and Connections, from their own marketplace sessions, and opening a sign-in page.
 const CLOUD_READS = {
-  'marketplace.sales_history': ({ marketplace, settled }) => readMarketplaceOrderHistory(marketplace, settled),
+  'marketplace.sales_history': ({ marketplace, settled, seller_region }) => readMarketplaceOrderHistory(marketplace, settled, seller_region),
   // Settings → Connections: sign-in status only, never cookie or token values.
-  'marketplace.sessions': async () => ({ sessions: await readExtensionSessions() }),
+  'marketplace.sessions': async ({ seller_region }) => ({ sessions: await readExtensionSessions(undefined, seller_region) }),
   // The seller asked to sign in: open that marketplace's sign-in page in this Chrome, as the Mac does.
-  'marketplace.connect': ({ marketplace }) => new Promise(resolve => handleMarketplaceConnect({ payload: { marketplace } }, resolve)),
+  'marketplace.connect': ({ marketplace, seller_region }) => new Promise(resolve => handleMarketplaceConnect({ payload: { marketplace, seller_region } }, resolve)),
   // Inventory import: the same reads the Mac's import makes, each listing checked against the signed-in account.
   // Their errors are the Bridge's own words, as the Mac shows them; nothing the marketplace said.
   'marketplace.import.page': async ({ marketplace, cursor }) => importReply(await readMarketplaceImportPage(marketplace, cursor ?? null)),
@@ -33,6 +33,7 @@ async function runCloudRead(command) {
 async function runCloudMarketplaceCommand(command, photos) {
   if (Object.hasOwn(CLOUD_READS, command.type)) return runCloudRead(command);
   if (command.type === 'marketplace.like_events') return readMarketplaceLikes(command.payload);
+  if (command.type === 'marketplace.active_offers') return readMarketplaceActiveOffers(command.payload);
   if (['marketplace.promotion_check', 'marketplace.promote', 'marketplace.promotion_result'].includes(command.type)) {
     let result = null;
     await handleMarketplacePromotion(command, value => { result = value; });

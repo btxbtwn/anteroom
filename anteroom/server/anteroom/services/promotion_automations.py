@@ -56,11 +56,30 @@ log = logging.getLogger("anteroom.promotion_automations")
 # Pause between shares, before Poshmark's own jitter of up to 3 seconds.
 SHARE_SPEEDS = {"slow": 15000, "normal": 7000, "fast": 4000}
 SHARE_ORDERS = ("newest", "oldest", "random")
-# Vendoo's ceiling for Poshmark sharing; Poshmark stops sooner if it wants to.
-MAX_DAILY_SHARES = 6000
+SHARE_MODES = ("self", "party", "community")
+HOURLY_INTENSITIES = ("none", "low", "medium", "high")
+INTENSITY_GAP_MULTIPLIER = {"high": 1.0, "medium": 1.5, "low": 2.25}
+# Poshmark's daily Posh Party windows in Pacific Time (America/Los_Angeles).
+POSH_PARTY_TIMES_PT = ("09:00", "12:00", "16:00", "19:00")
+POSH_PARTY_HOURS_PT = (9, 12, 16, 19)
+POSH_PARTY_DURATION_HOURS = 2
+# Peak-hour defaults for the 24-hour Poshmark sharing intensity schedule.
+DEFAULT_HOURLY_SCHEDULE: dict[str, str] = {
+    **{str(h): "none" for h in range(0, 7)},
+    "7": "low",
+    "8": "medium",
+    **{str(h): "high" for h in (9, 10, 11, 12, 13, 14, 18, 19, 20, 21)},
+    **{str(h): "medium" for h in (15, 16, 17, 22)},
+    "23": "low",
+}
+# Safety ceiling for Poshmark sharing; Poshmark stops sooner if it wants to.
+MAX_DAILY_SHARES = 8000
+MAX_DAILY_FOLLOWS = 1000
+MAX_DAILY_UNFOLLOWS = 1000
 MAX_TIMES = 6
 MAX_LISTED_ITEMS = 500
 OFFER_INTERVAL = timedelta(minutes=15)
+FOLLOW_INTERVAL = timedelta(hours=1)
 CLOUD_DISCONNECTED = "Paused: Reconnect the marketplace cloud session to resume."
 # Listing reads per offer check, spaced out; the rest are read in a later check.
 OFFER_READS = 60
@@ -91,6 +110,79 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat() + "Z" if value else None
 
 
+def active_posh_party_window(moment: datetime | None = None) -> str | None:
+    """Return the active PT Posh Party slot ('09:00', '12:00', '16:00', '19:00') if now is inside one."""
+    from zoneinfo import ZoneInfo
+
+    current_utc = as_utc(moment or _now())
+    local_pt = current_utc.astimezone(ZoneInfo("America/Los_Angeles"))
+    for start_hour, label in zip(POSH_PARTY_HOURS_PT, POSH_PARTY_TIMES_PT, strict=True):
+        if start_hour <= local_pt.hour < start_hour + POSH_PARTY_DURATION_HOURS:
+            return label
+    return None
+
+
+def hourly_intensity_for(hourly_schedule: dict | None, timezone_name: str | None, moment: datetime | None = None) -> str:
+    """Return 'none' | 'low' | 'medium' | 'high' for the current local hour."""
+    if not hourly_schedule:
+        return "high"
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo(timezone_name or "UTC")
+    local_hour = str(as_utc(moment or _now()).astimezone(tz).hour)
+    level = str(hourly_schedule.get(local_hour) or "none").lower()
+    return level if level in HOURLY_INTENSITIES else "none"
+
+
+def _normalize_share_modes(raw: list[str] | None) -> list[str]:
+    if not raw:
+        return ["self"]
+    modes: list[str] = []
+    for mode in raw:
+        item = str(mode or "").strip().lower()
+        if item not in SHARE_MODES:
+            raise PromotionError(400, f"Unsupported share mode: {mode}. Choose self, party, or community.")
+        if item not in modes:
+            modes.append(item)
+    return modes or ["self"]
+
+
+def _normalize_hourly_schedule(raw: dict | None) -> dict[str, str] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise PromotionError(400, "Hourly schedule must map hours 0–23 to none, low, medium, or high.")
+    cleaned: dict[str, str] = {}
+    for hour in range(24):
+        key = str(hour)
+        level = str(raw.get(key, raw.get(hour, "none")) or "none").strip().lower()
+        if level not in HOURLY_INTENSITIES:
+            raise PromotionError(400, f"Invalid hourly intensity '{level}' for hour {key}.")
+        cleaned[key] = level
+    return cleaned
+
+
+def _normalize_follow_config(raw: dict | None) -> dict:
+    if not isinstance(raw, dict):
+        raise PromotionError(400, "Configure at least one Poshmark follow or unfollow option.")
+    reciprocal = bool(raw.get("reciprocal_24h", False))
+    new_cap = int(raw.get("new_active_sellers_cap") or 0)
+    unfollow_cap = int(raw.get("unfollow_cap") or 0)
+    unsub_live = bool(raw.get("unsubscribe_live_shows", False))
+    if not 0 <= new_cap <= MAX_DAILY_FOLLOWS:
+        raise PromotionError(400, f"New active seller follows cap must be 0 to {MAX_DAILY_FOLLOWS:,}/day.")
+    if not 0 <= unfollow_cap <= MAX_DAILY_UNFOLLOWS:
+        raise PromotionError(400, f"Unfollow cap must be 0 to {MAX_DAILY_UNFOLLOWS:,}/day.")
+    if not (reciprocal or new_cap > 0 or unfollow_cap > 0 or unsub_live):
+        raise PromotionError(400, "Enable reciprocal follows, active seller follows, unfollows, or Live Show unsubscribe.")
+    return {
+        "reciprocal_24h": reciprocal,
+        "new_active_sellers_cap": new_cap,
+        "unfollow_cap": unfollow_cap,
+        "unsubscribe_live_shows": unsub_live,
+    }
+
+
 def run_out(run: PromotionRun) -> dict:
     return {"id": run.id, "started_at": _iso(run.started_at), "finished_at": _iso(run.finished_at),
             "sent": run.sent, "skipped": run.skipped, "failed": run.failed, "note": run.note}
@@ -103,8 +195,15 @@ def out(db: Session, row: PromotionAutomation) -> dict:
         "scope": row.scope, "conversation_ids": row.conversation_ids or [], "excluded_ids": row.excluded_ids or [],
         "min_days_listed": row.min_days_listed, "share_order": row.share_order, "speed": row.speed,
         "daily_cap": row.daily_cap, "times": row.times or [], "timezone": row.timezone,
+        "share_modes": row.share_modes or (["self"] if row.action == "share" else []),
+        "hourly_schedule": row.hourly_schedule,
         "discount_percent": row.discount_percent, "min_likes": row.min_likes, "shipping_label": row.shipping_label,
         "minimum_price": dollars(row.minimum_price_cents) if row.minimum_price_cents is not None else None,
+        "waterfall_steps": row.waterfall_steps or [],
+        "bundle_pause_minutes": row.bundle_pause_minutes,
+        "bundle_min_items": row.bundle_min_items,
+        "bundle_comment": row.bundle_comment,
+        "follow_config": row.follow_config,
         "paused_reason": row.paused_reason, "next_run_at": _iso(row.next_run_at) if row.enabled else None,
         "last_run": run_out(last) if last else None, "available": promotions.available(row.marketplace, row.action),
     }
@@ -117,6 +216,16 @@ def _ids(value, label: str) -> list[str]:
     return ids
 
 
+def _default_name(marketplace: str, action: str) -> str:
+    labels = {
+        "share": "sharing",
+        "offer": "offers to likers",
+        "bundle_offer": "private bundle offers",
+        "follow": "automatic follows",
+    }
+    return f"{NAMES[marketplace]} {labels.get(action, action)}"
+
+
 def _validate(body: dict) -> dict:
     marketplace, action = body.get("marketplace") or "", body.get("action")
     if action not in promotions.SUPPORTED.get(marketplace, frozenset()):
@@ -125,16 +234,19 @@ def _validate(body: dict) -> dict:
     scope = body.get("scope") or "all"
     if scope not in ("all", "items"):
         raise PromotionError(400, "Cover all live listings or the items you choose.")
-    fields = {
+    fields: dict = {
         "marketplace": marketplace, "action": action, "scope": scope,
-        "name": str(body.get("name") or "").strip()[:80] or f"{NAMES[marketplace]} {'sharing' if action == 'share' else 'offers to likers'}",
+        "name": str(body.get("name") or "").strip()[:80] or _default_name(marketplace, action),
         "conversation_ids": _ids(body.get("conversation_ids"), "items") if scope == "items" else [],
         "excluded_ids": _ids(body.get("excluded_ids"), "exclusions"),
         "min_days_listed": int(body.get("min_days_listed") or 0),
         "share_order": None, "speed": None, "daily_cap": None, "times": None, "timezone": None,
+        "share_modes": None, "hourly_schedule": None,
         "discount_percent": None, "min_likes": None, "shipping_label": None, "minimum_price_cents": None,
+        "waterfall_steps": None, "bundle_pause_minutes": None, "bundle_min_items": None, "bundle_comment": None,
+        "follow_config": None,
     }
-    if scope == "items" and not fields["conversation_ids"]:
+    if scope == "items" and action != "follow" and not fields["conversation_ids"]:
         raise PromotionError(400, "Choose at least one item.")
     if not 0 <= fields["min_days_listed"] <= 365:
         raise PromotionError(400, "Minimum days listed is 0 to 365.")
@@ -144,17 +256,45 @@ def _validate(body: dict) -> dict:
             raise PromotionError(400, "Choose an order and a speed.")
         if not isinstance(cap, int) or not 1 <= cap <= MAX_DAILY_SHARES:
             raise PromotionError(400, f"The daily cap is 1 to {MAX_DAILY_SHARES:,} shares.")
+        share_modes = _normalize_share_modes(body.get("share_modes"))
+        hourly_schedule = _normalize_hourly_schedule(body.get("hourly_schedule"))
         try:
             times = sorted({normalize_schedule({"kind": "daily", "time": str(value)})["time"] for value in body.get("times") or []})
             timezone = str(body.get("timezone") or "UTC")
             require_timezone(timezone)
         except ScheduleError as exc:
             raise PromotionError(400, str(exc)) from exc
-        if not 1 <= len(times) <= MAX_TIMES:
+        if hourly_schedule is None and not 1 <= len(times) <= MAX_TIMES:
             raise PromotionError(400, f"Choose 1 to {MAX_TIMES} round times.")
-        fields.update(share_order=order, speed=speed, daily_cap=cap, times=times, timezone=timezone)
+        if hourly_schedule is not None and not any(v != "none" for v in hourly_schedule.values()):
+            raise PromotionError(400, "Set at least one hour above 'none' in the 24-hour schedule.")
+        fields.update(
+            share_order=order, speed=speed, daily_cap=cap, times=times, timezone=timezone,
+            share_modes=share_modes, hourly_schedule=hourly_schedule,
+        )
+    elif action == "follow":
+        follow_cfg = _normalize_follow_config(body.get("follow_config"))
+        try:
+            raw_times = body.get("times") or []
+            times = sorted({normalize_schedule({"kind": "daily", "time": str(value)})["time"] for value in raw_times})
+            timezone = str(body.get("timezone") or "UTC")
+            require_timezone(timezone)
+        except ScheduleError as exc:
+            raise PromotionError(400, str(exc)) from exc
+        if len(times) > MAX_TIMES:
+            raise PromotionError(400, f"Choose at most {MAX_TIMES} follow round times.")
+        fields.update(
+            scope="all",
+            conversation_ids=[],
+            times=times or None,
+            timezone=timezone,
+            follow_config=follow_cfg,
+            daily_cap=max(follow_cfg["new_active_sellers_cap"], follow_cfg["unfollow_cap"], 1),
+        )
     else:
-        discount, likes = body.get("discount_percent"), body.get("min_likes") or 1
+        waterfall_steps = promotions.normalize_waterfall_steps(body.get("waterfall_steps"))
+        discount = waterfall_steps[0]["discount_percent"] if waterfall_steps else body.get("discount_percent")
+        likes = body.get("min_likes") or 1
         if not isinstance(discount, int) or not 1 <= discount <= 99:
             raise PromotionError(400, "Enter the discount for the offer.")
         if not isinstance(likes, int) or not 1 <= likes <= 1000:
@@ -166,7 +306,22 @@ def _validate(body: dict) -> dict:
             minimum = money_cents(body["minimum_price"]) if body.get("minimum_price") not in (None, "") else None
         except ValueError as exc:
             raise PromotionError(400, "Enter a positive minimum price with at most two decimal places, or leave it blank.") from exc
-        fields.update(discount_percent=discount, min_likes=likes, shipping_label=label, minimum_price_cents=minimum)
+        fields.update(
+            discount_percent=discount,
+            min_likes=likes,
+            shipping_label=label,
+            minimum_price_cents=minimum,
+            waterfall_steps=waterfall_steps,
+        )
+        if action == "bundle_offer":
+            pause_min = body.get("bundle_pause_minutes") if body.get("bundle_pause_minutes") is not None else 15
+            min_items = body.get("bundle_min_items") if body.get("bundle_min_items") is not None else 1
+            if type(pause_min) is not int or not 1 <= pause_min <= 1440:
+                raise PromotionError(400, "Bundle activity pause must be 1 to 1,440 minutes.")
+            if type(min_items) is not int or not 1 <= min_items <= 20:
+                raise PromotionError(400, "Minimum bundle items must be 1 to 20.")
+            comment = str(body.get("bundle_comment") or "").strip()[:500] or None
+            fields.update(bundle_pause_minutes=pause_min, bundle_min_items=min_items, bundle_comment=comment)
     return fields
 
 
@@ -197,8 +352,22 @@ def delete(db: Session, automation_id: str) -> None:
 
 
 def next_share_slot(row: PromotionAutomation, after: datetime) -> datetime:
+    if row.hourly_schedule:
+        # Advance to the next top-of-hour whose configured intensity is not 'none'.
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo(row.timezone or "UTC")
+        cursor = as_utc(after).replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        for _ in range(48):
+            local_hour = str(cursor.astimezone(tz).hour)
+            if str(row.hourly_schedule.get(local_hour) or "none").lower() != "none":
+                return cursor.astimezone(UTC).replace(tzinfo=None)
+            cursor += timedelta(hours=1)
     slots = [next_after({"kind": "daily", "time": clock}, row.timezone or "UTC", as_utc(after)) for clock in row.times or []]
-    return min(slot for slot in slots if slot).astimezone(UTC).replace(tzinfo=None)
+    valid = [slot for slot in slots if slot]
+    if not valid:
+        return (as_utc(after) + timedelta(hours=1)).astimezone(UTC).replace(tzinfo=None)
+    return min(valid).astimezone(UTC).replace(tzinfo=None)
 
 
 def enable(db: Session, automation_id: str) -> dict:
@@ -214,7 +383,12 @@ def enable(db: Session, automation_id: str) -> dict:
 
 
 def _schedule_enabled(row: PromotionAutomation, now: datetime) -> None:
-    row.next_run_at = next_share_slot(row, now) if row.action == "share" else now + OFFER_INTERVAL
+    if row.action == "share":
+        row.next_run_at = next_share_slot(row, now)
+    elif row.action == "follow":
+        row.next_run_at = next_share_slot(row, now) if row.times else now + FOLLOW_INTERVAL
+    else:
+        row.next_run_at = now + OFFER_INTERVAL
     row.enabled, row.paused_reason = True, None
     row.like_events_since = now
 
@@ -256,7 +430,7 @@ def listing(db: Session) -> dict:
     report_overdue(db)
     labels = set()
     for (options,) in db.query(ListingPromotion.shipping_options).filter(
-            ListingPromotion.marketplace == "poshmark", ListingPromotion.action == "offer").order_by(
+            ListingPromotion.marketplace == "poshmark", ListingPromotion.action.in_(("offer", "bundle_offer"))).order_by(
             ListingPromotion.created_at.desc()).limit(200).all():
         labels.update(option.get("label") for option in options or [] if option.get("label"))
     rows = db.query(PromotionAutomation).order_by(PromotionAutomation.created_at).all()
@@ -264,7 +438,12 @@ def listing(db: Session) -> dict:
         "automations": [out(db, row) for row in rows],
         "supported": {name: sorted(actions) for name, actions in promotions.SUPPORTED.items()},
         "awaiting_capture": {name: sorted(actions) for name, actions in promotions.AWAITING_CAPTURE.items()},
-        "speeds": list(SHARE_SPEEDS), "orders": list(SHARE_ORDERS), "max_daily_cap": MAX_DAILY_SHARES,
+        "speeds": list(SHARE_SPEEDS), "orders": list(SHARE_ORDERS), "share_modes": list(SHARE_MODES),
+        "posh_party_times_pt": list(POSH_PARTY_TIMES_PT),
+        "default_hourly_schedule": dict(DEFAULT_HOURLY_SCHEDULE),
+        "max_daily_cap": MAX_DAILY_SHARES,
+        "max_daily_follows": MAX_DAILY_FOLLOWS,
+        "max_daily_unfollows": MAX_DAILY_UNFOLLOWS,
         "shipping_labels": sorted(labels),
     }
 
@@ -322,21 +501,44 @@ def activity(db: Session, automation_id: str, limit: int = 50) -> dict:
 
 
 def _shares_today(db: Session, marketplace: str, now: datetime) -> int:
-    return db.query(ListingPromotion).filter(
-        ListingPromotion.marketplace == marketplace, ListingPromotion.action == "share",
+    rows = db.query(
+        ListingPromotion.listing_id,
+        ListingPromotion.state,
+        ListingPromotion.recipient_count,
+        ListingPromotion.follow_budget,
+    ).filter(
+        ListingPromotion.marketplace == marketplace,
+        ListingPromotion.action == "share",
         ListingPromotion.sent_at > now - timedelta(hours=24),
-    ).count()
+    ).all()
+    total = 0
+    for listing_id, state, recipient_count, follow_budget in rows:
+        if listing_id == "__account__":
+            if state == "failed":
+                if isinstance(follow_budget, dict) and type(follow_budget.get("max_shares")) is int:
+                    total += max(0, int(follow_budget["max_shares"]))
+                elif recipient_count is not None:
+                    total += max(0, int(recipient_count))
+            elif recipient_count is not None:
+                total += max(0, int(recipient_count))
+            elif isinstance(follow_budget, dict) and type(follow_budget.get("max_shares")) is int:
+                total += max(0, int(follow_budget["max_shares"]))
+            else:
+                total += 50
+        else:
+            total += max(0, int(recipient_count)) if recipient_count is not None else 1
+    return total
 
 
 def _order(db: Session, row: PromotionAutomation, targets: list) -> list:
-    if row.action == "offer":
+    if row.action in ("offer", "bundle_offer"):
         # Skipped reviews are journaled too: low-like listings must not keep
         # consuming the bounded scan while other listings never get checked.
         # Persisted checks survive restarts; a new rule starts with unseen items.
         checked = dict(db.query(ListingPromotion.listing_id, func.max(ListingPromotion.created_at)).filter(
             ListingPromotion.automation_id == row.id,
             ListingPromotion.marketplace == row.marketplace,
-            ListingPromotion.action == "offer",
+            ListingPromotion.action == row.action,
         ).group_by(ListingPromotion.listing_id).all())
         return sorted(targets, key=lambda target: (checked.get(target[1], datetime.min), target[1]))
     if row.share_order == "random":
@@ -435,7 +637,12 @@ def _begin_round(
     if like_events is None:
         target_next_run = expected_next_run_at if expected_next_run_at is not None else row.next_run_at
         # Claim the due round: when two Machines read the same due rule, one runs it.
-        claimed_slot = next_share_slot(row, now) if row.action == "share" else now + OFFER_INTERVAL
+        if row.action == "share":
+            claimed_slot = next_share_slot(row, now)
+        elif row.action == "follow":
+            claimed_slot = next_share_slot(row, now) if row.times else now + FOLLOW_INTERVAL
+        else:
+            claimed_slot = now + OFFER_INTERVAL
         claimed = db.execute(update(PromotionAutomation).execution_options(synchronize_session=False).where(
             PromotionAutomation.id == row.id, PromotionAutomation.next_run_at == target_next_run,
         ).values(next_run_at=claimed_slot))
@@ -453,10 +660,18 @@ def _begin_round(
         "action": row.action,
         "speed": row.speed,
         "daily_cap": row.daily_cap,
+        "timezone": row.timezone,
+        "share_modes": list(row.share_modes or ["self"]),
+        "hourly_schedule": dict(row.hourly_schedule) if isinstance(row.hourly_schedule, dict) else None,
         "min_days_listed": row.min_days_listed,
         "min_likes": row.min_likes,
         "shipping_label": row.shipping_label,
         "discount_percent": row.discount_percent,
+        "waterfall_steps": list(row.waterfall_steps or []),
+        "bundle_pause_minutes": row.bundle_pause_minutes,
+        "bundle_min_items": row.bundle_min_items,
+        "bundle_comment": row.bundle_comment,
+        "follow_config": dict(row.follow_config) if isinstance(row.follow_config, dict) else None,
     }
     started = _StartedRound(rule, run.id, target_next_run, claimed_slot)
     db.commit()
@@ -481,7 +696,7 @@ def _prepare_round(
     ]
     remaining = (row.daily_cap or 0) - _shares_today(db, row.marketplace, now) if row.action == "share" else None
     # Like-feed rounds read their listings; the regular scan skips those still waiting for a like.
-    waiting = _waiting_for_likes(db, row, now) if like_events is None else set()
+    waiting = _waiting_for_likes(db, row, now) if like_events is None and not row.waterfall_steps else set()
     held = _held_after_refusal(db, row, now, {target[1] for target in covered})
     return targets, remaining, waiting, held
 
@@ -497,11 +712,28 @@ def _check_offer_target(
     marketplace: str,
     listing_id: str,
     new_like_at: datetime | None,
-) -> tuple[bool, str | None]:
+    action: str = "offer",
+) -> tuple[bool, str | None, dict | None, datetime | None]:
     row = db.get(PromotionAutomation, automation_id)
     if not row or not row.enabled:
-        return False, None
-    return True, promotions.blocking(db, marketplace, listing_id, "offer", new_like_at=new_like_at)
+        return False, None, None, None
+    blocked = promotions.blocking(db, marketplace, listing_id, action, new_like_at=new_like_at)
+    if blocked:
+        return True, blocked, None, None
+    if row.waterfall_steps:
+        first_seen = (
+            promotions.first_seen_waterfall_like_at(db, marketplace, listing_id, action)
+            if new_like_at is None
+            else None
+        )
+        effective_like_at = new_like_at if new_like_at is not None else first_seen
+        step, skip_reason = promotions.next_waterfall_step(
+            db, marketplace, listing_id, action, row.waterfall_steps, new_like_at=effective_like_at,
+        )
+        if skip_reason:
+            return True, skip_reason, None, first_seen
+        return True, None, step, first_seen
+    return True, None, None, None
 
 
 def _record_review_failure(
@@ -580,7 +812,7 @@ def _abandon_round(db: Session, started: _StartedRound, now: datetime) -> None:
 
 async def run_round(automation_id: str, *, expected_next_run_at: datetime | None = None,
                     sleep=asyncio.sleep, like_events: dict[str, datetime] | None = None) -> PromotionRun | None:
-    """One round: share the next listings, or offer on listings with new likers. Stops at the first limit."""
+    """One round: share listings, run follow/unfollow, or send offers/bundles. Stops at the first limit."""
     now = _now()
     async def abandon(started: _StartedRound | None) -> None:
         if started is not None:
@@ -596,12 +828,43 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
     stop_note = None
     try:
         await run_worker_db_step(promotions.require_chrome, marketplace)
+        batch = new_id()
+        if action == "follow":
+            follow_result = await promotions.perform_account_action(
+                marketplace,
+                "follow",
+                automation_id=automation_id,
+                batch_id=batch,
+                extra_payload={},
+            )
+            if follow_result["state"] == "done":
+                counts["sent"] += max(int(follow_result.get("recipient_count") or 1), 1)
+            else:
+                counts["failed"] += 1
+                if follow_result["state"] == "unknown" or follow_result.get("stop"):
+                    stop_note = await in_worker_session(
+                        _pause_by_id, automation_id, follow_result.get("note") or "The marketplace asked Anteroom to stop.",
+                    )
+                else:
+                    reasons[str(follow_result.get("note") or "refused")[:120]] += 1
+            return await in_worker_session(_finish_round, run_id, counts, stop_note, reasons)
+
+        share_modes = list(rule.get("share_modes") or ["self"])
+        party_window = active_posh_party_window(now) if action == "share" and "party" in share_modes else None
+        intensity = hourly_intensity_for(rule.get("hourly_schedule"), rule.get("timezone"), now) if action == "share" else "high"
+        if action == "share" and rule.get("hourly_schedule") and intensity == "none":
+            stop_note = "Current hour is set to none in the 24-hour sharing schedule."
+            return await in_worker_session(_finish_round, run_id, counts, stop_note, reasons)
+
         targets, remaining, waiting, held = await in_worker_session(_prepare_round, automation_id, now, like_events)
         reads = 0
-        batch = new_id()
         for conv_id, conv_title, listing_id in targets:
             new_like_at = like_events.get(listing_id) if like_events is not None else None
-            if action == "offer":
+            chosen_discount = rule["discount_percent"]
+            chosen_waterfall_step: int | None = None
+            chosen_step: dict | None = None
+            first_seen_like_at: datetime | None = None
+            if action in ("offer", "bundle_offer"):
                 if listing_id in waiting:
                     if not await in_worker_session(_check_enabled, automation_id):
                         stop_note = "Turned off during the round."
@@ -618,17 +881,25 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
                     counts["skipped"] += 1
                     reasons[HELD_AFTER_REFUSAL] += 1
                     continue
-                enabled, blocked = await in_worker_session(
-                    _check_offer_target, automation_id, marketplace, listing_id, new_like_at,
+                enabled, blocked, step, first_seen_like_at = await in_worker_session(
+                    _check_offer_target, automation_id, marketplace, listing_id, new_like_at, action,
                 )
                 if not enabled:
                     stop_note = "Turned off during the round."
                     break
                 if blocked:
                     counts["skipped"] += 1
-                    reason = blocked if blocked == promotions.MERCARI_COOLDOWN_NOTE else "offered in the last 24 hours or unconfirmed"
+                    reason = (
+                        blocked
+                        if blocked == promotions.MERCARI_COOLDOWN_NOTE or "waterfall" in blocked
+                        else "offered in the last 24 hours or unconfirmed"
+                    )
                     reasons[reason] += 1
                     continue
+                if step is not None:
+                    chosen_step = step
+                    chosen_discount = int(step["discount_percent"])
+                    chosen_waterfall_step = int(step["step"])
                 if reads >= OFFER_READS:
                     stop_note = f"Checked {OFFER_READS} listings; the rest are checked next time."
                     break
@@ -642,9 +913,12 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
                 if remaining is not None and remaining <= 0:
                     stop_note = f"Reached the daily cap of {rule['daily_cap']:,} shares."
                     break
+                if "self" not in share_modes and not ("party" in share_modes and party_window):
+                    break
             send = ListingPromotion(
                 batch_id=batch, conversation_id=conv_id, marketplace=marketplace, action=action,
-                listing_id="", title=conv_title, discount_percent=rule["discount_percent"],
+                listing_id="", title=conv_title, discount_percent=chosen_discount,
+                waterfall_step=chosen_waterfall_step,
                 automation_id=automation_id, state="preview", expires_at=_now() + promotions.PREVIEW_TTL,
             )
             # Feed events arriving during the read must remain newer than this check.
@@ -652,12 +926,21 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
             try:
                 await promotions.review(send, conv_id, new_like_at=new_like_at)
                 shipping = None
-                if action == "offer":
+                if action in ("offer", "bundle_offer"):
                     if cast(int, send.like_count) < (rule["min_likes"] or 1):
                         raise PromotionError(409, "fewer likes than the rule needs")
-                    last = await in_worker_session(promotions.likes_at_last_offer, marketplace, listing_id)
-                    if new_like_at is None and last is not None and cast(int, send.like_count) <= last:
-                        raise PromotionError(409, "no new likers since the last offer")
+                    if chosen_waterfall_step is None or chosen_waterfall_step == 1:
+                        last = await in_worker_session(promotions.likes_at_last_offer, marketplace, listing_id)
+                        if new_like_at is None and last is not None and cast(int, send.like_count) <= last:
+                            raise PromotionError(409, "no new likers since the last offer")
+                    if (
+                        chosen_waterfall_step == 1
+                        and chosen_step is not None
+                        and new_like_at is None
+                        and first_seen_like_at is None
+                        and int(chosen_step.get("delay_minutes") or 0) > 0
+                    ):
+                        raise PromotionError(409, f"waiting {int(chosen_step['delay_minutes'])}m before waterfall step 1")
                     shipping = _shipping_choice_for(marketplace, rule["shipping_label"], send)
             except PromotionError as exc:
                 # Review only reads, but its refusal still belongs in the
@@ -683,11 +966,27 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
                 reasons[skip_reason] += 1
                 continue
             send_id = await in_worker_session(_save_preview_send, send)
+            base_gap = SHARE_SPEEDS.get(rule["speed"] or "") if action == "share" else None
+            effective_gap = int(base_gap * INTENSITY_GAP_MULTIPLIER.get(intensity, 1.0)) if base_gap else None
+            extra_payload: dict | None = None
+            if action == "share":
+                if share_modes != ["self"]:
+                    extra_payload = {"share_modes": share_modes, "party_window": party_window}
+            elif action == "bundle_offer":
+                extra_payload = {
+                    "bundle_pause_minutes": rule.get("bundle_pause_minutes") or 15,
+                    "bundle_min_items": rule.get("bundle_min_items") or 1,
+                    "bundle_comment": rule.get("bundle_comment"),
+                }
             try:
-                result = await promotions.perform(send_id, shipping,
-                                                  new_like_at=new_like_at,
-                                                  gap_ms=SHARE_SPEEDS.get(rule["speed"] or "") if action == "share" else None,
-                                                  include_executor=True)
+                result = await promotions.perform(
+                    send_id,
+                    shipping,
+                    new_like_at=new_like_at,
+                    gap_ms=effective_gap,
+                    extra_payload=extra_payload,
+                    include_executor=True,
+                )
             except PromotionError as exc:
                 reason = await in_worker_session(_mark_send_skipped, send_id, exc)
                 if exc.code in ("busy", "paused", "chrome"):
@@ -717,6 +1016,22 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
                     stop_note = await in_worker_session(_pause_by_id, automation_id, reason, signed_out)
                 break
             reasons[str(result.get("note") or "refused")[:120]] += 1
+
+        if action == "share" and "community" in share_modes and stop_note is None and (remaining is None or remaining > 0):
+            if await in_worker_session(_check_enabled, automation_id):
+                community_result = await promotions.perform_account_action(
+                    marketplace,
+                    "share",
+                    automation_id=automation_id,
+                    batch_id=batch,
+                    extra_payload={"share_mode": "community", "max_shares": min(remaining or 50, 50)},
+                )
+                if community_result["state"] == "done":
+                    counts["sent"] += max(int(community_result.get("recipient_count") or 1), 1)
+                elif community_result["state"] == "unknown" or community_result.get("stop"):
+                    stop_note = await in_worker_session(
+                        _pause_by_id, automation_id, community_result.get("note") or "The marketplace asked Anteroom to stop.",
+                    )
     except PromotionError as exc:
         stop_note = str(exc)
         log.warning("%s automation %s could not finish its round: %s", marketplace, automation_id, scrub(str(exc)))

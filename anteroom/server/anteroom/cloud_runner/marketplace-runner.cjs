@@ -35,10 +35,11 @@ const EXTENSION_SCRIPTS = [
 
 function isPoshmarkCookieHost(hostname) {
   const host = String(hostname || '').toLowerCase();
-  return host === 'poshmark.com' || host.endsWith('.poshmark.com');
+  return ['poshmark.com', 'poshmark.ca'].some(domain => host === domain || host.endsWith('.' + domain));
 }
 
 function cookieHost(marketplace, hostname) {
+  if (marketplace === 'poshmark') return isPoshmarkCookieHost(hostname);
   const host = String(hostname || '').toLowerCase();
   return host === `${marketplace}.com` || host.endsWith(`.${marketplace}.com`);
 }
@@ -212,10 +213,10 @@ function createMarketplaceFetch({ jar, userAgent, httpFetch, marketplace = 'posh
       const isPoshmark = isPoshmarkCookieHost(currentUrl.hostname);
       if (isPoshmark && POSHMARK_HEADER_PATH.test(currentUrl.pathname)) {
         if (!headerMap.has('origin')) {
-          headerMap.set('origin', ['Origin', 'https://poshmark.com']);
+          headerMap.set('origin', ['Origin', currentUrl.origin]);
         }
         if (!headerMap.has('referer')) {
-          headerMap.set('referer', ['Referer', 'https://poshmark.com/create-listing']);
+          headerMap.set('referer', ['Referer', currentUrl.origin + '/create-listing']);
         }
       }
 
@@ -448,7 +449,8 @@ async function executeMarketplaceOperation({
   const allowed = ['marketplace.execute', 'marketplace.result', 'marketplace.delete',
     'marketplace.promote', 'marketplace.promotion_check', 'marketplace.promotion_result',
     'marketplace.sessions', 'marketplace.verify_session', 'marketplace.sales', 'marketplace.sales_history',
-    'marketplace.import.page', 'marketplace.import.listing', 'marketplace.like_events'];
+    'marketplace.import.page', 'marketplace.import.listing', 'marketplace.like_events',
+    'marketplace.active_offers'];
   if (marketplace === 'poshmark') allowed.push('marketplace.form');
   if (!allowed.includes(type)) {
     return { result: { ok: false, safe_to_retry: true, error_code: 'rejected', error: 'Unsupported cloud command.' },
@@ -469,6 +471,21 @@ async function executeMarketplaceOperation({
   }
   if (refusal) {
     return { result: refusal, cookies_changed: false, cookies };
+  }
+  if (type === 'marketplace.promote' && payload.action === 'follow') {
+    const cfg = payload.follow_config || {};
+    if (Number(cfg.new_active_sellers_cap || 0) > 1000 || Number(cfg.unfollow_cap || 0) > 1000) {
+      return {
+        result: {
+          ok: false,
+          safe_to_retry: true,
+          error_code: 'rejected',
+          error: 'Follow and unfollow caps cannot exceed 1,000 per day.',
+        },
+        cookies_changed: false,
+        cookies,
+      };
+    }
   }
 
   const jar = buildCookieJar(cookies, marketplace);
@@ -546,17 +563,17 @@ async function executeMarketplaceOperation({
   const cmdType = String(command?.type || '');
   let result;
   if (cmdType === 'marketplace.sales') {
-    result = await context.readMarketplaceSales(marketplace, command.payload?.listing_ids || []);
+    result = await context.readMarketplaceSales(marketplace, command.payload?.listing_ids || [], command.payload?.seller_region);
   } else if (cmdType === 'marketplace.sessions') {
-    const summary = await context.readExtensionSession(marketplace);
+    const summary = await context.readExtensionSession(marketplace, undefined, command.payload?.seller_region);
     result = { ok: true, sessions: { [marketplace]: summary } };
   } else if (cmdType === 'marketplace.verify_session') {
-    const summary = await context.readExtensionSession(marketplace);
+    const summary = await context.readExtensionSession(marketplace, undefined, command.payload?.seller_region);
     if (summary.state !== 'signed_in') {
       result = { ok: true, session: summary };
     } else {
       try {
-        if (marketplace === 'poshmark') await context.poshmarkCsrf(Date.now() + 15000);
+        if (marketplace === 'poshmark') await context.poshmarkCsrf(Date.now() + 15000, context.poshmarkOrigin(command.payload?.seller_region));
         if (marketplace === 'depop') {
           const me = await context.depopAccountRead('/presentation/api/v1/users/me/', 'verify', Date.now() + 15000);
           if (!/^\d{1,15}$/.test(String(me?.id ?? ''))) {

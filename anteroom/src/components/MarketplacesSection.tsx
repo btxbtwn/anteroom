@@ -22,6 +22,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu";
 import { Spinner } from "./ui/spinner";
+import { DraftScheduleControl } from "./DraftScheduleControl";
 import { MarketplaceMessagesContext, uniqueMarketplaceMessages } from "./marketplaceMessages";
 
 type Marketplace = DelistMarketplace;
@@ -458,9 +459,9 @@ export function MarketplacesLayout({
           const session = cached?.sessions[market];
           if (runtime.hosted && runtime.account && session?.cloud_available
               && (session.mode === "cloud" || cached?.chrome_connected === false)) {
-            const { token } = await api.cloudSessions.connectToken(market);
+            const { token, seller_region } = await api.cloudSessions.connectToken(market);
             const { cloudExtension } = await import("../api/cloudExtension");
-            const res = await cloudExtension(runtime.account).connectCloudSession(market, token);
+            const res = await cloudExtension(runtime.account).connectCloudSession(market, token, seller_region);
             if (!res.ok) throw new Error(res.error || "Open Settings → Connections in desktop Chrome to reconnect in Cloud.");
             return { ok: true, signed_in: false };
           }
@@ -947,6 +948,11 @@ export function MarketplacesLayout({
           })()}
         </section>
       )}
+      {!soldSomewhere && !selectedMarketplace && Boolean(selected) ? (
+        <div className="mb-3">
+          <DraftScheduleControl convId={convId} />
+        </div>
+      ) : null}
       <FieldsShownContext.Provider value={reportFields}>
         <MarketplaceMessagesContext value={shownMessages}>{children}</MarketplaceMessagesContext>
       </FieldsShownContext.Provider>

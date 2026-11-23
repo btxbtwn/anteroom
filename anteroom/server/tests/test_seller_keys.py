@@ -38,6 +38,11 @@ CASES = [
                           expires_at=datetime.now(UTC) + timedelta(hours=1))),
 ]
 
+PLAID_CASES = [
+    ("plaid_connections", dict(institution_id="bank", institution_name="Bank", environment="sandbox", accounts=[])),
+    ("plaid_transactions", dict(import_key="transaction", imported_revision=1)),
+]
+
 
 def owned_values(values, seller):
     return values | ({"job_id": f"job-{seller}"} if "job_id" in values else {})
@@ -55,7 +60,7 @@ def prepare(engine, revision="head"):
                                {"job": f"job-{seller}", "item": f"item-{seller}", "seller": seller})
 
 
-@pytest.mark.parametrize("table_name,values", CASES, ids=[case[0] for case in CASES])
+@pytest.mark.parametrize("table_name,values", CASES + PLAID_CASES, ids=[case[0] for case in CASES + PLAID_CASES])
 def test_independent_shops_can_reuse_keys_but_same_shop_cannot(migration_engine, table_name, values):  # noqa: F811
     engine = migration_engine
     prepare(engine)
@@ -82,6 +87,8 @@ def test_upgrade_keeps_all_keyed_records_and_matches_models(migration_engine):  
     after = read_rows(engine, names)
     for row in after["ebay_actions"]:
         assert row.pop("ad_listing_ids") is None
+    for row in after["ebay_offer_rules"]:
+        assert row.pop("waterfall_steps") is None
     assert after == before
     with engine.connect() as connection:
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []

@@ -11,7 +11,7 @@ from urllib.parse import urlsplit, urlunsplit
 _HOSTS = {
     "ebay": {"ebay.com", "ebay.co.uk", "ebay.ca", "ebay.com.au", "ebay.de", "ebay.fr", "ebay.it", "ebay.es"},
     "etsy": {"etsy.com"},
-    "poshmark": {"poshmark.com"},
+    "poshmark": {"poshmark.com", "poshmark.ca"},
     "mercari": {"mercari.com"},
     "depop": {"depop.com"},
 }

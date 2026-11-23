@@ -1,7 +1,7 @@
 import { listingScreenRead } from "./listingScreen";
 import { reportError } from "./errorReports";
 import type { VendooDraft } from "./vendooDraft";
-import type { CsvInput, CsvResult, CurrencyReport, Expense, ExpenseInput, ExpenseUpdate, MarketplaceCloudResult, MileageAmount, MileageInput, OfferLogResponse } from "./contract.gen";
+import type { ConnectionStatus, CsvInput, CsvResult, CurrencyReport, Expense, ExpenseInput, ExpenseUpdate, MarketplaceCloudResult, MileageAmount, MileageInput, OfferLogResponse, PlaidExchange, PlaidLinkToken, PlaidStatus } from "./contract.gen";
 import { ApiRequestError, currentHostedSession, retryAfterMs, studioFetch, studioUpload, hasHostedApiSession } from "./transport";
 import { trackPhotoUpload } from "../photoUploads";
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
@@ -85,15 +85,22 @@ import type {
 } from "./types";
 import { readSse } from "./sse";
 import { AssistantRefused, type AssistantMemory, type AssistantMessage, type AssistantStreamHandlers, type AssistantThread } from "./assistant";
-import type { Automation, AutomationApproval, AutomationBody, AutomationDraft, AutomationHistory, AutomationPreview, AutomationRun, RelistGap } from "./automations";
+import type {
+  Automation, AutomationApproval, AutomationBody, AutomationDraft, AutomationHistory, AutomationPreview, AutomationRun,
+  AutoRelistLog, AutoRelistMarketplace, AutoRelistRule, AutoRelistRuleBody, BulkScheduleResult, DraftScheduleState,
+  RelistGap, ScheduledPublishLog,
+} from "./automations";
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
 import type { AgentConnectionStatus, AgentConnectionTest, McpAccessToken, McpTokenCreateResponse } from "./agentConnection";
 import { browserTimeZone, type GoalMetric, type GoalPeriod, type HomeMutationResponse, type HomeSummaryResponse } from "./home";
-import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus, StillListedResponse } from "./directConnections";
+import type {
+  DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus,
+  SaleSyncOutcome, SaleTrackerResponse, StillListedResponse,
+} from "./directConnections";
 import type { DelistMarketplace, MarketplaceListings, MarketplaceMark, SalesCheck, SellerSale, SellerSaleResult } from "./marketplaceListings";
 import type { ListingReadiness, NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight } from "./nativeMarketplaces";
 import type { CloudConnectTokenResponse, ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
-import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
+import type { EbayOffer, EbayOfferSelection, EbayOffersStatus, EbayWaterfallStep } from "./ebayOffers";
 import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
 import type { ChromeImportMarketplace, MarketplaceImportHeld, MarketplaceImportPage, MarketplaceImportResult } from "./inventoryImport";
 import type { EtsyListing, EtsyListingState, EtsyOrders, EtsyOrderStatus, EtsyPage, EtsyShop } from "./etsy";
@@ -513,7 +520,32 @@ function postHostedPhoto(convId: string, file: File, marketplace?: string): Prom
   return studioFetch(`${BASE}/drafts/${encodeURIComponent(convId)}/photos${query}`, { method: "POST", body: file });
 }
 
+export type GenerationRating = {
+  rating: "up" | "down";
+  issues: string[];
+  note: string;
+};
+
+export type SellerCountry = "US" | "CA" | "GB" | "AU";
+type SellerRegion = { country: SellerCountry; currency: string; ebay_marketplace: string; poshmark_domain: string | null; marketplaces: string[] };
+
 export const api = {
+  plaid: {
+    status: (signal: AbortSignal) => read<PlaidStatus>("/business-expenses/plaid/status", { signal }),
+    linkToken: (connectionId?: string) => request<PlaidLinkToken>(
+      `/business-expenses/plaid/link-token${connectionId ? `?connection_id=${encodeURIComponent(connectionId)}` : ""}`,
+      { method: "POST" },
+    ),
+    exchange: (body: PlaidExchange) => request<ConnectionStatus>("/business-expenses/plaid/exchange", {
+      method: "POST", body: JSON.stringify(body),
+    }),
+    sync: (id: string) => request<ConnectionStatus>(
+      `/business-expenses/plaid/connections/${encodeURIComponent(id)}/sync`, { method: "POST" },
+    ),
+    disconnect: (id: string) => request<void>(
+      `/business-expenses/plaid/connections/${encodeURIComponent(id)}`, { method: "DELETE" },
+    ),
+  },
   businessExpenses: {
     list: (params: string, signal: AbortSignal) => read<Expense[]>(`/business-expenses?${params}`, { signal }),
     report: (params: string, signal: AbortSignal) => read<CurrencyReport[]>(`/business-expenses/profit-and-loss?${params}`, { signal }),
@@ -761,6 +793,47 @@ export const api = {
     approvals: () => request<AutomationApproval[]>("/automations/approvals"),
     approve: (row: AutomationApproval) =>
       request<AutomationApproval>(`/automations/approvals/${row.id}/approve`, { method: "POST", body: JSON.stringify({ confirm: true, action: row.action, marketplaces: row.marketplaces, revision_id: row.revision_id, review_token: row.review_token }) }),
+    scheduledDrafts: () => request<{ drafts: DraftScheduleState[] }>("/automations/scheduled-drafts").then((r) => r.drafts),
+    scheduledDraftLogs: (limit = 50) =>
+      request<{ logs: ScheduledPublishLog[] }>(`/automations/scheduled-drafts/logs?limit=${limit}`).then((r) => r.logs),
+    bulkScheduleDrafts: (conversationIds: string[], publishAt: string, marketplaces: string[]) =>
+      request<BulkScheduleResult>("/automations/scheduled-drafts/bulk-schedule", {
+        method: "POST",
+        body: JSON.stringify({ conversation_ids: conversationIds, publish_at: publishAt, marketplaces, confirm: true }),
+      }),
+    bulkUnscheduleDrafts: (conversationIds: string[]) =>
+      request<BulkScheduleResult>("/automations/scheduled-drafts/bulk-unschedule", {
+        method: "POST",
+        body: JSON.stringify({ conversation_ids: conversationIds }),
+      }),
+    autoRelistRules: () => request<{ rules: AutoRelistRule[] }>("/automations/auto-relist").then((r) => r.rules),
+    autoRelistLogs: (marketplace?: AutoRelistMarketplace, limit = 50) => {
+      const params = new URLSearchParams({ limit: String(limit) });
+      if (marketplace) params.set("marketplace", marketplace);
+      return request<{ logs: AutoRelistLog[] }>(`/automations/auto-relist/logs?${params}`).then((r) => r.logs);
+    },
+    saveAutoRelistRule: (marketplace: AutoRelistMarketplace, body: AutoRelistRuleBody) =>
+      request<AutoRelistRule>(`/automations/auto-relist/${marketplace}`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    runAutoRelist: () =>
+      request<{ ok: boolean; outcomes: AutoRelistLog[] }>("/automations/auto-relist/run", { method: "POST" }),
+  },
+  draftSchedule: {
+    get: (convId: string) => request<DraftScheduleState>(`/conversations/${encodeURIComponent(convId)}/schedule`),
+    setReady: (convId: string, readyToList: boolean) =>
+      request<DraftScheduleState>(`/conversations/${encodeURIComponent(convId)}/schedule/ready`, {
+        method: "PUT",
+        body: JSON.stringify({ ready_to_list: readyToList }),
+      }),
+    schedule: (convId: string, publishAt: string, marketplaces: string[]) =>
+      request<DraftScheduleState>(`/conversations/${encodeURIComponent(convId)}/schedule`, {
+        method: "POST",
+        body: JSON.stringify({ publish_at: publishAt, marketplaces, confirm: true }),
+      }),
+    unschedule: (convId: string) =>
+      request<DraftScheduleState>(`/conversations/${encodeURIComponent(convId)}/schedule`, { method: "DELETE" }),
   },
   errors: {
     list: () => request<RelistGap[]>("/errors"),
@@ -840,9 +913,14 @@ export const api = {
   },
   ebayOffers: {
     status: () => request<EbayOffersStatus>("/ebay-offers"),
-    preview: (selections: EbayOfferSelection[], discountPercent: number) =>
+    preview: (selections: EbayOfferSelection[], discountPercent: number, waterfallSteps?: EbayWaterfallStep[]) =>
       request<{ offers: EbayOffer[] }>("/ebay-offers/preview", {
-        method: "POST", body: JSON.stringify({ selections, discount_percent: discountPercent }),
+        method: "POST",
+        body: JSON.stringify({
+          selections,
+          discount_percent: discountPercent,
+          ...(waterfallSteps?.length ? { waterfall_steps: waterfallSteps } : {}),
+        }),
       }),
     send: (attemptIds: string[]) => request<{ offers: EbayOffer[] }>("/ebay-offers/send", {
       method: "POST", body: JSON.stringify({ attempt_ids: attemptIds, confirm: true }),
@@ -850,9 +928,16 @@ export const api = {
     enable: (attemptIds: string[]) => request<OkResponse>("/ebay-offers/enable", {
       method: "POST", body: JSON.stringify({ attempt_ids: attemptIds, confirm: true }),
     }),
-    enableAll: (discountPercent: number, minimumPrice: string) => request<OkResponse>("/ebay-offers/enable-all", {
-      method: "POST", body: JSON.stringify({ discount_percent: discountPercent, minimum_price: minimumPrice || null, confirm: true }),
-    }),
+    enableAll: (discountPercent: number, minimumPrice: string, waterfallSteps?: EbayWaterfallStep[]) =>
+      request<OkResponse>("/ebay-offers/enable-all", {
+        method: "POST",
+        body: JSON.stringify({
+          discount_percent: discountPercent,
+          minimum_price: minimumPrice || null,
+          confirm: true,
+          ...(waterfallSteps?.length ? { waterfall_steps: waterfallSteps } : {}),
+        }),
+      }),
     pause: (ruleId?: string) => request<OkResponse>(ruleId ? `/ebay-offers/rules/${ruleId}/pause` : "/ebay-offers/pause", { method: "POST" }),
     checked: (attemptId: string) => request<OkResponse>(`/ebay-offers/attempts/${attemptId}/checked`, {
       method: "POST", body: JSON.stringify({ confirm: true }),
@@ -1027,6 +1112,11 @@ export const api = {
     },
     dismiss: (saleId: string) => request<OkResponse>(`/marketplace-sales/${saleId}/dismiss`, { method: "POST" }),
     stillListed: (readOptions?: ReadOptions) => read<StillListedResponse>("/marketplace-sales/still-listed", readOptions),
+    tracker: (limit = 200) => request<SaleTrackerResponse>(`/marketplace-sales/tracker?limit=${limit}`),
+    retryTrackerEvent: (eventId: string) =>
+      request<{ ok: boolean; outcome: SaleSyncOutcome }>(`/marketplace-sales/tracker/${encodeURIComponent(eventId)}/retry`, {
+        method: "POST",
+      }),
   },
   health: () => request<{ status: string; version: string }>("/health"),
 
@@ -1043,6 +1133,13 @@ export const api = {
       data_dir?: string;
     }>("/status", options),
 
+  generationFeedback: {
+    get: (id: string) => read<{ revision_id: string; feedback: GenerationRating | null } | null>(`/conversations/${id}/generation-feedback`),
+    save: (id: string, revisionId: string, feedback: GenerationRating) => request<GenerationRating>(`/conversations/${id}/generation-feedback`, {
+      method: "PUT", body: JSON.stringify({ revision_id: revisionId, ...feedback }),
+    }),
+    summary: () => read<{ up: number; down: number; issues: Record<string, number> }>("/generation-feedback"),
+  },
   conversations: {
     copyBatchPreview: (ids: string[]) => request<{ rows: BatchCopyPreviewRow[] }>("/listings/copies/preview", { method: "POST", body: JSON.stringify({ conversation_ids: ids }) }),
     copyResult: (id: string, requestId: string) => request<Conversation>(`/conversations/${id}/copy-result/${requestId}`),
@@ -1065,6 +1162,8 @@ export const api = {
       request<Conversation>(`/conversations/${id}/unsettle`, { method: "POST" }),
     stop: (id: string) =>
       request<{ ok: boolean }>(`/conversations/${id}/stop`, { method: "POST" }),
+    cancelGeneration: (id: string) =>
+      request<{ ok: boolean }>(`/conversations/${id}/generate/cancel`, { method: "POST" }),
     activity: (id: string, options?: ReadOptions) => read<ConversationActivity>(`/conversations/${id}/activity`, options),
     messages: (id: string, options?: ReadOptions) => read<Message[]>(`/conversations/${id}/messages`, options),
     /** The item's photos, or with `marketplace` the photos added on that marketplace's form only. */
@@ -1280,6 +1379,11 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ autodelist }),
       }),
+    setSaleAutoAdjustQuantity: (autoAdjustQuantity: boolean) =>
+      request<SaleDetectionStatus>("/settings/sale-detection", {
+        method: "PUT",
+        body: JSON.stringify({ auto_adjust_quantity: autoAdjustQuantity }),
+      }),
     provider: () => request<ProviderStatus>("/settings/provider"),
     setProvider: (apiKey: string) =>
       request<OkResponse>("/settings/provider", {
@@ -1406,6 +1510,10 @@ export const api = {
         method: "PUT",
         body: JSON.stringify(models),
       }),
+    sellerRegion: () => read<SellerRegion>("/settings/seller-region"),
+    setSellerRegion: (country: SellerCountry) => request<SellerRegion>("/settings/seller-region", {
+      method: "PUT", body: JSON.stringify({ country }),
+    }),
     marketplaces: () =>
       request<{
         available: { id: string; label: string; fillable: boolean }[];

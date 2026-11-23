@@ -15,7 +15,7 @@ it.each([
 ] as const)("%s after an earlier rewrite fails", async (_, changeSelection, expected) => {
   let resolveBatch!: (value: BulkRegenerateResult) => void;
   const batch = new Promise<BulkRegenerateResult>((resolve) => { resolveBatch = resolve; });
-  const bulk: BulkRegenerate = { start: () => batch, run: null, running: false, pendingIds: [], cancel: () => {} };
+  const bulk: BulkRegenerate = { start: () => batch, run: null, running: false, pendingIds: [], cancelSubmission: () => {}, cancel: () => {} };
   const root = createRoot(document.createElement("div"));
   let current!: ListingSelection;
 

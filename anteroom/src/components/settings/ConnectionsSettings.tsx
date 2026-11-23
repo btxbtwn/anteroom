@@ -20,6 +20,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
 import { SettingsCode, SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
+import { SaleDetectionTracker } from "./SaleDetectionTracker";
 import { useWorkspaceRuntime } from "../../app/runtime";
 
 function ExtensionConnectionRow() {
@@ -341,9 +342,9 @@ function ChromeSessionRow({
   const cloudConnect = useMutation({
     mutationFn: async () => {
       if (!account) throw new Error("Sign in to your Anteroom account first.");
-      const { token } = await api.cloudSessions.connectToken(marketplace);
+      const { token, seller_region } = await api.cloudSessions.connectToken(marketplace);
       const { cloudExtension } = await import("../../api/cloudExtension");
-      const response = await cloudExtension(account).connectCloudSession(marketplace, token);
+      const response = await cloudExtension(account).connectCloudSession(marketplace, token, seller_region);
       if (!response.ok) {
         throw new Error(
           response.error || `Update Anteroom Bridge in desktop Chrome, sign in to ${name}, then choose Connect in Cloud.`,
@@ -544,6 +545,10 @@ function MarketplaceSection() {
     mutationFn: (autodelist: boolean) => api.settings.setSaleAutodelist(autodelist),
     onSuccess: (data) => queryClient.setQueryData(["sale-detection"], data),
   });
+  const saveAutoAdjust = useMutation({
+    mutationFn: (autoAdjust: boolean) => api.settings.setSaleAutoAdjustQuantity(autoAdjust),
+    onSuccess: (data) => queryClient.setQueryData(["sale-detection"], data),
+  });
   const chromeReady = Boolean(extension.data?.connected);
   const accounts = direct.data?.accounts;
   const relay = direct.data?.relay;
@@ -592,69 +597,108 @@ function MarketplaceSection() {
       {saveAutodelist.error ? <SettingsNote tone="error">{saveAutodelist.error.message}</SettingsNote> : null}
     </SettingsRow>
   );
+  const autoAdjustRow = (
+    <SettingsRow
+      id="sale-auto-adjust-quantity"
+      inlineControl
+      title="Auto-adjust quantity"
+      description="When a multi-quantity item sells with stock remaining, decrement quantities on other live marketplaces without delisting them. On Mercari (quantity capped at 1), automatically relist a fresh single-quantity listing and update tracking."
+      control={
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          {saveAutoAdjust.isPending ? (
+            <span role="status" className="inline-flex items-center gap-1">
+              <Spinner size="sm" tone="muted" aria-hidden role={undefined} />
+              Saving…
+            </span>
+          ) : null}
+          {detection.data === undefined ? (
+            detection.error ? <span>Unavailable</span> : <span role="status">Loading…</span>
+          ) : (
+            <Switch
+              size="sm"
+              checked={detection.data.auto_adjust_quantity === true}
+              disabled={saveAutoAdjust.isPending}
+              aria-label="Auto-adjust quantity across marketplaces when stock remains"
+              onCheckedChange={(checked) => saveAutoAdjust.mutate(checked)}
+            />
+          )}
+        </span>
+      }
+    >
+      {saveAutoAdjust.error ? <SettingsNote tone="error">{saveAutoAdjust.error.message}</SettingsNote> : null}
+    </SettingsRow>
+  );
   if (hosted) {
     return (
-      <SettingsSection id="accounts" title="Accounts">
-        {DIRECT_MARKETPLACES.map((marketplace) => (
-          <DirectConnectionRow key={marketplace.id} marketplace={marketplace} account={accounts?.[marketplace.id]}
-            salesSwitch={sessionWorkflows ? salesSwitch(marketplace.id, marketplace.name) : undefined} checkError={detection.data?.checks?.[marketplace.id]} />
-        ))}
-        <HostedChromeSessions salesSwitch={sessionWorkflows ? salesSwitch : undefined} checks={detection.data?.checks} />
-        {sessionWorkflows ? (
-          <>
-            <SettingsRow id="sale-detection" title="Sale detection"
-              description="Chrome checks for sales while this browser is connected, and saved sales stay if orders can’t be read; nothing comes down unless Delist the other marketplaces is on.">
-              {saveDetection.error ? <SettingsNote tone="error">{saveDetection.error.message}</SettingsNote> : null}
-            </SettingsRow>
-            {autodelistRow}
-          </>
-        ) : null}
-      </SettingsSection>
+      <>
+        <SettingsSection id="accounts" title="Accounts">
+          {DIRECT_MARKETPLACES.map((marketplace) => (
+            <DirectConnectionRow key={marketplace.id} marketplace={marketplace} account={accounts?.[marketplace.id]}
+              salesSwitch={sessionWorkflows ? salesSwitch(marketplace.id, marketplace.name) : undefined} checkError={detection.data?.checks?.[marketplace.id]} />
+          ))}
+          <HostedChromeSessions salesSwitch={sessionWorkflows ? salesSwitch : undefined} checks={detection.data?.checks} />
+          {sessionWorkflows ? (
+            <>
+              <SettingsRow id="sale-detection" title="Sale detection"
+                description="Chrome checks for sales while this browser is connected, and saved sales stay if orders can’t be read; nothing comes down unless Delist the other marketplaces is on.">
+                {saveDetection.error ? <SettingsNote tone="error">{saveDetection.error.message}</SettingsNote> : null}
+              </SettingsRow>
+              {autodelistRow}
+              {autoAdjustRow}
+            </>
+          ) : null}
+        </SettingsSection>
+        {sessionWorkflows ? <SaleDetectionTracker /> : null}
+      </>
     );
   }
   return (
-    <SettingsSection id="accounts" title="Accounts">
-      {DIRECT_MARKETPLACES.map((marketplace) => (
-        <DirectConnectionRow
-          key={marketplace.id}
-          marketplace={marketplace}
-          account={accounts?.[marketplace.id]}
-          salesSwitch={salesSwitch(marketplace.id, marketplace.name)}
-          checkError={detection.data?.checks?.[marketplace.id]}
+    <>
+      <SettingsSection id="accounts" title="Accounts">
+        {DIRECT_MARKETPLACES.map((marketplace) => (
+          <DirectConnectionRow
+            key={marketplace.id}
+            marketplace={marketplace}
+            account={accounts?.[marketplace.id]}
+            salesSwitch={salesSwitch(marketplace.id, marketplace.name)}
+            checkError={detection.data?.checks?.[marketplace.id]}
+          />
+        ))}
+        {CHROME_MARKET_ORDER.map((marketplace) => (
+          <ChromeSessionRow
+            key={marketplace}
+            marketplace={marketplace}
+            chromeReady={chromeReady}
+            salesSwitch={salesSwitch(marketplace, EXTENSION_SESSION_NAMES[marketplace])}
+            checkError={detection.data?.checks?.[marketplace]}
+          />
+        ))}
+        <SettingsRow
+          title="Where the sign-in lives"
+          description="These sign-ins live in Chrome and the extension, never in Anteroom, which asks you to sign in again when one expires."
         />
-      ))}
-      {CHROME_MARKET_ORDER.map((marketplace) => (
-        <ChromeSessionRow
-          key={marketplace}
-          marketplace={marketplace}
-          chromeReady={chromeReady}
-          salesSwitch={salesSwitch(marketplace, EXTENSION_SESSION_NAMES[marketplace])}
-          checkError={detection.data?.checks?.[marketplace]}
-        />
-      ))}
-      <SettingsRow
-        title="Where the sign-in lives"
-        description="These sign-ins live in Chrome and the extension, never in Anteroom, which asks you to sign in again when one expires."
-      />
-      <SettingsRow
-        id="sale-detection"
-        title="Sale detection"
-        description="Detect sales checks a few times an hour (Poshmark by comparing your Poshmark closet) and tells you when a listed item sells; nothing comes down unless Delist the other marketplaces is on."
-        status={
-          listening.length || (relay && !relay.connected && Object.values(accounts ?? {}).some((account) => account.connected)) ? (
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <StatusDot tone={relay?.connected ? "success" : "warning"} />
-              {relay?.connected
-                ? `Listening for ${listening.join(" and ")}`
-                : relay?.lastError || "Connecting"}
-            </span>
-          ) : null
-        }
-      >
-        {saveDetection.error ? <SettingsNote tone="error">{saveDetection.error.message}</SettingsNote> : null}
-      </SettingsRow>
-      {autodelistRow}
-    </SettingsSection>
+        <SettingsRow
+          id="sale-detection"
+          title="Sale detection"
+          description="Detect sales checks a few times an hour (Poshmark by comparing your Poshmark closet) and tells you when a listed item sells; nothing comes down unless Delist the other marketplaces is on."
+          status={
+            listening.length || (relay && !relay.connected && Object.values(accounts ?? {}).some((account) => account.connected)) ? (
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <StatusDot tone={relay?.connected ? "success" : "warning"} />
+                {relay?.connected
+                  ? `Listening for ${listening.join(" and ")}`
+                  : relay?.lastError || "Connecting"}
+              </span>
+            ) : null
+          }
+        >
+          {saveDetection.error ? <SettingsNote tone="error">{saveDetection.error.message}</SettingsNote> : null}
+        </SettingsRow>
+        {autodelistRow}
+        {autoAdjustRow}
+      </SettingsSection>
+      <SaleDetectionTracker />
+    </>
   );
 }
 

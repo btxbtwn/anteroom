@@ -20,6 +20,11 @@ const depop = {
 };
 
 describe("native form structure", () => {
+  it("reloads eBay condition rows when a seller switches between graded and ungraded", () => {
+    const listing = { direct_category_ids: { ebay: "183454" }, ebay_specifics: { condition: "2750" } };
+    expect(nativeFormStructureKey(listing, "ebay"))
+      .not.toBe(nativeFormStructureKey({ ...listing, ebay_specifics: { condition: "4000" } }, "ebay"));
+  });
   it("stays put when a value changes and moves when the category changes", () => {
     const priced = { ...depop, price: 40, brand: "Other" };
     expect(nativeFormStructureKey(priced, "depop")).toBe(nativeFormStructureKey(depop, "depop"));

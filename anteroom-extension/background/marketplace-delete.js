@@ -5,9 +5,10 @@
 const DELETE_DEADLINE_MS = 60000;
 const MERCARI_GONE = /^Item is no longer available\.?$/i;
 
-async function deletePoshmark(id, deadline) {
-  const account = await poshmarkAccount();
-  const client = poshmarkClient(deadline, await poshmarkCsrf(deadline));
+async function deletePoshmark(id, deadline, region) {
+  const origin = poshmarkOrigin(region);
+  const account = await poshmarkAccount(origin);
+  const client = poshmarkClient(deadline, await poshmarkCsrf(deadline, origin), origin);
   // Poshmark answers errors with HTTP 200 and an error body.
   const gone = error => ['PostRemovedError', 'NotFoundError'].includes(error?.marketplace_type);
   const read = async step => {
@@ -107,7 +108,7 @@ async function runMarketplaceDelete(payload) {
     return marketplaceFailure(marketplaceError('Confirm deleting a named marketplace listing.'), true);
   }
   try {
-    return await entry[1](String(payload.listing_id), Date.now() + DELETE_DEADLINE_MS);
+    return await entry[1](String(payload.listing_id), Date.now() + DELETE_DEADLINE_MS, payload.seller_region);
   } catch (error) {
     // Every delete reads the listing first, so repeating one is safe.
     return marketplaceFailure(error.code === 'uncertain' ? Object.assign(error, { code: 'network' }) : error, true);
