@@ -126,7 +126,10 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
         listing_json = activity.scoped_listing(before, listing_json, scope)
     from anteroom.services import choice_lists, native_contract
 
-    if source != "native_schema" and (native_contract.KEY in before or use_saved_defaults):
+    # Auto-relist saves the previous revision with one marketplace price changed
+    # and locked. Normalizing it as generated content would restore the old
+    # locks and drop that price, so it is kept as written, like a schema refresh.
+    if source not in {"native_schema", "auto_relist"} and (native_contract.KEY in before or use_saved_defaults):
         listing_json = native_contract.copy_listing(listing_json)
         if source in FILL_ON_SOURCES and native_contract.KEY in before:
             listing_json[native_contract.KEY] = choice_lists.compact_contracts(before[native_contract.KEY])
