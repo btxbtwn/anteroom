@@ -539,16 +539,22 @@ function MarkupOverlay({ edits, renderedEdits, pen, onChange }: {
 }) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  // Where the drag started. The release can arrive before the last move has rendered,
+  // so the mark is built from this and the release point, never from `draft`.
+  const start = useRef<{ x: number; y: number } | null>(null);
   const [hint, setHint] = useState<string | null>(null);
   const at = (event: ReactPointerEvent<HTMLElement>) => {
     const rect = frameRef.current?.getBoundingClientRect();
     if (!rect?.width || !rect.height) return null;
     return { x: (event.clientX - rect.left) / rect.width, y: (event.clientY - rect.top) / rect.height };
   };
-  const finish = () => {
-    if (!draft) return;
-    const mark = markFromDrag(pen.tool, draft.x1, draft.y1, draft.x2, draft.y2, pen.color, pen.text);
+  const finish = (event: ReactPointerEvent<HTMLElement>) => {
+    const from = start.current;
+    start.current = null;
     setDraft(null);
+    if (!from) return;
+    const to = at(event) ?? from;
+    const mark = markFromDrag(pen.tool, from.x, from.y, to.x, to.y, pen.color, pen.text);
     if (!mark) {
       setHint(pen.tool === "text" ? "Type a label first." : null);
       return;
@@ -582,14 +588,19 @@ function MarkupOverlay({ edits, renderedEdits, pen, onChange }: {
         const point = at(event);
         if (!point) return;
         event.currentTarget.setPointerCapture(event.pointerId);
+        start.current = point;
         setDraft({ x1: point.x, y1: point.y, x2: point.x, y2: point.y });
       }}
       onPointerMove={(event) => {
+        const from = start.current;
         const point = at(event);
-        if (draft && point) setDraft({ ...draft, x2: point.x, y2: point.y });
+        if (from && point) setDraft({ x1: from.x, y1: from.y, x2: point.x, y2: point.y });
       }}
       onPointerUp={finish}
-      onPointerCancel={() => setDraft(null)}
+      onPointerCancel={() => {
+        start.current = null;
+        setDraft(null);
+      }}
     >
       {(renderedEdits.redactions ?? []).map((box, position) => <RedactionBox key={`r${position}`} box={box} />)}
       {preview && "redaction" in preview ? <RedactionBox box={preview.redaction} /> : null}

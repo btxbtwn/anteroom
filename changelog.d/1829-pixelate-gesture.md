@@ -1,0 +1,1 @@
+- A Pixelate, blur, arrow or other mark drawn quickly on a photo is no longer sometimes lost when you let go.
