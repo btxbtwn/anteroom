@@ -17,6 +17,7 @@ import {
   mergeHomeSnapshot,
   patchHomeAfterDismiss,
   patchHomeAfterRestore,
+  settlePendingAttention,
   type AttentionItem,
   type AttentionKind,
   type AttentionTarget,
@@ -24,6 +25,7 @@ import {
   type GoalPace,
   type GoalPeriod,
   type HomeSummaryResponse,
+  type PendingAttentionOp,
   type SellerGoalProgress,
 } from "../api/home";
 import { homeQuery } from "../api/pageQueries";
@@ -155,8 +157,9 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
   const syncHome = async (next: HomeSummaryResponse | undefined) => {
     await queryClient.cancelQueries({ queryKey: queryDef.queryKey, exact: true });
     if (next) {
-      const local = queryClient.getQueryData<HomeSummaryResponse>(queryDef.queryKey);
-      queryClient.setQueryData(queryDef.queryKey, mergeHomeSnapshot(next, local));
+      const merged = mergeHomeSnapshot(next, pendingAttention.current);
+      settlePendingAttention(pendingAttention.current, next);
+      queryClient.setQueryData(queryDef.queryKey, merged);
     } else {
       await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
     }
@@ -177,6 +180,7 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
   const goalMutationScope = { id: "today-goals" };
   const attentionQueues = useRef(new Map<string, Promise<unknown>>());
   const attentionEpoch = useRef(new Map<string, number>());
+  const pendingAttention = useRef(new Map<string, PendingAttentionOp>());
 
   const bumpAttentionEpoch = (key: string) => {
     const next = (attentionEpoch.current.get(key) ?? 0) + 1;
@@ -228,19 +232,28 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
     onMutate: async (item) => {
       await queryClient.cancelQueries({ queryKey: queryDef.queryKey, exact: true });
       const epoch = bumpAttentionEpoch(item.key);
+      pendingAttention.current.set(item.key, { op: "dismiss", item });
       patchHomeCache((current) => patchHomeAfterDismiss(current, item));
       return { key: item.key, epoch };
     },
     onSuccess: (res, item, ctx) => {
       if (!attentionOpIsCurrent(item.key, ctx?.epoch)) return;
+      pendingAttention.current.set(item.key, {
+        op: "dismiss",
+        item,
+        dismissal: res.dismissal,
+      });
       if (res.home) {
-        queryClient.setQueryData(queryDef.queryKey, res.home);
+        const merged = mergeHomeSnapshot(res.home, pendingAttention.current);
+        settlePendingAttention(pendingAttention.current, res.home);
+        queryClient.setQueryData(queryDef.queryKey, merged);
         return;
       }
       patchHomeCache((current) => patchHomeAfterDismiss(current, item, res.dismissal));
     },
     onError: async (_err, item, ctx) => {
       if (!attentionOpIsCurrent(item.key, ctx?.epoch)) return;
+      pendingAttention.current.delete(item.key);
       await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
     },
   });
@@ -251,19 +264,24 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
     onMutate: async (itemKey) => {
       await queryClient.cancelQueries({ queryKey: queryDef.queryKey, exact: true });
       const epoch = bumpAttentionEpoch(itemKey);
+      pendingAttention.current.set(itemKey, { op: "restore" });
       patchHomeCache((current) => patchHomeAfterRestore(current, itemKey));
       return { key: itemKey, epoch };
     },
     onSuccess: (res, itemKey, ctx) => {
       if (!attentionOpIsCurrent(itemKey, ctx?.epoch)) return;
+      pendingAttention.current.set(itemKey, { op: "restore" });
       if (res.home) {
-        queryClient.setQueryData(queryDef.queryKey, res.home);
+        const merged = mergeHomeSnapshot(res.home, pendingAttention.current);
+        settlePendingAttention(pendingAttention.current, res.home);
+        queryClient.setQueryData(queryDef.queryKey, merged);
         return;
       }
       patchHomeCache((current) => patchHomeAfterRestore(current, res.item_key ?? itemKey));
     },
     onError: async (_err, itemKey, ctx) => {
       if (!attentionOpIsCurrent(itemKey, ctx?.epoch)) return;
+      pendingAttention.current.delete(itemKey);
       await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
     },
   });

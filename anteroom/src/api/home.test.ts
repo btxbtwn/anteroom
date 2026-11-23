@@ -3,8 +3,10 @@ import {
   mergeHomeSnapshot,
   patchHomeAfterDismiss,
   patchHomeAfterRestore,
+  settlePendingAttention,
   type AttentionItem,
   type HomeSummaryResponse,
+  type PendingAttentionOp,
 } from "./home";
 
 const baseItem = (key: string, kind: AttentionItem["kind"] = "failed_job"): AttentionItem => ({
@@ -61,16 +63,41 @@ describe("patchHomeAfterDismiss / restore", () => {
     expect(restored.needs_attention.find((item) => item.key === "a")?.reappears_in_days).toBeUndefined();
   });
 
-  it("keeps a local dismiss when a stale server snapshot still lists the alert as active", () => {
-    const local = patchHomeAfterDismiss(sample, sample.needs_attention[0]!, {
-      item_key: "a",
-      dismissed_at: "2026-11-22T12:00:00Z",
-      expires_at: "2026-11-29T12:00:00Z",
-      reappears_in_days: 7,
-    });
-    const merged = mergeHomeSnapshot(sample, local);
+  it("re-applies only pending dismissals onto a stale server snapshot", () => {
+    const pending = new Map<string, PendingAttentionOp>([
+      ["a", {
+        op: "dismiss",
+        item: sample.needs_attention[0]!,
+        dismissal: {
+          item_key: "a",
+          dismissed_at: "2026-11-22T12:00:00Z",
+          expires_at: "2026-11-29T12:00:00Z",
+          reappears_in_days: 7,
+        },
+      }],
+    ]);
+    const merged = mergeHomeSnapshot(sample, pending);
     expect(merged.needs_attention.map((item) => item.key)).toEqual(["b"]);
     expect(merged.dismissed.map((item) => item.key)).toEqual(["a"]);
-    expect(merged.goals).toEqual(sample.goals);
+  });
+
+  it("takes the server Active state when a local dismiss is not pending", () => {
+    const pending = new Map<string, PendingAttentionOp>();
+    const merged = mergeHomeSnapshot(sample, pending);
+    expect(merged.needs_attention.map((item) => item.key)).toEqual(["a", "b"]);
+    expect(merged.dismissed).toEqual([]);
+  });
+
+  it("drops pending dismissals once the server snapshot confirms them", () => {
+    const pending = new Map<string, PendingAttentionOp>([
+      ["a", { op: "dismiss", item: sample.needs_attention[0]! }],
+    ]);
+    const confirmed = patchHomeAfterDismiss(sample, sample.needs_attention[0]!);
+    settlePendingAttention(pending, confirmed);
+    expect(pending.size).toBe(0);
+
+    pending.set("a", { op: "dismiss", item: sample.needs_attention[0]! });
+    settlePendingAttention(pending, sample);
+    expect(pending.has("a")).toBe(true);
   });
 });

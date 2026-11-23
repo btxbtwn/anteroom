@@ -165,32 +165,58 @@ export function patchHomeAfterRestore(
   };
 }
 
+export type PendingAttentionOp =
+  | {
+      op: "dismiss";
+      item: AttentionItem;
+      dismissal?: Partial<AttentionDismissalResult> | null;
+    }
+  | { op: "restore" };
+
 /**
- * Keep newer local dismiss/restore patches when a slow Today snapshot arrives
- * (goal save still rebuilds home_summary and can lag behind an optimistic alert move).
+ * Apply a Today snapshot from a slow goal save without wiping in-flight alert
+ * moves. Only pending dismiss/restore keys are patched; every other alert takes
+ * the server state so cross-device and expired dismissals can show up.
+ * Confirmed keys are removed from `pending`.
  */
 export function mergeHomeSnapshot(
   server: HomeSummaryResponse,
-  local: HomeSummaryResponse | undefined,
+  pending: ReadonlyMap<string, PendingAttentionOp>,
 ): HomeSummaryResponse {
-  if (!local) return server;
+  if (pending.size === 0) return server;
   let merged = server;
-  for (const item of local.dismissed) {
-    if (merged.needs_attention.some((entry) => entry.key === item.key)) {
-      merged = patchHomeAfterDismiss(merged, item, {
-        item_key: item.key,
-        dismissed_at: item.dismissed_at ?? undefined,
-        expires_at: item.expires_at ?? undefined,
-        reappears_in_days: item.reappears_in_days,
-      });
+  for (const [key, action] of pending) {
+    if (action.op === "dismiss") {
+      const active = merged.needs_attention.find((entry) => entry.key === key);
+      if (active) {
+        merged = patchHomeAfterDismiss(merged, active, action.dismissal ?? {
+          item_key: key,
+          dismissed_at: action.item.dismissed_at,
+          expires_at: action.item.expires_at,
+          reappears_in_days: action.item.reappears_in_days,
+        });
+      }
+      continue;
     }
-  }
-  for (const item of local.needs_attention) {
-    if (merged.dismissed.some((entry) => entry.key === item.key)) {
-      merged = patchHomeAfterRestore(merged, item.key);
+    if (merged.dismissed.some((entry) => entry.key === key)) {
+      merged = patchHomeAfterRestore(merged, key);
     }
   }
   return merged;
+}
+
+/** Drop pending ops the server snapshot already reflects. */
+export function settlePendingAttention(
+  pending: Map<string, PendingAttentionOp>,
+  server: HomeSummaryResponse,
+): void {
+  for (const [key, action] of [...pending.entries()]) {
+    if (action.op === "dismiss") {
+      if (server.dismissed.some((entry) => entry.key === key)) pending.delete(key);
+      continue;
+    }
+    if (!server.dismissed.some((entry) => entry.key === key)) pending.delete(key);
+  }
 }
 
 export function browserTimeZone(): string {
