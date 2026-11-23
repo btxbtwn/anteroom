@@ -141,6 +141,24 @@ def test_sandbox_provider_can_take_as_long_as_a_model(monkeypatch):
     assert elapsed >= 0.4
 
 
+def test_sandbox_slow_stream_applies_only_to_the_current_turn(monkeypatch):
+    monkeypatch.setattr("anteroom.providers.sandbox.SLOW_WORD_SECONDS", 0)
+    provider = SandboxProvider()
+    messages = [{"role": "user", "content": "Tell me something long [sandbox:slow]"}]
+
+    async def chunks():
+        return [chunk async for chunk in provider.chat(messages)]
+
+    streamed = asyncio.run(chunks())
+    assert len(streamed) > 1
+    assert "The end." in "".join(streamed)
+    messages.extend([
+        {"role": "assistant", "content": "Sandbox is streaming"},
+        {"role": "user", "content": "And last week?"},
+    ])
+    assert asyncio.run(chunks()) == [REPLY]
+
+
 def test_install_blocks_outbound_connections_but_not_loopback():
     # install() patches httpx and socket for the whole process, so it runs in its own.
     script = """

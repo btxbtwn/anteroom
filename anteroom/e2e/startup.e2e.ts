@@ -1,7 +1,7 @@
 import { expect, test } from "./fixtures";
 
 test("a failed startup download offers to reload the workspace", async ({ page }) => {
-  const entryModule = "**/src/main.tsx";
+  const entryModule = (url: URL) => url.pathname === "/src/main.tsx";
   await page.route(entryModule, route => route.fulfill({ status: 404 }));
   await page.goto("/");
 

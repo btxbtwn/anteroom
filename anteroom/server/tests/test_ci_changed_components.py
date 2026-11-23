@@ -151,6 +151,41 @@ def test_test_only_change_does_not_run_browser_suites(tmp_path: Path) -> None:
     assert selected["frontend"] == "false"
 
 
+@pytest.mark.parametrize(
+    ("event", "paths", "suites"),
+    [
+        ("pull_request", "anteroom/e2e/chatStreaming.e2e.ts\ndocs/ci.md\n", ["sandbox"]),
+        ("pull_request", "anteroom/hosted-e2e/workspace.e2e.ts\n", ["hosted"]),
+        ("pull_request", "anteroom/e2e/a.e2e.ts\nanteroom/hosted-e2e/b.e2e.ts\n", ["sandbox", "hosted"]),
+        ("pull_request", "anteroom/e2e/fixtures.ts\n", ["sandbox", "hosted"]),
+        ("pull_request", "anteroom/e2e/a.e2e.ts\nanteroom/src/App.tsx\n", ["sandbox", "hosted"]),
+        ("pull_request", "unknown-input\n", ["sandbox", "hosted"]),
+        ("push", "anteroom/e2e/a.e2e.ts\n", ["sandbox", "hosted"]),
+        ("workflow_dispatch", "anteroom/hosted-e2e/a.e2e.ts\n", ["sandbox", "hosted"]),
+    ],
+)
+def test_browser_matrix_preserves_shared_and_release_coverage(tmp_path: Path, event, paths, suites) -> None:
+    selected = components(tmp_path, "--stdin", "--workflow", event, stdin=paths)
+    assert selected["browser"] == "true"
+    assert json.loads(selected["browser_suites"]) == [{"name": name} for name in suites]
+
+
+def test_browser_matrix_treats_a_moved_spec_as_both_paths(repository: tuple[Path, str]) -> None:
+    root, _ = repository
+    source = root / "anteroom/e2e/example.e2e.ts"
+    source.parent.mkdir()
+    source.write_text("test('sample', () => {});\n", encoding="utf-8")
+    git(root, "add", ".")
+    git(root, "commit", "-qm", "Add a sandbox spec")
+    base = git(root, "rev-parse", "HEAD")
+    destination = root / "anteroom/hosted-e2e/example.e2e.ts"
+    destination.parent.mkdir()
+    git(root, "mv", str(source), str(destination))
+    git(root, "commit", "-qm", "Move it to hosted")
+    selected = components(root, "--base", base, "--workflow", "pull_request")
+    assert json.loads(selected["browser_suites"]) == [{"name": "sandbox"}, {"name": "hosted"}]
+
+
 def test_a_rename_runs_both_components(repository: tuple[Path, str]) -> None:
     root, _ = repository
     source = root / "anteroom" / "src" / "moved.ts"

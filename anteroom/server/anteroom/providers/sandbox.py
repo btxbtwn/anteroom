@@ -125,7 +125,13 @@ class SandboxProvider:
         if STALL_MARKER in prompt:
             await _stall()
         await _model_wait()
-        if SLOW_MARKER in prompt:
+        # History can contain a slow turn even when the next reply should be immediate.
+        latest_user = next(
+            (message for message in reversed(messages or [])
+             if isinstance(message, dict) and message.get("role") == "user"),
+            {},
+        )
+        if SLOW_MARKER in _prompt_text([latest_user]):
             for word in SLOW_REPLY.split(" "):
                 await asyncio.sleep(SLOW_WORD_SECONDS)
                 yield word + " "

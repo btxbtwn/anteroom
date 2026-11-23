@@ -24,6 +24,9 @@ class PostgresTimingArtifacts(unittest.TestCase):
         path = '${{ runner.temp }}/pg-durations-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}.json'
         self.assertIn(f'--durations-path "{path}"', postgres)
         self.assertIn(f'test ! -e "{path}"', postgres)
+        self.assertIn('python -m pytest --collect-only -q -p pg_timing_seed', postgres)
+        self.assertIn('python -m pytest --rootdir=.', postgres)
+        self.assertIn(f'PG_DURATIONS_PATH: {path}', postgres)
         safe_path = '${{ runner.temp }}/pg-observations-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}/durations.json'
         self.assertIn(f'--input "{path}"', postgres)
         self.assertIn(f'--output "{safe_path}"', postgres)
@@ -62,6 +65,25 @@ class PostgresTimingArtifacts(unittest.TestCase):
                 self.assert_hash_only_upload_paths(value, [safe, inventory])
         value = yaml.load(f'path: |\n  {safe}\n  {inventory}\n', Loader=yaml.BaseLoader)['path']
         self.assert_hash_only_upload_paths(value, [safe, inventory])
+
+    def test_collect_only_expands_known_files_and_leaves_new_files_unweighted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            profile = json.loads((ROOT / '.github/scripts/pg-file-durations.json').read_text())
+            known = 'server/tests/test_ci_workflows.py'
+            target = root / known
+            target.parent.mkdir(parents=True)
+            target.write_text('def test_one(): pass\ndef test_two(): pass\n')
+            (target.parent / 'test_unmeasured.py').write_text('def test_three(): pass\n')
+            output = root / 'seed.json'
+            environment = {**os.environ, 'PYTEST_DISABLE_PLUGIN_AUTOLOAD': '1', 'PYTEST_PLUGINS': '',
+                           'PYTHONPATH': str(ROOT / '.github/scripts'), 'PG_DURATIONS_PATH': str(output)}
+            result = subprocess.run([sys.executable, '-m', 'pytest', '--collect-only', '-q', '-p', 'pg_timing_seed'],
+                                    cwd=root, env=environment, capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('3 tests collected', result.stdout)
+            self.assertEqual(json.loads(output.read_text()),
+                             {f'{known}::test_{name}': profile[known] for name in ('one', 'two')})
 
     def test_xdist_controller_writes_exact_shard_union_and_safe_durations(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -129,7 +151,7 @@ class PostgresTimingArtifacts(unittest.TestCase):
 
     @staticmethod
     def run_pytest(root, durations, group=None):
-        command = [sys.executable, '-m', 'pytest', '-p', 'xdist.plugin', '-p', 'pytest_split.plugin',
+        command = [sys.executable, '-m', 'pytest', '--rootdir=.', '-p', 'xdist.plugin', '-p', 'pytest_split.plugin',
                    '-q', '-n', '2', '--store-durations', '--clean-durations', '--durations-path', str(durations)]
         if group is not None:
             command += ['--splits', '2', '--group', str(group)]

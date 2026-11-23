@@ -147,7 +147,8 @@ def test_local_check_driver_uses_selected_groups(
     invoked = "\n".join(json.loads(line)[1] for line in commands.read_text().splitlines())
     assert ("npm run build" in invoked) == frontend
     assert ("-m pytest" in invoked) == backend
-    assert ("npm run e2e" in invoked) == browser
+    assert ("check-browser-shards.sh" in invoked) == browser
+    assert ("npm run e2e:hosted" in invoked) == browser
     assert ("-m pip_audit" in invoked) == audit
 
 

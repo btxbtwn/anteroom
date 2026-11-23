@@ -37,6 +37,7 @@ jobs:
       frontend: ${{ steps.changes.outputs.frontend }}
       backend: ${{ steps.changes.outputs.backend }}
       browser: ${{ steps.changes.outputs.browser }}
+      browser_suites: ${{ steps.changes.outputs.browser_suites }}
       health: ${{ steps.changes.outputs.health }}
       audit: ${{ steps.changes.outputs.audit }}
       extension: ${{ steps.changes.outputs.extension }}
@@ -51,14 +52,15 @@ jobs:
           BEFORE: ${{ github.event.before }}
           FULL_VERIFICATION: ${{ inputs.full_verification }}
         run: |
+          workflow=workflow_dispatch
           case "$GITHUB_EVENT_NAME" in
             # checkout tests a merge; its first parent is the actual base.
-            pull_request) base="$(git rev-parse HEAD^1)" ;;
-            push) base="$BEFORE" ;;
+            pull_request) base="$(git rev-parse --verify HEAD^1 2>/dev/null || true)"; workflow=pull_request ;;
+            push) base="$BEFORE"; workflow=push ;;
             *) base="" ;;
           esac
           if [ "$FULL_VERIFICATION" = "true" ]; then base=""; fi
-          python3 .github/scripts/changed-components.py --base "$base" >> "$GITHUB_OUTPUT"
+          python3 .github/scripts/changed-components.py --base "$base" --workflow "$workflow" >> "$GITHUB_OUTPUT"
 
   changelog:
     name: Changelog
@@ -215,7 +217,7 @@ jobs:
           ANTEROOM_HOSTED_BUILD: "1"
           VITE_SUPABASE_URL: "https://build-validation.supabase.co"
           VITE_SUPABASE_PUBLISHABLE_KEY: "public-build-validation"
-        run: npm run build
+        run: ./node_modules/.bin/vite build
 
   studio-browser:
     name: Studio browser tests (${{ matrix.suite.name }})
@@ -225,11 +227,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite:
-          - name: sandbox
-            script: e2e
-          - name: hosted
-            script: e2e:hosted
+        suite: ${{ fromJSON(needs.changes.outputs.browser_suites) }}
+    env:
+      PLAYWRIGHT_ENGINES: ${{ matrix.suite.name == 'sandbox' && 'chromium webkit' || 'chromium' }}
     defaults:
       run:
         working-directory: anteroom
@@ -257,53 +257,33 @@ jobs:
       - name: Install locked npm dependencies
         run: npm ci
       - name: Install Playwright OS dependencies
-        run: npx playwright install-deps chromium webkit
-      - name: Install Playwright browser binaries
-        run: npx playwright install chromium webkit
-      - name: Prepare sandbox evidence directory
-        id: browser-evidence-dir
-        if: matrix.suite.name == 'sandbox'
-        continue-on-error: true
         run: |
-          umask 077
-          directory="$RUNNER_TEMP/sandbox-browser-evidence"
-          mkdir "$directory"
-          node -e 'process.stdout.write(require("node:crypto").randomBytes(32))' > "$directory/identity-key"
+          read -r -a browsers <<< "$PLAYWRIGHT_ENGINES"
+          npx playwright install-deps "${browsers[@]}"
+      - name: Install Playwright browser binaries
+        run: |
+          read -r -a browsers <<< "$PLAYWRIGHT_ENGINES"
+          npx playwright install "${browsers[@]}"
       - name: Compile Bridge network rules in Chromium
         if: matrix.suite.name == 'sandbox'
         run: node scripts/check-bridge-network.mjs
       - name: Verify remembered Bridge approval in Chromium
         if: matrix.suite.name == 'sandbox'
         run: node scripts/check-bridge-connection.mjs
-      - name: Desktop and phone layouts (${{ matrix.suite.name }})
-        run: npm run ${{ matrix.suite.script }}
-        env:
-          SANDBOX_BROWSER_EVIDENCE_FILE: ${{ steps.browser-evidence-dir.outcome == 'success' && format('{0}/sandbox-browser-evidence/actual.json', runner.temp) || '' }}
-      - name: Measure sandbox browser collection parity
-        id: browser-evidence
-        if: steps.browser-evidence-dir.outcome == 'success'
-        continue-on-error: true
-        timeout-minutes: 2
-        run: |
-          directory="$RUNNER_TEMP/sandbox-browser-evidence"
-          reporter=../.github/scripts/browser-evidence-reporter.mjs
-          output() {
-            SANDBOX_BROWSER_EVIDENCE_FILE="$directory/$1.json" npm run e2e -- --list --reporter="$reporter" --output="$directory/list-output" "${@:2}" >/dev/null 2>&1 || {
-              echo "Sandbox collection failed for $1." >&2
-              return 1
-            }
-          }
-          output full
-          output shard-1 --shard=1/2
-          output shard-2 --shard=2/2
-          node ../.github/scripts/verify-browser-evidence.mjs "$directory"
+      - name: Desktop and phone layouts (sandbox)
+        if: matrix.suite.name == 'sandbox'
+        timeout-minutes: 40
+        run: bash scripts/check-browser-shards.sh "$RUNNER_TEMP/sandbox-browser"
+      - name: Desktop and phone layouts (hosted)
+        if: matrix.suite.name == 'hosted'
+        run: npm run e2e:hosted
       - name: Upload verified sandbox browser profile
-        if: matrix.suite.name == 'sandbox' && steps.browser-evidence.outcome == 'success'
+        if: matrix.suite.name == 'sandbox'
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sandbox-browser-profile-attempt-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/sandbox-browser-evidence/profile.json
+          path: ${{ runner.temp }}/sandbox-browser/evidence/profile.json
           if-no-files-found: error
           retention-days: 7
       - name: Keep marketplace-session desktop and phone screenshots
@@ -322,6 +302,8 @@ jobs:
           path: |
             anteroom/e2e/report
             anteroom/e2e/results
+            ${{ runner.temp }}/sandbox-browser/report-*
+            ${{ runner.temp }}/sandbox-browser/results-*
           retention-days: 7
 
   studio-code-health:
@@ -470,6 +452,8 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: anteroom/server/anteroom/cloud_runner/package-lock.json
       - name: Install cloud runner dependencies
         working-directory: anteroom/server/anteroom/cloud_runner
         run: npm ci --no-audit --no-fund
@@ -484,14 +468,15 @@ jobs:
           python ../.github/scripts/test-pg-inventory.py
         env:
           PYTEST_PLUGINS: ""
-      # Each xdist worker creates its own database on this server.
-      # A fresh, attempt-specific path supplies no input timings: assignments stay
-      # unchanged. The controller records setup/call/teardown duration per nodeid.
+      # Each xdist worker creates its own database on this server. Seed the
+      # splitter from reviewed file averages for the current test inventory.
+      # --clean-durations replaces the seed with this run's own observations.
       - id: postgres-tests
         run: |
           mkdir "${{ runner.temp }}/pg-observations-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}"
           test ! -e "${{ runner.temp }}/pg-durations-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}.json"
-          python -m pytest -q -n auto -p pg_inventory --splits 2 --group ${{ matrix.group }} \
+          PYTEST_PLUGINS='' python -m pytest --collect-only -q -p pg_timing_seed >/dev/null
+          python -m pytest --rootdir=. -q -n auto -p pg_inventory --splits 2 --group ${{ matrix.group }} \
           --store-durations --clean-durations \
           --durations-path "${{ runner.temp }}/pg-durations-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}.json"
         env:
@@ -500,6 +485,7 @@ jobs:
           ANTEROOM_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
           PYTHONPATH: ${{ github.workspace }}/.github/scripts
           PG_INVENTORY_PATH: ${{ runner.temp }}/pg-observations-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}/inventory.json
+          PG_DURATIONS_PATH: ${{ runner.temp }}/pg-durations-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}.json
 
       - name: Hash Postgres test identifiers for public artifacts
         if: success() && steps.postgres-tests.outcome == 'success'
@@ -509,8 +495,8 @@ jobs:
           --output "${{ runner.temp }}/pg-observations-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}/durations.json"
 
       # Failed/interrupted runs can leave partial JSON. Never upload those as a
-      # profile. A later rebalance must validate both successful shard inventories;
-      # these observations are not consumed by CI or shared through a cache.
+      # profile. The exact union is checked before CI passes. Observations stay
+      # separate from the checked-in scheduling input.
       - name: Keep successful Postgres shard duration observations
         if: success() && steps.postgres-tests.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

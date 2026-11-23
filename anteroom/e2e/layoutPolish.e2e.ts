@@ -23,7 +23,7 @@ async function textWidth(locator: Locator, text: string): Promise<number> {
 test.describe("layout", () => {
   test.skip(({ phone }) => phone, "Desktop layout: hover actions, the side-by-side table and the chats panel");
 
-  test("a hovered sidebar row ends its title before the row's actions", async ({ page, request }) => {
+  test("a hovered sidebar row ends its title before the row's actions", async ({ page, request }, info) => {
     await createListing(request, LONG_TITLE);
     await page.goto("/");
     await showStatusTab(page, "Draft");
@@ -36,10 +36,10 @@ test.describe("layout", () => {
     const textRight = await link.evaluate((element) => element.getBoundingClientRect().right - parseFloat(getComputedStyle(element).paddingRight));
     const actionsLeft = (await rename.boundingBox())!.x;
     expect(textRight).toBeLessThanOrEqual(actionsLeft);
-    await page.screenshot({ path: "e2e/results/layout/sidebar-row-hover-desktop.png", clip: { x: 0, y: 0, width: 360, height: 900 } });
+    await page.screenshot({ path: info.outputPath("sidebar-row-hover-desktop.png"), clip: { x: 0, y: 0, width: 360, height: 900 } });
   });
 
-  test("the inventory table gives titles the free width and leaves search to the sidebar", async ({ page, request }) => {
+  test("the inventory table gives titles the free width and leaves search to the sidebar", async ({ page, request }, info) => {
     const titleText = `${LONG_TITLE} ${crypto.randomUUID().slice(0, 6)}`;
     await createListing(request, titleText);
     await page.goto("/");
@@ -57,10 +57,10 @@ test.describe("layout", () => {
     await page.getByRole("searchbox", { name: /Search listings/ }).fill(titleText);
     await expect(table.getByRole("rowheader")).toHaveCount(1);
     await page.getByRole("searchbox", { name: /Search listings/ }).fill("");
-    await page.screenshot({ path: "e2e/results/layout/inventory-table-desktop.png" });
+    await page.screenshot({ path: info.outputPath("inventory-table-desktop.png") });
   });
 
-  test("the chats panel shows its whole search placeholder", async ({ page }) => {
+  test("the chats panel shows its whole search placeholder", async ({ page }, info) => {
     // History appears once there is a chat, and opens from the History button.
     expect((await page.request.post("/api/assistant/threads")).ok()).toBe(true);
     await openPage(page, "Assistant");
@@ -70,25 +70,25 @@ test.describe("layout", () => {
     const placeholder = (await search.getAttribute("placeholder")) ?? "";
     const room = await search.evaluate((element) => element.clientWidth);
     expect(await textWidth(search, placeholder)).toBeLessThanOrEqual(room);
-    await page.screenshot({ path: "e2e/results/layout/assistant-desktop.png" });
+    await page.screenshot({ path: info.outputPath("assistant-desktop.png") });
   });
 
-  test("the eBay tab names eBay once and offers one Connect eBay", async ({ page }) => {
+  test("the eBay tab names eBay once and offers one Connect eBay", async ({ page }, info) => {
     await openPage(page, "Marketplaces");
     const panel = page.getByRole("tabpanel");
     await expect(panel.getByRole("button", { name: "Connect eBay", exact: true })).toHaveCount(1);
     // The tab names the marketplace; the panel's own heading is for screen readers only.
     await expect(panel.getByRole("heading", { name: "eBay", exact: true, level: 2 })).toBeAttached();
     await expect(panel.getByRole("heading", { name: "eBay", exact: true, level: 2 })).toHaveClass(/sr-only/);
-    await page.screenshot({ path: "e2e/results/layout/marketplaces-desktop.png" });
+    await page.screenshot({ path: info.outputPath("marketplaces-desktop.png") });
   });
 
-  test("every automation row has its switch in the On column", async ({ page }) => {
+  test("every automation row has its switch in the On column", async ({ page }, info) => {
     await openPage(page, "Automations");
     const rows = page.getByRole("region", { name: "Your automations" }).getByRole("listitem");
     await expect(rows.first()).toBeVisible();
     for (const row of await rows.all()) await expect(row.getByRole("switch")).toHaveCount(1);
-    await page.screenshot({ path: "e2e/results/layout/automations-desktop.png" });
+    await page.screenshot({ path: info.outputPath("automations-desktop.png") });
   });
 });
 
@@ -100,7 +100,7 @@ test("phone screens after the layout fixes", async ({ page, phone }, info) => {
     await page.getByRole("button", { name: "Open navigation" }).first().click();
     await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name, exact: true }).click();
     await expect(page.getByRole("main")).toBeVisible();
-    await page.screenshot({ path: `e2e/results/layout/${name.toLowerCase()}-${info.project.name}.png` });
+    await page.screenshot({ path: info.outputPath(`${name.toLowerCase()}-${info.project.name}.png`) });
   }
 });
 
@@ -140,6 +140,6 @@ test("a phone page is one color from the status bar to the toolbar", async ({ pa
     });
     expect(surfaces.header, scheme).toBe(surfaces.canvas);
     expect(surfaces.page, scheme).toBe(surfaces.canvas);
-    await page.screenshot({ path: `e2e/results/layout/phone-canvas-${scheme}-${info.project.name}.png` });
+    await page.screenshot({ path: info.outputPath(`phone-canvas-${scheme}-${info.project.name}.png`) });
   }
 });
