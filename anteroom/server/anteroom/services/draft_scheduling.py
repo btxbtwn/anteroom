@@ -83,8 +83,30 @@ def _normalize_marketplaces(marketplaces: list[str] | None) -> list[str]:
     return seen
 
 
+def _declared_quantity(db: Session, conv_id: str) -> int | None:
+    """Return the listing's declared stock count (including eBay variation totals), or None."""
+    from anteroom.services.ebay_variations import total_quantity
+
+    listing = db.query(Listing).filter(Listing.conversation_id == conv_id).first()
+    if listing is None or not listing.current_revision_id:
+        return None
+    revision = db.get(ListingRevision, listing.current_revision_id)
+    if revision is None or not isinstance(revision.listing_json, dict):
+        return None
+    var_total = total_quantity(revision.listing_json)
+    if isinstance(var_total, int) and var_total > 0:
+        return var_total
+    raw = revision.listing_json.get("quantity")
+    if type(raw) is int and raw > 0:
+        return raw
+    return None
+
+
 def _is_sold_or_has_sale(db: Session, conv: Conversation | None) -> bool:
-    """Return True if the item is marked sold or has any paid/pending-cancellation sale."""
+    """Return True if the item is marked sold or its stock is exhausted by sales.
+
+    Multi-quantity items with stock still remaining are not treated as sold.
+    """
     if conv is None:
         return False
     if conv.status == "sold":
@@ -95,16 +117,42 @@ def _is_sold_or_has_sale(db: Session, conv: Conversation | None) -> bool:
         for entry in marks.values()
     ):
         return True
-    has_sale = (
-        db.query(MarketplaceSale.id)
+    sales = (
+        db.query(MarketplaceSale)
         .filter(
             MarketplaceSale.conversation_id == conv.id,
             MarketplaceSale.order_status.in_((*PAID_STATUSES, "cancellation_pending")),
         )
-        .first()
-        is not None
+        .all()
     )
-    return has_sale
+    if not sales:
+        return False
+
+    from anteroom.services.sale_inventory import stock_after_sale
+
+    checked_pairs: set[tuple[str, str | None]] = set()
+    has_observed_remaining = False
+    for sale in sales:
+        if sale.order_status not in PAID_STATUSES:
+            continue
+        pair = (sale.marketplace, sale.listing_id)
+        if pair in checked_pairs:
+            continue
+        checked_pairs.add(pair)
+        stock = stock_after_sale(db, conv.id, sale.marketplace, sale.listing_id)
+        if stock["status"] == "sold_out":
+            return True
+        if stock["status"] == "remaining" and isinstance(stock.get("remaining"), int) and stock["remaining"] > 0:
+            has_observed_remaining = True
+
+    if has_observed_remaining:
+        return False
+
+    declared_qty = _declared_quantity(db, conv.id)
+    if declared_qty is None or declared_qty <= 1:
+        return True
+    total_sold = sum(sale.quantity if type(sale.quantity) is int and sale.quantity > 0 else 1 for sale in sales)
+    return total_sold >= declared_qty
 
 
 def _schedule_content_digest(
@@ -342,14 +390,18 @@ def unschedule_on_edit(db: Session, conv_id: str, *, reason: str | None = None) 
 
 
 def unschedule_on_sale(db: Session, conv_id: str | None) -> bool:
-    """Automatically unschedule any pending draft when a sale is recorded or item is marked sold.
+    """Automatically unschedule a pending draft when the item sells out or is marked sold.
 
+    Multi-quantity items with stock still remaining stay scheduled.
     Does not commit: participates in the caller's save transaction.
     """
     if not conv_id:
         return False
     listing = db.query(Listing).filter(Listing.conversation_id == conv_id).first()
     if listing is None or listing.scheduled_status != "scheduled":
+        return False
+    conv = db.get(Conversation, conv_id)
+    if not _is_sold_or_has_sale(db, conv):
         return False
     return _clear_schedule(
         db,

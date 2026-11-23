@@ -132,6 +132,7 @@ export function BusinessExpenses({ report, mode, setMode }: {
             <p className="text-xs text-muted-foreground">{expense.incurred_date} · {CATEGORIES[expense.category]}</p>
           </div>
           <div className="flex items-center gap-2 text-sm">
+            {expense.accounting_type === "needs_review" && <Badge variant="outline">Needs review</Badge>}
             <Badge variant="secondary">{({ manual: "Manual", csv: "CSV", plaid: "Plaid" })[expense.import_source]}</Badge>
             <span className="tabular-nums">{expenseMoney(expense.amount_cents, expense.currency ?? "USD")}</span>
             <Button variant="ghost" onClick={() => setEditing(expense)}>Edit</Button>

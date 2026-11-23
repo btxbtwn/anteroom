@@ -1188,7 +1188,8 @@
           "accounting_type": {
             "enum": [
               "operating_expense",
-              "inventory_purchase"
+              "inventory_purchase",
+              "needs_review"
             ],
             "title": "Accounting Type",
             "type": "string"

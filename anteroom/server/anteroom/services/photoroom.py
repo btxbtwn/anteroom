@@ -160,7 +160,11 @@ def _prepare_upload(data: bytes) -> tuple[bytes, str, str]:
     from anteroom.services import image_decode
 
     img, _size = image_decode.decode(data, max_side=MAX_INPUT_SIDE)
-    has_alpha = "A" in img.getbands() and img.convert("RGBA").getchannel("A").getextrema()[0] < 255
+    has_alpha = False
+    if "A" in img.getbands():
+        extrema = img.convert("RGBA").getchannel("A").getextrema()
+        min_alpha = extrema[0] if isinstance(extrema, tuple) else extrema
+        has_alpha = min_alpha < 255
     buffer = BytesIO()
     if has_alpha:
         if img.mode != "RGBA":

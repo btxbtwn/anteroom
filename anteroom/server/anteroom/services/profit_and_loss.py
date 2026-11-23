@@ -71,6 +71,8 @@ def report(db: Session, start: date, end: date, mode: AccountingMode,
     expense_start = lower.date() + timedelta(days=lower.time() != time.min)
     expense_end = (upper - timedelta(microseconds=1)).date()
     for expense in db.scalars(entries(expense_start, expense_end)):
+        if expense.accounting_type == "needs_review":
+            continue
         if expense.accounting_type == "inventory_purchase":
             if mode == "cash":
                 totals[expense.currency][inventory_label] += expense.amount_cents

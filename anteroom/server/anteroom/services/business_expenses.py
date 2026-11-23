@@ -51,7 +51,7 @@ class ExpenseInput(BaseModel):
 class Expense(ExpenseInput):
     id: str
     revision: int
-    accounting_type: Literal["operating_expense", "inventory_purchase"]
+    accounting_type: Literal["operating_expense", "inventory_purchase", "needs_review"]
     import_source: Literal["manual", "csv", "plaid"]
 
 

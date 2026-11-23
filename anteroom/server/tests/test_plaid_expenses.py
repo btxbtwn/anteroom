@@ -487,10 +487,40 @@ def test_plaid_m6_503_unconfigured_m8_clothing_other_and_l7_categorized_refunds(
     connect(client)
     by_vendor = list_expenses(client)
     assert by_vendor["Goodwill"]["category"] == "other"
+    assert by_vendor["Goodwill"]["accounting_type"] == "needs_review"
     assert by_vendor["Nordstrom"]["category"] == "other"
+    assert by_vendor["Nordstrom"]["accounting_type"] == "needs_review"
     assert by_vendor["Pirate Ship Refund"]["amount_cents"] == -850
     assert by_vendor["Pirate Ship Refund"]["category"] == "shipping_labels"
+    assert by_vendor["Pirate Ship Refund"]["accounting_type"] == "operating_expense"
     assert "Bank Deposit" not in by_vendor
+
+    # Unreviewed thrift/clothing charges are excluded from both accrual and cash P&L until seller review.
+    from datetime import date
+    from anteroom.services import profit_and_loss
+
+    with Session(_engine) as db:
+        for mode in ("accrual", "cash"):
+            reports = profit_and_loss.report(db, date(2026, 1, 1), date(2026, 1, 31), mode, sales=[])
+            lines = {line.label: line.amount_cents for line in reports[0].lines}
+            assert lines["Operating Expenses"] == -850
+            assert lines.get("Other", 0) == 0
+            if mode == "cash":
+                assert lines["Inventory Purchases"] == 0
+
+    # Once the seller reviews and classifies Goodwill as inventory_purchases, it enters cash P&L (not accrual operating).
+    goodwill = by_vendor["Goodwill"]
+    updated = client.put(f"{EXPENSES}/{goodwill['id']}", json={
+        **goodwill, "category": "inventory_purchases", "expected_revision": goodwill["revision"],
+    })
+    assert updated.status_code == 200
+    assert updated.json()["accounting_type"] == "inventory_purchase"
+    with Session(_engine) as db:
+        accrual = {line.label: line.amount_cents for line in profit_and_loss.report(db, date(2026, 1, 1), date(2026, 1, 31), "accrual", sales=[])[0].lines}
+        cash = {line.label: line.amount_cents for line in profit_and_loss.report(db, date(2026, 1, 1), date(2026, 1, 31), "cash", sales=[])[0].lines}
+        assert accrual["Operating Expenses"] == -850
+        assert cash["Inventory Purchases"] == 2500
+        assert cash["Operating Expenses"] == -850
 
     # M6: missing Plaid credentials returns HTTP 503 (PlaidUnavailable).
     monkeypatch.delenv("PLAID_CLIENT_ID", raising=False)

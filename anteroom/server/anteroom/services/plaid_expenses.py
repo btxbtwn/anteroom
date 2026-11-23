@@ -375,8 +375,20 @@ def _import_key(environment: str, transaction_id: str) -> str:
     return sha256(f"plaid:{environment}:{transaction_id}".encode()).hexdigest()
 
 
+def _needs_review_row(row: dict | None) -> bool:
+    if not row:
+        return False
+    detail = (row.get("personal_finance_category") or {}).get("detailed") or ""
+    return detail.startswith("GENERAL_MERCHANDISE_") and detail.endswith(
+        ("_CLOTHING_AND_ACCESSORIES", "_THRIFT_STORES"),
+    )
+
+
 def _reconcile(db: Session, environment: str, delta: Delta) -> None:
-    changes = {_import_key(environment, key): _expense(row) if row else None for key, row in delta.changes.items()}
+    changes = {
+        _import_key(environment, key): (_expense(row), _needs_review_row(row)) if row else (None, False)
+        for key, row in delta.changes.items()
+    }
     keys = list(changes)
     # Work in chunks within one write transaction (including the cursor).
     for start in range(0, len(keys), 500):
@@ -397,7 +409,7 @@ def _reconcile(db: Session, environment: str, delta: Delta) -> None:
                 continue
             if expense is not None and (record is None or expense.revision != record.imported_revision):
                 continue
-            body = changes[key]
+            body, needs_review = changes[key]
             if body is None:
                 if expense is not None and record is not None:
                     db.delete(expense)
@@ -410,6 +422,8 @@ def _reconcile(db: Session, environment: str, delta: Delta) -> None:
                 expense = BusinessExpense(import_source="plaid", import_key=key)
                 db.add(expense)
             apply_input(expense, body)
+            if needs_review and body.category == "other":
+                expense.accounting_type = "needs_review"
             written.append((record, expense))
         db.flush()
         for record, expense in written:

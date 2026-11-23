@@ -961,12 +961,13 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         from anteroom.services import automation_actions
 
         now = _now()
-        # Case 1: unschedule_on_sale clears scheduled draft immediately.
+        # Case 1: unschedule_on_sale clears scheduled draft immediately when marked sold.
         c1, l1, _r1 = self._create_draft("Sold Before Due")
         draft_scheduling.schedule_draft(
             self.db, c1.id, marketplaces=["poshmark"], publish_at=now + timedelta(hours=1), confirm=True, now=now,
         )
         self.assertIsNotNone(l1.scheduled_publish_at)
+        c1.status = "sold"
         self.assertTrue(draft_scheduling.unschedule_on_sale(self.db, c1.id))
         self.db.commit()
         self.db.refresh(l1)
@@ -1008,6 +1009,38 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         ))
         self.assertFalse(res["ok"])
         self.assertIn("sold", res["error"].lower())
+
+        # Case 4: multi-quantity item with stock remaining is NOT treated as sold until exhausted.
+        c4, l4, r4 = self._create_draft("Multi Qty Shirt", quantity=3)
+        self.db.add(MarketplaceSale(
+            id=new_id(), marketplace="ebay", order_id="ord-multi-1", line_id="line-multi-1",
+            conversation_id=c4.id, quantity=1, order_status="paid",
+            sold_at=now, received_at=now, state="new",
+        ))
+        self.db.commit()
+        draft_scheduling.schedule_draft(
+            self.db, c4.id, marketplaces=["poshmark"], publish_at=now + timedelta(hours=1), confirm=True, now=now,
+        )
+        self.assertFalse(draft_scheduling.unschedule_on_sale(self.db, c4.id))
+        self.assertIsNotNone(l4.scheduled_publish_at)
+        with patch.object(automation_actions, "_native_one", AsyncMock(return_value={"marketplace": "poshmark", "ok": True})):
+            ok_partial = asyncio.run(automation_actions.publish_revision(c4.id, ["poshmark"], r4.id))
+        self.assertTrue(ok_partial["ok"])
+
+        # Selling the remaining 2 units exhausts stock and blocks publishing / unschedules the draft.
+        self.db.add(MarketplaceSale(
+            id=new_id(), marketplace="ebay", order_id="ord-multi-2", line_id="line-multi-2",
+            conversation_id=c4.id, quantity=2, order_status="paid",
+            sold_at=now, received_at=now, state="new",
+        ))
+        self.db.commit()
+        self.assertTrue(draft_scheduling.unschedule_on_sale(self.db, c4.id))
+        self.db.commit()
+        self.db.refresh(l4)
+        self.assertIsNone(l4.scheduled_publish_at)
+        sold_out = asyncio.run(automation_actions.publish_revision(c4.id, ["poshmark"], r4.id))
+        self.assertFalse(sold_out["ok"])
+        self.assertIn("sold", sold_out["error"].lower())
 
     def test_m1_abandoned_claim_wakes_scheduler_and_recovers(self):
         from anteroom.services.automation_scheduler import _has_due_scheduled_drafts
@@ -1156,6 +1189,33 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         asyncio.run(_run_auto_relist(now + timedelta(days=1)))
         self.assertFalse(auto_relist.has_due_relist_rules(self.db, now + timedelta(days=1, minutes=2)))
         self.assertTrue(auto_relist.has_due_relist_rules(self.db, now + timedelta(days=1, minutes=6)))
+
+        # Vendoo note-backed imported listing (no MarketplaceListing row) is still discovered.
+        import json
+
+        imported_id = "5f0000000000000000000992"
+        c_imp, _l_imp, _r_imp = self._create_draft("Vendoo Imported Coat")
+        c_imp.status = "listed"
+        c_imp.notes = json.dumps({
+            "vendooMarketplaces": ["Poshmark"],
+            "vendooListingUrls": {
+                "poshmark": f"https://poshmark.com/listing/vendoo-coat-{imported_id}",
+            },
+            "vendooDates": {
+                "listedByMarketplace": {
+                    "Poshmark": (now - timedelta(days=45)).isoformat(),
+                },
+            },
+        })
+        self.db.commit()
+        posh_rule = MarketplaceRelistRule(
+            id=new_id(), marketplace="poshmark", enabled=True, min_age_days=30, daily_cap=5,
+        )
+        found = auto_relist._eligible_candidates(
+            self.db, posh_rule, now + timedelta(days=2), conv_id=c_imp.id,
+        )
+        self.assertEqual([item["conversation_id"] for item in found], [c_imp.id])
+        self.assertEqual(found[0]["listing_id"], imported_id)
 
 
 if __name__ == "__main__":

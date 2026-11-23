@@ -480,13 +480,27 @@ def _eligible_candidates(
     age_cutoff = _sql_age_cutoff(rule, moment)
     query = (
         db.query(MarketplaceListing, Conversation)
-        .join(Conversation, Conversation.id == MarketplaceListing.conversation_id)
+        .select_from(Conversation)
+        .outerjoin(
+            MarketplaceListing,
+            (MarketplaceListing.conversation_id == Conversation.id)
+            & (MarketplaceListing.marketplace == rule.marketplace),
+        )
         .filter(
-            MarketplaceListing.marketplace == rule.marketplace,
-            MarketplaceListing.state.in_(LIVE_STATES),
-            MarketplaceListing.listing_id.isnot(None),
             Conversation.status != "sold",
-            (MarketplaceListing.listed_at.is_(None)) | (MarketplaceListing.listed_at <= age_cutoff),
+            (
+                (
+                    MarketplaceListing.id.isnot(None)
+                    & MarketplaceListing.state.in_(LIVE_STATES)
+                    & MarketplaceListing.listing_id.isnot(None)
+                    & ((MarketplaceListing.listed_at.is_(None)) | (MarketplaceListing.listed_at <= age_cutoff))
+                )
+                | (
+                    MarketplaceListing.id.is_(None)
+                    & Conversation.notes.isnot(None)
+                    & (Conversation.notes != "")
+                )
+            ),
         )
     )
     if conv_id is not None:
@@ -496,7 +510,7 @@ def _eligible_candidates(
         return []
 
     matched_conv_ids = [conv.id for _ml, conv in rows]
-    sold_convs = {
+    sold_convs: set[str] = {
         row[0]
         for row in db.query(MarketplaceSale.conversation_id)
         .filter(
@@ -504,6 +518,7 @@ def _eligible_candidates(
             MarketplaceSale.order_status.in_((*PAID_STATUSES, "cancellation_pending")),
         )
         .all()
+        if row[0] is not None
     }
     excluded_convs: set[str] = set(sold_convs)
     if respect_backoff:
@@ -518,6 +533,7 @@ def _eligible_candidates(
                 MarketplaceRelistLog.created_at >= backoff_since,
             )
             .all()
+            if row[0] is not None
         )
     if rule.marketplace == "ebay":
         cycle_since = moment - EBAY_CYCLE_DEDUPE_WINDOW
@@ -531,6 +547,7 @@ def _eligible_candidates(
                 MarketplaceRelistLog.created_at >= cycle_since,
             )
             .all()
+            if row[0] is not None
         )
 
     eligible_rows = [(ml, conv) for ml, conv in rows if conv.id not in excluded_convs]
@@ -540,7 +557,11 @@ def _eligible_candidates(
     conv_ids = [conv.id for conv in eligible_convs]
 
     known_by_conv = listings_for(db, eligible_convs)
-    listed_index = load_listed_index(db) if any(ml.listed_at is None for ml, _conv in eligible_rows) else None
+    listed_index = (
+        load_listed_index(db)
+        if any(ml is None or ml.listed_at is None for ml, _conv in eligible_rows)
+        else None
+    )
     listings_by_conv = {row.conversation_id: row for row in db.query(Listing).filter(Listing.conversation_id.in_(conv_ids)).all()}
     rev_ids = [row.current_revision_id for row in listings_by_conv.values() if row.current_revision_id]
     revs_by_id = {row.id: row for row in db.query(ListingRevision).filter(ListingRevision.id.in_(rev_ids)).all()} if rev_ids else {}
@@ -550,11 +571,11 @@ def _eligible_candidates(
         entry = (known_by_conv.get(conv.id) or {}).get(rule.marketplace) or {}
         if entry.get("sold_here") or entry.get("state") not in (None, "live", "failed") or not entry.get("listing_id"):
             continue
-        if ml.listed_at is not None:
+        if ml is not None and ml.listed_at is not None:
             listed_at = ml.listed_at
         else:
             assert listed_index is not None
-            listed_at, _src = resolve_listed_at(listed_index, conv, [ml], {rule.marketplace})
+            listed_at, _src = resolve_listed_at(listed_index, conv, [ml] if ml is not None else [], {rule.marketplace})
         if not is_due_for_relist(rule.marketplace, listed_at, rule, moment):
             continue
 
@@ -564,9 +585,9 @@ def _eligible_candidates(
         notes = parse_notes(conv.notes)
         raw_labels = notes.get("vendooLabels") or ""
         labels = [part.strip() for part in str(raw_labels).split(",") if part.strip()]
-        obs = ml.inventory_observation if isinstance(ml.inventory_observation, dict) else {}
+        obs = ml.inventory_observation if (ml is not None and isinstance(ml.inventory_observation, dict)) else {}
         likes = obs.get("likes") if isinstance(obs.get("likes"), int) else obs.get("watchers")
-        price_raw = ml.listed_price if ml.listed_price is not None else data.get("price")
+        price_raw = ml.listed_price if (ml is not None and ml.listed_price is not None) else data.get("price")
         try:
             price = float(price_raw) if price_raw is not None else None
         except (TypeError, ValueError):

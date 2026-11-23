@@ -684,13 +684,28 @@ def test_mcp_l8_batch_cap_auth_rate_limit_and_timeout(monkeypatch):
         timed_out = _rpc(client, "ping")
     assert timed_out.status_code == 504
 
-    # L8: per-IP failed arm_ Bearer auth attempts rate-limit at 429 with Retry-After.
+    # L8: per-IP failed arm_ Bearer auth attempts rate-limit at 429 with Retry-After,
+    # and desktop requests cannot bypass the limiter by rotating Fly-Client-IP.
     mcp_tokens.clear_auth_failures()
     try:
-        for _ in range(mcp_tokens.AUTH_FAIL_MAX):
-            resp = _rpc(client, "ping", extra_headers={"Authorization": "Bearer arm_wrong_token"})
+        for idx in range(mcp_tokens.AUTH_FAIL_MAX):
+            resp = _rpc(
+                client,
+                "ping",
+                extra_headers={
+                    "Authorization": "Bearer arm_wrong_token",
+                    "Fly-Client-IP": f"203.0.113.{idx + 1}",
+                },
+            )
             assert resp.status_code == 401
-        throttled = _rpc(client, "ping", extra_headers={"Authorization": "Bearer arm_wrong_token"})
+        throttled = _rpc(
+            client,
+            "ping",
+            extra_headers={
+                "Authorization": "Bearer arm_wrong_token",
+                "Fly-Client-IP": "203.0.113.250",
+            },
+        )
         assert throttled.status_code == 429
         assert throttled.headers.get("Retry-After") == "60"
     finally:

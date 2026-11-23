@@ -28,10 +28,11 @@ _MCP_RPC_TIMEOUT_SECONDS = 30.0
 _MCP_STORAGE_CLEANUP_TIMEOUT_SECONDS = 15.0
 
 
-def _client_key(request: Request) -> str:
-    forwarded = (request.headers.get("fly-client-ip") or "").strip()
-    if forwarded:
-        return forwarded
+def _client_key(request: Request, *, is_hosted: bool = False) -> str:
+    if is_hosted:
+        forwarded = (request.headers.get("fly-client-ip") or "").strip()
+        if forwarded:
+            return forwarded
     return request.client.host if request.client and request.client.host else "unknown"
 
 
@@ -81,9 +82,9 @@ def _run_mcp_call(
 
 @router.post("")
 async def mcp_post(request: Request):
-    is_hosted = getattr(request.state, "seller", None) is not None
+    is_hosted = getattr(request.state, "seller", None) is not None or hasattr(request.app.state, "session_verifier")
     bearer = _extract_bearer(request)
-    client_key = _client_key(request)
+    client_key = _client_key(request, is_hosted=is_hosted)
     if not is_hosted and bearer is not None and mcp_tokens.is_auth_rate_limited(client_key):
         return JSONResponse(
             {"detail": "Too many failed authentication attempts. Try again shortly."},
