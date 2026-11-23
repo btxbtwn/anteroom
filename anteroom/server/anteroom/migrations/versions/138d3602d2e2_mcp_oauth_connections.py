@@ -1,7 +1,7 @@
 """Add apps connected to MCP by signing in (Claude, ChatGPT, Gemini)
 
 Revision ID: 138d3602d2e2
-Revises: 5c2e8f1a9d37
+Revises: a8f1c4e29b70
 Create Date: 2026-11-23 06:30:00.000000
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = "138d3602d2e2"
-down_revision = "5c2e8f1a9d37"
+down_revision = "a8f1c4e29b70"
 branch_labels = None
 depends_on = None
 
