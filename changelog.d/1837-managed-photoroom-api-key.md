@@ -1,0 +1,1 @@
+- Hosted AI Studio can use Anteroom's Photoroom key automatically (`ANTEROOM_MANAGED_PHOTOROOM_KEY`), with no per-account Photoroom setup.

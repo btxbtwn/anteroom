@@ -83,3 +83,30 @@ it("hides Providers on hosted workspaces with managed AI and renders General ins
   expect(html).not.toContain("Listing AI");
   expect(html).not.toContain("private vault");
 });
+
+it("hides the Photoroom key field when managed Photoroom is on", () => {
+  const client = new QueryClient();
+  client.setQueryData(["settings-provider"], { primary: "openai", fallback: "none", photo_provider: "same", chatgpt: { signed_in: false } });
+  client.setQueryData(["ai-keys"], { providers: [{ id: "openai", sign_in: false }] });
+  client.setQueryData(["settings-photoroom"], { configured: false, masked_key: null, source: "server", available: true });
+  const html = renderToStaticMarkup(
+    <WorkspaceRuntimeProvider
+      value={{
+        hosted: true,
+        features: new Set(["managed_photoroom"]),
+        views: new Set(["settings"]),
+        marketplaceForms: new Set(),
+        actionMarketplaces: new Set(),
+      }}
+    >
+      <QueryClientProvider client={client}>
+        <ProvidersSettings />
+      </QueryClientProvider>
+    </WorkspaceRuntimeProvider>,
+  );
+  expect(html).toContain("AI Studio uses Anteroom");
+  expect(html).toContain("Photoroom account");
+  expect(html).toContain("Photoroom key automatically");
+  expect(html).not.toContain("photoroom.com/api");
+  expect(html).not.toContain('placeholder="sk_pr_..."');
+});

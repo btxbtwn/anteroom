@@ -338,8 +338,10 @@ function BraveSearchSection({ chatgptSignedIn }: { chatgptSignedIn: boolean }) {
   );
 }
 
-/** AI Studio's Photoroom key: on the Mac it lives in Keychain, on the web in the account's vault. */
+/** AI Studio's Photoroom key: on the Mac it lives in Keychain, on the web in the account's vault unless managed. */
 function PhotoroomSection({ hosted }: { hosted: boolean }) {
+  const { features } = useWorkspaceRuntime();
+  const managed = features.has("managed_photoroom");
   const queryClient = useQueryClient();
   const { data: photoroom } = useQuery({ queryKey: ["settings-photoroom"], queryFn: api.settings.photoroom });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["settings-photoroom"] });
@@ -349,13 +351,13 @@ function PhotoroomSection({ hosted }: { hosted: boolean }) {
   const failure = (setKeyMutation.error ?? deleteKeyMutation.error) as Error | null;
   const status = failure ? (
     <span className="text-destructive-foreground">{failure.message}</span>
+  ) : managed || photoroom?.source === "server" ? (
+    "AI Studio uses Anteroom's Photoroom account"
   ) : configured ? (
     <span className="inline-flex items-center gap-1.5">
       <span className="size-1.5 rounded-full bg-success" aria-hidden />
       AI Studio ready · <SettingsCode>{photoroom?.masked_key}</SettingsCode>
     </span>
-  ) : photoroom?.source === "server" ? (
-    "AI Studio uses Anteroom's Photoroom account"
   ) : photoroom?.source === "sandbox" ? (
     "Sandbox: AI Studio draws a stand-in and never calls Photoroom"
   ) : (
@@ -368,18 +370,22 @@ function PhotoroomSection({ hosted }: { hosted: boolean }) {
         id="photoroom-api-key"
         title="API key"
         description={
-          <>
-            Powers AI Studio in the photo editor: background removal, shadows, ghost mannequin, flat lay and virtual
-            models. Get a key at{" "}
-            <a className="text-foreground underline-offset-4 hover:underline" href="https://www.photoroom.com/api" target="_blank" rel="noreferrer">
-              photoroom.com/api
-            </a>
-            . {hosted ? "Stored encrypted in your account's vault" : "Stored in macOS Keychain"} and never sent to the browser.
-          </>
+          managed ? (
+            <>Powers AI Studio in the photo editor: background removal, shadows, ghost mannequin, flat lay and virtual models. Hosted accounts use Anteroom's Photoroom key automatically.</>
+          ) : (
+            <>
+              Powers AI Studio in the photo editor: background removal, shadows, ghost mannequin, flat lay and virtual
+              models. Get a key at{" "}
+              <a className="text-foreground underline-offset-4 hover:underline" href="https://www.photoroom.com/api" target="_blank" rel="noreferrer">
+                photoroom.com/api
+              </a>
+              . {hosted ? "Stored encrypted in your account's vault" : "Stored in macOS Keychain"} and never sent to the browser.
+            </>
+          )
         }
         status={status}
         control={
-          configured ? (
+          !managed && configured ? (
             <Button size="xs" variant="ghost-destructive" disabled={setKeyMutation.isPending || deleteKeyMutation.isPending}
               onClick={() => { setKeyMutation.reset(); deleteKeyMutation.mutate(); }}>
               <Trash2Icon />
@@ -388,12 +394,14 @@ function PhotoroomSection({ hosted }: { hosted: boolean }) {
           ) : null
         }
       >
-        <ApiKeyField
-          label="Photoroom API key"
-          placeholder="sk_pr_..."
-          saving={setKeyMutation.isPending || deleteKeyMutation.isPending}
-          onSave={(key) => { deleteKeyMutation.reset(); setKeyMutation.mutate(key); }}
-        />
+        {managed ? null : (
+          <ApiKeyField
+            label="Photoroom API key"
+            placeholder="sk_pr_..."
+            saving={setKeyMutation.isPending || deleteKeyMutation.isPending}
+            onSave={(key) => { deleteKeyMutation.reset(); setKeyMutation.mutate(key); }}
+          />
+        )}
       </SettingsRow>
     </SettingsSection>
   );
