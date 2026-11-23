@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import page from "../../cloud.html?raw";
+import localPage from "../../index.html?raw";
 import appIconUrl from "../../desktop/AppIcon.png";
 import themeBoot from "../../public/assets/theme-boot.js?raw";
 
@@ -27,6 +28,12 @@ it("points the startup splash logo at an icon Vite bundles into /assets", () => 
   const match = page.match(/<img\s+class="startup-logo"\s+src="([^"]+)"/);
   expect(match?.[1]).toBe("/desktop/AppIcon.png");
   expect(appIconUrl).toContain("AppIcon.png");
+});
+
+it("keeps the startup shell identifier stable across local and hosted releases", () => {
+  expect(page).toContain('<main id="cloud-startup"');
+  expect(localPage).toContain('<main id="cloud-startup"');
+  expect(themeBoot).toContain('document.getElementById("cloud-startup")');
 });
 
 it("publishes SEO, canonical, Open Graph, and Twitter metadata", () => {

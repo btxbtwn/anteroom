@@ -15,10 +15,11 @@
 })();
 
 // The application cannot report errors or offer a reload until its modules run.
-// The ID only exists on the static shell, which React replaces when it starts.
+// Both static shells use the same ID. Keep it stable because the HTML and script
+// can come from different builds during a rollout.
 (function () {
   function showRecovery(failed) {
-    var shell = document.getElementById("app-startup");
+    var shell = document.getElementById("cloud-startup");
     if (!shell) return;
     var status = shell.querySelector(".startup-status");
     var reload = shell.querySelector(".startup-reload");
