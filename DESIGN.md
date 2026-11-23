@@ -241,9 +241,13 @@ Reject a change that adds any of these:
 ## Research before you design
 
 Use the living [design reference library](docs/design-references.md) to find
-relevant catalogs and product examples. Consult what helps the current task
-and maintain the directory as sources change; it supplements these rules
-rather than adding another checklist.
+relevant catalogs, product examples and research. It lists the products to
+compare against (cross-listing tools, seller admins, the workspaces Anteroom
+looks like, and open-source apps whose code and history are public) and where
+each records its changes. When you borrow from one, link the dated changelog
+entry, release, pull request or archived page, not an undated screenshot.
+Consult what helps the current task and maintain the directory as sources
+change; it supplements these rules rather than adding another checklist.
 
 Before building or changing a visible element, look up how established design
 systems handle that element: Material Design 3, Apple's Human Interface
