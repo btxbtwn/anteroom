@@ -27,7 +27,6 @@ from anteroom.routes import plaid
 from anteroom.routes import ai_keys, business_expenses, sales_ledger, bulk_delete, bulk_edit, bulk_marketplace, listing_copies, listing_templates
 from anteroom.routes import automations as automations_route
 from anteroom.routes.error_reports import router as error_reports_router
-from anteroom.routes.operator_usage import router as operator_usage_router
 from anteroom.routes import errors as errors_route
 from anteroom.routes import listing_videos
 from anteroom.routes import home as home_route
@@ -300,7 +299,6 @@ app.include_router(updates.router)
 app.include_router(changelog.router)
 app.include_router(desktop.router)
 app.include_router(error_reports_router)
-app.include_router(operator_usage_router)
 app.include_router(home_route.router)
 app.include_router(mcp_route.router)
 

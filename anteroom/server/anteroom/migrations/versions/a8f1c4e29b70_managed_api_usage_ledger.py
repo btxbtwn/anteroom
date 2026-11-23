@@ -54,7 +54,8 @@ def upgrade() -> None:
     for role in ("anon", "authenticated"):
         if bind.scalar(sa.text("SELECT 1 FROM pg_roles WHERE rolname = :role"), {"role": role}):
             op.execute(f"REVOKE ALL ON public.api_usage_events FROM {role}")
-    op.execute("GRANT SELECT, INSERT ON public.api_usage_events TO anteroom_seller")
+    # DELETE lets account deletion clear the seller's own rows (seller_owner still scopes it).
+    op.execute("GRANT SELECT, INSERT, DELETE ON public.api_usage_events TO anteroom_seller")
     op.execute(
         f"CREATE POLICY seller_owner ON public.api_usage_events AS RESTRICTIVE FOR ALL TO PUBLIC "
         f"USING ({owner}) WITH CHECK ({owner})"

@@ -230,3 +230,20 @@ def test_operator_usage_route_requires_operator(db, monkeypatch):
     assert "text/csv" in csv.headers["content-type"]
     assert SELLER_A in csv.text
     assert "0.03" in csv.text
+
+
+def test_operator_usage_route_is_served_by_the_hosted_app(db, monkeypatch):
+    from anteroom.hosted import create_app
+    from anteroom.routes import operator_usage
+    from anteroom.services.seller_sessions import SellerIdentity
+
+    monkeypatch.delenv("ANTEROOM_BACKGROUND_WORKER", raising=False)
+    monkeypatch.setenv("ANTEROOM_OPERATOR_USER_ID", SELLER_B)
+    monkeypatch.setattr(operator_usage, "_report_db", lambda: db)
+    verifier = SimpleNamespace(verify=lambda token: SellerIdentity(user_id=token))
+    with TestClient(create_app("https://example.supabase.co", session_verifier=verifier)) as client:
+        assert client.get("/api/operator/usage").status_code == 401
+        assert client.get("/api/operator/usage", headers={"Authorization": f"Bearer {SELLER_A}"}).status_code == 403
+        response = client.get("/api/operator/usage", headers={"Authorization": f"Bearer {SELLER_B}"})
+    assert response.status_code == 200
+    assert response.json()["sellers"] == []

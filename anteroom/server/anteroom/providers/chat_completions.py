@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from anteroom.services import model_usage
 
+import asyncio
 import json
 import re
 from dataclasses import dataclass
@@ -328,7 +329,8 @@ class ChatCompletionsProvider:
             call.usage(payload.get("usage"), anthropic=False)
             if self.name == "openrouter":
                 from anteroom.services import api_usage
-                api_usage.note_openrouter_call(call.record, provider_request_id=payload.get("id"))
+                # The ledger insert is a database round trip; keep it off the event loop.
+                await asyncio.to_thread(api_usage.note_openrouter_call, call.record, provider_request_id=payload.get("id"))
             return payload
 
     async def _complete(self, messages: list[dict], model: str, *, reasoning: bool | dict = True) -> str:
@@ -399,7 +401,7 @@ class ChatCompletionsProvider:
                         raise EmptyCompletionError(self.spec.label, model, finish, reasoning_chars)
             if self.name == "openrouter":
                 from anteroom.services import api_usage
-                api_usage.note_openrouter_call(call.record, provider_request_id=request_id)
+                await asyncio.to_thread(api_usage.note_openrouter_call, call.record, provider_request_id=request_id)
 
 
 def openrouter_sources(payload: dict) -> list[dict]:

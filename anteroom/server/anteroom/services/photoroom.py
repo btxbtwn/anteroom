@@ -249,7 +249,8 @@ async def edit(image: bytes, options: StudioOptions) -> bytes:
         raise PhotoroomError("Photoroom answered without an image. Try again.")
     if source == "server":
         from anteroom.services import api_usage
-        api_usage.record_photoroom(edit_label=options.label())
+        # The ledger insert is a database round trip; keep it off the event loop.
+        await asyncio.to_thread(api_usage.record_photoroom, edit_label=options.label())
     return response.content
 
 
