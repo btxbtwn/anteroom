@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1166 — 2026-11-23
+
+- Keep a simulated timeout from interrupting MCP authentication checks in CI.
+
 ## 0.1.1165 — 2026-11-23
 
 - Retry hosted deployments when a short-lived database lock interrupts a schema update.

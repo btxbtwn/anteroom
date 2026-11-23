@@ -1,1 +1,0 @@
-- Keep a simulated timeout from interrupting MCP authentication checks in CI.
