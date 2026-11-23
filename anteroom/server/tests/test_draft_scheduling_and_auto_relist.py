@@ -1096,7 +1096,32 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
             sold_at=now + timedelta(minutes=2), received_at=now + timedelta(minutes=2), state="new",
         ))
         self.db.commit()
-        self.assertFalse(draft_scheduling._is_sold_or_has_sale(self.db, c_obs))
+        # eBay's quantity does not reflect the Etsy sale without a quantity sync: two paid
+        # sales exhaust the declared quantity of 2 even though eBay still reports 1 left.
+        self.assertTrue(draft_scheduling._is_sold_or_has_sale(self.db, c_obs))
+
+        # Only same-marketplace sales and a fresh remaining read keep the draft scheduled,
+        # even when the sale count reaches the declared quantity.
+        c_same, _l_same, _r_same = self._create_draft("Same Market Multi Shirt", quantity=2)
+        self.db.add(MarketplaceListing(
+            id=new_id(), conversation_id=c_same.id, marketplace="ebay", state="published",
+            listing_id="eb-same-1", listing_url="https://www.ebay.com/itm/eb-same-1",
+            listed_at=now - timedelta(days=2),
+            inventory_observation={
+                "listing_id": "eb-same-1",
+                "state": "active",
+                "quantity": 1,
+                "checked_at": (now + timedelta(minutes=5)).isoformat(),
+            },
+        ))
+        for n in (1, 2):
+            self.db.add(MarketplaceSale(
+                id=new_id(), marketplace="ebay", order_id=f"ord-s{n}", line_id=f"l-s{n}",
+                listing_id="eb-same-1", conversation_id=c_same.id, quantity=1, order_status="paid",
+                sold_at=now + timedelta(minutes=n), received_at=now + timedelta(minutes=n), state="new",
+            ))
+        self.db.commit()
+        self.assertFalse(draft_scheduling._is_sold_or_has_sale(self.db, c_same))
 
         # Seller restock revision and sale_quantity_sync revision establish a new quantity baseline.
         c_res, _l_res, r_res = self._create_draft("Restocked Multi Shirt", quantity=3)
