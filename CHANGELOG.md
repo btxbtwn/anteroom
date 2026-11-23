@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1186 — 2026-11-23
+
+- Behind the scenes: two assistant chat checks that sometimes failed for no real reason no longer hold up updates.
+
 ## 0.1.1185 — 2026-11-23
 
 - Auto-Relist no longer raises a listing's price when pricing rules are on. A relist now changes only that marketplace's price, and a relist that couldn't delist leaves your saved prices as they were.
