@@ -45,22 +45,29 @@ def _run_mcp_call(
     payload: Any,
     *,
     is_hosted: bool,
+    hosted_token_id: str | None,
     bearer_token: str | None,
     session_id: str | None,
     protocol_version: str | None,
 ) -> tuple[Any | None, int, dict[str, str]]:
+    token_id = hosted_token_id
     if not is_hosted and bearer_token is not None:
         if not bearer_token:
             raise HTTPException(401, "Invalid bearer token")
         verified = mcp_tokens.authenticate_token(db.get_bind(), bearer_token, hosted=False)
         if verified is None:
             raise HTTPException(401, "Invalid or revoked MCP access token")
+        token_id = verified.token_id
+    # Read fresh on every request, so a change in Settings applies to the next call.
+    # A seller session, or loopback on the Mac without a token, reaches every tool.
+    permissions = mcp_tokens.permissions_for(db, token_id) if token_id is not None else None
     return mcp_http.handle_rpc_payload(
         db,
         payload,
         session_id=session_id,
         protocol_version=protocol_version,
         bearer_token=bearer_token,
+        permissions=permissions,
     )
 
 
@@ -81,6 +88,7 @@ async def mcp_post(request: Request):
         )
 
     is_hosted = getattr(request.state, "seller", None) is not None
+    hosted_token_id = getattr(request.state, "mcp_token_id", None) if is_hosted else None
     bearer = _extract_bearer(request)
     session_id = request.headers.get("mcp-session-id")
     protocol_version = request.headers.get("mcp-protocol-version")
@@ -90,6 +98,7 @@ async def mcp_post(request: Request):
             db,
             payload,
             is_hosted=is_hosted,
+            hosted_token_id=hosted_token_id,
             bearer_token=bearer,
             session_id=session_id,
             protocol_version=protocol_version,

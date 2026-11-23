@@ -1207,6 +1207,11 @@ class AgentConnectionTest(BaseModel):
 class McpTokenCreateConfig(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     expires_in_days: int | None = Field(default=None, ge=1, le=365)
+    permissions: dict[str, str] | None = None
+
+
+class McpTokenPermissionsConfig(BaseModel):
+    permissions: dict[str, str]
 
 
 @router.get("/agent", response_model=AgentConnectionStatus)
@@ -1236,9 +1241,26 @@ def create_mcp_token(body: McpTokenCreateConfig, db: Session = Depends(get_db, s
     from anteroom.services import mcp_tokens
 
     try:
-        return mcp_tokens.create_token(db, name=body.name, expires_in_days=body.expires_in_days)
+        return mcp_tokens.create_token(
+            db, name=body.name, expires_in_days=body.expires_in_days, permissions=body.permissions,
+        )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+@router.patch("/mcp-tokens/{token_id}")
+def update_mcp_token_permissions(
+    token_id: str, body: McpTokenPermissionsConfig, db: Session = Depends(get_db, scope="function"),
+):
+    from anteroom.services import mcp_tokens
+
+    try:
+        updated = mcp_tokens.update_permissions(db, token_id, body.permissions)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if updated is None:
+        raise HTTPException(404, "Access token not found")
+    return updated
 
 
 @router.delete("/mcp-tokens/{token_id}")

@@ -28,7 +28,7 @@ from anteroom.models.marketplace_listing import LIVE_STATES, MarketplaceListing
 from anteroom.models.marketplace_sale import MarketplaceSale
 from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
 from anteroom.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
-from anteroom.services import boxes, home_dashboard, listing_editor
+from anteroom.services import boxes, home_dashboard, listing_editor, mcp_tokens
 from anteroom.services.background_tasks import ACTIVE as ACTIVE_TASK_STATUSES
 from anteroom.services.etsy_audit import etsy_not_allowed_live
 from anteroom.services.etsy_fields import etsy_eligible
@@ -79,6 +79,34 @@ _DELETE_ANNOTATIONS = {
     "idempotentHint": False,
     "openWorldHint": False,
 }
+
+
+# The permission area and level each tool needs (``services/mcp_tokens.py``).
+TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
+    "search_inventory": ("listings", "read"),
+    "get_listing": ("listings", "read"),
+    "create_draft_listing": ("listings", "write"),
+    "edit_listing": ("listings", "write"),
+    "manage_listing_photos": ("listings", "write"),
+    "manage_labels_and_notes": ("listings", "write"),
+    "delete_draft_listing": ("listings", "write"),
+    "get_sales_analytics": ("analytics", "read"),
+    "get_offer_activity": ("analytics", "read"),
+    "get_sourcing_roi": ("analytics", "read"),
+    "run_etsy_audit": ("analytics", "read"),
+    "get_needs_attention": ("attention", "read"),
+}
+
+_AREA_NAMES = {"listings": "Listings", "analytics": "Analytics", "attention": "Needs Attention"}
+_LEVEL_NAMES = {"read": "Read", "write": "Read and write"}
+
+
+def _tool_allowed(name: str, permissions: dict[str, str] | None) -> bool:
+    """``permissions`` is None for the seller's own session, which reaches every tool."""
+    if permissions is None:
+        return True
+    area, level = TOOL_PERMISSIONS[name]
+    return mcp_tokens.allows(permissions, area, level)
 
 
 class McpToolError(Exception):
@@ -360,8 +388,12 @@ def handle_rpc_payload(
     session_id: str | None = None,
     protocol_version: str | None = None,
     bearer_token: str | None = None,
+    permissions: dict[str, str] | None = None,
 ) -> tuple[Any | None, int, dict[str, str]]:
     """Process a JSON-RPC 2.0 request object or batch.
+
+    ``permissions`` are the calling token's; None means the seller's own
+    session (or loopback on the Mac), which reaches every tool.
 
     Returns ``(response_body_or_none, http_status, extra_headers)``.
     When ``response_body_or_none`` is None (notifications only), HTTP 202 is returned.
@@ -379,7 +411,7 @@ def handle_rpc_payload(
         responses: list[dict[str, Any]] = []
         for item in payload:
             resp, negotiated = _handle_single(
-                db, item, headers=headers, bearer_token=bearer_token,
+                db, item, headers=headers, bearer_token=bearer_token, permissions=permissions,
             )
             if negotiated:
                 headers["MCP-Protocol-Version"] = negotiated
@@ -392,7 +424,9 @@ def handle_rpc_payload(
     if not isinstance(payload, dict):
         return _rpc_error(None, -32600, "Invalid Request: expected JSON object"), 400, headers
 
-    resp, negotiated = _handle_single(db, payload, headers=headers, bearer_token=bearer_token)
+    resp, negotiated = _handle_single(
+        db, payload, headers=headers, bearer_token=bearer_token, permissions=permissions,
+    )
     if negotiated:
         headers["MCP-Protocol-Version"] = negotiated
     if resp is None:
@@ -406,6 +440,7 @@ def _handle_single(
     *,
     headers: dict[str, str],
     bearer_token: str | None,
+    permissions: dict[str, str] | None,
 ) -> tuple[dict[str, Any] | None, str | None]:
     if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
         return _rpc_error(None, -32600, "Invalid Request: jsonrpc must be '2.0'"), None
@@ -450,7 +485,8 @@ def _handle_single(
         return _rpc_result(msg_id, {}), None
 
     if method == "tools/list":
-        return _rpc_result(msg_id, {"tools": tool_definitions()}), None
+        tools = [tool for tool in tool_definitions() if _tool_allowed(tool["name"], permissions)]
+        return _rpc_result(msg_id, {"tools": tools}), None
 
     if method == "resources/list":
         return _rpc_result(msg_id, {"resources": []}), None
@@ -467,6 +503,13 @@ def _handle_single(
             arguments = {}
         if not isinstance(arguments, dict):
             return _rpc_error(msg_id, -32602, "Invalid params: arguments must be an object"), None
+        if name in TOOL_PERMISSIONS and not _tool_allowed(name, permissions):
+            area, level = TOOL_PERMISSIONS[name]
+            return _rpc_result(msg_id, _tool_error_result(
+                f"This access token is not allowed to use {name}. To allow it, set "
+                f"{_AREA_NAMES[area]} to {_LEVEL_NAMES[level]} for this token in "
+                "Anteroom Settings → Agents."
+            )), None
         try:
             result_data = _dispatch_tool(db, name, arguments, bearer_token=bearer_token)
         except KeyError:

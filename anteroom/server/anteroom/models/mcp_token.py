@@ -1,13 +1,15 @@
 """Seller-scoped personal access tokens for the Streamable HTTP MCP server.
 
 Plaintext tokens are shown once on creation and never stored: only the SHA-256
-digest and a short non-secret prefix live in this table.
+digest and a short non-secret prefix live in this table. ``permissions`` holds
+what the seller lets the token reach, per area (see ``services/mcp_tokens.py``).
 """
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import DateTime, Index, String
+from sqlalchemy import JSON, DateTime, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from anteroom.database import Base
@@ -26,6 +28,7 @@ class McpAccessToken(SellerOwned, Base):
     name: Mapped[str] = mapped_column(String(80), nullable=False)
     token_prefix: Mapped[str] = mapped_column(String(24), nullable=False)
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    permissions: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

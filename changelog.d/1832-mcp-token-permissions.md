@@ -1,0 +1,1 @@
+- Choose what each MCP access token can do in Settings → Agents: no access, read, or read and write for listings, and read access to analytics and Needs Attention. Changes apply to the token's next request, and new tokens start read-only.

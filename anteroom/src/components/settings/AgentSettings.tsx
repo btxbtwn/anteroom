@@ -2,7 +2,13 @@ import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { CheckIcon, CopyIcon, KeyRoundIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { api } from "../../api/client";
-import type { McpAccessToken, McpTokenCreateResponse } from "../../api/agentConnection";
+import type {
+  McpAccessToken,
+  McpPermissionArea,
+  McpPermissionLevel,
+  McpTokenCreateResponse,
+  McpTokenPermissions,
+} from "../../api/agentConnection";
 import { useWorkspaceRuntime } from "../../app/runtime";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -17,6 +23,68 @@ const EXPIRY_OPTIONS = [
   { value: "90", label: "90 days" },
   { value: "365", label: "1 year" },
 ] as const;
+
+const LEVEL_LABELS: Record<McpPermissionLevel, string> = {
+  none: "No access",
+  read: "Read",
+  write: "Read and write",
+};
+
+/* What each area covers and which levels it offers; matches services/mcp_tokens.py. */
+const PERMISSION_AREAS: ReadonlyArray<{
+  area: McpPermissionArea;
+  label: string;
+  levels: readonly McpPermissionLevel[];
+}> = [
+  { area: "listings", label: "Listings", levels: ["none", "read", "write"] },
+  { area: "analytics", label: "Analytics", levels: ["none", "read"] },
+  { area: "attention", label: "Needs Attention", levels: ["none", "read"] },
+];
+
+const NEW_TOKEN_PERMISSIONS: McpTokenPermissions = { listings: "read", analytics: "read", attention: "read" };
+
+function PermissionSelects({
+  permissions,
+  onChange,
+  disabled,
+  labelPrefix,
+}: {
+  permissions: McpTokenPermissions;
+  onChange: (area: McpPermissionArea, level: McpPermissionLevel) => void;
+  disabled?: boolean;
+  labelPrefix: string;
+}) {
+  return (
+    <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-x-3">
+      {PERMISSION_AREAS.map(({ area, label, levels }) => (
+        <label
+          key={area}
+          className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-center gap-1.5 text-xs text-muted-foreground sm:flex"
+        >
+          <span>{label}</span>
+          <Select
+            value={permissions[area]}
+            disabled={disabled}
+            onValueChange={(value) => {
+              if (value && value !== permissions[area]) onChange(area, value as McpPermissionLevel);
+            }}
+          >
+            <SelectTrigger size="sm" className="w-full sm:w-36" aria-label={`${labelPrefix} ${label} access`}>
+              <SelectValue>{LEVEL_LABELS[permissions[area]]}</SelectValue>
+            </SelectTrigger>
+            <SelectPopup>
+              {levels.map((level) => (
+                <SelectItem key={level} value={level}>
+                  {LEVEL_LABELS[level]}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        </label>
+      ))}
+    </div>
+  );
+}
 
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
@@ -63,6 +131,7 @@ export function AgentSettings() {
 
   const [tokenName, setTokenName] = useState("");
   const [expiryChoice, setExpiryChoice] = useState<string>("90");
+  const [newPermissions, setNewPermissions] = useState<McpTokenPermissions>(NEW_TOKEN_PERMISSIONS);
   const [createdToken, setCreatedToken] = useState<McpTokenCreateResponse | null>(null);
 
   const createToken = useMutation({
@@ -70,12 +139,20 @@ export function AgentSettings() {
     onSuccess: (created) => {
       setCreatedToken(created);
       setTokenName("");
+      setNewPermissions(NEW_TOKEN_PERMISSIONS);
       void tokensQuery.refetch?.();
     },
   });
 
   const revokeToken = useMutation({
     mutationFn: api.settings.mcpTokens.revoke,
+    onSuccess: () => {
+      void tokensQuery.refetch?.();
+    },
+  });
+
+  const updatePermissions = useMutation({
+    mutationFn: api.settings.mcpTokens.updatePermissions,
     onSuccess: () => {
       void tokensQuery.refetch?.();
     },
@@ -92,7 +169,7 @@ export function AgentSettings() {
     const trimmed = tokenName.trim();
     if (!trimmed) return;
     const expires_in_days = expiryChoice === "none" ? null : Number(expiryChoice);
-    createToken.mutate({ name: trimmed, expires_in_days });
+    createToken.mutate({ name: trimmed, expires_in_days, permissions: newPermissions });
   };
 
   return (
@@ -101,7 +178,7 @@ export function AgentSettings() {
         <SettingsRow
           id="agent-mcp-url"
           title="Streamable HTTP endpoint"
-          description="Connect Claude, ChatGPT, Gemini, or any MCP client. Agents can read inventory, analytics, offers, sourcing ROI, and Needs Attention — and stage local drafts or edits. They can never publish, update live marketplaces, or delist."
+          description="Connect Claude, ChatGPT, Gemini, or any MCP client. Agents can read inventory, analytics, offers, sourcing ROI, and Needs Attention, and stage local drafts or edits, as far as each token allows. They can never publish, update live marketplaces, or delist."
         >
           {data?.mcp_url ? (
             <div className="flex items-start gap-2">
@@ -119,7 +196,7 @@ export function AgentSettings() {
         <SettingsRow
           id="agent-mcp-tokens"
           title="Access tokens"
-          description="Personal tokens authenticate MCP clients to your account only. Tokens cannot publish or delist listings and cannot access other API routes."
+          description="Personal tokens authenticate MCP clients to your account only. Choose what each token can read or change; changes apply to its next request. Tokens cannot publish or delist listings and cannot access other API routes."
           status={
             tokensQuery.isPending
               ? "Loading tokens…"
@@ -156,10 +233,20 @@ export function AgentSettings() {
               {createToken.isPending ? <Spinner /> : <PlusIcon />}
               Create token
             </Button>
+            <div className="basis-full">
+              <PermissionSelects
+                permissions={newPermissions}
+                labelPrefix="New token"
+                onChange={(area, level) => setNewPermissions((current) => ({ ...current, [area]: level }))}
+              />
+            </div>
           </form>
 
           {createToken.error ? <SettingsNote tone="error">{createToken.error.message}</SettingsNote> : null}
           {revokeToken.error ? <SettingsNote tone="error">{revokeToken.error.message}</SettingsNote> : null}
+          {updatePermissions.error ? (
+            <SettingsNote tone="error">{updatePermissions.error.message}</SettingsNote>
+          ) : null}
           {tokensQuery.error ? <SettingsNote tone="error">{tokensQuery.error.message}</SettingsNote> : null}
 
           {createdToken ? (
@@ -217,6 +304,18 @@ export function AgentSettings() {
                       <Trash2Icon />
                       Revoke
                     </Button>
+                  ) : null}
+                  {tok.active ? (
+                    <div className="basis-full">
+                      <PermissionSelects
+                        permissions={tok.permissions}
+                        labelPrefix={tok.name}
+                        disabled={updatePermissions.isPending}
+                        onChange={(area, level) =>
+                          updatePermissions.mutate({ tokenId: tok.id, permissions: { [area]: level } })
+                        }
+                      />
+                    </div>
                   ) : null}
                 </div>
               ))}
