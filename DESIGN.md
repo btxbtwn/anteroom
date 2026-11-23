@@ -112,8 +112,10 @@ and lists read top to bottom: Sourcing, Settings, Automations. `expanded`
 Marketplaces, Analytics. Do not add a third width or a page-local `max-w-*`.
 
 **Navigation.** Every page link has a visible name or, where space forces an
-icon, a tooltip with its name. The sidebar footer shows names once the sidebar
-is wider than 18rem and falls back to icons below that.
+icon, a tooltip with its name. On desktop the pages sit in the navigation rail
+on the left edge: icons at rest, names once a mouse rests on it (about 200 ms)
+or the keyboard reaches it, and always while it is pinned (`[`), when the page
+moves over to make room. Phones use the navigation drawer.
 
 **Tabs.** Page tabs are muted labels with a 2px foreground underline on the
 active one (`.ebay-navigation`). No brand-colored or tinted tabs, no bordered
@@ -241,15 +243,21 @@ Reject a change that adds any of these:
 ## Research before you design
 
 Use the living [design reference library](docs/design-references.md) to find
-relevant catalogs and product examples. Consult what helps the current task
-and maintain the directory as sources change; it supplements these rules
-rather than adding another checklist.
+relevant catalogs, product examples and research. It lists the products to
+compare against (cross-listing tools, seller admins, the workspaces Anteroom
+looks like, and open-source apps whose code and history are public) and where
+each records its changes. When you borrow from one, link the dated changelog
+entry, release, pull request or archived page, not an undated screenshot.
+Consult what helps the current task and maintain the directory as sources
+change; it supplements these rules rather than adding another checklist.
 
 Before building or changing a visible element, look up how established design
 systems handle that element: Material Design 3, Apple's Human Interface
 Guidelines, Shopify Polaris, WCAG 2.2, and products the seller already uses.
 Look for sizes, spacing, touch targets, states and how the content is
-arranged. Apply what fits Anteroom. When a finding conflicts with a rule
+arranged. For behavior that research has measured (menu and hover timing,
+navigation, forms, search, filters, product lists, mobile), check Baymard
+Institute's e-commerce UX research and Nielsen Norman Group as well. Apply what fits Anteroom. When a finding conflicts with a rule
 here, say so in the PR and update this file in the same PR. List what you
 applied, what you did not and why, with links to the sources, in the PR and
 in your reply to the seller.
@@ -298,6 +306,9 @@ already there; it only shrinks. The rest of this list needs a person's eye.
   [Error-message guidelines](https://www.nngroup.com/articles/error-message-guidelines/)
 - Material Design 3, [Progress indicators](https://m3.material.io/components/progress-indicators/guidelines)
   and [Snackbar](https://m3.material.io/components/snackbar/guidelines)
+- Baymard Institute, [UX research articles](https://baymard.com/blog) and
+  [Drop-down menu flickering](https://baymard.com/blog/dropdown-menu-flickering-issue)
+  (300–500 ms hover delay)
 - Apple, [Human Interface Guidelines: Feedback](https://developer.apple.com/design/human-interface-guidelines/feedback)
 - Shopify Polaris, [Toast](https://polaris.shopify.com/components/feedback-indicators/toast)
 - W3C, [WCAG 2.2](https://www.w3.org/TR/WCAG22/) (2.5.8 Target Size, 4.1.3 Status Messages)

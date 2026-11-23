@@ -1246,6 +1246,33 @@ def set_auto_adjust_quantity(enabled: bool) -> bool:
     return auto_adjust_quantity_enabled()
 
 
+PREFERRED_NAME_KEY = "preferred_name"
+MAX_PREFERRED_NAME_CHARS = 40
+
+
+def get_preferred_name() -> str:
+    """What the seller asked Anteroom to call them; empty until they say."""
+    raw = read_settings().get(PREFERRED_NAME_KEY)
+    return " ".join(raw.split()) if isinstance(raw, str) else ""
+
+
+def set_preferred_name(name: object) -> str:
+    if not isinstance(name, str):
+        raise ValueError("Name must be text")
+    text = " ".join(name.split())
+    if len(text) > MAX_PREFERRED_NAME_CHARS:
+        raise ValueError(f"Name must be {MAX_PREFERRED_NAME_CHARS} characters or fewer")
+
+    def mutator(payload: dict) -> None:
+        if text:
+            payload[PREFERRED_NAME_KEY] = text
+        else:
+            payload.pop(PREFERRED_NAME_KEY, None)
+
+    update_settings(mutator)
+    return text
+
+
 BUSINESS_NOTE_KEY = "business_note"
 MAX_BUSINESS_NOTE_CHARS = 4000
 

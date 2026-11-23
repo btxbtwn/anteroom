@@ -19,10 +19,12 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
+from sqlalchemy import event
 
 from anteroom.database import in_worker_session
 from anteroom.services import mcp_http, mcp_oauth, mcp_tokens
 from anteroom.services.hosted_limits import read_bounded_body
+from anteroom.services.local_requests import came_through_tailnet
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
 
@@ -77,6 +79,17 @@ def _run_mcp_call(
 ) -> tuple[Any | None, int, dict[str, str]]:
     if expired():
         raise TimeoutError
+
+    def refuse_late_commit(_session) -> None:
+        # The client was already told this call timed out: a change still in
+        # progress must not be saved behind its back, or a retry doubles it.
+        if expired():
+            raise TimeoutError
+
+    event.listen(db, "before_commit", refuse_late_commit)
+    # A commit flushes after before_commit, and a flush can wait on a locked
+    # database. Check again once the writes are flushed, just before COMMIT.
+    event.listen(db, "after_flush", lambda session, _context: refuse_late_commit(session))
     token_id = hosted_token_id
     if not is_hosted and bearer_token is not None:
         if not bearer_token:
@@ -115,6 +128,14 @@ async def mcp_post(request: Request):
     oauth_client_id = getattr(request.state, "mcp_oauth_client_id", None) if is_hosted else None
     bearer = _extract_bearer(request)
     client_key = _client_key(request, is_hosted=is_hosted)
+    if not is_hosted and bearer is None and came_through_tailnet(request.headers):
+        # Only the Mac itself reaches every tool without a token. An agent on
+        # another tailnet device is held to the token the seller gave it.
+        return JSONResponse(
+            {"detail": "Use an MCP access token from Settings → Agents to reach Anteroom over Tailscale."},
+            status_code=401,
+            headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"},
+        )
     if not is_hosted and bearer is not None and mcp_tokens.is_auth_rate_limited(client_key):
         return JSONResponse(
             {"detail": "Too many failed authentication attempts. Try again shortly."},
@@ -197,7 +218,7 @@ async def mcp_post(request: Request):
         )
     except TimeoutError:
         return JSONResponse(
-            {"jsonrpc": "2.0", "id": None, "error": {"code": -32000, "message": "MCP request timed out"}},
+            {"jsonrpc": "2.0", "id": None, "error": {"code": -32000, "message": "MCP request timed out. Anything it had not saved by then was not saved."}},
             status_code=504,
             headers={"Cache-Control": "no-store"},
         )

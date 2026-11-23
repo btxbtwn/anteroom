@@ -12,7 +12,7 @@ import { ListingSession } from "../components/listingSession";
 import { HostedSetupChecklist, SetupChecklist } from "../components/SetupChecklist";
 import { ListingSidebar } from "../components/ListingSidebar";
 import { AssistantThreadPanel } from "../components/sidebar/AssistantThreadPanel";
-import { SIDEBAR_FOOTER_WIDTH } from "../components/sidebar/SidebarFooter";
+import { NavRail } from "../components/sidebar/NavRail";
 import { ArrowLeftIcon, HistoryIcon, PlusIcon, SearchIcon, SquarePenIcon } from "lucide-react";
 import {
   DEFAULT_SETTINGS_SECTION,
@@ -78,8 +78,8 @@ const FirstRunGuide = lazy(() =>
 );
 
 const ACTIVE_JOB_STATUSES = new Set(["queued", "awaiting_extension", "dispatched"]);
-/* Open wider for listing titles; resizing still stops at the footer's minimum width. */
-const SIDEBAR_WIDTH: PanelWidthLimits = { min: SIDEBAR_FOOTER_WIDTH, max: 420, maxVw: 30 };
+/* Open wider for listing titles; resizing stops where the header controls still fit. */
+const SIDEBAR_WIDTH: PanelWidthLimits = { min: 240, max: 420, maxVw: 30 };
 const THREADS_WIDTH: PanelWidthLimits = { min: 200, max: 420, maxVw: 30 };
 const MAIN_PANEL_MIN_WIDTH = 360;
 let setupGuideAutoOpen: boolean | null = null;
@@ -146,7 +146,7 @@ export function App() {
   // Chat history opens from the History button and starts closed, as a side sheet does.
   const [threadsCollapsed, setThreadsCollapsed] = usePanelCollapsed("assistant-history", true);
   const panelWidthStyle = {
-    // A width the seller dragged to wins, unless it would clip the footer buttons.
+    // A width the seller dragged to wins, unless it would clip the header controls.
     "--sidebar-width": `${Math.max(sidebarWidth ?? 340, SIDEBAR_WIDTH.min)}px`,
     "--sidebar-min-width": `${SIDEBAR_WIDTH.min}px`,
     ...(threadsWidth ? { "--threads-width": `${threadsWidth}px` } : {}),
@@ -823,6 +823,18 @@ export function App() {
       <div
         className={`app-content mobile-pane-${activeView === "listings" ? mobilePane : "workspace"}${mobileListOpen ? " mobile-sidebar-open" : ""}${sidebarHidden ? " sidebar-collapsed" : ""}`}
       >
+        {isMobile ? null : (
+          <NavRail
+            activeView={activeView}
+            onOpenHome={openHome}
+            onOpenSourcing={openSourcing}
+            onOpenAnalytics={openAnalytics}
+            onOpenMarketplaces={openMarketplaces}
+            onOpenAutomations={openAutomations}
+            onOpenAssistant={openAssistant}
+            onOpenSettings={openSettings}
+          />
+        )}
         {sidebarHidden ? null : (
           <ListingSidebar
             conversations={conversations}
@@ -848,13 +860,6 @@ export function App() {
             onDelete={deleteListing}
             onCreate={createListing}
             creating={createConv.isPending}
-            onOpenHome={openHome}
-            onOpenSettings={openSettings}
-            onOpenAnalytics={openAnalytics}
-            onOpenMarketplaces={openMarketplaces}
-            onOpenAutomations={openAutomations}
-            onOpenAssistant={openAssistant}
-            onOpenSourcing={openSourcing}
             onOpenSuggestions={openSuggestions}
             onToggleInventoryTable={toggleInventoryTable}
             onOpenMobileNav={() => setMobileNavOpen(true)}

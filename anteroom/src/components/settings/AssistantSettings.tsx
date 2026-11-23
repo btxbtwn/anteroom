@@ -1,12 +1,63 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
-import { ASSISTANT_MEMORY_KEY, ASSISTANT_NOTE_KEY } from "../../api/assistant";
+import { ASSISTANT_MEMORY_KEY, ASSISTANT_NAME_KEY, ASSISTANT_NOTE_KEY } from "../../api/assistant";
 import { Button } from "../ui/button";
+import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
 
 const NOTE_MAX = 4000;
+const NAME_MAX = 40;
+
+/** What the seller wants Anteroom to call them; the Assistant home greets them by it. */
+function NameSection() {
+  const queryClient = useQueryClient();
+  const saved = useQuery({ queryKey: ASSISTANT_NAME_KEY, queryFn: api.assistant.name });
+  const [draft, setDraft] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: (name: string) => api.assistant.saveName(name),
+    onSuccess: (result) => {
+      queryClient.setQueryData(ASSISTANT_NAME_KEY, result);
+      setDraft(null);
+    },
+  });
+  const name = draft ?? saved.data?.name ?? "";
+  const changed = draft !== null && draft.trim() !== (saved.data?.name ?? "");
+
+  return (
+    <SettingsSection title="Your name">
+      <SettingsRow
+        id="preferred-name"
+        title="What should Anteroom call you?"
+        description="The Assistant greets you by it. Leave it empty for a plain greeting."
+      >
+        <form
+          className="flex flex-wrap items-end gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            save.mutate(name);
+          }}
+        >
+          <Input
+            size="sm"
+            className="w-56 max-w-full"
+            aria-label="Your name"
+            autoComplete="given-name"
+            maxLength={NAME_MAX}
+            value={name}
+            disabled={saved.isLoading}
+            placeholder="Your first name"
+            onChange={(event) => setDraft(event.target.value)}
+          />
+          <Button type="submit" size="sm" disabled={!changed || save.isPending || saved.isLoading}>Save</Button>
+        </form>
+        {saved.isError ? <SettingsNote tone="error">Could not load your name.</SettingsNote> : null}
+        {save.isError ? <SettingsNote tone="error">{(save.error as Error).message || "Could not save."}</SettingsNote> : null}
+      </SettingsRow>
+    </SettingsSection>
+  );
+}
 
 /** What the seller tells the business assistant to keep in mind on every question. */
 function BusinessNoteSection() {
@@ -116,6 +167,7 @@ function MemorySection() {
 export function AssistantSettings() {
   return (
     <>
+      <NameSection />
       <BusinessNoteSection />
       <MemorySection />
     </>

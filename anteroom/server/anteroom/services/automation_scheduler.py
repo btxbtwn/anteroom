@@ -13,7 +13,7 @@ import copy
 import logging
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import cast
 
 from sqlalchemy import CursorResult, update
@@ -43,6 +43,8 @@ from anteroom.services.automations import (
 log = logging.getLogger("anteroom.automations")
 
 TICK_SECONDS = 30.0
+# How long one tick may spend starting Auto-Relist relists (see _run_auto_relist).
+RELIST_PASS_BUDGET = timedelta(minutes=2)
 _task: asyncio.Task | None = None
 # Runs this process is inside. A restart starts empty, so a leftover "running" row is picked up again.
 _inflight: set[str] = set()
@@ -508,7 +510,9 @@ async def _run_auto_relist(moment: datetime) -> int:
     from anteroom.services.auto_relist import run_auto_relist
 
     try:
-        results = await run_auto_relist(now=moment, scheduled=True)
+        # Relists run one at a time inside the tick, so scheduled publishes and
+        # automations never wait more than one pass's budget plus one relist.
+        results = await run_auto_relist(now=moment, scheduled=True, time_budget=RELIST_PASS_BUDGET)
         return sum(1 for item in results if item.get("status") in {"completed", "failed"})
     except Exception:  # noqa: BLE001
         log.exception("auto-relist sweep failed")

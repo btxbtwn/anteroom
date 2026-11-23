@@ -534,6 +534,16 @@ export interface PlaidStatus {
   connections: ConnectionStatus[];
 }
 
+export interface PreferredName {
+  /** What the seller asked Anteroom to call them; empty until they say. The Assistant home greets them by it. */
+  name: string;
+}
+
+export interface PreferredNameInput {
+  /** Trimmed and collapsed to single spaces, then at most 40 characters; empty clears it. */
+  name: string;
+}
+
 /** A marketplace price that is not what the seller's pricing rules give. */
 export interface PriceDrift {
   marketplace: string;

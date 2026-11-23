@@ -68,6 +68,9 @@ struct BusinessAssistantTests {
         precondition([4, 5, 11, 12, 17, 18, 23].map(at) == [
             "Good evening", "Good morning", "Good morning", "Good afternoon", "Good afternoon", "Good evening", "Good evening",
         ])
+        let evening = calendar.date(from: DateComponents(year: 2026, month: 11, day: 7, hour: 20))!
+        precondition(AssistantFormat.greeting(at: evening, calendar: calendar, name: "Cristian") == "Good evening, Cristian")
+        precondition(AssistantFormat.greeting(at: evening, calendar: calendar, name: "  ") == "Good evening")
         precondition(AssistantFormat.starters.count == 4)
 
         // History groups by local day, newest first, and leaves empty groups out.

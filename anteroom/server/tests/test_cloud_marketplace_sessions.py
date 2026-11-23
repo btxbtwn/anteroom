@@ -968,3 +968,35 @@ def test_decrypt_audit_records_operation_type(cloud, monkeypatch):  # noqa: F811
             assert audit.detail == "marketplace.like_events"
 
 
+
+
+def test_upload_check_gives_up_on_a_busy_runner_before_the_web_side_does(monkeypatch):
+    from types import SimpleNamespace
+
+    from anteroom.services import seller_region
+
+    slot_wait = getattr(cloud_marketplace, "_VERIFY_SLOT_WAIT_S", None)
+    monkeypatch.setattr(cloud_marketplace, "_seller_id", lambda: USER_ID)
+    monkeypatch.setenv("ANTEROOM_PROCESS_ROLE", "worker")
+    monkeypatch.setattr(cloud_sessions, "is_cloud_enabled", lambda marketplace: True)
+    monkeypatch.setattr(seller_region, "seller_region", lambda: SimpleNamespace(country="US"))
+    monkeypatch.setattr(cloud_marketplace, "_VERIFY_SLOT_WAIT_S", 0.05, raising=False)
+    started: list[str] = []
+
+    async def run_subprocess(*args, **kwargs):
+        started.append("check")
+        return {"ok": True}
+
+    monkeypatch.setattr(cloud_marketplace, "_run_subprocess", run_subprocess)
+    busy = asyncio.Semaphore(0)  # every runner slot is taken
+    monkeypatch.setattr(cloud_marketplace, "_loop_semaphore", lambda: busy)
+
+    async def run():
+        with pytest.raises(cloud_marketplace.CloudExecutionUnavailable):
+            await asyncio.wait_for(cloud_marketplace.verify_upload_local(
+                "mercari", [{"name": "session", "value": "x"}], "UA", "proxy-1"), timeout=5)
+
+    asyncio.run(run())
+    assert started == []
+    # The slot wait plus the 25 s check ends before the web side gives up (25 s + 15 s).
+    assert slot_wait is not None and slot_wait + 25.0 < 25.0 + 15.0

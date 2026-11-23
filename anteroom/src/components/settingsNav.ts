@@ -92,6 +92,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {id:"listing-templates",title:"Saved templates",section:"listings",targetId:"listing-templates",searchTerms:["template","preset","reusable fields","saved defaults"]},
   {
+    id: "preferred-name",
+    title: "Your name",
+    section: "assistant",
+    targetId: "preferred-name",
+    searchTerms: ["name", "first name", "nickname", "call me", "greeting", "good morning", "good evening", "profile"],
+  },
+  {
     id: "business-note",
     title: "About your business",
     section: "assistant",

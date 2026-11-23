@@ -87,7 +87,7 @@ export function WorkspaceTopbar({ crumbs, sidebarOpen, onToggleSidebar, rightPan
       <div
         className={
           sidebarOpen
-            ? "relative flex w-[calc(var(--sidebar-column-width)-var(--topbar-inset))] shrink-0 items-center"
+            ? "relative flex w-[calc(var(--nav-rail-width)+var(--sidebar-column-width)-var(--topbar-inset))] shrink-0 items-center"
             : "relative flex shrink-0 items-center"
         }
       >

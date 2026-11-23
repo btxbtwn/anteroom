@@ -11,6 +11,8 @@ final class BusinessAssistantModel {
     let api: AnteroomAPI
     private(set) var threads: [AssistantThread] = []
     private(set) var threadsLoaded = false
+    /// The name the home screen greets the seller by; empty keeps the plain greeting.
+    private(set) var preferredName = ""
     private(set) var threadID: String?
     private(set) var turns: [AssistantTurn] = []
     private(set) var loadingTurns = false
@@ -59,6 +61,11 @@ final class BusinessAssistantModel {
         } catch {
             if !threadsLoaded { self.error = error.localizedDescription }
         }
+    }
+
+    /// A name that fails to load leaves the plain greeting; nothing else depends on it.
+    func loadName() async {
+        if let name = try? await api.assistantName() { preferredName = name }
     }
 
     /// Open a conversation, or nil for a new one, and pick up an answer still being written in it.

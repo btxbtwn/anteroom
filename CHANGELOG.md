@@ -6,6 +6,43 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1182 — 2026-11-23
+
+- Checking sales on a listing that was just deleted now says it wasn't found, instead of showing a server error.
+
+## 0.1.1181 — 2026-11-23
+
+- The Assistant greets you by name: set what Anteroom should call you in Settings → Assistant, and it says "Good evening, <name>" on the web and iPhone.
+
+## 0.1.1180 — 2026-11-23
+
+- When an agent's change to Anteroom times out, it is no longer saved afterwards, so trying again doesn't make a second draft.
+- If deleting a draft on your Mac doesn't go through, its photos and videos are no longer removed anyway.
+
+## 0.1.1179 — 2026-11-23
+
+- When the cloud runner is busy, Connect in Cloud for Mercari and Depop now gives up within seconds so you can try again, instead of checking your sign-in after the page has stopped waiting.
+
+## 0.1.1178 — 2026-11-23
+
+- On iPhone, a seller outside the US now searches their own eBay site's categories instead of picking from eBay US's list.
+
+## 0.1.1177 — 2026-11-23
+
+- Auto-Relist works through a long backlog a little at a time, so scheduled listings and automations no longer wait hours behind it.
+
+## 0.1.1176 — 2026-11-23
+
+- An agent connecting to Anteroom on your Mac over Tailscale now needs its MCP access token, so the permissions you chose for that token always apply.
+
+## 0.1.1175 — 2026-11-23
+
+- A Pixelate, blur, arrow or other mark drawn quickly on a photo is no longer sometimes lost when you let go.
+
+## 0.1.1174 — 2026-11-23
+
+- Move the page buttons (Today, Assistant, Sourcing, Analytics, Marketplaces, Automations, Settings) out of the bottom of the listings sidebar into a slim rail on the left edge. Rest the mouse on it to see page names, or pin it open with the pin button or the [ key, and the page moves over to make room.
+
 ## 0.1.1173 — 2026-11-23
 
 - Connect Claude, ChatGPT or Gemini to Anteroom by signing in: add Anteroom as a custom connector, approve it, and choose what it can do. Manage or disconnect connected apps in Settings → Agents.

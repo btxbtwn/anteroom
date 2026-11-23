@@ -1715,6 +1715,88 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertEqual(price_for(published.listing_json, "poshmark"), 35)
 
 
+    def test_one_relist_pass_stops_starting_relists_when_its_time_is_up(self):
+        old_time = _now() - timedelta(days=45)
+        for index in range(3):
+            conv, _listing, _rev = self._create_draft(f"Budget Coat {index}", price=50.0)
+            listing_id = f"5f00000000000000000000c{index}"
+            self.db.add(MarketplaceListing(
+                id=new_id(), conversation_id=conv.id, marketplace="poshmark", state="published",
+                listing_id=listing_id, listing_url=f"https://poshmark.com/listing/{listing_id}",
+                listed_at=old_time + timedelta(hours=index), listed_price=50.0,
+            ))
+        self.db.commit()
+        auto_relist.save_rule(self.db, "poshmark", {"enabled": True, "min_age_days": 30, "daily_cap": 10}, confirm=True)
+        delisted: list[str] = []
+
+        async def delister(conv_id: str, market: str) -> dict:
+            delisted.append(conv_id)
+            return {"ok": True}
+
+        async def lister(conv_id: str, market: str, rev_id: str) -> dict:
+            return {"ok": True, "listing_id": f"5f0000000000000000000{len(delisted):03d}"}
+
+        async def no_offers(market: str, listing_id: str) -> bool:
+            return False
+
+        # A pass whose time is already up finishes the relist it started and leaves the rest.
+        outcomes = asyncio.run(auto_relist.run_auto_relist(
+            now=_now(), delister=delister, lister=lister, offer_checker=no_offers, time_budget=timedelta(0),
+        ))
+        self.assertEqual([o["status"] for o in outcomes], ["completed"])
+        self.assertEqual(len(delisted), 1)
+
+        # The next pass picks up where it stopped.
+        outcomes = asyncio.run(auto_relist.run_auto_relist(
+            now=_now(), delister=delister, lister=lister, offer_checker=no_offers,
+        ))
+        self.assertEqual([o["status"] for o in outcomes], ["completed", "completed"])
+        self.assertEqual(len(set(delisted)), 3)
+
+    def test_the_scheduler_gives_each_relist_pass_a_time_budget(self):
+        from unittest.mock import AsyncMock
+
+        from anteroom.services import automation_scheduler
+
+        with patch("anteroom.services.auto_relist.run_auto_relist", AsyncMock(return_value=[])) as run:
+            asyncio.run(automation_scheduler._run_auto_relist(_now()))
+        budget = run.await_args.kwargs.get("time_budget")
+        self.assertIsNotNone(budget)
+        self.assertLessEqual(budget, timedelta(minutes=5))
+
+
+    def test_a_short_pass_relists_the_oldest_listing_whatever_its_marketplace(self):
+        old_time = _now() - timedelta(days=40)
+        for market, age, listing_id, url in (
+            ("poshmark", timedelta(0), "5f00000000000000000000d1", "https://poshmark.com/listing/5f00000000000000000000d1"),
+            ("mercari", timedelta(days=10), "m12345678902", "https://www.mercari.com/us/item/m12345678902/"),
+        ):
+            conv, _listing, _rev = self._create_draft(f"{market} coat", price=50.0)
+            self.db.add(MarketplaceListing(
+                id=new_id(), conversation_id=conv.id, marketplace=market, state="published",
+                listing_id=listing_id, listing_url=url,
+                listed_at=old_time - age, listed_price=50.0,
+            ))
+            self.db.commit()
+            auto_relist.save_rule(self.db, market, {"enabled": True, "min_age_days": 30, "daily_cap": 10}, confirm=True)
+        delisted: list[str] = []
+
+        async def delister(conv_id: str, market: str) -> dict:
+            delisted.append(market)
+            return {"ok": True}
+
+        async def lister(conv_id: str, market: str, rev_id: str) -> dict:
+            return {"ok": True, "listing_id": f"new-{market}"}
+
+        async def no_offers(market: str, listing_id: str) -> bool:
+            return False
+
+        outcomes = asyncio.run(auto_relist.run_auto_relist(
+            now=_now(), delister=delister, lister=lister, offer_checker=no_offers, time_budget=timedelta(0),
+        ))
+        self.assertEqual(delisted, ["mercari"], outcomes)
+
+
 if __name__ == "__main__":
     unittest.main()
 

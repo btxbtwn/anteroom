@@ -56,8 +56,12 @@ async def delist(conv_id: str, body: DelistRequest):
 @router.post("/check-sales")
 async def check_sales(conv_id: str):
     """Read this item's live listings for a sale now. Nothing on any marketplace changes."""
-    result = await chrome_sales.check_item(conv_id)
-    return {**result, "listings": await in_worker_session(marketplace_delist.listings, conv_id)}
+    try:
+        result = await chrome_sales.check_item(conv_id)
+        return {**result, "listings": await in_worker_session(marketplace_delist.listings, conv_id)}
+    except marketplace_delist.DelistError as exc:
+        # The item can be deleted while its editor is still open.
+        raise HTTPException(exc.status_code, str(exc)) from exc
 
 
 @router.post("/sold")

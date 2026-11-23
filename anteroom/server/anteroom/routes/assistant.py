@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from anteroom.database import SessionLocal, get_db, in_worker_session
 from anteroom.models.assistant import AssistantMessage, AssistantThread
+from anteroom.routes.api_contract import PreferredName, PreferredNameInput
 from anteroom.routes.attachments import AttachmentUpload, store_uploads
 from anteroom.services import assistant_changes, assistant_memory, background_tasks, business_assistant
 from anteroom.services.chat_attachments import MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, attach_to_last_user_turn
@@ -50,7 +51,9 @@ from anteroom.services.streaming import (
 from anteroom.services.user_settings import (
     MAX_BUSINESS_NOTE_CHARS,
     get_business_note,
+    get_preferred_name,
     set_business_note,
+    set_preferred_name,
 )
 
 log = logging.getLogger("anteroom.assistant")
@@ -161,6 +164,20 @@ def get_note():
 @router.put("/note")
 def save_note(body: BusinessNote):
     return {"note": set_business_note(body.note)}
+
+
+@router.get("/name", response_model=PreferredName)
+def get_name():
+    """What the seller asked to be called; the home screen greets them by it."""
+    return {"name": get_preferred_name()}
+
+
+@router.put("/name", response_model=PreferredName)
+def save_name(body: PreferredNameInput):
+    try:
+        return {"name": set_preferred_name(body.name)}
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.get("/memory")

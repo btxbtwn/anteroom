@@ -1043,6 +1043,16 @@ struct PlaidStatus: Codable, Hashable, Sendable {
     }
 }
 
+struct PreferredName: Codable, Hashable, Sendable {
+    /// What the seller asked Anteroom to call them; empty until they say. The Assistant home greets them by it.
+    var name: String
+}
+
+struct PreferredNameInput: Codable, Hashable, Sendable {
+    /// Trimmed and collapsed to single spaces, then at most 40 characters; empty clears it.
+    var name: String
+}
+
 /// A marketplace price that is not what the seller's pricing rules give.
 struct PriceDrift: Codable, Hashable, Sendable {
     var marketplace: String

@@ -991,6 +991,12 @@ final class AnteroomAPI: Sendable {
 
     // MARK: Business assistant
 
+    /// What the seller asked to be called (Settings → Assistant on the web); empty until they say.
+    func assistantName() async throws -> String {
+        let payload: PreferredName = try await decode(request("GET", "api/assistant/name"))
+        return payload.name
+    }
+
     func assistantThreads() async throws -> [AssistantThread] {
         try await decode(request("GET", "api/assistant/threads"))
     }

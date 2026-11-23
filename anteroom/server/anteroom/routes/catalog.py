@@ -92,6 +92,12 @@ def categories(
     if_none_match: str | None = Header(default=None),
     db: Session = Depends(get_db, scope="function"),
 ):
+    from anteroom.services.seller_region import seller_region
+
+    if marketplace == "ebay" and seller_region(db=db).country != "US":
+        # The synced tree is eBay US's. Sellers on another eBay site search
+        # that site's categories instead, as the web picker does.
+        return {"coverage": "observed", "complete": False, "nodes": []}
     tree = db.get(CategoryTree, marketplace)
     if tree:
         bind = db.get_bind()
