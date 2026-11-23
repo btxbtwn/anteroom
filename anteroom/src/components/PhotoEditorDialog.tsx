@@ -582,7 +582,8 @@ function MarkupOverlay({ edits, renderedEdits, pen, onChange }: {
   return (
     <div
       ref={frameRef}
-      className="absolute inset-0 cursor-crosshair touch-none"
+      // A drag here draws; it must not select page text, which the browser would drag away on the next press.
+      className="absolute inset-0 cursor-crosshair touch-none select-none"
       data-markup-frame=""
       onPointerDown={(event) => {
         const point = at(event);
