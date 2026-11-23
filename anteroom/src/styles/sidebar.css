@@ -1,7 +1,7 @@
 /* ── Sidebar ── */
 
-/* Desktop: the window titlebar owns panel collapse and settings stay in the
-   sidebar footer. Phones show this header instead, since the desktop topbar is
+/* Desktop: the window titlebar owns panel collapse and the pages sit in the
+   navigation rail. Phones show this header instead, since the desktop topbar is
    hidden below 900px. */
 .sidebar-header {
   display: none;

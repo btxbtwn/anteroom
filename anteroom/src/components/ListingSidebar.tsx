@@ -34,7 +34,7 @@ import {
   type ListingFilters as Filters,
   type ListingStatusFilter,
 } from "./inventoryFilters";
-import { LightbulbIcon, PlusIcon, SearchIcon, Table2Icon, XIcon } from "lucide-react";
+import { ArrowLeftIcon, LightbulbIcon, PlusIcon, SearchIcon, Table2Icon, XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
 import { Kbd } from "./ui/kbd";
@@ -47,7 +47,6 @@ import { shelveListings } from "./sidebar/shelveListings";
 import { setListingSearch, useListingSearch } from "./sidebar/listingSearch";
 import { BulkActionBar, BulkSelectionDialogs } from "./sidebar/BulkSelection";
 import { SettingsSidebarNav } from "./sidebar/SettingsSidebarNav";
-import { SidebarFooter } from "./sidebar/SidebarFooter";
 import { useListingSelection } from "./sidebar/useListingSelection";
 import { useSettingsSearch } from "./sidebar/useSettingsSearch";
 
@@ -76,13 +75,6 @@ interface Props {
   onDelete: (id: string, title: string) => void;
   onCreate: () => void;
   creating: boolean;
-  onOpenHome: () => void;
-  onOpenSettings: () => void;
-  onOpenAnalytics: () => void;
-  onOpenMarketplaces: () => void;
-  onOpenAutomations: () => void;
-  onOpenAssistant: () => void;
-  onOpenSourcing: () => void;
   /** Opens or closes the inventory table, the full-width view of these listings. */
   onOpenSuggestions: () => void;
   onToggleInventoryTable: () => void;
@@ -108,13 +100,6 @@ export function ListingSidebar({
   onDelete,
   onCreate,
   creating,
-  onOpenHome,
-  onOpenSettings,
-  onOpenAnalytics,
-  onOpenMarketplaces,
-  onOpenAutomations,
-  onOpenAssistant,
-  onOpenSourcing,
   onOpenSuggestions,
   onToggleInventoryTable,
   onOpenMobileNav,
@@ -469,18 +454,14 @@ export function ListingSidebar({
         <BulkActionBar bulk={bulk} selection={selection} eligibleIds={eligibleIds} />
       )}
 
-      <SidebarFooter
-        settingsMode={settingsMode}
-        activeView={activeView}
-        onCloseSettings={onCloseSettings}
-        onOpenHome={onOpenHome}
-        onOpenSourcing={onOpenSourcing}
-        onOpenAnalytics={onOpenAnalytics}
-        onOpenMarketplaces={onOpenMarketplaces}
-        onOpenAutomations={onOpenAutomations}
-        onOpenAssistant={onOpenAssistant}
-        onOpenSettings={onOpenSettings}
-      />
+      {settingsMode && (
+        <div className="flex shrink-0 items-center p-(--sidebar-content-inset) max-[900px]:hidden">
+          <button type="button" className={cn(SIDEBAR_ROW, "w-auto text-xs")} aria-label="Back" onClick={onCloseSettings}>
+            <ArrowLeftIcon />
+            <span>Back</span>
+          </button>
+        </div>
+      )}
       <BulkSelectionDialogs selection={selection} onOpenListing={onSelect} />
     </aside>
   );

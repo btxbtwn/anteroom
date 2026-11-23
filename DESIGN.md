@@ -112,8 +112,10 @@ and lists read top to bottom: Sourcing, Settings, Automations. `expanded`
 Marketplaces, Analytics. Do not add a third width or a page-local `max-w-*`.
 
 **Navigation.** Every page link has a visible name or, where space forces an
-icon, a tooltip with its name. The sidebar footer shows names once the sidebar
-is wider than 18rem and falls back to icons below that.
+icon, a tooltip with its name. On desktop the pages sit in the navigation rail
+on the left edge: icons at rest, names once a mouse rests on it (about 200 ms)
+or the keyboard reaches it, and always while it is pinned (`[`), when the page
+moves over to make room. Phones use the navigation drawer.
 
 **Tabs.** Page tabs are muted labels with a 2px foreground underline on the
 active one (`.ebay-navigation`). No brand-colored or tinted tabs, no bordered

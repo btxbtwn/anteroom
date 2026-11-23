@@ -19,7 +19,7 @@ import { pageLoaders } from "../app/pageLoaders";
 
 export type MobileNavTarget = "home" | "assistant" | "listings" | "sourcing" | "analytics" | "settings" | "marketplaces" | "automations";
 
-/** Same order as the desktop sidebar footer: today, assistant and inventory, the day's work, insight, settings. */
+/** Same order as the desktop navigation rail: today, assistant and inventory, the day's work, insight, settings. */
 const ITEMS: { id: MobileNavTarget; label: string; icon: ComponentType<{ className?: string }> }[] = [
   { id: "home", label: "Today", icon: HomeIcon },
   { id: "assistant", label: "Assistant", icon: MessageCircleIcon },
