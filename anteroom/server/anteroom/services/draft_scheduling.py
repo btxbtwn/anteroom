@@ -147,8 +147,9 @@ def _is_sold_or_has_sale(db: Session, conv: Conversation | None) -> bool:
 
     Multi-quantity items with stock still remaining stay schedulable/publishable:
     - A marketplace stock observation of ``remaining > 0`` suppresses the cumulative
-      check only when it is fresher than paid sales across all marketplaces (newer
-      than every other marketplace's paid sales, and at or after its own).
+      check only when it is at or after its own marketplace's paid sales and either
+      no other marketplace has paid sales, or a ``sale_quantity_sync`` revision made
+      after those sales already pushed them into that marketplace's quantity.
     - Otherwise, paid sales occurring at or after the current quantity revision's
       baseline (or all paid sales for an initial revision) are compared against the
       revision's declared available quantity so neither cross-marketplace sales nor
@@ -211,8 +212,15 @@ def _is_sold_or_has_sale(db: Session, conv: Conversation | None) -> bool:
                     t for s in paid_sales if s.marketplace == sale.marketplace and (t := _sale_timestamp(s)) is not None
                 ]
                 same_ok = not same_stamps or obs_checked >= max(same_stamps)
+                # One marketplace's stock only reflects other marketplaces' sales once a
+                # quantity sync (Auto-adjust quantity) has run after them; otherwise the
+                # cumulative check below decides.
                 other_ok = not other_sales or (
-                    len(other_stamps) == len(other_sales) and obs_checked > max(other_stamps)
+                    from_quantity_sync
+                    and baseline_at is not None
+                    and len(other_stamps) == len(other_sales)
+                    and max(other_stamps) <= baseline_at
+                    and obs_checked > max(other_stamps)
                 )
                 if same_ok and other_ok:
                     has_fresh_remaining = True
