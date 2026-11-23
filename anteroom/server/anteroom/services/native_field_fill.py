@@ -550,7 +550,7 @@ async def _ask(conv_id: str, provider, rows_by_market: dict[str, list[dict]], fo
             " Category is required on every form. Choose the most specific supported category for each item "
             "from the listed choices; do not skip it or ask the seller to choose. If none fits, leave it "
             "unresolved so listing remains blocked." if categories else "") + (
-            ' Copy each exact evidence quote from the Evidence block. '
+            ' Copy each exact quote of at least three characters from the Evidence block. '
             ' For fields that accept multiple choices, use a list in "value". '
             "Recheck every listed field, including existing values. Omit unsupported answers; they will be cleared. "
             "Use only the Evidence block as factual support. The existing listing is context, not evidence. "

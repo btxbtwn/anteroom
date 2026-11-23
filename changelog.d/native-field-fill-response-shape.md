@@ -1,1 +1,1 @@
-- Keep supported marketplace fields from being dropped when the model leaves out the required evidence quote.
+- Give the model one clear format for including evidence quotes when filling marketplace fields.
