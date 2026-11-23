@@ -77,8 +77,16 @@ core and the worker takes the shared one.
 
 | Process group | Role | Machine | Runs |
 | --- | --- | --- | --- |
-| `app` | `web` | performance-1x, 2 GB | Seller requests, Mac and Chrome connections, direct marketplace jobs, Chrome sale checks and promotion rounds (`chrome` lease) |
+| `app` | `web` | performance-1x, 4 GB | Seller requests, Mac and Chrome connections, direct marketplace jobs, Chrome sale checks and promotion rounds (`chrome` lease) |
 | `worker` | `worker` | shared-cpu-1x, 2 GB | Drafts, assistant answers, automations, eBay offers, the job watchdog, Sourcing and sales sync (`schedulers` lease) |
+
+**Incident mitigation (2026-11-22, [#1816](https://github.com/btxbtwn/anteroom/issues/1816)):** the web
+Machine's Python process was OOM-killed twice the same evening at about 1.9 GB
+RSS on the approved 2 GB shape, so Fly had no healthy candidate and
+myanteroom.com hung. The live web Machine was raised to 4 GB that night, and
+`deploy/fly/fly.toml` matches it so the next deploy does not shrink RAM. This
+is a temporary capacity stopgap; the root-cause memory spike still needs a fix
+before treating 4 GB as the long-term size.
 
 Chrome sale checks and promotion rounds stay on the web Machine because they
 list sellers from the Chrome tabs connected to their own process

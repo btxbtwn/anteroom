@@ -1,0 +1,1 @@
+- Keep the hosted web app from going blank when the server runs out of memory.
