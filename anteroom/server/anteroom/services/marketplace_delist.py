@@ -269,6 +269,9 @@ def _record(db: Session, conv_id: str, marketplace: str, value: dict) -> None:
     _store(db, conv_id, "marketplaceDelists", marketplace, value)
 
 
+# A delist that recorded a failure on some marketplace, in ``marketplaceDelists``.
+DELIST_INCOMPLETE = "A delist did not finish."
+
 SALE_PINS = "saleDelistTargets"
 
 
@@ -560,7 +563,7 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
                     "marketplace_message": _marketplace_message(name, exc)})
         await in_worker_session(lambda db: JobRepo(db).update_status(
             job_id, "failed" if failed else "completed", "native_delist",
-            error="A delist did not finish." if failed else None,
+            error=DELIST_INCOMPLETE if failed else None,
             # A follow-up retry alerts the operator itself, on its first try and every few after.
             failure_log_level=logging.INFO if sale_id else logging.ERROR))
     except BaseException:
