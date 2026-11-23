@@ -177,6 +177,22 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
         from anteroom.services.draft_scheduling import unschedule_on_edit
 
         unschedule_on_edit(db, conv_id)
+    elif source == "native_schema" and previous is not None:
+        listing_row = db.query(Listing).filter(Listing.conversation_id == conv_id).first()
+        if (
+            listing_row is not None
+            and listing_row.scheduled_status == "scheduled"
+            and listing_row.scheduled_revision_id == previous.id
+        ):
+            meta_keys = {native_contract.KEY, native_contract.EVIDENCE_KEY}
+            before_public = {k: v for k, v in before.items() if k not in meta_keys}
+            after_public = {k: v for k, v in listing_json.items() if k not in meta_keys}
+            if normalized_listing_hash(before_public) == normalized_listing_hash(after_public):
+                listing_row.scheduled_revision_id = revision.id
+            else:
+                from anteroom.services.draft_scheduling import unschedule_on_edit
+
+                unschedule_on_edit(db, conv_id)
     _recheck_error_flag(db, conv_id)
     _drop_fixed_marketplace_errors(db, conv_id, before, listing_json)
 
@@ -205,10 +221,13 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
 
 
 def add_photo(db: Session, conv_id: str, original_filename: str, stored_filename: str, mime_type: str, size_bytes: int, checksum: str | None = None, width: int | None = None, height: int | None = None, marketplace: str | None = None) -> Photo:
+    from anteroom.services.draft_scheduling import unschedule_on_edit
+
     photo = ConversationRepo(db).insert_photo(
         conv_id, original_filename, stored_filename, mime_type, size_bytes,
         checksum=checksum, width=width, height=height, marketplace=marketplace,
     )
+    unschedule_on_edit(db, conv_id, reason="Photos changed after scheduling; review and reschedule before publishing.")
     _recheck_error_flag(db, conv_id)
     db.commit()
     db.refresh(photo)
@@ -216,8 +235,19 @@ def add_photo(db: Session, conv_id: str, original_filename: str, stored_filename
 
 
 def delete_photo(db: Session, conv_id: str, photo_id: str) -> bool:
+    from anteroom.services.draft_scheduling import unschedule_on_edit
+
     if not ConversationRepo(db).remove_photo(conv_id, photo_id):
         return False
+    unschedule_on_edit(db, conv_id, reason="Photos changed after scheduling; review and reschedule before publishing.")
     _recheck_error_flag(db, conv_id)
     db.commit()
     return True
+
+
+def reorder_photos(db: Session, conv_id: str, ordered_ids: list[str]) -> None:
+    from anteroom.services.draft_scheduling import unschedule_on_edit
+
+    ConversationRepo(db).update_photo_order(conv_id, ordered_ids)
+    unschedule_on_edit(db, conv_id, reason="Photos changed after scheduling; review and reschedule before publishing.")
+    db.commit()

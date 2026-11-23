@@ -1,1 +1,0 @@
-- Copy an Anteroom setup prompt for Claude, Codex, Google Antigravity, Cursor, or any other MCP client from Settings → Agents.

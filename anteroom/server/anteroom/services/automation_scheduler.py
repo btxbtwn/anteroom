@@ -93,7 +93,7 @@ async def tick(db: Session, *, now: datetime | None = None, executor=None) -> in
                 run = _claim_next(db, moment)
             if run is None:
                 due_drafts = _has_due_scheduled_drafts(db, moment)
-                has_relist = _has_enabled_auto_relist(db)
+                has_relist = _has_enabled_auto_relist(db, moment)
                 end_read(db)
                 break
             automation = db.get(Automation, run.automation_id)
@@ -482,32 +482,15 @@ def _naive(value: datetime) -> datetime:
 
 
 def _has_due_scheduled_drafts(db: Session, moment: datetime) -> bool:
-    from anteroom.models.listing import Listing
+    from anteroom.services.draft_scheduling import has_due_or_abandoned_publishes
 
-    cutoff = _naive(moment)
-    return (
-        db.query(Listing.conversation_id)
-        .filter(
-            Listing.ready_to_list.is_(True),
-            Listing.scheduled_status == "scheduled",
-            Listing.scheduled_publish_at.isnot(None),
-            Listing.scheduled_publish_at <= cutoff,
-            Listing.scheduled_confirmed_at.isnot(None),
-        )
-        .first()
-        is not None
-    )
+    return has_due_or_abandoned_publishes(db, moment)
 
 
-def _has_enabled_auto_relist(db: Session) -> bool:
-    from anteroom.models.automation import MarketplaceRelistRule
+def _has_enabled_auto_relist(db: Session, moment: datetime | None = None) -> bool:
+    from anteroom.services.auto_relist import has_due_relist_rules
 
-    return (
-        db.query(MarketplaceRelistRule.id)
-        .filter(MarketplaceRelistRule.enabled.is_(True))
-        .first()
-        is not None
-    )
+    return has_due_relist_rules(db, moment)
 
 
 async def _run_scheduled_drafts(moment: datetime) -> int:
@@ -525,7 +508,7 @@ async def _run_auto_relist(moment: datetime) -> int:
     from anteroom.services.auto_relist import run_auto_relist
 
     try:
-        results = await run_auto_relist(now=moment)
+        results = await run_auto_relist(now=moment, scheduled=True)
         return sum(1 for item in results if item.get("status") in {"completed", "failed"})
     except Exception:  # noqa: BLE001
         log.exception("auto-relist sweep failed")

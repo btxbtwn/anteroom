@@ -97,8 +97,7 @@ def upload_photos(
 
 @router.patch("/api/conversations/{conv_id}/photos/order")
 def reorder_photos(conv_id: str, ordered_ids: list[str], db: Session = Depends(get_db)):
-    repo = ConversationRepo(db)
-    repo.reorder_photos(conv_id, ordered_ids)
+    listing_persistence.reorder_photos(db, conv_id, ordered_ids)
     return {"ok": True}
 
 

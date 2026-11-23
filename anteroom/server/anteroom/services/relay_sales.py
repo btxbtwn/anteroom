@@ -92,10 +92,14 @@ def reconcile_unmatched(db: Session, *, conversation_id: str | None = None, mark
             MarketplaceSale.id == sale_id, MarketplaceSale.conversation_id.is_(None), MarketplaceSale.state == "new",
         ).update({"conversation_id": owner_id}, synchronize_session=False):
             linked.append(sale_id)
+    from anteroom.services.draft_scheduling import unschedule_on_sale
+
     for sale_id in linked:
         sale = db.get(MarketplaceSale, sale_id, populate_existing=True)
         if sale is not None:
             replace_stand_in(db, sale)
+            if sale.conversation_id:
+                unschedule_on_sale(db, sale.conversation_id)
     db.commit()
     return len(linked)
 
@@ -176,6 +180,10 @@ def record_sale(
     try:
         db.flush()
         replace_stand_in(db, sale)
+        if conv is not None:
+            from anteroom.services.draft_scheduling import unschedule_on_sale
+
+            unschedule_on_sale(db, conv.id)
         db.commit()
     except IntegrityError:
         db.rollback()

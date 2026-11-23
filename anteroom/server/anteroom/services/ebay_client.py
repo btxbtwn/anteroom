@@ -7,6 +7,8 @@ import base64
 import json
 import re
 import xml.etree.ElementTree as ET
+from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 import httpx
@@ -155,7 +157,7 @@ class EbayClient:
     @marketplace_call("ebay")
     async def request(self, method: str, path: str, *, params: dict | None = None, body: dict | None = None,
                       app: bool = False, xml: str | None = None, call: str | None = None, upload: dict | None = None,
-                      raw: bool = False, binary: bytes | None = None) -> dict:
+                      raw: bool = False, binary: bytes | Path | None = None) -> dict:
         if method.upper() not in {"GET", "HEAD"} and not app and not (xml is not None and call and call.startswith("Get")):
             from anteroom.services.listing_mode import require
             await asyncio.to_thread(require, "direct")
@@ -195,6 +197,11 @@ class EbayClient:
             assert_identity(self.seller)
         host = api_host(path)
 
+        async def _stream_file(file_path: Path, chunk_size: int = 1024 * 1024):
+            with file_path.open("rb") as handle:
+                while chunk := await asyncio.to_thread(handle.read, chunk_size):
+                    yield chunk
+
         async def send(token: str):
             headers = {"Authorization": f"Bearer {token}", "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
                        "Content-Language": "en-US"}
@@ -211,15 +218,21 @@ class EbayClient:
                 headers = {"X-EBAY-API-IAF-TOKEN": token, "X-EBAY-API-CALL-NAME": call,
                            "X-EBAY-API-SITEID": "0", "X-EBAY-API-COMPATIBILITY-LEVEL": "1487",
                            "Content-Type": "text/xml"}
+            content: Any = xml
             if binary is not None:
                 # The Media API's video upload takes the file itself as the body.
                 headers["Content-Type"] = "application/octet-stream"
+                if isinstance(binary, Path):
+                    headers["Content-Length"] = str(binary.stat().st_size)
+                    content = _stream_file(binary)
+                else:
+                    content = binary
             async with http_client() as client:
                 files = {upload["field"]: ("image.jpg" if upload["mime"] == "image/jpeg" else "image.png",
                                           base64.b64decode(upload["data"], validate=True), upload["mime"])} if upload else None
                 return await client.request(method, host + path, headers=headers, params=params,
                                             json=body if xml is None and not files and binary is None else None,
-                                            content=xml if binary is None else binary, files=files,
+                                            content=content, files=files,
                                             timeout=300 if binary is not None else 30, follow_redirects=False)
 
         if not app:

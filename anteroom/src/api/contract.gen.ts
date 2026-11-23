@@ -262,7 +262,7 @@ export interface Expense {
   origin_destination?: string | null;
   id: string;
   revision: number;
-  accounting_type: "operating_expense" | "inventory_purchase";
+  accounting_type: "operating_expense" | "inventory_purchase" | "needs_review";
   import_source: "manual" | "csv" | "plaid";
 }
 

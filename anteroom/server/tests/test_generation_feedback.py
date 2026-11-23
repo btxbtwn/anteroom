@@ -35,4 +35,22 @@ def test_feedback_rates_the_generated_revision_and_uses_only_tags_in_prompts():
         save_feedback(db, conversation.id, FeedbackInput(revision_id=generated.id, rating="up"))
         assert feedback_summary(db) == {"up": 1, "down": 0, "issues": {}}
         assert feedback_prompt(db) == ""
+
+        # L10: feedback older than recent_days is excluded in SQL.
+        from datetime import UTC, datetime, timedelta
+        old_rev = ListingRevision(
+            conversation_id=conversation.id,
+            listing_json={},
+            source="model",
+            generation_feedback={
+                "rating": "down",
+                "issues": ["price"],
+                "note": "",
+                "rated_at": (datetime.now(UTC) - timedelta(days=45)).isoformat(),
+            },
+        )
+        db.add(old_rev)
+        db.commit()
+        assert feedback_summary(db, recent_days=30) == {"up": 1, "down": 0, "issues": {}}
+        assert feedback_summary(db, recent_days=60) == {"up": 1, "down": 1, "issues": {"price": 1}}
     engine.dispose()

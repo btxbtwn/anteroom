@@ -233,3 +233,35 @@ def test_report_uses_sale_proceeds_refunds_and_accrual_cogs(expenses):
     })
     assert previous.status_code == 200, previous.text
     assert previous.json()[0]["lines"][-1]["amount_cents"] == 4200
+
+
+def test_negative_refund_expenses_allowed_while_zero_and_negative_mileage_rejected(expenses):
+    # L7: refunds/credits can be recorded as negative expenses; zero and negative mileage remain invalid.
+    client, _engine = expenses
+    refund = client.post(ROOT, json={
+        "incurred_date": "2026-01-12",
+        "category": "shipping_supplies",
+        "vendor": "Pirate Ship Refund",
+        "amount_cents": -1250,
+    })
+    assert refund.status_code == 201, refund.text
+    assert refund.json()["amount_cents"] == -1250
+
+    zero = client.post(ROOT, json={
+        "incurred_date": "2026-01-12",
+        "category": "shipping_supplies",
+        "vendor": "Zero",
+        "amount_cents": 0,
+    })
+    assert zero.status_code == 422
+
+    neg_miles = client.post(ROOT, json={
+        "incurred_date": "2026-01-12",
+        "category": "mileage",
+        "vendor": "Bad trip",
+        "amount_cents": -700,
+        "distance": "10",
+        "distance_unit": "mi",
+        "mileage_rate_cents": "70",
+    })
+    assert neg_miles.status_code == 422

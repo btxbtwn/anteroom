@@ -671,6 +671,9 @@ def apply_photo_edit(
                 raise PhotoNotFoundError("Photo not found")
             if fresh.stored_filename != current_stored or fresh.source_filename != current_source:
                 raise PhotoConflictError("Photo changed while editing; try again.")
+            from anteroom.services.draft_scheduling import unschedule_on_edit
+
+            unschedule_on_edit(db, conv_id, reason="Photos changed after scheduling; review and reschedule before publishing.")
             photo = repo.replace_photo_file(fresh, meta, source_filename=new_source, edits=new_edits)
             committed = True
             db.refresh(photo)

@@ -1098,8 +1098,11 @@ class VideoClient(Client):
                 raise EbayFailure("eBay returned HTTP 404.", 404)
             video = self.videos[video_id]
             if path.endswith("/upload"):
-                assert len(kwargs["binary"]) == video["size"]
+                payload = kwargs["binary"]
+                raw = payload.read_bytes() if isinstance(payload, Path) else payload
+                assert len(raw) == video["size"]
                 video["status"] = "PROCESSING"
+                video["uploaded_bytes"] = raw
                 return {}
             if video["status"] != "PENDING_UPLOAD" and self.states:
                 video["status"] = self.states.pop(0)
@@ -1149,7 +1152,8 @@ class EbayVideoTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(created), 1)
         self.assertEqual(created[0][2]["body"]["classification"], ["ITEM"])
         self.assertEqual(created[0][2]["body"]["size"], 10)
-        self.assertEqual(self.media(client, "/upload")[0][2]["binary"], b"clip-bytes")
+        self.assertIsInstance(self.media(client, "/upload")[0][2]["binary"], Path)
+        self.assertEqual(client.videos["v1"]["uploaded_bytes"], b"clip-bytes")
         self.assertEqual(client.items["ar-abc123"]["product"]["videoIds"], ["v1"])
         self.assertEqual(self.binding["ebay_video"], {"checksum": self.video["checksum"], "video_id": "v1"})
         self.assertFalse(any(call[1].endswith("/publish") for call in client.calls))

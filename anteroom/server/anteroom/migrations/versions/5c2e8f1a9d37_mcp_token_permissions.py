@@ -7,7 +7,7 @@ fills those existing rows (no row triggers fire); new tokens always set their
 own permissions.
 
 Revision ID: 5c2e8f1a9d37
-Revises: 3f6a9d2c7b14
+Revises: 8e4b2c9a1d7f
 Create Date: 2026-11-22 22:00:00.000000
 """
 from __future__ import annotations
@@ -17,7 +17,7 @@ import sqlalchemy as sa
 
 
 revision = '5c2e8f1a9d37'
-down_revision = '3f6a9d2c7b14'
+down_revision = '8e4b2c9a1d7f'
 branch_labels = None
 depends_on = None
 

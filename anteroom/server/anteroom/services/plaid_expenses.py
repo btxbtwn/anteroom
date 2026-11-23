@@ -190,11 +190,23 @@ def _save_connection(row: PlaidConnection, token: str) -> None:
         db.commit()
 
 
+class PlaidUnavailable(RuntimeError):
+    """Raised when Plaid credentials are unavailable to revoke a connected Item."""
+
+
 async def _revoke(client: PlaidClient, token: str) -> None:
     try:
         await client.post("/item/remove", access_token=token)
     except PlaidError:
         logger.warning("Plaid could not revoke an Item")
+
+
+async def _revoke_strict(client: PlaidClient, token: str) -> None:
+    try:
+        await client.post("/item/remove", access_token=token)
+    except PlaidError as exc:
+        if exc.code not in {"ITEM_NOT_FOUND", "INVALID_ACCESS_TOKEN"}:
+            raise
 
 
 async def revoke_hosted_items(client: PlaidClient, owner: str, connection_ids: list[str]) -> None:
@@ -296,8 +308,6 @@ def _category(detail: str, vendor: str) -> Category:
         return "shipping_labels"
     if "uline" in merchant or "staples" in merchant:
         return "shipping_supplies"
-    if detail.startswith("GENERAL_MERCHANDISE_") and detail.endswith(("_CLOTHING_AND_ACCESSORIES", "_THRIFT_STORES")):
-        return "inventory_purchases"
     if any(name in merchant for name in ("vendoo", "list perfectly", "adobe", "quickbooks")):
         return "software_subscriptions"
     if "advertis" in merchant or merchant.startswith(("meta ads", "google ads")):
@@ -308,6 +318,8 @@ def _category(detail: str, vendor: str) -> Category:
         return "platform_fees"
     if detail.endswith("_OFFICE_SUPPLIES"):
         return "home_office"
+    # Leave thrift and clothing card charges as "other" for seller review so cash-basis
+    # P&L does not double-count inventory already tracked in Sourcing boxes.
     return "other"
 
 
@@ -345,7 +357,11 @@ def _expense(row: dict) -> ExpenseInput | None:
     if not currency:
         return None
     amount = round_cents(Decimal(str(row["amount"])) * 100)
-    if amount <= 0:
+    if amount == 0:
+        return None
+    # Import categorized merchant refunds/credits (negative Plaid amounts) so expenses are not
+    # overstated, while ignoring uncategorized negative inflows (e.g. payroll or deposits).
+    if amount < 0 and not (primary or detailed):
         return None
     vendor = str(row.get("merchant_name") or row["name"])
     return ExpenseInput(incurred_date=row["date"], amount_cents=amount, currency=currency,
@@ -359,8 +375,40 @@ def _import_key(environment: str, transaction_id: str) -> str:
     return sha256(f"plaid:{environment}:{transaction_id}".encode()).hexdigest()
 
 
+_NEEDS_REVIEW_PLAID_DETAILED = frozenset({
+    "GENERAL_MERCHANDISE_CLOTHING_AND_ACCESSORIES",
+    "GENERAL_MERCHANDISE_DISCOUNT_STORES",
+})
+_THRIFT_VENDOR_KEYWORDS = (
+    "goodwill",
+    "salvation army",
+    "savers",
+    "value village",
+    "thrift",
+    "buffalo exchange",
+    "plato's closet",
+    "crossroads trading",
+    "deseret industries",
+    "st. vincent de paul",
+)
+
+
+def _needs_review_row(row: dict | None) -> bool:
+    """Flag clothing, discount-store, and thrift sourcing charges for seller classification."""
+    if not row:
+        return False
+    detail = (row.get("personal_finance_category") or {}).get("detailed") or ""
+    if detail in _NEEDS_REVIEW_PLAID_DETAILED:
+        return True
+    vendor = str(row.get("merchant_name") or row.get("name") or "").casefold()
+    return any(keyword in vendor for keyword in _THRIFT_VENDOR_KEYWORDS)
+
+
 def _reconcile(db: Session, environment: str, delta: Delta) -> None:
-    changes = {_import_key(environment, key): _expense(row) if row else None for key, row in delta.changes.items()}
+    changes = {
+        _import_key(environment, key): (_expense(row), _needs_review_row(row)) if row else (None, False)
+        for key, row in delta.changes.items()
+    }
     keys = list(changes)
     # Work in chunks within one write transaction (including the cursor).
     for start in range(0, len(keys), 500):
@@ -381,7 +429,7 @@ def _reconcile(db: Session, environment: str, delta: Delta) -> None:
                 continue
             if expense is not None and (record is None or expense.revision != record.imported_revision):
                 continue
-            body = changes[key]
+            body, needs_review = changes[key]
             if body is None:
                 if expense is not None and record is not None:
                     db.delete(expense)
@@ -394,6 +442,8 @@ def _reconcile(db: Session, environment: str, delta: Delta) -> None:
                 expense = BusinessExpense(import_source="plaid", import_key=key)
                 db.add(expense)
             apply_input(expense, body)
+            if needs_review and body.category == "other":
+                expense.accounting_type = "needs_review"
             written.append((record, expense))
         db.flush()
         for record, expense in written:
@@ -479,14 +529,18 @@ def _finish_disconnect(connection_id: str) -> None:
 
 async def disconnect(client: PlaidClient | None, connection_id: str) -> None:
     environment = await database.in_worker_session(_begin_disconnect, connection_id)
-    if client and client.environment == environment:
-        try:
-            token = await database.run_worker_db_step(keychain.read_slot, _slot(connection_id))
-        except CredentialStorageUnavailable:
-            logger.warning("Plaid Item revocation skipped because the credential could not be read")
-        else:
-            if token:
-                await _revoke(client, token)
+    try:
+        token = await database.run_worker_db_step(keychain.read_slot, _slot(connection_id))
+    except CredentialStorageUnavailable:
+        logger.warning("Plaid Item revocation skipped because the credential could not be read")
+    else:
+        if token:
+            if client is None or client.environment != environment:
+                raise PlaidUnavailable(
+                    "Plaid is not configured for this connection's environment. "
+                    "Restore PLAID_* settings to revoke bank access before disconnecting."
+                )
+            await _revoke_strict(client, token)
     await database.run_worker_db_step(_finish_disconnect, connection_id)
 
 

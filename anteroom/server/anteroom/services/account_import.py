@@ -235,6 +235,9 @@ ALLOWED_SETTINGS_KEYS = frozenset({
     'hidden_fields',
     'vendoo_sales_archived_at',
     'brave_quota_exhausted',
+    'pricing_rules',
+    'shipping_presets',
+    'listing_warnings',
 })
 
 

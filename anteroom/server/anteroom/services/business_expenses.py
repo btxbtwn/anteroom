@@ -18,7 +18,7 @@ DecimalText = Annotated[Decimal, WithJsonSchema({"type": "string", "description"
 
 class ExpenseInput(BaseModel):
     incurred_date: date
-    amount_cents: int = Field(gt=0, le=999_999_999_999)
+    amount_cents: int = Field(ge=-999_999_999_999, le=999_999_999_999, json_schema_extra={"not": {"const": 0}})
     currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
     category: Category
     vendor: str = Field(default="", max_length=256)
@@ -31,10 +31,14 @@ class ExpenseInput(BaseModel):
 
     @model_validator(mode="after")
     def validate_trip(self) -> Self:
+        if self.amount_cents == 0:
+            raise ValueError("Amount must be non-zero.")
         fields = (self.distance, self.distance_unit, self.mileage_rate_cents)
         if self.category != "mileage":
             if any(value is not None for value in (*fields, self.origin_destination)):
                 raise ValueError("Trip details belong to mileage expenses.")
+        elif self.amount_cents < 0:
+            raise ValueError("Mileage amount must be positive.")
         elif self.distance is None or self.distance_unit is None or self.mileage_rate_cents is None:
             raise ValueError("Enter the trip distance, unit and rate.")
         else:
@@ -49,7 +53,7 @@ class ExpenseInput(BaseModel):
 class Expense(ExpenseInput):
     id: str
     revision: int
-    accounting_type: Literal["operating_expense", "inventory_purchase"]
+    accounting_type: Literal["operating_expense", "inventory_purchase", "needs_review"]
     import_source: Literal["manual", "csv", "plaid"]
 
 
@@ -98,6 +102,7 @@ class MileageAmount(BaseModel):
 
 
 # IRS standard business mileage rates and CRA automobile allowance rates.
+# 2026 US rate: 72.5c Jan 1-Jun 30 (Notice 2026-10), raised mid-year to 76c Jul 1-Dec 31 (IRS Announcement 2026-11).
 US_RATES = {2023: Decimal("65.5"), 2024: Decimal(67), 2025: Decimal(70), 2026: Decimal("72.5")}
 CA_RATES = {2023: (68, 62), 2024: (70, 64), 2025: (72, 66), 2026: (73, 67)}
 KM_PER_MILE = Decimal("1.609344")
@@ -109,6 +114,7 @@ def mileage(body: MileageInput) -> MileageAmount:
         if body.us_rate_override_cents is not None:
             rate = body.us_rate_override_cents
         else:
+            # IRS Announcement 2026-11 mid-year adjustment: 76 cents/mile effective July 1, 2026.
             rate = Decimal(76) if body.incurred_date >= date(2026, 7, 1) else US_RATES[year]
             if body.distance_unit == "km":
                 rate /= KM_PER_MILE

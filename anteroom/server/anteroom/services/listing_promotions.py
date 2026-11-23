@@ -787,7 +787,8 @@ async def perform_account_action(
         ):
             result = None
         finish = asyncio.ensure_future(in_worker_session(_finish_send, promotion_id, None, result))
-        return await asyncio.shield(finish)
+        done = await asyncio.shield(finish)
+        return {**done, "executor": "cloud" if use_cloud else "chrome"}
     except BaseException:
         if finish is not None:
             with contextlib.suppress(BaseException):

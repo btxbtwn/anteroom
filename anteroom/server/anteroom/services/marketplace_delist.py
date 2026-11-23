@@ -395,6 +395,11 @@ def _mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | No
     # Marking listed or not listed starts the record over; a sale keeps how the listing ended.
     if state != "sold":
         _store(db, conv_id, "marketplaceDelists", marketplace, None)
+    else:
+        from anteroom.services.draft_scheduling import unschedule_on_sale
+
+        if unschedule_on_sale(db, conv_id):
+            db.commit()
     if state == "listed":
         from anteroom.services.relay_sales import reconcile_unmatched
 

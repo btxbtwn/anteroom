@@ -44,7 +44,7 @@ def test_changed_photos_do_not_reuse_old_analysis(draft, change):
         first.checksum = "edited"
         db.commit()
     else:
-        repo.reorder_photos(conv_id, [second.id, first.id])
+        listing_persistence.reorder_photos(db, conv_id, [second.id, first.id])
     assert listing_generate.current_photo_analysis(repo, conv_id) is None
 
 
