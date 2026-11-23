@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1184 — 2026-11-23
+
+- Behind the scenes: an iPhone Safari check that sometimes failed for no real reason no longer holds up updates.
+
 ## 0.1.1183 — 2026-11-23
 
 - Drawing a mark on a photo no longer highlights text beside it, so a quick second mark is no longer dragged away and lost.

@@ -1,1 +1,0 @@
-- Behind the scenes: an iPhone Safari check that sometimes failed for no real reason no longer holds up updates.
