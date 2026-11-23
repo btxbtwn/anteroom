@@ -15,6 +15,7 @@ from anteroom.services.marketplace_accounts import SignInRequired
 from anteroom.services.relay_client import RelayError
 
 router = APIRouter(prefix="/api/etsy", tags=["etsy"])
+_RATE_LIMIT_MESSAGE = "Etsy requests are temporarily rate limited. Wait and try again."
 
 
 async def _read_workspace(operation, response: Response):
@@ -30,7 +31,7 @@ async def _read_workspace(operation, response: Response):
         if status in {401, 403}:
             raise HTTPException(403, "Etsy denied access. Reconnect your shop to grant permission.") from None
         if status == 429:
-            raise HTTPException(429, "Etsy's request limit was reached. Wait a moment, then refresh.") from None
+            raise HTTPException(429, _RATE_LIMIT_MESSAGE) from None
         raise HTTPException(502, "Etsy could not load this view. Try again.") from None
     except Exception:
         # Upstream errors may contain authorization headers or buyer details.
@@ -59,15 +60,23 @@ async def get_listings(response: Response, offset: int = Query(0, ge=0, le=10000
     return await _read_workspace(lambda client: etsy_workspace.listings(client, state, offset), response)
 
 
-@router.get("/listing-profiles")
-async def get_listing_profiles():
-    """Only profile IDs and labels; never return shipping origins or addresses."""
+async def _load_listing_profiles(*, fresh: bool = False):
     try:
-        return await etsy_listings.listing_profiles()
+        return await etsy_listings.listing_profiles(fresh=fresh)
     except (ValueError, marketplace_accounts.SignInRequired) as exc:
         raise HTTPException(409, str(exc)) from exc
     except (httpx.HTTPError, RelayError) as exc:
+        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
+            retry_after = exc.response.headers.get("retry-after", "")
+            headers = {"Retry-After": retry_after} if retry_after.isascii() and retry_after.isdecimal() and len(retry_after) <= 10 else None
+            raise HTTPException(429, _RATE_LIMIT_MESSAGE, headers=headers) from None
         raise HTTPException(502, "Could not load Etsy listing profiles. Check the Etsy connection.") from exc
+
+
+@router.get("/listing-profiles")
+async def get_listing_profiles():
+    """Only profile IDs and labels; never return shipping origins or addresses."""
+    return await _load_listing_profiles()
 
 
 class ImportRequest(BaseModel):
@@ -106,12 +115,7 @@ def get_listing_defaults():
 @router.put("/listing-defaults")
 async def put_listing_defaults(body: EtsyListingDefaults):
     """Saved once in Settings; only profiles from the connected shop are accepted."""
-    try:
-        profiles = await etsy_listings.listing_profiles()
-    except (ValueError, marketplace_accounts.SignInRequired) as exc:
-        raise HTTPException(409, str(exc)) from exc
-    except (httpx.HTTPError, RelayError) as exc:
-        raise HTTPException(502, "Could not load Etsy listing profiles. Check the Etsy connection.") from exc
+    profiles = await _load_listing_profiles(fresh=True)
     if (body.shipping_profile_id not in {p["id"] for p in profiles["shipping"]}
             or body.readiness_state_id not in {p["id"] for p in profiles["processing"]}
             or body.return_policy_id not in {p["id"] for p in profiles["returns"]}):

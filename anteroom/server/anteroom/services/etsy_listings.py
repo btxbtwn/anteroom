@@ -10,10 +10,15 @@ import asyncio
 import html
 import inspect
 import re
+import time
 import unicodedata
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable
-from typing import Literal
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
+from threading import Lock
+from typing import Literal
+from weakref import WeakKeyDictionary
 
 import httpx
 
@@ -22,7 +27,7 @@ from anteroom.services.etsy_fields import (
     DEFAULT_ETSY_RENEWAL, sanitize_etsy_tags, etsy_eligible, etsy_renewal_raw, etsy_when_made_code, etsy_when_options,
     etsy_when_raw, etsy_when_to_store, etsy_what_raw, etsy_who_raw, is_etsy_digital_listing,
 )
-from anteroom.services import marketplace_accounts, marketplace_schemas
+from anteroom.services import marketplace_accounts, marketplace_schemas, service_context
 from anteroom.services.keychain import get_marketplace_accounts
 from anteroom.services.listing_result import ListingProblem, failure, missing, retry_after_seconds, scrub
 from anteroom.services.direct_preflight import Context, gap, requirement, seeded_leaf
@@ -33,6 +38,20 @@ from anteroom.services.vendoo_specifics import is_not_applicable
 
 RecordFn = Callable[[dict], Awaitable[None] | None]
 ActiveFn = Callable[[], Awaitable[bool] | bool]
+_Profiles = dict[str, list[dict]]
+_ProfileKey = tuple[str | None, str, float]
+_PROFILE_TTL_SECONDS = 60
+_PROFILE_CACHE_SIZE = 256
+
+
+@dataclass
+class _ProfileReads:
+    cached: OrderedDict[_ProfileKey, tuple[float, _Profiles]] = field(default_factory=OrderedDict)
+    pending: dict[_ProfileKey, asyncio.Task[_Profiles]] = field(default_factory=dict)
+
+
+_profile_reads: WeakKeyDictionary[asyncio.AbstractEventLoop, _ProfileReads] = WeakKeyDictionary()
+_profile_reads_lock = Lock()
 
 
 async def _record(record: RecordFn, values: dict) -> None:
@@ -48,12 +67,17 @@ async def _is_active(active: ActiveFn) -> bool:
     return bool(result)
 
 
-def connected_shop_id() -> str:
+def _connected_shop() -> tuple[str, float | None]:
     account = get_marketplace_accounts().get("etsy") or {}
     shop_id = str(account.get("accountId") or "")
     if not account.get("accessToken") or not re.fullmatch(r"[1-9]\d*", shop_id):
         raise ValueError("Connect Etsy in Settings → Connections first.")
-    return shop_id
+    connected_at = account.get("connectedAt")
+    return shop_id, connected_at if isinstance(connected_at, (int, float)) else None
+
+
+def connected_shop_id() -> str:
+    return _connected_shop()[0]
 
 
 def listing_id(url: str | None) -> str:
@@ -69,15 +93,50 @@ def edit_url(item_id: str) -> str:
     return f"https://www.etsy.com/your/shops/me/listing-editor/edit/{item_id}"
 
 
-async def listing_profiles() -> dict[str, list[dict]]:
-    shop_id = await asyncio.to_thread(connected_shop_id)
+async def listing_profiles(*, fresh: bool = False) -> _Profiles:
+    """Reuse a live read or a recent result from this seller's current connection."""
+    shop_id, connected_at = connection = await asyncio.to_thread(_connected_shop)
+    if connected_at is None:
+        profiles = await _fetch_listing_profiles(shop_id)
+    else:
+        context = service_context.current()
+        key = (context.seller_id if context else None, shop_id, connected_at)
+        loop = asyncio.get_running_loop()
+        with _profile_reads_lock:
+            reads = _profile_reads.get(loop)
+            if reads is None:
+                reads = _profile_reads[loop] = _ProfileReads()
+        cached = reads.cached.get(key)
+        if not fresh and cached and time.monotonic() - cached[0] < _PROFILE_TTL_SECONDS:
+            reads.cached.move_to_end(key)
+            return cached[1]
+        task = reads.pending.get(key)
+        if task is None:
+            task = asyncio.create_task(_fetch_listing_profiles(shop_id))
+            reads.pending[key] = task
+
+            def finish(done: asyncio.Task[_Profiles]) -> None:
+                if reads.pending.get(key) is done:
+                    reads.pending.pop(key)
+                if not done.cancelled() and done.exception() is None:
+                    reads.cached[key] = (time.monotonic(), done.result())
+                    reads.cached.move_to_end(key)
+                    if len(reads.cached) > _PROFILE_CACHE_SIZE:
+                        reads.cached.popitem(last=False)
+
+            task.add_done_callback(finish)
+        profiles = await asyncio.shield(task)
+    if await asyncio.to_thread(_connected_shop) != connection:
+        raise ValueError("The connected Etsy shop changed. Load its shipping profiles again.")
+    return profiles
+
+
+async def _fetch_listing_profiles(shop_id: str) -> _Profiles:
     shipping, processing, returns = await asyncio.gather(
         marketplace_accounts.etsy_api("GET", f"shops/{shop_id}/shipping-profiles"),
         marketplace_accounts.etsy_api("GET", f"shops/{shop_id}/readiness-state-definitions", params={"limit": 100}),
         marketplace_accounts.etsy_api("GET", f"shops/{shop_id}/policies/return"),
     )
-    if await asyncio.to_thread(connected_shop_id) != shop_id:
-        raise ValueError("The connected Etsy shop changed. Load its shipping profiles again.")
     return {
         "shipping": [{"id": str(p["shipping_profile_id"]), "title": str(p.get("title") or "Shipping profile")[:200],
                       "is_calculated": p.get("profile_type") == "calculated"}

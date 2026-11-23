@@ -393,8 +393,61 @@ describe("Etsy", () => {
     );
     expect(refused.status).toBe(429);
     expect(refused.headers.get("retry-after")).toBe("5");
+    expect(refused.headers.get("x-anteroom-etsy-throttle-source")).toBe("relay");
     expect(limit).toHaveBeenCalledWith({ key: a.deviceId });
     expect(calls.some((c) => c.url.includes("/shops/53/receipts"))).toBe(false);
+  });
+
+  it("marks upstream Etsy throttling and forwards its quota and retry headers", async () => {
+    const a = await register();
+    await connectEtsy(a.token, { userId: "784", shopId: "54" });
+    const info = vi.spyOn(console, "info");
+    route("GET", /api\.etsy\.com\/v3\/application\/shops\/54\/shipping-profiles/, () =>
+      new Response("Too many requests", { status: 429, headers: {
+        "retry-after": "17", "x-limit-per-second": "10", "x-remaining-this-secon": "0",
+        "x-limit-per-day": "10000", "x-remaining-today": "9821",
+        "x-anteroom-etsy-throttle-source": "relay",
+      } }),
+    );
+    const reply = await relay(
+      "/studio/etsy/v3/application/shops/54/shipping-profiles",
+      authed(a.token, { headers: { "x-etsy-authorization": "Bearer 784.access" } }),
+    );
+    expect(reply.status).toBe(429);
+    expect(reply.headers.get("x-anteroom-etsy-throttle-source")).toBe("etsy");
+    expect(reply.headers.get("retry-after")).toBe("17");
+    expect(reply.headers.get("x-limit-per-second")).toBe("10");
+    expect(reply.headers.get("x-remaining-this-secon")).toBe("0");
+    expect(reply.headers.get("x-limit-per-day")).toBe("10000");
+    expect(reply.headers.get("x-remaining-today")).toBe("9821");
+    expect(info).toHaveBeenCalledWith({
+      event: "etsy_api_quota", source: "etsy", status: 429, "retry-after": 17,
+      "x-limit-per-second": 10, "x-remaining-this-secon": 0, "x-limit-per-day": 10000,
+      "x-remaining-today": 9821,
+    });
+  });
+
+  it("samples successful Etsy quota headers without logging untrusted values", async () => {
+    const a = await register();
+    await connectEtsy(a.token, { userId: "785", shopId: "55" });
+    const info = vi.spyOn(console, "info");
+    route("GET", /api\.etsy\.com\/v3\/application\/shops\/55\/shipping-profiles/, () =>
+      Response.json({ results: [] }, { headers: {
+        "x-limit-per-day": "10000", "x-remaining-today": "9800",
+        "x-limit-per-second": "arbitrary upstream text",
+        "x-anteroom-etsy-throttle-source": "relay",
+      } }),
+    );
+    const load = () => relay("/studio/etsy/v3/application/shops/55/shipping-profiles",
+      authed(a.token, { headers: { "x-etsy-authorization": "Bearer 785.access" } }));
+    const first = await load();
+    expect(first.status).toBe(200);
+    expect(first.headers.has("x-anteroom-etsy-throttle-source")).toBe(false);
+    expect((await load()).status).toBe(200);
+    expect(info.mock.calls.filter(([log]) => log?.event === "etsy_api_quota")).toEqual([[{
+      event: "etsy_api_quota", source: "etsy", status: 200,
+      "x-limit-per-day": 10000, "x-remaining-today": 9800,
+    }]]);
   });
 
   it("refreshes tokens only for the device's own Etsy account", async () => {

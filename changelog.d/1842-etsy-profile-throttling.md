@@ -1,0 +1,1 @@
+- Etsy listing settings reuse recent profile reads to reduce repeat requests and tell you when to wait and try again if requests are rate limited.
