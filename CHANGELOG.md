@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1212 — 2026-11-24
+
+- Your AI assistant (Claude, ChatGPT, Gemini, Cursor) can now save marketplace drafts, list, send your saved edits to live listings and delist through Anteroom's MCP connector, but only if you allow it. Each token and connected app has a new **Marketplaces** setting in Settings → Agents: **No access** (the default, also for every assistant you already connected), **Save drafts**, or **Publish, update and delist**. The assistant must name each marketplace and confirm every publish, update and delist, can schedule a listing with Scheduled Draft Publishing, and can check how each action went. Anteroom shows which assistant started a running action.
+
 ## 0.1.1211 — 2026-11-24
 
 - Needs attention alerts can now be resolved, not only snoozed. **Resolve** hides an alert until something changes, like another sale or a new error, so a sold item still listed elsewhere always comes back when it sells again.
