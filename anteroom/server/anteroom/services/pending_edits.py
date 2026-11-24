@@ -148,7 +148,7 @@ def discard_pending_edits(
 
     saved = listing_editor.save_listing_edit(
         conv_id, copy.deepcopy(target.listing_json), db, source="restore",
-        expected_revision_id=expected_revision_id, commit=False,
+        expected_revision_id=expected_revision_id, commit=False, verbatim=True,
     )
     # Going back is not a correction for generation to learn from.
     db.query(ListingCorrection).filter_by(revision_id=saved["revision_id"]).update({"source": "restore"})
