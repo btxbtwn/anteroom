@@ -5,7 +5,8 @@ import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import { api } from "../api/client";
 import type { ListingPhoto } from "../api/types";
-import { BulkPhotoStudioDialog } from "./BulkPhotoStudioDialog";
+import { BulkPhotoBatches } from "./BulkPhotoStudioDialog";
+import type { Listing } from "./sidebar/listingShelves";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -30,16 +31,17 @@ async function openDialog() {
     await vi.waitFor(() => expect(button(name)?.disabled).toBe(false));
     await act(async () => { button(name)!.click(); });
   };
-  await act(async () => root.render(<QueryClientProvider client={client}>
-    <BulkPhotoStudioDialog listings={[{ id: "draft", status: "draft", title: "Jacket" }]} onDone={() => {}} />
+  const render = (batches: { id: number; listings: Listing[] }[]) => act(async () => root.render(<QueryClientProvider client={client}>
+    <BulkPhotoBatches batches={batches} onDone={() => {}} />
   </QueryClientProvider>));
+  await render([{ id: 1, listings: [{ id: "draft", status: "draft", title: "Jacket" }] }]);
   const close = async () => {
     await act(async () => root.unmount());
     client.clear();
     host.remove();
     vi.restoreAllMocks();
   };
-  return { click, host, close };
+  return { click, host, close, render };
 }
 
 it("splits a large selection and resumes failed or unsent photos without editing saved photos again", async () => {
@@ -93,6 +95,32 @@ it("reselects only unchanged, unedited photos after a reply is lost", async () =
       [saved.id, sameVersion.id, changed.id, untouched.id],
       [untouched.id],
     ]);
+  } finally {
+    await close();
+  }
+});
+
+it("starts another batch for other drafts while an earlier batch keeps running in the background", async () => {
+  vi.spyOn(api.conversations, "photos").mockImplementation(async (id) => [{ ...photos[0], id: `${id}-p0`, conversation_id: id }]);
+  let finish: () => void = () => {};
+  const studio = vi.spyOn(api.conversations, "photoStudio").mockImplementation((id, ids) => id === "draft"
+    ? new Promise((resolve) => { finish = () => resolve({ photos: [], errors: [] }); })
+    : Promise.resolve({ photos: ids.map((photoId) => ({ ...photos[0], id: photoId, conversation_id: id })), errors: [] }));
+  const { click, host, close, render } = await openDialog();
+  try {
+    await click("Review photos");
+    await click("Apply to 1 photo");
+    await click("Continue in background");
+    await render([
+      { id: 1, listings: [{ id: "draft", status: "draft", title: "Jacket" }] },
+      { id: 2, listings: [{ id: "other", status: "draft", title: "Boots" }] },
+    ]);
+    expect(host.textContent).toContain("Photo edits · 0 of 1");
+    await click("Review photos");
+    await click("Apply to 1 photo");
+    await vi.waitFor(() => expect(host.textContent).toContain("1 saved · 0 failed"));
+    expect(studio.mock.calls.map((call) => call[0])).toEqual(["draft", "other"]);
+    await act(async () => finish());
   } finally {
     await close();
   }

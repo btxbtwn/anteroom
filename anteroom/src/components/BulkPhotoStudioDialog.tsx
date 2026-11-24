@@ -64,8 +64,29 @@ interface Target {
   photos: ListingPhoto[];
 }
 
-/** Kept at the workspace level so closing the dialog or opening a draft leaves the batch running. */
-export function BulkPhotoStudioDialog({ listings, onDone }: {
+interface BulkPhotoBatch {
+  id: number;
+  listings: Listing[];
+}
+
+/**
+ * Kept at the workspace level so closing a dialog or opening a draft leaves its
+ * batch running. Each batch runs on its own, so the seller can start another for
+ * other drafts while earlier ones are still working.
+ */
+export function BulkPhotoBatches({ batches, onDone }: {
+  batches: BulkPhotoBatch[];
+  onDone: (id: number) => void;
+}) {
+  return batches.map((batch, slot) => (
+    <BulkPhotoStudioDialog key={batch.id} batchId={batch.id} slot={slot} listings={batch.listings} onDone={() => onDone(batch.id)} />
+  ));
+}
+
+function BulkPhotoStudioDialog({ batchId, slot = 0, listings, onDone }: {
+  batchId: number;
+  /** Stacks this batch's background button above earlier batches' buttons. */
+  slot?: number;
   listings: Listing[];
   onDone: () => void;
 }) {
@@ -82,7 +103,7 @@ export function BulkPhotoStudioDialog({ listings, onDone }: {
 
   const key = useQuery({ queryKey: ["settings-photoroom"], queryFn: api.settings.photoroom, staleTime: 60_000 });
   const review = useQuery({
-    queryKey: ["bulk-photo-review", listings.map((item) => item.id)],
+    queryKey: ["bulk-photo-review", batchId, listings.map((item) => item.id)],
     queryFn: ({ signal }) => readDraftPhotos(listings, signal),
     staleTime: Infinity, gcTime: 0, retry: false,
   });
@@ -193,7 +214,7 @@ export function BulkPhotoStudioDialog({ listings, onDone }: {
   };
   const close = () => running ? setVisible(false) : onDone();
   if (!visible) return (
-    <Button className="fixed bottom-28 right-4 z-20" variant="outline" onClick={() => setVisible(true)}>
+    <Button className="fixed right-4 z-20" style={{ bottom: `calc(7rem + ${slot} * 2.75rem)` }} variant="outline" onClick={() => setVisible(true)}>
       {running ? `Photo edits · ${results.size} of ${photoCount}` : "Photo edit results"}
     </Button>
   );

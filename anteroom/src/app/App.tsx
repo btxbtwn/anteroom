@@ -77,8 +77,8 @@ const PAGE_LOADERS = [...Object.values(pageLoaders), loadListingEditor, loadChat
 const FirstRunGuide = lazy(() =>
   import("../components/FirstRunGuide").then((module) => ({ default: module.FirstRunGuide })),
 );
-const BulkPhotoStudioDialog = lazy(() =>
-  import("../components/BulkPhotoStudioDialog").then((module) => ({ default: module.BulkPhotoStudioDialog })),
+const BulkPhotoBatches = lazy(() =>
+  import("../components/BulkPhotoStudioDialog").then((module) => ({ default: module.BulkPhotoBatches })),
 );
 
 const ACTIVE_JOB_STATUSES = new Set(["queued", "awaiting_extension", "dispatched"]);
@@ -611,7 +611,13 @@ export function App() {
   };
 
   const bulk = useBulkRegenerate((id) => activeView === "listings" && selectedConvId === id);
-  const [bulkPhotoListings, setBulkPhotoListings] = useState<Listing[] | null>(null);
+  // Each batch runs independently, so a running batch never blocks starting one for other drafts.
+  const [bulkPhotoBatches, setBulkPhotoBatches] = useState<{ id: number; listings: Listing[] }[]>([]);
+  const nextPhotoBatch = useRef(0);
+  const startPhotoBatch = (listings: Listing[]) => {
+    const id = ++nextPhotoBatch.current;
+    setBulkPhotoBatches((batches) => [...batches, { id, listings }]);
+  };
   const [bulkProgressOpen, setBulkProgressOpen] = useState(false);
   const [bulkDrafts, setBulkDrafts] = useState<Record<string, { title: string; status: string; retry?: boolean }>>({});
   // Bulk-uploaded drafts already carry their SKUs and measurements, so they generate straight away.
@@ -871,7 +877,7 @@ export function App() {
             onCloseSettings={closeSettings}
             onSettingsSectionChange={handleSettingsSectionChange}
             onSettingsSearchResult={handleSettingsSearchResult}
-            onEditPhotos={bulkPhotoListings ? undefined : setBulkPhotoListings}
+            onEditPhotos={startPhotoBatch}
             bulk={bulk}
           />
         )}
@@ -1146,9 +1152,10 @@ export function App() {
           dropPhotos.mutate({ files });
         }}
       />
-      {bulkPhotoListings && (
+      {bulkPhotoBatches.length > 0 && (
         <Suspense fallback={null}>
-          <BulkPhotoStudioDialog listings={bulkPhotoListings} onDone={() => setBulkPhotoListings(null)} />
+          <BulkPhotoBatches batches={bulkPhotoBatches}
+            onDone={(id) => setBulkPhotoBatches((batches) => batches.filter((batch) => batch.id !== id))} />
         </Suspense>
       )}
       {pendingBulkGroups ? (
