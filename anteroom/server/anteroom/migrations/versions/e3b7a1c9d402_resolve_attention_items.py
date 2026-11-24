@@ -21,13 +21,19 @@ depends_on = None
 
 
 def upgrade() -> None:
-    with op.batch_alter_table("attention_dismissals") as batch:
-        batch.add_column(sa.Column("fingerprint", sa.String(length=64), nullable=True))
-        batch.alter_column("expires_at", existing_type=sa.DateTime(), nullable=True)
+    # A database adopted from before migrations gets this table from the
+    # current models, already in its new shape: change only what is missing.
+    columns = {column["name"]: column for column in sa.inspect(op.get_bind()).get_columns("attention_dismissals")}
+    if not columns["expires_at"]["nullable"]:
+        with op.batch_alter_table("attention_dismissals") as batch:
+            batch.alter_column("expires_at", existing_type=sa.DateTime(), nullable=True)
+    if "fingerprint" not in columns:
+        op.add_column("attention_dismissals", sa.Column("fingerprint", sa.String(length=64), nullable=True))
 
 
 def downgrade() -> None:
     op.execute("DELETE FROM attention_dismissals WHERE expires_at IS NULL")
     with op.batch_alter_table("attention_dismissals") as batch:
-        batch.alter_column("expires_at", existing_type=sa.DateTime(), nullable=False)
         batch.drop_column("fingerprint")
+    with op.batch_alter_table("attention_dismissals") as batch:
+        batch.alter_column("expires_at", existing_type=sa.DateTime(), nullable=False)
