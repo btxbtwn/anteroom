@@ -31,7 +31,7 @@ async def forms_prompt(conv_id: str, option_catalog=None) -> str:
         return ""
     definitions = json.loads((skills_dir() / "list-this/references/listing-editor-fields.json").read_text())
     markets = set(get_selected_marketplaces()) | set(listing.get(native_contract.KEY) or {})
-    native = await native_field_fill.load_forms(conv_id, markets)
+    native = await native_field_fill.load_forms(conv_id, markets, include_depop_category_picker=True)
     forms: dict[str, dict] = {
         "general": {
             "fields": _values(definitions["general"], listing, "general")
@@ -79,6 +79,7 @@ async def forms_prompt(conv_id: str, option_catalog=None) -> str:
         "These current editor forms override historical, reference and saved native form instructions above. "
         "Every row is accessible, including optional and empty fields. Use fields rows with path and value "
         "to save changes. Copy an exact choice; where option_values maps labels to IDs, save its ID. "
+        "For a selection-only row with options_lookup, search for the intended choice and save its returned value. "
         "Respect locked fields, types, limits and dependent choices. Category changes are allowed when requested; "
         "change the category first and reload its form before choosing dependent values. "
         "Unavailable forms or choices require a connection or reload; never invent their fields or IDs, "

@@ -249,6 +249,65 @@ class NativeEditorTest(unittest.TestCase):
         self.assertEqual(len(JobRepo(self.db).list_by_conversation(self.conv.id)), before)
         self.bridge.assert_not_called()
 
+    def test_chat_can_replace_an_unknown_depop_category_using_the_native_picker(self):
+        import json
+
+        path = "direct_category_ids.depop"
+        label = "Men > Tops > T-shirts"
+        snapshot = {
+            **self.listing,
+            "direct_category_ids": {**self.listing["direct_category_ids"], "depop": "menswear_retired"},
+            "depop_specifics": {"nativeSizeId": "retired-size"},
+        }
+        listing_persistence.save_revision(self.db, self.conv.id, snapshot, "test")
+        before = ListingRepo(self.db).get_revisions(self.conv.id)[0].listing_json
+        test = self
+
+        class Provider:
+            name = "fake"
+            listing_model = "fake-model"
+
+            async def chat(self, messages, stream=True):
+                last = messages[-1]["content"]
+                if last == f"Set Depop category to {label}":
+                    forms_prompt = messages[0]["content"].split("--- Current editable forms ---", 1)[1]
+                    forms, _ = json.JSONDecoder().raw_decode(forms_prompt[forms_prompt.index("\n{") + 1:])
+                    test.assertEqual([row["path"] for row in forms["depop"]["fields"]], [path])
+                    test.assertIn("options_lookup", forms["depop"]["fields"][0])
+                    yield json.dumps({"_field_targets": [path]})
+                elif last.startswith("Field targets acknowledged."):
+                    test.assertIn("Look up any choices needed", last)
+                    yield json.dumps({"_option_search": [{"marketplace": "depop", "field": path, "query": label}]})
+                else:
+                    result = json.loads(last.split("\n", 1)[1])[0]["results"][0]
+                    test.assertEqual(result, {"label": label, "value": "menswear_tshirts"})
+                    yield "Set the Depop category.\n```json\n" + json.dumps({"fields": [
+                        {"path": path, "value": result["value"]},
+                    ]}) + "\n```"
+
+        with patch("anteroom.routes.chat.get_listing_provider", return_value=Provider()), \
+                patch("anteroom.services.listing_provider.managed_task_provider", return_value=None), \
+                patch("anteroom.services.chat_forms.get_selected_marketplaces", return_value=["depop"]), \
+                patch("anteroom.services.chat_prompts.load_skill_rules", return_value=""):
+            answer = self.client.post(f"/api/conversations/{self.conv.id}/messages", json={
+                "text": f"Set Depop category to {label}",
+            })
+
+        self.assertIn("event: listing_updated", answer.text)
+        latest = ListingRepo(self.db).get_revisions(self.conv.id)[0].listing_json
+        self.assertEqual(latest["direct_category_ids"], {
+            **before["direct_category_ids"], "depop": "menswear_tshirts",
+        })
+        self.assertEqual(latest["depop_specifics"]["categoryId"], "menswear_tshirts")
+        self.assertNotIn("nativeSizeId", latest["depop_specifics"])
+        self.assertEqual(latest["marketplace_category_ids"]["depop"], "menswear_tshirts")
+        self.assertEqual(latest.get("category_path"), before.get("category_path"))
+        form = self.client.get(f"{self.url}/depop/form")
+        self.assertEqual(form.status_code, 200)
+        self.assertEqual(form.json()["category_id"], "menswear_tshirts")
+        self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
+        self.bridge.assert_not_called()
+
     def test_mercari_override_keeps_the_saved_form_valid_through_posting_preparation(self):
         from anteroom.services import direct_preflight, native_contract
 

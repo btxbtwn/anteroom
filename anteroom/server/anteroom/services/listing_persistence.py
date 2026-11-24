@@ -124,6 +124,11 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
     scope = activity.edit_fields.get()
     if scope is not None and source in FILL_ON_SOURCES:
         listing_json = activity.scoped_listing(before, listing_json, scope)
+        if "direct_category_ids.depop" in scope:
+            from anteroom.services.depop_category import align_depop_category
+
+            # Derive Depop's other category keys from the accepted picker edit.
+            align_depop_category(listing_json, before)
     from anteroom.services import choice_lists, native_contract
 
     # Auto-relist saves the previous revision with one marketplace price changed

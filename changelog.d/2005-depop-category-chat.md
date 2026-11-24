@@ -1,0 +1,1 @@
+- Set the Depop category from listing chat, even when the draft's old category is no longer recognized.

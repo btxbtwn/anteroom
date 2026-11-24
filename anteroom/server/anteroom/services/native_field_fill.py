@@ -289,8 +289,10 @@ def _keep_depop_tags(listing: dict, rows: dict[str, dict]) -> None:
             write_value(listing, path, stored if row.get("multi") else stored[0])
 
 
-async def load_forms(conv_id: str, markets: Iterable[str] = MARKETS) -> dict[str, dict]:
-    """Each named direct marketplace's current form. One that cannot be read is skipped."""
+async def load_forms(
+    conv_id: str, markets: Iterable[str] = MARKETS, *, include_depop_category_picker: bool = False,
+) -> dict[str, dict]:
+    """Load usable forms and optionally expose Depop's picker when its current category is unknown."""
     from anteroom.services.native_editor import editor_form
 
     forms = {}
@@ -300,8 +302,16 @@ async def load_forms(conv_id: str, markets: Iterable[str] = MARKETS) -> dict[str
         except Exception as exc:  # noqa: BLE001 - one marketplace's form never stops the others
             log.info("No %s form to fill for %s: %s", market, conv_id, exc)
             continue
-        if isinstance(form, dict) and form.get("known") is not False and not form.get("properties_unavailable"):
-            forms[market] = form
+        if not isinstance(form, dict) or form.get("properties_unavailable"):
+            continue
+        if form.get("known") is False:
+            if market == "depop" and include_depop_category_picker:
+                # The picker is independent of the current leaf's field schema.
+                picker = [row for row in form.get("fields") or [] if _path(row) == "direct_category_ids.depop"]
+                if picker:
+                    forms[market] = {**form, "fields": picker}
+            continue
+        forms[market] = form
     return forms
 
 
