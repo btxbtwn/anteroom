@@ -49,6 +49,8 @@ class Listing(SellerOwned, Base):
     scheduled_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     scheduled_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     scheduled_content_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # The MCP agent that scheduled it ("mcp:<name>"), carried onto the jobs that publish it; null for the seller.
+    scheduled_requested_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=True)
 
     conversation: Mapped[Conversation] = relationship("Conversation", back_populates="listing", primaryjoin="and_(Conversation.id == foreign(Listing.conversation_id), Conversation.user_id == Listing.user_id)")
