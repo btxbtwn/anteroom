@@ -21,18 +21,33 @@ async function openConnections(page: Page, phone: boolean) {
 
 test("cloud connections can be checked with Chrome closed", async ({ page }, info) => {
   test.setTimeout(90_000);
-  const cloud = (connected: boolean, state: string) => ({
-    state, mode: "cloud", cloud_connected: connected, cloud_available: true,
-    cloud_state: state === "expired" ? "expired" : "signed_out", expiring: false, expires_at: null, label: null,
+  if (info.project.name === "desktop") await page.setViewportSize({ width: 1440, height: 900 });
+  const cloud = (marketplace: string, state: "signed_in" | "expired", label: string | null = null) => ({
+    marketplace, state, mode: "cloud", cloud_connected: state === "signed_in",
+    expiring: false, expires_at: null, label, connected_at: "2026-11-24T20:00:00Z",
   });
-  // Mercari is never a cloud marketplace: the server reports it as a Chrome sign-in (#2029).
-  const sessions = {
-    poshmark: cloud(true, "signed_in"),
-    depop: cloud(false, "expired"),
-    mercari: { state: "signed_out", expiring: false, expires_at: null, label: null },
-  };
-  await page.route("**/api/marketplaces/sessions", route => route.fulfill({ json: { sessions, chrome_connected: false } }));
-  await page.route("**/api/cloud-sessions/poshmark/verify", route => route.fulfill({ json: { ok: true } }));
+  const poshmarkCloud = cloud("poshmark", "signed_in", "poshmark-cloud");
+  const depopCloud = cloud("depop", "signed_in", "depop-cloud");
+  await page.route("**/api/cloud-sessions", route => route.fulfill({
+    json: { enabled: ["poshmark", "depop"], sessions: { poshmark: poshmarkCloud, depop: depopCloud } },
+  }));
+  let finishChromeCheck!: () => void;
+  const chromeCheck = new Promise<void>(resolve => { finishChromeCheck = resolve; });
+  await page.route("**/api/marketplaces/sessions", async route => {
+    await chromeCheck;
+    await route.fulfill({ json: { sessions: {}, chrome_sessions: {}, chrome_connected: false } });
+  });
+  await page.route("**/api/cloud-sessions/poshmark/verify", route => route.fulfill({
+    json: { ok: true, session: poshmarkCloud },
+  }));
+  let rejectDepopTest!: () => void;
+  const depopTest = new Promise<void>(resolve => { rejectDepopTest = resolve; });
+  await page.route("**/api/cloud-sessions/depop/verify", async route => {
+    await depopTest;
+    await route.fulfill({ json: {
+      ok: false, session: cloud("depop", "expired"), error: "Depop asked to sign in again.",
+    } });
+  });
   await page.goto("/?sign-in");
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
@@ -40,17 +55,53 @@ test("cloud connections can be checked with Chrome closed", async ({ page }, inf
   await expect(page.getByRole("button", { name: "Account", exact: true })).toBeVisible({ timeout: 20_000 });
   await openConnections(page, info.project.name === "phone");
   const poshmark = page.locator("#chrome-poshmark");
-  await poshmark.getByRole("button", { name: "Test Cloud" }).click();
-  await expect(poshmark.getByText("Poshmark cloud sign-in verified.")).toBeVisible();
-  await expect(poshmark.getByRole("button", { name: "Disconnect Cloud" })).toBeVisible();
+  const poshmarkBrowser = poshmark.getByRole("group", { name: "Chrome", exact: true });
+  const poshmarkHosted = poshmark.getByRole("group", { name: "Cloud", exact: true });
+  try {
+    await expect(poshmarkHosted.getByText("Signed in as poshmark-cloud", { exact: true })).toBeVisible();
+  } finally {
+    finishChromeCheck();
+  }
+  await expect(poshmarkBrowser.getByRole("button", { name: "Sign in to Poshmark in Chrome" })).toBeDisabled();
+  await expect(poshmarkHosted.getByRole("button", { name: "Sign in to Poshmark in Cloud" })).toBeEnabled();
+  await expect(poshmarkBrowser.getByRole("button", { name: "Sign in to Poshmark in Chrome" }))
+    .toHaveAccessibleDescription("Keep your sign-in in your browser. Leave Chrome open for listing actions and sales checks.");
+  await expect(poshmarkHosted.getByRole("button", { name: "Sign in to Poshmark in Cloud" }))
+    .toHaveAccessibleDescription("Anteroom saves an encrypted sign-in so listing actions, sales checks, and enabled automations can run with Chrome closed.");
+  await poshmarkHosted.getByRole("button", { name: "Test Poshmark cloud connection" }).click();
+  await expect(poshmarkHosted.getByText("Cloud sign-in verified.", { exact: true })).toBeVisible();
+  await expect(poshmarkHosted.getByRole("button", { name: "Disconnect Poshmark from Cloud" })).toBeVisible();
   const depop = page.locator("#chrome-depop");
-  await expect(depop.getByRole("button", { name: "Reconnect in Cloud" })).toBeVisible();
-  await expect(depop.getByRole("button", { name: "Disconnect Cloud" })).toBeVisible();
+  const depopHosted = depop.getByRole("group", { name: "Cloud", exact: true });
+  await expect(depopHosted).toContainText("Signed in as depop-cloud");
+  await depopHosted.getByRole("button", { name: "Test Depop cloud connection" }).click();
+  await expect(depopHosted.getByText("Testing connection…", { exact: true })).toBeVisible();
+  // Keep the follow-up status request in flight. The test reply itself must update the badge.
+  let resumeStatus!: () => void;
+  const pendingStatus = new Promise<void>(resolve => { resumeStatus = resolve; });
+  await page.route("**/api/cloud-sessions", async route => {
+    await pendingStatus;
+    await route.fulfill({ json: { enabled: ["poshmark", "depop"], sessions: { poshmark: poshmarkCloud, depop: cloud("depop", "expired") } } });
+  });
+  rejectDepopTest();
+  try {
+    await expect(depopHosted.getByText("Sign-in expired", { exact: true })).toBeVisible();
+    await expect(depopHosted.getByText("Depop asked to sign in again.", { exact: true })).toBeVisible();
+  } finally {
+    resumeStatus();
+  }
   const mercari = page.locator("#chrome-mercari");
   await expect(mercari).toBeVisible();
-  await expect(mercari.getByRole("button", { name: /Cloud/ })).toHaveCount(0);
-  await mercari.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: `e2e/results/hosted/session-cloud-connections-${info.project.name}.png`, fullPage: true });
+  const mercariBrowser = mercari.getByRole("group", { name: "Chrome", exact: true });
+  await expect(mercariBrowser.getByRole("button", { name: "Sign in to Mercari in Chrome" }))
+    .toHaveAccessibleDescription("Keep desktop Chrome open for Mercari listing actions and sales checks. Anteroom Bridge remembers your sign-in after Chrome restarts.");
+  await expect(mercari.getByRole("group", { name: "Cloud", exact: true })).toHaveCount(0);
+  await depop.scrollIntoViewIfNeeded();
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await expect.poll(() => page.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(colorScheme === "dark");
+    await page.screenshot({ path: `e2e/results/hosted/session-cloud-connections-${info.project.name}-${colorScheme}.png` });
+  }
 });
 
 test("hosted Chrome imports, saved-off rules and sale switches are available", async ({ page }, info) => {

@@ -1,7 +1,7 @@
 import { listingScreenRead } from "./listingScreen";
 import { reportError } from "./errorReports";
 import type { VendooDraft } from "./vendooDraft";
-import type { AttentionItem, AttentionResolveInput, AttentionResolveResult, AttentionRestoreInput, AttentionRestoreResult, AttentionSnoozeInput, AttentionSnoozeResult, ConnectionStatus, CsvInput, CsvResult, CurrencyReport, Expense, ExpenseInput, ExpenseUpdate, MarketplaceCloudResult, MileageAmount, MileageInput, OfferLogResponse, PlaidExchange, PlaidLinkToken, PlaidStatus, PreferredName, PreferredNameInput } from "./contract.gen";
+import type { AttentionItem, AttentionResolveInput, AttentionResolveResult, AttentionRestoreInput, AttentionRestoreResult, AttentionSnoozeInput, AttentionSnoozeResult, ConnectionStatus, CsvInput, CsvResult, CurrencyReport, Expense, ExpenseInput, ExpenseUpdate, MarketplaceCloudResult, MarketplaceCloudSessions, MileageAmount, MileageInput, OfferLogResponse, PlaidExchange, PlaidLinkToken, PlaidStatus, PreferredName, PreferredNameInput } from "./contract.gen";
 import { ApiRequestError, currentHostedSession, retryAfterMs, studioFetch, studioUpload, hasHostedApiSession } from "./transport";
 import { trackPhotoUpload } from "../photoUploads";
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
@@ -977,6 +977,7 @@ export const api = {
       request<ExtensionSessionConnect>(`/marketplaces/${marketplace}/connect`, { method: "POST" }),
   },
   cloudSessions: {
+    status: (options?: ReadOptions) => read<MarketplaceCloudSessions>("/cloud-sessions", options),
     connectToken: (marketplace: ExtensionSessionMarket) =>
       request<CloudConnectTokenResponse>(`/cloud-sessions/${marketplace}/connect-token`, { method: "POST" }),
     verify: (marketplace: ExtensionSessionMarket) =>

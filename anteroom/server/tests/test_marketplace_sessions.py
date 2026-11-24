@@ -30,6 +30,23 @@ def test_session_status_asks_to_connect_chrome():
     assert response.status_code == 409
 
 
+def test_status_preserves_chrome_sign_in_when_cloud_is_active():
+    chrome = {"state": "signed_in", "expires_at": None, "label": "chrome-account", "expiring": False}
+    cloud = {"state": "signed_in", "expires_at": None, "label": "cloud-account", "expiring": False, "cloud_connected": True}
+    with (
+        patch("anteroom.services.cloud_sessions.enabled_marketplaces", return_value={"depop"}),
+        patch("anteroom.services.cloud_sessions.public_sessions", return_value={"depop": cloud}),
+        patch("anteroom.services.extension_connection._web_chrome", new=AsyncMock(return_value={
+            "sessions": {"depop": {**chrome, "access_token": "secret-token"}},
+        })),
+    ):
+        response = TestClient(app).get("/api/marketplaces/sessions")
+    assert response.status_code == 200
+    assert response.json()["sessions"]["depop"]["label"] == "cloud-account"
+    assert response.json()["chrome_sessions"]["depop"] == chrome
+    assert "secret-token" not in response.text
+
+
 def test_connect_response_cannot_carry_a_token():
     def request(job, message_type, payload=None, timeout=40):
         assert message_type == "marketplace.connect"
