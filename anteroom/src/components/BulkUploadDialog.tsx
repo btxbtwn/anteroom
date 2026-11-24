@@ -552,6 +552,8 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
                           <img
                             src={previewUrls.get(file)}
                             alt=""
+                            loading="lazy"
+                            decoding="async"
                             draggable={false}
                             style={turns.get(file) ? { transform: `rotate(${turns.get(file)! * 90}deg)` } : undefined}
                           />
