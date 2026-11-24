@@ -1,1 +1,0 @@
-- Hosted browser checks skip an unused browser install, and simulated slow chat replies only run when the current turn requests them.

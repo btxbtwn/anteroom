@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1188 — 2026-11-24
+
+- Claude and ChatGPT now show Anteroom's tools by plain names, like "Search inventory" or "Delete draft listing", when they ask before running one.
+
+## 0.1.1187 — 2026-11-24
+
+- Hosted browser checks skip an unused browser install, and simulated slow chat replies only run when the current turn requests them.
+
 ## 0.1.1186 — 2026-11-23
 
 - Behind the scenes: two assistant chat checks that sometimes failed for no real reason no longer hold up updates.
