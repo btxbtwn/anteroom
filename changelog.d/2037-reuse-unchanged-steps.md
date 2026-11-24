@@ -1,2 +1,0 @@
-- Retrying a draft after an error no longer reads the photos, picks the category or fills marketplace fields again when the photos and Item Details haven't changed, so a retry costs less.
-- Regenerate reuses the photo reading when the photos and Item Details haven't changed. Changing a photo or the Item Details still reads the photos again.

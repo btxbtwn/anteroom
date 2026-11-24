@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1227 — 2026-11-24
+
+- Retrying a draft after an error no longer reads the photos, picks the category or fills marketplace fields again when the photos and Item Details haven't changed, so a retry costs less.
+- Regenerate reuses the photo reading when the photos and Item Details haven't changed. Changing a photo or the Item Details still reads the photos again.
+
 ## 0.1.1226 — 2026-11-24
 
 - Box Scout no longer reads Poshmark's search, which Poshmark doesn't allow. It prices boxes from your own sales and eBay's sold listings, and says that Poshmark sales aren't checked.
