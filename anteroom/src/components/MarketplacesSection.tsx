@@ -178,7 +178,8 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
     return { tone: "busy", label: draft.state === "updating" ? "Updating…" : draft.action === "save_draft" ? "Saving draft…" : "Listing…", detail: draft.progress ? `${draft.progress.label}…` : null };
   }
   if (draft && (draft.state === "unknown" || BUSY.has(draft.state))) {
-    return { tone: "attention", label: "Unconfirmed", detail: draft.error || "Check the result before trying again.", said };
+    const href = live?.state === "deleted" ? undefined : live?.url ?? undefined;
+    return { tone: "attention", label: "Unconfirmed", href, hrefLabel: "View", detail: draft.error || "Check the result before trying again.", said };
   }
   if (live?.state === "deleting") return { tone: "busy", label: "Delisting…" };
   if (live?.state === "deleted") {
@@ -877,7 +878,7 @@ export function MarketplacesLayout({
                 </span>
               )}
             </span>
-            <span className="ms-auto flex shrink-0 items-center gap-1.5">
+            <span className="ms-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1.5">
               {selectedStatus.href && (
                 <Button size="xs" variant="ghost" aria-label={`${selectedStatus.hrefLabel} on ${railLabel(selectedMarketplace)}`}
                   render={<a href={selectedStatus.href} target="_blank" rel="noopener noreferrer" />}>

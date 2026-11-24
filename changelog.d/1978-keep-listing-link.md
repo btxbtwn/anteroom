@@ -1,0 +1,1 @@
+- Open the original listing with View when Anteroom cannot confirm that it was delisted.
