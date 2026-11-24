@@ -35,7 +35,9 @@ class PendingEditsError(ValueError):
 
 def _comparable(listing: dict | None) -> dict[str, Any]:
     raw = listing if isinstance(listing, dict) else {}
-    return without_operational_keys({key: value for key, value in raw.items() if key in ROOTS and key not in _PRIVATE})
+    projected: dict[str, Any] = without_operational_keys(
+        {key: value for key, value in raw.items() if key in ROOTS and key not in _PRIVATE})
+    return projected
 
 
 def _changes(live: dict, new: dict, path: tuple[str, ...] = ()) -> list[dict[str, Any]]:

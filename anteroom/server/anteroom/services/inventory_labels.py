@@ -76,7 +76,7 @@ def label_counts(db: Session) -> list[dict[str, Any]]:
     return sorted(named, key=lambda row: (row["label"].casefold(), row["label"]))
 
 
-def _rewrite(db: Session, label: str, replacement: str | None) -> dict[str, Any]:
+def _rewrite(db: Session, label: Any, replacement: str | None) -> dict[str, Any]:
     """Replace (or with ``None`` remove) ``label`` on every item, in the caller's one transaction."""
     target = _clean(label, "label").casefold()
     repo = ConversationRepo(db)
@@ -99,12 +99,12 @@ def _rewrite(db: Session, label: str, replacement: str | None) -> dict[str, Any]
     return {"items_changed": len(changed), "conversation_ids": changed[:_LISTED_IDS]}
 
 
-def rename_label(db: Session, label: str, new_label: str) -> dict[str, Any]:
+def rename_label(db: Session, label: Any, new_label: Any) -> dict[str, Any]:
     """Rename a label on every item that wears it; an item already wearing the new name keeps one."""
     replacement = _clean(new_label, "new_label")
     return {"label": _clean(label, "label"), "new_label": replacement, **_rewrite(db, label, replacement)}
 
 
-def delete_label(db: Session, label: str) -> dict[str, Any]:
+def delete_label(db: Session, label: Any) -> dict[str, Any]:
     """Take a label off every item that wears it. The items themselves are untouched."""
     return {"label": _clean(label, "label"), "deleted": True, **_rewrite(db, label, None)}
