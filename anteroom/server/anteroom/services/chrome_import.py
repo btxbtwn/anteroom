@@ -143,7 +143,7 @@ def match_candidates(db: Session) -> list[tuple[str, str, set[str]]]:
     return [(conv_id, title, title_tokens(title)) for conv_id, title in rows if title and title.strip()]
 
 
-def _local_price(db: Session, conv_id: str) -> float | None:
+def local_price(db: Session, conv_id: str) -> float | None:
     from anteroom.models.listing import ListingRevision
     from anteroom.repositories.queries import ListingRepo
 
@@ -160,21 +160,24 @@ def close_titles(title: str, items: list[tuple[str, str, set[str]]]) -> list[tup
     return [entry for entry in scored if entry[0] >= MATCH_THRESHOLD]
 
 
-def suggested_match(db: Session, marketplace: str, title: str, price: float | None,
+def suggested_match(db: Session, marketplace: str, listing_id: str, title: str, price: float | None,
                     items: list[tuple[str, str, set[str]]]) -> dict | None:
     """The local item that looks most like this listing and has no listing on that marketplace yet.
 
     Only a suggestion: the seller decides whether to link it or import a new item.
+    An item the seller said is a different product than this listing is never suggested for it.
     """
+    from anteroom.services import import_reviews
     from anteroom.services.marketplace_delist import listings
 
+    rejected = import_reviews.rejected_items(db, marketplace, listing_id)
     # Items already on this marketplace are passed over, so they never hide one that is not.
     for score, conv_id, local in close_titles(title, items):
-        if marketplace in listings(db, conv_id):
+        if conv_id in rejected or marketplace in listings(db, conv_id):
             continue
-        local_price = _local_price(db, conv_id)
-        return {"conversation_id": conv_id, "title": local, "score": round(score, 2), "price": local_price,
-                "price_differs": bool(price and local_price and abs(local_price - price) > max(1.0, price * 0.1))}
+        item_price = local_price(db, conv_id)
+        return {"conversation_id": conv_id, "title": local, "score": round(score, 2), "price": item_price,
+                "price_differs": bool(price and item_price and abs(item_price - price) > max(1.0, price * 0.1))}
     return None
 
 
@@ -204,7 +207,7 @@ def _page(db: Session, marketplace: str, reply: dict, raw: list) -> dict:
         if price is None and not reason:
             reason = "This import supports listings priced in USD."
         if not existing and not reason:
-            match = suggested_match(db, marketplace, title, price, items)
+            match = suggested_match(db, marketplace, listing_id, title, price, items)
         rows.append({"id": listing_id, "title": title, "url": public_listing_url(marketplace, listing_id),
                      "price": f"{price:.2f}" if price is not None else None, "quantity": _quantity(entry.get("quantity")),
                      "reason": reason, "conversation_id": existing.id if existing else None, "match": match})
@@ -270,12 +273,71 @@ def snapshot(marketplace: str, listing: dict) -> tuple[dict, list[str]]:
         # The marketplace's own category is the one its tab shows.
         if marketplace in {"poshmark", "depop", "mercari"}:
             out["direct_category_ids"] = {marketplace: category_id}
+    if marketplace == "mercari":
+        specifics = _mercari_specifics(listing.get("mercari_specifics"))
+        if specifics:
+            out["mercari_specifics"] = specifics
+            # Each one is the seller's own Mercari answer, kept as a seller field.
+            out["seller_fields"] = sorted(f"mercari_specifics.{key}" for key in specifics)
+        package = specifics.get("package") or {}
+        if "pounds" in package:
+            out["weight_lb"], out["weight_oz"] = package["pounds"], math.ceil(package["ounces"])
+        if all(key in package for key in ("length", "width", "height")):
+            out["package_dimensions_in"] = "x".join(f"{package[key]:g}" for key in ("length", "width", "height"))
     if marketplace == "poshmark" and isinstance(listing.get("poshmark"), dict):
         _poshmark_fields(out, listing["poshmark"], category_id)
     if marketplace == "depop":
         _depop_fields(listing, out)
     photos = [url for url in listing.get("photos") or [] if isinstance(url, str) and url.startswith("https://")]
     return out, photos
+
+
+def _size(value) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return value if math.isfinite(number) and 0 <= number <= 10_000 else None
+
+
+def _mercari_specifics(raw) -> dict:
+    """The Mercari tab's answers Chrome read from the item, each checked against what Mercari's form accepts."""
+    if not isinstance(raw, dict):
+        return {}
+    out: dict = {}
+    if raw.get("condition") in {"1", "2", "3", "4", "5"}:
+        out["condition"] = raw["condition"]
+    for key in ("nativeSizeId", "shippingClassId"):
+        if isinstance(raw.get(key), str) and re.fullmatch(r"[1-9]\d{0,9}", raw[key]):
+            out[key] = raw[key]
+    if raw.get("noBrand") is True:
+        out["noBrand"] = True
+    if raw.get("shippingMethod") in {"MERCARI", "SOYO"}:
+        out["shippingMethod"] = raw["shippingMethod"]
+    if raw.get("shippingPayerId") in (1, 2):
+        out["shippingPayerId"] = raw["shippingPayerId"]
+    if isinstance(raw.get("shipsFrom"), str) and re.fullmatch(r"\d{5}", raw["shipsFrom"]):
+        out["shipsFrom"] = raw["shipsFrom"]
+    package: dict = raw["package"] if isinstance(raw.get("package"), dict) else {}
+    pack: dict = {}
+    pounds, ounces = _size(package.get("pounds")), _size(package.get("ounces"))
+    if pounds is not None and ounces is not None and ounces < 16:
+        pack.update(pounds=int(pounds), ounces=ounces)
+    if package.get("fitsShoebox") in {"yes", "no"}:
+        pack["fitsShoebox"] = package["fitsShoebox"]
+    sides = {key: _size(package.get(key)) for key in ("length", "width", "height")}
+    if pack.get("fitsShoebox") == "no" and all(sides.values()):
+        pack.update(sides)
+    elif pack.get("fitsShoebox") == "no" and package.get("skipDimensions") is True:
+        pack["skipDimensions"] = True
+    if pack:
+        out["package"] = pack
+    smart = raw.get("smartPricing")
+    if isinstance(smart, dict) and isinstance(smart.get("enabled"), bool):
+        out["smartPricing"] = {"enabled": smart["enabled"]}
+        minimum = _price(smart.get("minimumPrice"))
+        if smart["enabled"] and minimum is not None:
+            out["smartPricing"]["minimumPrice"] = minimum
+    return out
 
 
 def _poshmark_fields(out: dict, post: dict, category_id: str) -> None:
@@ -425,7 +487,8 @@ async def import_listing(marketplace: str, listing: str, *, unless_matched: bool
     return {**result, "linked": False}
 
 
-async def link_listing(marketplace: str, listing: str, conversation_id: str) -> dict:
+async def link_listing(marketplace: str, listing: str, conversation_id: str, *,
+                       deadline: float | None = None) -> dict:
     """Link a listing to an item the seller chose. The item's own edits and photos stay as they are."""
     listing_id = listing_id_from(marketplace, listing)
 
@@ -434,6 +497,6 @@ async def link_listing(marketplace: str, listing: str, conversation_id: str) -> 
         await _read(marketplace, listing_id)
 
     try:
-        return await inventory_import.link_owned_listing(marketplace, listing_id, conversation_id, verify)
+        return await inventory_import.link_owned_listing(marketplace, listing_id, conversation_id, verify, deadline=deadline)
     except inventory_import.LinkError as exc:
         raise ChromeImportError(exc.status_code, str(exc)) from exc

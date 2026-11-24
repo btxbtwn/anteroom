@@ -3,7 +3,7 @@ import { api } from "./api/client";
 import { directAccountKey } from "./api/directConnections";
 import { marketplaceName } from "./components/marketplaceNames";
 import type {
-  ImportMarketplace, MarketplaceImportHeld, MarketplaceImportMatch, MarketplaceImportPage, MarketplaceImportResult,
+  ImportMarketplace, MarketplaceImportHeld, MarketplaceImportPage, MarketplaceImportResult,
 } from "./api/inventoryImport";
 
 export interface Importer {
@@ -36,9 +36,6 @@ export function importerFor(marketplace: ImportMarketplace): Importer {
   };
 }
 
-/** A listing that looks like an item already in Anteroom. The seller links it or imports it as new. */
-export interface ImportAllReview { id: string; title: string; price: string | null; match: MarketplaceImportMatch }
-
 export interface ImportAllRun {
   /** Tells this run from a later one on the same key, so a cleared or replaced run's walk stops. */
   run: number;
@@ -49,7 +46,8 @@ export interface ImportAllRun {
   imported: number;
   alreadyIn: number;
   skipped: number;
-  review: ImportAllReview[];
+  /** Listings that look like an item already in Anteroom. The server keeps them for review (``api.importReviews``). */
+  held: number;
   failures: { id: string; title: string; message: string }[];
   /** What an imported listing still needs, such as photos the marketplace did not provide. */
   warnings: { id: string; title: string; message: string }[];
@@ -94,9 +92,10 @@ const message = (error: unknown) => error instanceof Error ? error.message : "Th
  *
  * Reads the marketplace and saves local items through the same requests as
  * importing one listing; nothing is listed, changed or delisted. A listing
- * that looks like an existing item is never linked or duplicated here: it
- * waits in ``review`` for the seller. The server checks for a match again as
- * it saves, so marketplaces importing side by side do not import one item twice.
+ * that looks like an existing item is never linked or duplicated here: the
+ * server holds it for the seller to review, on any device or through their
+ * assistant. The server checks for a match as it saves, so marketplaces
+ * importing side by side do not import one item twice.
  */
 export function startImportAll(key: string, marketplace: ImportMarketplace, importer: Importer, onFinish: () => void,
   /** eBay and Etsy: the ``directAccountKey`` of the account the seller started the run for. */
@@ -104,7 +103,7 @@ export function startImportAll(key: string, marketplace: ImportMarketplace, impo
   if (busy(runs.get(key))) return;
   counter += 1;
   const id = counter;
-  runs.set(key, { run: id, marketplace, status: "running", page: 1, imported: 0, alreadyIn: 0, skipped: 0, review: [], failures: [], warnings: [], error: null });
+  runs.set(key, { run: id, marketplace, status: "running", page: 1, imported: 0, alreadyIn: 0, skipped: 0, held: 0, failures: [], warnings: [], error: null });
   notify();
   void walk(key, id, importer, account).finally(onFinish);
 }
@@ -127,12 +126,6 @@ export function clearImportAll(marketplace?: ImportMarketplace, keep?: string) {
     }
   }
   if (changed) notify();
-}
-
-/** The seller linked or imported a listing from the review list. */
-export function resolveImportAllReview(key: string, listingId: string) {
-  const run = runs.get(key);
-  if (run?.review.some((row) => row.id === listingId)) update(key, run.run, { review: run.review.filter((row) => row.id !== listingId) });
 }
 
 /** Change this run only while it is still the one on its key: a cleared or replaced run is left alone. */
@@ -195,17 +188,13 @@ async function walk(key: string, id: number, importer: Importer, expected: strin
       seen.add(row.id);
       if (row.reason) update(key, id, (run) => ({ skipped: run.skipped + 1 }));
       else if (row.conversation_id) update(key, id, (run) => ({ alreadyIn: run.alreadyIn + 1 }));
-      else if (row.match) {
-        const match = row.match;
-        update(key, id, (run) => ({ review: [...run.review, { id: row.id, title: row.title, price: row.price, match }] }));
-      } else {
+      else {
+        // A row the page already matched goes to the server too: it checks again and keeps the hold for review.
         if (stopping()) return update(key, id, { status: "stopped" });
         try {
           const result = await importer.importNew(row.id, chromeAccount);
           if (result.conversation_id === null) {
-            // Another import brought in a matching item after this page was read.
-            const { match } = result;
-            update(key, id, (run) => ({ review: [...run.review, { id: row.id, title: row.title, price: row.price, match }] }));
+            update(key, id, (run) => ({ held: run.held + 1 }));
           } else {
             const warnings = result.warnings.map((warning) => ({ id: row.id, title: row.title, message: warning }));
             update(key, id, (run) => ({ ...(result.reused ? { alreadyIn: run.alreadyIn + 1 } : { imported: run.imported + 1 }),

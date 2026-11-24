@@ -6,6 +6,23 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1220 — 2026-11-24
+
+- Filling marketplace fields after a new draft costs less AI time: it now reads only the listing rules that apply to those fields, not the title, description and pricing formulas.
+
+## 0.1.1219 — 2026-11-24
+
+- Importing a listing from Mercari now brings over everything Mercari has for it: its category, condition, size, brand (or No brand), who pays shipping, ship on your own or Mercari's shipping label, package weight and size, ships-from ZIP, and Smart Pricing with its minimum price. Updating that listing from Anteroom afterwards no longer turns Smart Pricing on or switches who pays shipping.
+
+## 0.1.1218 — 2026-11-24
+
+- Listings that Import all holds because they look like an item you already have now stay on the import screen after a reload and on your other devices, until you link them, import them as new, or mark them **Not the same item**.
+- Your AI assistant can list those look-alikes and confirm or reject each one through Anteroom's MCP connector. Confirming links the listing to your existing item exactly like **Link to this item**; nothing is listed, changed or delisted on any marketplace.
+
+## 0.1.1217 — 2026-11-24
+
+- When your AI assistant schedules a listing, the publish that runs at that time now shows it was started by that assistant, and the assistant's status check says who scheduled it.
+
 ## 0.1.1216 — 2026-11-24
 
 - Connected AI agents (Claude, ChatGPT and others) can now look up your orders, your profit and loss for a period, your business expenses and a snapshot of your inventory, with the same numbers Anteroom shows. They only read; buyer details are never shared.

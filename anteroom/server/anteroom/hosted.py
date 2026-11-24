@@ -611,10 +611,11 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     # Bulk listing reads photos not uploaded yet; a saved listing reads its photos from private storage.
     from anteroom.routes import measurements
     app.include_router(measurements.hosted_router)
-    from anteroom.routes import listing_templates, listing_copies, similar_items, changelog
+    from anteroom.routes import listing_templates, listing_copies, similar_items, changelog, import_reviews
     app.include_router(listing_templates.router)
     app.include_router(listing_copies.router)
     app.include_router(similar_items.router)
+    app.include_router(import_reviews.router)
     app.include_router(changelog.router)
     from anteroom.routes.hosted_prices import router as prices_router
     app.include_router(prices_router)

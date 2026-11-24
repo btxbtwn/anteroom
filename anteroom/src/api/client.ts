@@ -116,7 +116,7 @@ import type { ListingReadiness, NativeDraft, NativeDrafts, NativeMarketplace, Na
 import type { CloudConnectTokenResponse, ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus, EbayWaterfallStep } from "./ebayOffers";
 import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
-import type { ChromeImportMarketplace, MarketplaceImportHeld, MarketplaceImportPage, MarketplaceImportResult } from "./inventoryImport";
+import type { ChromeImportMarketplace, ImportMarketplace, ImportReview, MarketplaceImportHeld, MarketplaceImportPage, MarketplaceImportResult } from "./inventoryImport";
 import type { EtsyListing, EtsyListingState, EtsyOrders, EtsyOrderStatus, EtsyPage, EtsyShop } from "./etsy";
 
 const BASE = "/api";
@@ -649,6 +649,11 @@ export const api = {
       request<MarketplaceImportResult | MarketplaceImportHeld>(`/chrome-import/${marketplace}`, {
         method: "POST", body: JSON.stringify({ listing, unless_matched: true, ...(account ? { account } : {}) }),
       }),
+  },
+  importReviews: {
+    list: (marketplace: ImportMarketplace) => request<{ reviews: ImportReview[] }>(`/import-reviews?marketplace=${marketplace}`),
+    /** The listing and the suggested item are different products: stop suggesting that item for it. */
+    notAMatch: (id: string) => request<{ id: string; decision: "not_match" }>(`/import-reviews/${encodeURIComponent(id)}/not-a-match`, { method: "POST" }),
   },
   etsy: {
     importCandidates: (page: number) => request<MarketplaceImportPage>(`/etsy/import/active?page=${page}`),
