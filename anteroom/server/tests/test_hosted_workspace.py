@@ -191,7 +191,8 @@ def test_full_editor_saves_history_and_preserves_existing_draft(cloud, signing_k
     assert summary['quantity'] == 2
     assert 'notes' not in summary
     first = saved.json()['revision_id']
-    assert saved.json()['listing'] == fields
+    # The values the seller just set come back as theirs, so the editor keeps them apart from followers (#2007).
+    assert saved.json()['listing'] == {**fields, 'seller_fields': ['brand', 'description', 'price', 'title']}
     assert client.put(path + '/listing', headers=alice, json={'listing': fields, 'expected_revision_id': ''}).status_code == 409
     second = client.put(path + '/listing', headers=alice, json={'listing': {**fields, 'price': 44}, 'expected_revision_id': first}).json()['revision_id']
     history = client.get(path + '/revisions', headers=alice).json()
