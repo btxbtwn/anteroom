@@ -498,6 +498,8 @@ async def preview(conversation_ids: list[str], marketplace: str, action: str,
     await run_worker_db_step(require_chrome, marketplace)
     batch = new_id()
     rows = []
+    # A refusal in STOP_CODES applies to every item that follows: the rest are not read.
+    stopped: str | None = None
     for conv_id in ids:
         started = await in_worker_session(_preview_local, conv_id, marketplace, action, batch, discount_percent,
                                           (floor_prices or {}).get(conv_id))
@@ -505,10 +507,15 @@ async def preview(conversation_ids: list[str], marketplace: str, action: str,
             continue
         row, listing_id, saved = started
         if saved is None:
-            try:
-                await _review_remote(row, listing_id)
-            except PromotionError as exc:
-                row.state, row.note = "skipped", str(exc)[:300]
+            if stopped is not None:
+                row.state, row.note = "skipped", f"Not checked: {stopped}"[:300]
+            else:
+                try:
+                    await _review_remote(row, listing_id)
+                except PromotionError as exc:
+                    row.state, row.note = "skipped", str(exc)[:300]
+                    if exc.code in STOP_CODES:
+                        stopped = str(exc)
             saved = await in_worker_session(_save_row, row)
         rows.append(saved)
     return {"batch_id": batch, "marketplace": marketplace, "action": action, "rows": rows}

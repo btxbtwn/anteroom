@@ -373,6 +373,55 @@ class ListingPromotionsTest(unittest.TestCase):
         result = self.client.post(f"/api/promotions/{row['id']}/perform", json={"confirm": True}).json()
         self.assertEqual((result["state"], result["stop"]), ("failed", True))
 
+    def _mercari_batch(self, count):
+        conversations = []
+        for index in range(count):
+            conv = ConversationRepo(self.db).create(title=f"Jacket {index}")
+            conv.notes = merge_notes(conv.notes, {"vendooListingUrls": {"mercari": f"https://www.mercari.com/us/item/m8264772774{index}/"}})
+            conversations.append(conv.id)
+        self.db.commit()
+        return conversations
+
+    def test_a_blocked_marketplace_stops_a_several_item_review(self):
+        for code in sorted(listing_promotions.STOP_CODES):
+            with self.subTest(code=code):
+                self.bridge.reset_mock()
+                ids = self._mercari_batch(3)
+                self.check = {"ok": False, "safe_to_retry": True, "error_code": code,
+                              "error": "Mercari blocked Anteroom's cloud request for listing details. The offer check stopped."}
+                response = self.client.post("/api/promotions/preview", json={
+                    "conversation_ids": ids, "marketplace": "mercari", "action": "offer", "discount_percent": 12,
+                    "floors": {conv_id: "1" for conv_id in ids}})
+                self.assertEqual(response.status_code, 200, response.text)
+                rows = response.json()["rows"]
+                # Mercari is asked about the first item only.
+                self.assertEqual(len(self.calls("marketplace.promotion_check")), 1)
+                self.assertEqual([row["conversation_id"] for row in rows], ids)
+                self.assertEqual([row["state"] for row in rows], ["skipped"] * 3)
+                self.assertEqual(rows[0]["note"], self.check["error"])
+                for row in rows[1:]:
+                    self.assertIn("Not checked", row["note"])
+                    self.assertIn(self.check["error"], row["note"])
+                # No row of the stopped review can be sent.
+                for row in rows:
+                    self.assertEqual(self.client.post(f"/api/promotions/{row['id']}/perform", json={"confirm": True}).status_code, 409)
+                self.assertEqual(self.calls("marketplace.promote"), [])
+
+    def test_one_refused_item_does_not_stop_a_several_item_review(self):
+        ids = self._mercari_batch(2)
+        answers = iter([{"ok": False, "safe_to_retry": True, "error_code": "rejected", "error": "Item is no longer available"},
+                        {**self.check, "offer_price_cents": 4400, "minimum_discount_percent": 1}])
+
+        async def answer(_job, message_type, payload, timeout=0):
+            return next(answers) if message_type == "marketplace.promotion_check" else self.sent
+
+        self.bridge.side_effect = answer
+        rows = self.client.post("/api/promotions/preview", json={
+            "conversation_ids": ids, "marketplace": "mercari", "action": "offer", "discount_percent": 12,
+            "floors": {conv_id: "1" for conv_id in ids}}).json()["rows"]
+        self.assertEqual([row["state"] for row in rows], ["skipped", "preview"])
+        self.assertEqual(len(self.calls("marketplace.promotion_check")), 2)
+
     def test_sold_items_and_busy_slot_send_nothing(self):
         row = self.preview(action="share")
         JobRepo(self.db).create(self.conv.id, "", {}, status="dispatched", current_step="native_delist")
