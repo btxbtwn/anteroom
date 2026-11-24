@@ -36,6 +36,10 @@ anteroom/public/assets/*
 !anteroom/desktop/
 anteroom/desktop/*
 !anteroom/desktop/AppIcon.png
+# Validation reads which General categories have subcategories from the bundled tree seed.
+!anteroom/data/
+anteroom/data/*
+!anteroom/data/category-trees-seed.json.gz
 # Hosted generation and native forms use the same canonical public rules.
 !skills/
 skills/*

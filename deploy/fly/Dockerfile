@@ -47,6 +47,8 @@ COPY deploy/fly/supabase-prod-ca-2021.crt /app/supabase-prod-ca-2021.crt
 COPY anteroom/VERSION /app/anteroom/VERSION
 COPY CHANGELOG.md /app/CHANGELOG.md
 COPY anteroom/server/anteroom/ /app/anteroom/server/anteroom/
+# Validation reads which General categories have subcategories from the category tree seed.
+COPY anteroom/data/category-trees-seed.json.gz /app/anteroom/data/category-trees-seed.json.gz
 COPY --from=cloud-runner /src/cloud_runner/node_modules /app/anteroom/server/anteroom/cloud_runner/node_modules
 COPY anteroom-extension/background/ /app/anteroom-extension/background/
 COPY skills/list-this/SKILL.md /app/skills/list-this/SKILL.md

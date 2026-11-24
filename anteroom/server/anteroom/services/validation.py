@@ -159,8 +159,11 @@ def _description_follows_formula(description: str) -> bool:
 
 
 def _category_is_terminal(path: str) -> bool:
+    """A final category has no subcategories, however deep it sits (#2075)."""
+    from anteroom.services.category_tree_seed import general_parent_paths
+
     parts = [part.strip() for part in re.split(r"\s*>\s*", path) if part.strip()]
-    return len(parts) >= 4
+    return " > ".join(parts) not in general_parent_paths()
 
 
 def _department_matches_category(department: str, category_path: str) -> bool:
@@ -654,7 +657,7 @@ def validate_listing(
     if not category_path:
         add_issue(result, "category_path", "Category is required")
     elif not _category_is_terminal(category_path):
-        add_issue(result, "category_path", "Category must be a terminal Vendoo path")
+        add_issue(result, "category_path", "Choose a category with no subcategories")
     department = text_value(payload.get("department"))
     if department and category_path and not _department_matches_category(department, category_path):
         add_issue(result, "department", "Department does not match the selected category")

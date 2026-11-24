@@ -9,6 +9,7 @@ import hashlib
 import gzip
 import json
 from datetime import datetime, UTC
+from functools import lru_cache
 from pathlib import Path
 from typing import cast
 
@@ -29,6 +30,14 @@ def default_seed_path() -> Path:
     if bundled.is_file():
         return bundled
     return Path(__file__).resolve().parents[3] / "data" / SEED_NAME
+
+
+@lru_cache(maxsize=1)
+def general_parent_paths() -> frozenset[str]:
+    """General categories that have subcategories, read once from the seed the trees are loaded from."""
+    payload = _read_seed(default_seed_path())
+    return frozenset(node["path"] for node in payload["category_tree_nodes"]
+                     if node["marketplace"] == "general" and node.get("has_children"))
 
 
 def default_db_path() -> Path:
