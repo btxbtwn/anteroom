@@ -62,7 +62,7 @@ semble find-related anteroom/server/anteroom/services/category_selection.py 10 .
 
 Use `--content docs` for specs/skills prose, `--content config` for JSON/YAML/TOML, or `--content all` when categories/schemas may live in code *and* references (e.g. `skills/list-this/references/`, `ANTEROOM_SPEC.md`). Navigate straight to returned paths/lines; use grep only for exact string sweeps (error messages, renames). If `semble` is missing from `$PATH`, use `uvx --from "semble[mcp]" semble`.
 
-**Anteroom listing agent:** Uses the in-app catalog index (`anteroom.services.catalog_index`), not Cursor MCP. It materializes SQLite category leaves, observed schemas, skill-reference dropdown options, `skills/list-this` rule chunks, and extension fill helpers into local docs, searches them with Semble, and only accepts hits that verify. `GET /api/catalog/search?kind=category|schema|option|skill|fill|all` exposes the same search. Generation pulls relevant skill chunks; repair enriches gap dropdowns; fill-log reports include related helpers. It does not search listings, photos, or secrets.
+**Anteroom listing agent:** The in-app catalog index (`anteroom.services.catalog_index`) materializes category leaves, observed schemas, dropdown options, and extension fill helpers into local docs, searches them with Semble, and only accepts hits that verify. `GET /api/catalog/search?kind=category|schema|option|fill|all` exposes that search. Generation reads relevant `skills/list-this` rules internally. Field repair uses catalog options, and fill-log reports include related helpers.
 
 ## Engineering Principles
 

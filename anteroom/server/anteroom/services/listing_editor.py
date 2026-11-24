@@ -118,9 +118,12 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
 
     # Chat applies accepted changes to inherited measurements after native edits are locked.
     notes = parse_notes(conv.notes) if depop_notes is None else None
+    include_formula_details = source != "mcp"
     if verbatim:
         listing_data = copy.deepcopy(listing_data)
-        validation = validate_listing(copy.deepcopy(listing_data), photo_count, require_photos=True)
+        validation = validate_listing(
+            copy.deepcopy(listing_data), photo_count, require_photos=True, include_formula_details=include_formula_details,
+        )
     else:
         listing_data = prepared_listing(previous_json, listing_data, notes=notes)
         from anteroom.services.agent_categories import map_general_category
@@ -130,7 +133,9 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
 
         # Validation rewrites dropdown keys. A value the seller owns is put back.
         locked = capture_locked(listing_data)
-        validation = validate_listing(listing_data, photo_count, require_photos=True)
+        validation = validate_listing(
+            listing_data, photo_count, require_photos=True, include_formula_details=include_formula_details,
+        )
         restore_locked(listing_data, locked)
     from anteroom.services.vendoo_marketplace_fields import best_offer_error
 

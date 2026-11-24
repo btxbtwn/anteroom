@@ -1,5 +1,8 @@
 """The shared category trees, loaded by the operator command, back the web pickers."""
 import json
+from types import SimpleNamespace
+
+import pytest
 
 from test_hosted_drafts import BOB, cloud, headers  # noqa: F401
 from test_seller_ownership import migration_engine  # noqa: F401
@@ -84,6 +87,34 @@ def test_loaded_trees_enable_verified_category_pickers_and_bulk_writes(cloud, si
     assert listing['category_path'] == LEAVES['general'][1]
     assert listing['direct_category_ids']['ebay'] == LEAVES['ebay'][0]
     assert listing['direct_category_ids']['depop'] == LEAVES['depop'][0]
+
+
+@pytest.mark.parametrize("warm_index", [False, True])
+def test_catalog_search_keeps_legacy_listing_rules_private(
+    cloud, signing_keys, tmp_path, monkeypatch, warm_index,  # noqa: F811
+):
+    client, _ = cloud
+    alice = headers(signing_keys)
+    # Older builds may have cached these documents on disk or in a Semble index.
+    rule = "kind: skill\nid: rule\npath: listing-rules.md\n\nSample Color private writing guideline"
+    catalog_index._write_text(tmp_path / "skills" / "rule.md", rule)
+    catalog_index._write_option_doc(tmp_path, "depop", "Sample Color", ["Blue"], "fixture")
+    index = None
+    if warm_index:
+        contents = [rule, *(path.read_text() for path in (tmp_path / "options").rglob("*.md"))]
+        hits = [SimpleNamespace(chunk=SimpleNamespace(content=content), score=1.0) for content in contents]
+        index = SimpleNamespace(search=lambda *_args, **_kwargs: hits)
+    monkeypatch.setattr(catalog_index, "catalog_docs_dir", lambda: tmp_path)
+    monkeypatch.setattr(catalog_index, "ensure_catalog_index", lambda _db: None)
+    monkeypatch.setattr(catalog_index, "_state", lambda: SimpleNamespace(index=index))
+
+    response = client.get("/api/catalog/search", headers=alice, params={"q": "Sample Color"})
+    assert response.status_code == 200, response.text
+    results = response.json()["results"]
+    assert all(hit["kind"] != "skill" for hit in results)
+    assert any(hit.get("options") == ["Blue"] for hit in results)
+    direct = client.get("/api/catalog/search", headers=alice, params={"q": "Sample Color", "kind": "skill"})
+    assert direct.status_code == 400
 
 
 def test_seller_index_state_persists_and_hosted_lookups_never_build_inline(monkeypatch):

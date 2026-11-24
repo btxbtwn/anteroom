@@ -976,7 +976,7 @@ def _tool_get_listing(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str
         for p in photos
     ]
 
-    validation = validate_listing(copy.deepcopy(editable), len(photos), require_photos=True)
+    validation = validate_listing(copy.deepcopy(editable), len(photos), require_photos=True, include_formula_details=False)
     notes = parse_notes(conv.notes)
     labels = inventory_labels.item_labels(notes, editable)
     direct = MarketplaceListingRepo(db).summaries().get(conv_id, {})

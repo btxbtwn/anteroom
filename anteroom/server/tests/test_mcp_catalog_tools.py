@@ -1,5 +1,4 @@
-"""MCP catalog and guidance reads: categories, category fields, allowed values, a listing's
-marketplace form, account settings and listing rules. Read-only, and never wait on Chrome."""
+"""MCP catalog reads expose marketplace fields and account settings."""
 from __future__ import annotations
 
 import json
@@ -21,7 +20,7 @@ from anteroom.services.native_category_match import native_rows
 
 CATALOG_TOOLS = {
     "search_categories", "get_category_attributes", "search_attribute_options",
-    "get_marketplace_form", "get_account_settings", "get_listing_guidelines",
+    "get_marketplace_form", "get_account_settings",
 }
 
 
@@ -99,8 +98,9 @@ def test_catalog_tools_are_listing_reads_in_the_catalog():
     # The write tools send agents to the lookups before they fill marketplace fields.
     for writer in ("create_draft_listing", "edit_listing"):
         text = definitions[writer]["description"]
-        for name in ("search_categories", "get_category_attributes", "get_listing_guidelines"):
+        for name in ("search_categories", "get_category_attributes", "search_attribute_options"):
             assert name in text, (writer, name)
+        assert "get_listing_guidelines" not in text
 
 
 def test_a_token_needs_listings_read_for_catalog_tools():
@@ -323,17 +323,45 @@ def test_account_settings_report_connections_without_secrets(monkeypatch):
         assert secret not in text
 
 
-def test_listing_guidelines_come_from_the_list_this_rules():
-    client = TestClient(app)
-    result, is_error = _call_tool(client, "get_listing_guidelines", {"marketplace": "etsy", "field": "title"})
-    assert not is_error, result
-    assert result["marketplace"] == "etsy"
-    assert "Title" in result["guidelines"]
-    assert len(result["guidelines"]) <= mcp_catalog_tools.MAX_GUIDELINE_CHARS
+def _assert_guidelines_are_private(client: TestClient, bearer: dict[str, str]) -> None:
+    assert "get_listing_guidelines" not in _tool_names(client, bearer)
+    response = _rpc(
+        client, "tools/call", {"name": "get_listing_guidelines", "arguments": {}}, extra_headers=bearer,
+    )
+    assert response.status_code == 200
+    assert response.json()["error"]["code"] == -32602
 
-    short, is_error = _call_tool(client, "get_listing_guidelines", {"max_chars": 2000})
-    assert not is_error
-    assert len(short["guidelines"]) <= 2000
+def test_listing_guidelines_are_private_even_with_listings_read_access():
+    client = TestClient(app)
+    token = client.post("/api/settings/mcp-tokens", json={"name": "Reader"}).json()["token"]
+    _assert_guidelines_are_private(client, {"Authorization": f"Bearer {token}"})
+
+
+def test_mcp_validation_keeps_formula_details_private(monkeypatch):
+    from anteroom.services import skill_formulas, validation
+
+    monkeypatch.setattr(skill_formulas, "get_listing_formulas", lambda: {"description": "Private Header: {DETAILS}"})
+    fields = {"title": "Cotton jacket", "brand": "Example Brand", "size": "M", "description": "Woven cotton."}
+    editor_validation = validation.validate_listing(fields.copy())
+    assert any("Private Header" in item["message"] for item in editor_validation.errors)
+    client = TestClient(app)
+    token = client.post(
+        "/api/settings/mcp-tokens", json={"name": "Writer", "permissions": {"listings": "write"}},
+    ).json()["token"]
+    bearer = {"Authorization": f"Bearer {token}"}
+
+    draft, is_error = _call_tool(client, "create_draft_listing", fields, bearer)
+    assert not is_error, draft
+    identity = {"conversation_id": draft["conversation_id"]}
+    edited, is_error = _call_tool(client, "edit_listing", {**identity, "fields": {"price": 20}}, bearer)
+    assert not is_error, edited
+    read, is_error = _call_tool(client, "get_listing", identity, bearer)
+    assert not is_error, read
+    for result in (draft, edited, read):
+        errors = result["validation"]["errors"]
+        assert any(item["field"] == "description" for item in errors)
+        assert "Private Header" not in json.dumps(errors)
+        assert "Brand Size Vibe Item Color Fit" not in json.dumps(errors)
 
 
 def test_hosted_catalog_tools_are_seller_scoped(cloud, signing_keys):  # noqa: F811
@@ -369,5 +397,4 @@ def test_hosted_catalog_tools_are_seller_scoped(cloud, signing_keys):  # noqa: F
                                      extra_headers=token)
         assert not is_error, found
         assert found["categories"]
-        rules, is_error = _call_tool(client, "get_listing_guidelines", {"marketplace": "poshmark"}, extra_headers=token)
-        assert not is_error and rules["guidelines"]
+        _assert_guidelines_are_private(client, token)

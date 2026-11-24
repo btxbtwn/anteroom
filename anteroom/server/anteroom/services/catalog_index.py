@@ -1,4 +1,4 @@
-"""Semantic search over local Anteroom catalog, skill rules, and fill helpers via Semble."""
+"""Semantic search over the Anteroom catalog and fill helpers via Semble."""
 from __future__ import annotations
 
 import asyncio
@@ -28,7 +28,7 @@ from anteroom.services.category_tree import MARKETPLACES
 
 log = logging.getLogger("anteroom.catalog_index")
 
-SEARCH_KINDS = frozenset({"category", "schema", "option", "skill", "fill", "all"})
+SEARCH_KINDS = frozenset({"category", "schema", "option", "fill", "all"})
 
 _INDEX_LOCK = threading.RLock()
 # Serializes the slow materialize + tokenize. Not the same lock readers take:
@@ -120,7 +120,7 @@ _FORM_MARKETPLACE = {
 
 
 def catalog_docs_dir() -> Path:
-    """Seller-scoped schema, option, skill and fill docs."""
+    """Seller-scoped schema, option and fill docs."""
     return _catalog_root() / "docs"
 
 
@@ -215,7 +215,6 @@ def fingerprint(db: Session) -> dict[str, Any]:
         "trees": trees,
         "schemas": db.query(CategorySchema).count(),
         "dropdown": _file_stamp(_dropdown_path()),
-        "skills": {str(path): _file_stamp(path) for path in _skill_files()},
         "extension": {str(path): _file_stamp(path) for path in _extension_script_files()},
     }
 
@@ -349,31 +348,6 @@ def _chunk_markdown(text: str) -> list[tuple[str, str]]:
     return chunks
 
 
-def _materialize_skills(root: Path) -> int:
-    count = 0
-    for path in _skill_files():
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        rel = str(path.relative_to(skills_dir())) if path.is_relative_to(skills_dir()) else path.name
-        for title, body in _chunk_markdown(text):
-            chunk_id = f"{rel}:{title}"
-            _write_text(
-                root / "skills" / f"{_safe_stem(chunk_id)}.md",
-                "\n".join([
-                    "kind: skill",
-                    f"id: {chunk_id}",
-                    f"path: {rel}",
-                    f"title: {title}",
-                    "",
-                    body[:6000],
-                ]),
-            )
-            count += 1
-    return count
-
-
 def _marketplace_from_script(path: Path) -> str:
     name = path.stem.casefold().split("-")[0]
     if name in MARKETPLACES or name == "vendoo":
@@ -498,7 +472,6 @@ def _write_catalog_docs(rows: list[_SchemaRow], root: Path | None = None) -> Pat
             if label and options:
                 _write_option_doc(docs, row.marketplace, label, options, f"schema:{row.general_path}")
     _materialize_dropdown_options(docs)
-    _materialize_skills(docs)
     _materialize_fill_helpers(docs)
     return docs
 
@@ -717,7 +690,7 @@ def _build_unlocked(
         "categories": len(snapshot.category_rows) if category_count is None else category_count,
         **{
             name: sum(1 for _ in (docs / name).rglob("*.md")) if (docs / name).exists() else 0
-            for name in ("schemas", "options", "skills", "fill")
+            for name in ("schemas", "options", "fill")
         },
     }
     log.info("catalog index rebuilt: %s", counts)
@@ -725,7 +698,7 @@ def _build_unlocked(
 
 
 def rebuild_catalog_index(db: Session) -> dict[str, Any]:
-    """Export catalog/skill/fill docs and rebuild the Semble index."""
+    """Export catalog and fill docs and rebuild the Semble index."""
     return build_catalog_index(lambda: catalog_snapshot(db))
 
 
@@ -967,20 +940,6 @@ def _verify_option(meta: dict[str, str], content: str) -> dict | None:
     }
 
 
-def _verify_skill(meta: dict[str, str], content: str) -> dict | None:
-    path = meta.get("path") or ""
-    if not path:
-        return None
-    return {
-        "kind": "skill",
-        "id": meta.get("id") or path,
-        "path": path,
-        "title": meta.get("title") or "",
-        "marketplace": "",
-        "snippet": _body_after_meta(content)[:4000],
-    }
-
-
 def _verify_fill(meta: dict[str, str], content: str) -> dict | None:
     path = meta.get("path") or ""
     symbol = meta.get("symbol") or ""
@@ -1011,8 +970,6 @@ def _verify_hit(db: Session | None, meta: dict[str, str], content: str, path_pre
         return _verify_schema(db, meta.get("id") or "", meta.get("general_path") or "")
     if kind == "option":
         return _verify_option(meta, content)
-    if kind == "skill":
-        return _verify_skill(meta, content)
     if kind == "fill":
         return _verify_fill(meta, content)
     return None
@@ -1033,9 +990,8 @@ def _lexical_docs(
     # Categories and schemas rank from the database in _lexical_fallback.
     folders = {
         "option": ["options"],
-        "skill": ["skills"],
         "fill": ["fill"],
-        "all": ["options", "skills", "fill"],
+        "all": ["options", "fill"],
     }.get(kind, [])
     for folder in folders:
         base = docs / folder
@@ -1165,7 +1121,7 @@ def _lexical_fallback(
                 "fields": row.fields if isinstance(row.fields, list) else [],
                 "score": float(score),
             }))
-    if kind in {"option", "skill", "fill", "all"}:
+    if kind in {"option", "fill", "all"}:
         for hit in _lexical_docs(query, marketplace=marketplace, kind=kind if kind != "all" else "all", top_k=top_k):
             hits.append((int(hit.get("score") or 0), hit))
     hits.sort(key=lambda item: (-item[0], item[1].get("path") or item[1].get("id") or ""))
@@ -1186,7 +1142,7 @@ def search_catalog(
     query = str(query or "").strip()
     kind = str(kind or "all").strip().lower()
     if kind not in SEARCH_KINDS:
-        raise ValueError("kind must be category, schema, option, skill, fill, or all")
+        raise ValueError("kind must be category, schema, option, fill, or all")
     if not query:
         return []
     if ensure:

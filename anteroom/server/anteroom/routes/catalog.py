@@ -140,13 +140,13 @@ def search(
     top_k: int = 15,
     db: Session = Depends(get_db, scope="function"),
 ):
-    from anteroom.services.catalog_index import search_catalog
+    from anteroom.services.catalog_index import SEARCH_KINDS, search_catalog
 
     query = str(q or "").strip()
     if not query:
         raise HTTPException(400, "q is required")
-    if kind not in {"category", "schema", "option", "skill", "fill", "all"}:
-        raise HTTPException(400, "kind must be category, schema, option, skill, fill, or all")
+    if kind not in SEARCH_KINDS:
+        raise HTTPException(400, "kind must be category, schema, option, fill, or all")
     top_k = max(1, min(int(top_k or 15), 50))
     try:
         hits = search_catalog(db, query, marketplace=marketplace or None, kind=kind, top_k=top_k)
