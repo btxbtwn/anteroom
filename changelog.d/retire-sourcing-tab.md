@@ -1,2 +1,0 @@
-- Retired the Sourcing tab, wholesale box buy-list, and item scouting tool.
-- Moved **Boxes you bought** into **Analytics → Boxes** so you can keep recording wholesale boxes and tracking what their listings earn back.

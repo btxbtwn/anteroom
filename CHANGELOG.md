@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1233 — 2026-11-24
+
+- Retired the Sourcing tab, wholesale box buy-list, and item scouting tool.
+- Moved **Boxes you bought** into **Analytics → Boxes** so you can keep recording wholesale boxes and tracking what their listings earn back.
+
 ## 0.1.1232 — 2026-11-24
 
 - Claude, ChatGPT and other assistants connected to Anteroom can now add photos to a listing: send a few photos in the chat, or, for assistants that can run commands, upload them straight from your computer with a single-use link that expires after 15 minutes.
