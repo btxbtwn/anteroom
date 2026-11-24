@@ -35,7 +35,7 @@ class ImportReview(SellerOwned, Base):
     )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
-    marketplace: Mapped[str] = mapped_column(String(16), nullable=False)
+    marketplace: Mapped[str] = mapped_column(String(32), nullable=False)
     listing_id: Mapped[str] = mapped_column(String(64), nullable=False)
     # What the marketplace showed when the import read it.
     title: Mapped[str] = mapped_column(String(255), nullable=False)

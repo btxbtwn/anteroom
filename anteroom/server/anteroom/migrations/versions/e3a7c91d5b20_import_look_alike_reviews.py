@@ -32,7 +32,7 @@ def upgrade() -> None:
             "import_reviews",
             sa.Column("id", sa.String(), nullable=False),
             sa.Column("user_id", sa.String(36), nullable=False, server_default=LOCAL_OWNER),
-            sa.Column("marketplace", sa.String(16), nullable=False),
+            sa.Column("marketplace", sa.String(32), nullable=False),
             sa.Column("listing_id", sa.String(64), nullable=False),
             sa.Column("title", sa.String(255), nullable=False),
             sa.Column("price", sa.Numeric(12, 2), nullable=True),
@@ -48,6 +48,7 @@ def upgrade() -> None:
             sa.PrimaryKeyConstraint("id"),
             sa.UniqueConstraint("user_id", "marketplace", "listing_id", "conversation_id", name="uq_import_reviews_listing_item"),
         )
+        # A table new in this revision: nothing reads it yet, so its indexes need no concurrent build.
         op.create_index("ix_import_reviews_user_id", "import_reviews", ["user_id"])
         op.create_index("ix_import_reviews_conversation_id", "import_reviews", ["conversation_id"])
         op.create_index("ix_import_reviews_owner_decision", "import_reviews", ["user_id", "decision", "created_at"])
