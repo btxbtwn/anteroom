@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1237 — 2026-11-24
+
+- Keep listing guidelines out of agent and catalog responses.
+
 ## 0.1.1236 — 2026-11-24
 
 - A category your AI agent changes on a listing now saves; before, Anteroom kept the old category on listings whose marketplace forms had been loaded.

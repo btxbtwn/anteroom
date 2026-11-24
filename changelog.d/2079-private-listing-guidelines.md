@@ -1,1 +1,0 @@
-- Keep listing guidelines out of agent and catalog responses.
