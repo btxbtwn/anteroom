@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1231 — 2026-11-24
+
+- On iPhone, a Needs attention refresh that was still loading no longer undoes a Resolve, Snooze or Restore you just tapped.
+
 ## 0.1.1230 — 2026-11-24
 
 - When Mercari or another marketplace asks for a browser check, Anteroom says so instead of reporting you signed out, keeps your saved sign-in and offer rules on, and stops instead of sending the same request into the check again.

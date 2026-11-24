@@ -1,1 +1,0 @@
-- On iPhone, a Needs attention refresh that was still loading no longer undoes a Resolve, Snooze or Restore you just tapped.
