@@ -225,8 +225,11 @@ def operator_email() -> str:
     return os.environ.get("ANTEROOM_OPERATOR_EMAIL", "").strip() or OPERATOR
 
 
-def send_email(subject: str, body: str) -> None:
-    """Workspace SMTP relay: allowed by the app's static egress IPs, TLS required."""
+def send_email(subject: str, body: str, *, sender: str = "Anteroom Errors", timeout: float = 20) -> None:
+    """Workspace SMTP relay: allowed by the app's static egress IPs, TLS required.
+
+    ``timeout`` bounds each socket operation (connect, TLS, every SMTP reply).
+    """
     import smtplib
     import ssl
     from email.message import EmailMessage
@@ -235,12 +238,12 @@ def send_email(subject: str, body: str) -> None:
     recipient = operator_email()
     domain = recipient.partition("@")[2] or "myanteroom.com"
     message = EmailMessage()
-    message["From"] = f"Anteroom Errors <{recipient}>"
+    message["From"] = f"{sender} <{recipient}>"
     message["To"] = recipient
     message["Subject"] = subject
     message["Message-ID"] = make_msgid(domain=domain)
     message.set_content(body)
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, local_hostname=domain, timeout=20) as smtp:
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, local_hostname=domain, timeout=timeout) as smtp:
         smtp.starttls(context=ssl.create_default_context())
         smtp.send_message(message)
 

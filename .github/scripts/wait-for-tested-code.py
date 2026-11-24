@@ -20,15 +20,14 @@ recorded with a "Deployed commit" notice. Without one, only the nearest merge
 is checked. It exits 1 if a check fails, is cancelled, never appears or does
 not finish in time.
 
-When recorded and live production are still on the pinned pre-recovery base
-(a1a55df0, 0.1.1091), the single historical failure on d19adbff (#1717: two
-Alembic heads, fixed in #1728 / 6d72c5e3) may be superseded only after all other
-commits in the span pass push CI and the exact Descendant verification receipt
-for bbb4c8fc (run 44992383513, attempt 1, artifact 14743680528) is
-live-verified against GitHub and local Git. The spent fa824f9a / 0.1.1011
-checkpoint was removed once production moved past b73c5347. Once Deploy hosted
-succeeds and records a newer Deployed commit, this checkpoint never matches
-again and ordinary gating applies unchanged.
+When recorded and live production are still on 23f8ab01 (0.1.1211), the
+three push CI failures caused by the split Alembic history (#2032 / #2031 /
+#2040; fixed in #2045 / afc3c2db) may be superseded only after all other
+commits in the span pass push CI and an exact Descendant verification receipt
+is live-verified against GitHub and local Git. Until a new receipt is pinned
+in HISTORICAL_RECOVERY_CHECKPOINT, those failures block every deploy. Once
+Deploy hosted succeeds and records a newer Deployed commit, the checkpoint
+never matches again and ordinary gating applies unchanged.
 """
 
 from __future__ import annotations
@@ -81,29 +80,23 @@ PRE_RENAME_PREFIXES = (
     ("vendoo-ios/", "anteroom-ios/"),
 )
 
-# Single-base recovery checkpoint for historical d19adbff (fixed in #1728).
-# Inert once Deploy hosted records a commit after a1a55df0 (or after artifact
-# 14743680528 expires ~30 days from 2026-11-22); remove this pin in a cleanup
-# PR once production is verified past a1a55df0.
-HISTORICAL_RECOVERY_CHECKPOINT: recovery_evidence.EvidencePin | None = recovery_evidence.EvidencePin(
-    repository="btxbtwn/anteroom",
-    repository_id=1183824317,
-    workflow_id=422931456,
-    target="bbb4c8fc560da5f81bedfd349714ff30a4c28a1d",
-    tree="81b5e145302b5124b16176ab2f97875801d67cd3",
-    production_base="a1a55df0789371ad271e443897b72c2fd6ff0c3e",
-    historical_failure="d19adbff5a34609dd5c2b7ada19966ae4aeafce8",
-    correcting_merge="6d72c5e3d9d1ee4256f7c754c749a2e19a01818c",
-    workflow_blob="a0a097906554252a26f35c957169ec6d0e3c93db",
-    ci_blob="eb20aa66b1eb2ab1c0b7e310e62ea0c1aacc8abe",
-    run_id=44992383513,
-    attempt=1,
-    receipt_artifact_id=14743680528,
-    receipt_digest="sha256:b6f32050e79a324cdc27c0d0adad164cb573a8eb229c22b0bf6d0c6cf980ce31",
-)
+# These pushes all tested the same split Alembic history. #2045 joined both
+# heads. Pin a Descendant verification receipt (production_base=23f8ab01)
+# before Deploy hosted can supersede them; None fails closed.
+HISTORICAL_RECOVERY_FAILURES = frozenset({
+    "99c3b7003d1d79cfc20cea283bebde7e54572081",  # CI 45390465842
+    "08b97e99edaa02f021bc7bcf876d2fd2ade83c69",  # CI 45391561313
+    "fb7d5c076cce6021b48240014ba6fb0e71256300",  # CI 45394131194
+})
+HISTORICAL_RECOVERY_CORRECTION = "afc3c2dbde647b59203c0b761c8c0dfb2b697264"
+
+# Spent d19adbff / 0.1.1091 pin removed after production reached 23f8ab01.
+# Pin a Descendant verification receipt here before Deploy hosted can
+# supersede HISTORICAL_RECOVERY_FAILURES; None fails closed.
+HISTORICAL_RECOVERY_CHECKPOINT: recovery_evidence.EvidencePin | None = None
 HISTORICAL_BASE_FLY_APP = "peaceful-meadowstone-6944"
-HISTORICAL_BASE_IMAGE_DIGEST = "sha256:cdc7323a7eb2f8ac00f2a9f3e96bd737abec9ce16c0aa2de7cdb3a77e14ebd7e"
-HISTORICAL_BASE_DB_REVISION = "85dab8d3327c"
+HISTORICAL_BASE_IMAGE_DIGEST = "sha256:22df137ee877807504d7223d6aff53e8cee6777cf2ddfd70838a14a822641591"
+HISTORICAL_BASE_DB_REVISION = "e3b7a1c9d402"
 HISTORICAL_BASE_FLY_GROUPS = ("app", "worker")
 ALEMBIC_CURRENT_RE = re.compile(r"([0-9a-f]{12})(?: \(head\))?")
 FLY_APP_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
@@ -254,18 +247,22 @@ def checkpoint_eligible(
         return False, f"Repository {repo!r} does not match pinned repository {pin.repository!r}."
     if production is None or production != pin.production_base:
         return False, "Recorded production commit does not match the pinned recovery base."
-    if failed_sha != verification_evidence.HISTORICAL:
-        return False, f"Commit {failed_sha[:8]} is not the diagnosed historical failure."
+    if failed_sha not in HISTORICAL_RECOVERY_FAILURES:
+        return False, f"Commit {failed_sha[:8]} is outside the diagnosed historical failures."
     run_git = git_fn or _read_git
     resolved_head = run_git("rev-parse", head)
     main_line = run_git("rev-list", "--first-parent", "origin/main").splitlines()
     if resolved_head not in main_line:
         return False, f"Target {resolved_head[:8]} is not on origin/main first-parent history."
     span = run_git("rev-list", "--first-parent", "--reverse", f"{production}..{resolved_head}").splitlines()
-    if failed_sha not in span or verification_evidence.CORRECTED not in span or pin.target not in span:
-        return False, "Historical failure, correcting merge, and verified checkpoint must all precede HEAD after production."
-    if not (span.index(failed_sha) < span.index(verification_evidence.CORRECTED) <= span.index(pin.target)):
-        return False, "First-parent ordering must be production < historical failure < correcting merge <= checkpoint <= HEAD."
+    if HISTORICAL_RECOVERY_CORRECTION not in span or pin.target not in span:
+        return False, "The correcting merge and verified checkpoint must follow production at or before HEAD."
+    correction_index = span.index(HISTORICAL_RECOVERY_CORRECTION)
+    if (
+        not HISTORICAL_RECOVERY_FAILURES.issubset(span[:correction_index])
+        or correction_index > span.index(pin.target)
+    ):
+        return False, "Every diagnosed failure must precede the correcting merge and verified checkpoint on main."
     return True, ""
 
 
@@ -993,7 +990,7 @@ def main() -> int:
     print(why)
     deadline = time.monotonic() + args.timeout
     missing_since: dict[str, float] = {}
-    superseded_historical: str | None = None
+    superseded_historical: list[str] = []
     covered_commits: set[str] = set()
     while True:
         waiting = []
@@ -1014,18 +1011,19 @@ def main() -> int:
                         reason = str(error)
                 else:
                     reason = f"Expected historical failure conclusion 'failure', got {conclusion!r}."
-                if eligible and superseded_historical is None:
-                    superseded_historical = sha
+                if eligible:
+                    superseded_historical.append(sha)
                     print(
                         f"CI on {sha[:8]} finished as '{conclusion}'; deferring to live verification "
                         f"of pinned Descendant verification checkpoint {HISTORICAL_RECOVERY_CHECKPOINT.target[:8]} "
                         "once every other commit in the deploy span passes CI."
                     )
                     continue
-                detail = f" Recovery checkpoint ineligible: {reason}" if sha == verification_evidence.HISTORICAL and reason else ""
+                detail = f" Recovery checkpoint ineligible: {reason}" if sha in HISTORICAL_RECOVERY_FAILURES and reason else ""
                 print(
                     f"::error::CI on {sha[:8]} finished as '{conclusion}', and this deploy ships its code. "
-                    f"Re-run it if it failed for an unrelated reason, or fix main; its passing run deploys.{detail}"
+                    f"Re-run CI for a transient failure. For a regression fixed on main, see the hosted recovery "
+                    f"procedure in docs/ci.md.{detail}"
                 )
                 return 1
             if status == "missing":
@@ -1079,7 +1077,7 @@ def main() -> int:
                 if state != "covered":
                     waiting.append((covered_sha, f"awaiting fresh coverage ({detail})"))
         if not waiting:
-            if superseded_historical is None:
+            if not superseded_historical:
                 _write_github_output("recovery_checkpoint", "false")
                 return 0
             try:
@@ -1092,16 +1090,17 @@ def main() -> int:
                     args.repo,
                     head_sha,
                     current_production,
-                    superseded_historical,
+                    superseded_historical[0],
                     pin=HISTORICAL_RECOVERY_CHECKPOINT,
                     health_url=args.health_url,
                 )
             except (ValueError, RuntimeError, OSError, subprocess.SubprocessError, json.JSONDecodeError) as error:
-                print(f"::error::Recovery checkpoint rejected for {superseded_historical[:8]}: {error}")
+                print(f"::error::Recovery checkpoint rejected: {error}")
                 return 1
             _write_github_output("recovery_checkpoint", "true")
+            commits = ", ".join(sha[:8] for sha in superseded_historical)
             print(
-                f"Historical CI failure on {superseded_historical[:8]} is superseded by verified Descendant "
+                f"Historical CI failures on {commits} are superseded by verified Descendant "
                 f"verification checkpoint {report['target'][:8]} (run {report['run_id']} attempt {report['attempt']}, "
                 f"receipt artifact {report['receipt_artifact_id']}; live base {report['production_base'][:8]} "
                 f"confirmed at {report['live_base_version']}). Every other commit through {head_sha[:8]} passed push CI."

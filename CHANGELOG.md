@@ -6,6 +6,22 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1222 — 2026-11-24
+
+- Your AI assistant can send feedback to the Anteroom team for you: a bug, a feature request, a question or something confusing. It shows you the message first. On myanteroom.com it is emailed to the team; on the Mac app it is saved and the assistant gives you an email link to send it yourself.
+
+## 0.1.1221 — 2026-11-24
+
+- Fix Anteroom updates failing to start after two more changes each added a database step at the same time.
+
+## 0.1.1220 — 2026-11-24
+
+- Filling marketplace fields after a new draft costs less AI time: it now reads only the listing rules that apply to those fields, not the title, description and pricing formulas.
+
+## 0.1.1219 — 2026-11-24
+
+- Importing a listing from Mercari now brings over everything Mercari has for it: its category, condition, size, brand (or No brand), who pays shipping, ship on your own or Mercari's shipping label, package weight and size, ships-from ZIP, and Smart Pricing with its minimum price. Updating that listing from Anteroom afterwards no longer turns Smart Pricing on or switches who pays shipping.
+
 ## 0.1.1218 — 2026-11-24
 
 - Listings that Import all holds because they look like an item you already have now stay on the import screen after a reload and on your other devices, until you link them, import them as new, or mark them **Not the same item**.

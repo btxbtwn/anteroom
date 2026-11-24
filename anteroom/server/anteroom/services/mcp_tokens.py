@@ -93,6 +93,10 @@ AREA_LEVELS: dict[str, tuple[str, ...]] = {
 DEFAULT_PERMISSIONS: dict[str, str] = {
     "listings": "read", "analytics": "read", "attention": "read", "marketplaces": "none",
 }
+# Not an area a seller sets: a tool gated on it (send_feedback) needs only
+# some access to any one area. A token with every area at "none" is one the
+# seller has switched off, so it reaches nothing at all.
+ANY_AREA = "any"
 
 
 class McpTokenError(ValueError):
@@ -151,6 +155,8 @@ def stored_permissions(raw: Any) -> dict[str, str]:
 
 
 def allows(permissions: dict[str, str], area: str, level: str) -> bool:
+    if area == ANY_AREA:
+        return any(permissions.get(name, "none") in levels[1:] for name, levels in AREA_LEVELS.items())
     levels = AREA_LEVELS[area]
     granted = permissions.get(area, "none")
     return granted in levels and levels.index(granted) >= levels.index(level)
