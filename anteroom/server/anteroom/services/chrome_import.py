@@ -273,12 +273,71 @@ def snapshot(marketplace: str, listing: dict) -> tuple[dict, list[str]]:
         # The marketplace's own category is the one its tab shows.
         if marketplace in {"poshmark", "depop", "mercari"}:
             out["direct_category_ids"] = {marketplace: category_id}
+    if marketplace == "mercari":
+        specifics = _mercari_specifics(listing.get("mercari_specifics"))
+        if specifics:
+            out["mercari_specifics"] = specifics
+            # Each one is the seller's own Mercari answer, kept as a seller field.
+            out["seller_fields"] = sorted(f"mercari_specifics.{key}" for key in specifics)
+        package = specifics.get("package") or {}
+        if "pounds" in package:
+            out["weight_lb"], out["weight_oz"] = package["pounds"], math.ceil(package["ounces"])
+        if all(key in package for key in ("length", "width", "height")):
+            out["package_dimensions_in"] = "x".join(f"{package[key]:g}" for key in ("length", "width", "height"))
     if marketplace == "poshmark" and isinstance(listing.get("poshmark"), dict):
         _poshmark_fields(out, listing["poshmark"], category_id)
     if marketplace == "depop":
         _depop_fields(listing, out)
     photos = [url for url in listing.get("photos") or [] if isinstance(url, str) and url.startswith("https://")]
     return out, photos
+
+
+def _size(value) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return value if math.isfinite(number) and 0 <= number <= 10_000 else None
+
+
+def _mercari_specifics(raw) -> dict:
+    """The Mercari tab's answers Chrome read from the item, each checked against what Mercari's form accepts."""
+    if not isinstance(raw, dict):
+        return {}
+    out: dict = {}
+    if raw.get("condition") in {"1", "2", "3", "4", "5"}:
+        out["condition"] = raw["condition"]
+    for key in ("nativeSizeId", "shippingClassId"):
+        if isinstance(raw.get(key), str) and re.fullmatch(r"[1-9]\d{0,9}", raw[key]):
+            out[key] = raw[key]
+    if raw.get("noBrand") is True:
+        out["noBrand"] = True
+    if raw.get("shippingMethod") in {"MERCARI", "SOYO"}:
+        out["shippingMethod"] = raw["shippingMethod"]
+    if raw.get("shippingPayerId") in (1, 2):
+        out["shippingPayerId"] = raw["shippingPayerId"]
+    if isinstance(raw.get("shipsFrom"), str) and re.fullmatch(r"\d{5}", raw["shipsFrom"]):
+        out["shipsFrom"] = raw["shipsFrom"]
+    package: dict = raw["package"] if isinstance(raw.get("package"), dict) else {}
+    pack: dict = {}
+    pounds, ounces = _size(package.get("pounds")), _size(package.get("ounces"))
+    if pounds is not None and ounces is not None and ounces < 16:
+        pack.update(pounds=int(pounds), ounces=ounces)
+    if package.get("fitsShoebox") in {"yes", "no"}:
+        pack["fitsShoebox"] = package["fitsShoebox"]
+    sides = {key: _size(package.get(key)) for key in ("length", "width", "height")}
+    if pack.get("fitsShoebox") == "no" and all(sides.values()):
+        pack.update(sides)
+    elif pack.get("fitsShoebox") == "no" and package.get("skipDimensions") is True:
+        pack["skipDimensions"] = True
+    if pack:
+        out["package"] = pack
+    smart = raw.get("smartPricing")
+    if isinstance(smart, dict) and isinstance(smart.get("enabled"), bool):
+        out["smartPricing"] = {"enabled": smart["enabled"]}
+        minimum = _price(smart.get("minimumPrice"))
+        if smart["enabled"] and minimum is not None:
+            out["smartPricing"]["minimumPrice"] = minimum
+    return out
 
 
 def _poshmark_fields(out: dict, post: dict, category_id: str) -> None:

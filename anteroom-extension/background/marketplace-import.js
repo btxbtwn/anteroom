@@ -34,7 +34,13 @@ const MERCARI_ITEM_DETAILS_QUERY = `query sellFetchItemsDetails($itemId: String!
     itemSize { id }
     brand { id }
     itemCategory { id }
-    seller { id }
+    shippingPayer { id }
+    shippingClasses { id }
+    shippingPackageWeight { weight unit }
+    shippingPackageDimension { length width height unit }
+    seller { id zipCode }
+    isAutoPriceDrop
+    minPriceForAutoPriceDrop
   }
 }`;
 
@@ -238,6 +244,50 @@ function mercariCategoryPath(master, id) {
   return names.filter(Boolean).join(' > ');
 }
 
+// The item's answers on Mercari's own form, in the Mercari tab's fields
+// (mercari_specifics), so the tab shows what Mercari has and an update sends it back unchanged.
+// Mercari's form has no colour, SKU or quantity: it sells one of each item.
+function mercariImportSpecifics(item) {
+  const specifics = {};
+  const condition = Number(item.itemCondition?.id);
+  if (MERCARI_CONDITIONS[condition]) specifics.condition = String(condition);
+  const size = Number(item.itemSize?.id);
+  if (Number.isInteger(size) && size > 0) specifics.nativeSizeId = String(size);
+  if (!(Number(item.brand?.id) > 0)) specifics.noBrand = true;
+  const classes = (Array.isArray(item.shippingClasses) ? item.shippingClasses : []).map(row => Number(row?.id)).filter(Number.isInteger);
+  const soyo = !classes.length || classes[0] === 0;
+  specifics.shippingMethod = soyo ? 'SOYO' : 'MERCARI';
+  if (!soyo && classes[0] > 0) specifics.shippingClassId = String(classes[0]);
+  const payer = Number(item.shippingPayer?.id);
+  if (payer === 1 || payer === 2) specifics.shippingPayerId = payer;
+  const pack = {};
+  const weight = Number(item.shippingPackageWeight?.weight);
+  if (Number.isFinite(weight) && weight > 0) {
+    const ounces = Math.ceil(String(item.shippingPackageWeight.unit || 'OUNCE').toUpperCase() === 'POUND' ? weight * 16 : weight);
+    pack.pounds = Math.floor(ounces / 16);
+    pack.ounces = ounces % 16;
+  }
+  const box = item.shippingPackageDimension;
+  if (box && (box.unit == null || String(box.unit).toUpperCase() === 'INCH')) {
+    const sides = [box.length, box.width, box.height].map(Number);
+    if (sides.every(side => Number.isFinite(side) && side > 0)) {
+      const [length, width, height] = sides;
+      if (length === 14 && width === 10 && height === 5) pack.fitsShoebox = 'yes';
+      else Object.assign(pack, { fitsShoebox: 'no', length, width, height });
+    } else if (!soyo && sides.every(side => side === 0)) {
+      Object.assign(pack, { fitsShoebox: 'no', skipDimensions: true });
+    }
+  }
+  if (Object.keys(pack).length) specifics.package = pack;
+  const zip = String(item.seller?.zipCode ?? '').trim();
+  if (/^\d{5}$/.test(zip)) specifics.shipsFrom = zip;
+  const minimum = Number(item.minPriceForAutoPriceDrop);
+  specifics.smartPricing = item.isAutoPriceDrop === true
+    ? { enabled: true, ...(Number.isFinite(minimum) && minimum > 0 ? { minimumPrice: Math.round(minimum) / 100 } : {}) }
+    : { enabled: false };
+  return specifics;
+}
+
 async function mercariImportListing(id, deadline) {
   const session = await mercariCurrentSession(deadline, true);
   await importPace('mercari');
@@ -262,6 +312,7 @@ async function mercariImportListing(id, deadline) {
     category_id: item.itemCategory?.id != null ? String(item.itemCategory.id) : null,
     sku: null, colors: [],
     photos: importPhotos((Array.isArray(item.photos) ? item.photos : []).map(photo => photo?.imageUrl)),
+    mercari_specifics: mercariImportSpecifics(item),
   };
 }
 
