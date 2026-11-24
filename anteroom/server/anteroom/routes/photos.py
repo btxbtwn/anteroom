@@ -166,13 +166,16 @@ async def photo_studio(conv_id: str, body: contract.PhotoStudioRequest, request:
     from anteroom.services.photoroom import PhotoroomError
 
     try:
-        outcome = await photo_studio.run(lambda work, *args: _in_session(request, work, *args),
-                                         conv_id, body.photo_ids, body.options)
+        outcome = await photo_studio.run(
+            lambda work, *args: _in_session(request, work, *args), conv_id, body.photo_ids, body.options,
+            photo_versions=body.review.photo_versions if body.review else None,
+            scheduled_confirmed_at=body.review.scheduled_confirmed_at if body.review else None,
+        )
     except PhotoroomError as exc:
         raise HTTPException(exc.status, str(exc)) from None
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from None
-    return {"photos": [_photo_response(photo) for photo in outcome["photos"]], "errors": outcome["errors"]}
+    return {**outcome, "photos": [_photo_response(photo) for photo in outcome["photos"]]}
 
 
 @edit_router.delete("/api/conversations/{conv_id}/photos/{photo_id}/edits")

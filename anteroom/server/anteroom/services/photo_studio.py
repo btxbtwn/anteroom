@@ -18,22 +18,50 @@ from collections.abc import Awaitable, Callable
 from io import BytesIO
 from typing import Any
 
+from fastapi import HTTPException
 from PIL import Image
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from anteroom.models.conversation import Photo
+from anteroom.models.conversation import Conversation, Photo
 from anteroom.repositories.queries import ConversationRepo
-from anteroom.services import photo_edits, photoroom
+from anteroom.services import item_status, photo_edits, photoroom
 from anteroom.services.media_handoff import finish_media_handoff
 from anteroom.services.photo_edits import PhotoEdits, StudioEdit
 from anteroom.services.photo_store import photo_store
 from anteroom.services.photoroom import PhotoroomError, StudioOptions
+from anteroom.services.vendoo_import import parse_notes
 
 log = logging.getLogger(__name__)
 
 RunDb = Callable[..., Awaitable[Any]]
 
 
-def _read_photo(db, conv_id: str, photo_id: str) -> tuple[str, str]:
+def _require_reviewed_draft(
+    db: Session, conv_id: str, scheduled_confirmed_at: str | None, *, lock: bool = False,
+) -> None:
+    from anteroom.models.listing import Listing
+
+    draft = select(Conversation.status, Conversation.notes).where(Conversation.id == conv_id)
+    row = db.execute(draft.with_for_update() if lock else draft).first()
+    if row is None or row.status != "draft" or item_status.status_for(db, conv_id, parse_notes(row.notes)).status != "draft":
+        raise photo_edits.PhotoConflictError("Bulk AI Studio only edits drafts.")
+
+    schedule = select(Listing.scheduled_status, Listing.scheduled_confirmed_at).where(Listing.conversation_id == conv_id)
+    pending = db.execute(schedule.with_for_update() if lock else schedule).first()
+    if pending is None:
+        return
+    if pending.scheduled_status == "publishing":
+        raise photo_edits.PhotoConflictError("This draft is publishing.")
+    if pending.scheduled_status == "scheduled":
+        confirmed = pending.scheduled_confirmed_at
+        if confirmed is None or confirmed.isoformat() + "Z" != scheduled_confirmed_at:
+            raise photo_edits.PhotoConflictError("Publishing schedule changed. Review this draft again.")
+
+
+def _read_photo(
+    db, conv_id: str, photo_id: str, reviewed_version: str | None, scheduled_confirmed_at: str | None,
+) -> tuple[str, str]:
     """The photo's served file and type, after checking the listing is not busy."""
     from anteroom.services import background_tasks
     from anteroom.services.service_context import current
@@ -41,9 +69,13 @@ def _read_photo(db, conv_id: str, photo_id: str) -> tuple[str, str]:
     try:
         if current() is not None:
             background_tasks.check_idle(db, conv_id)
+        if reviewed_version is not None:
+            _require_reviewed_draft(db, conv_id, scheduled_confirmed_at)
         photo = db.query(Photo).filter(Photo.id == photo_id, Photo.conversation_id == conv_id).first()
         if photo is None:
             raise photo_edits.PhotoNotFoundError("Photo not found")
+        if reviewed_version is not None and (photo.marketplace is not None or (photo.checksum or "")[:12] != reviewed_version):
+            raise photo_edits.PhotoConflictError("Photo changed. Review this draft again.")
         if photo.mime_type not in photo_edits.SAVE_FORMATS:
             raise ValueError("This photo format cannot be edited")
         return photo.stored_filename, photo.mime_type
@@ -70,18 +102,27 @@ def _store_result(key: str, mime_type: str, result: bytes, options: StudioOption
     photo_store().put(key, buffer.getvalue())
 
 
-def _save(db, conv_id: str, photo_id: str, served: str, key: str, options: StudioOptions) -> Photo:
+def _save(
+    db, conv_id: str, photo_id: str, served: str, key: str, options: StudioOptions,
+    reviewed_version: str | None, scheduled_confirmed_at: str | None,
+) -> Photo:
     """Make ``key`` the photo's AI Studio base, if the photo is still the one sent.
 
     What was sent already carried the photo's edits, so they start over on the result.
     """
     studio = StudioEdit(key=key, options=options)
-    return photo_edits.apply_photo_edit(ConversationRepo(db), conv_id, photo_id,
-                                        lambda _current: PhotoEdits(studio=studio), expected_stored=served)
+    return photo_edits.apply_photo_edit(
+        ConversationRepo(db), conv_id, photo_id, lambda _current: PhotoEdits(studio=studio), expected_stored=served,
+        validate_save=(lambda: _require_reviewed_draft(db, conv_id, scheduled_confirmed_at, lock=True))
+        if reviewed_version is not None else None,
+    )
 
 
-async def _one(run_db: RunDb, conv_id: str, photo_id: str, options: StudioOptions) -> Photo:
-    served, mime_type = await run_db(_read_photo, conv_id, photo_id)
+async def _one(
+    run_db: RunDb, conv_id: str, photo_id: str, options: StudioOptions,
+    reviewed_version: str | None, scheduled_confirmed_at: str | None,
+) -> Photo:
+    served, mime_type = await run_db(_read_photo, conv_id, photo_id, reviewed_version, scheduled_confirmed_at)
     data = await asyncio.to_thread(photo_store().read, served)
     result = await photoroom.edit(data, options)
     del data
@@ -90,7 +131,7 @@ async def _one(run_db: RunDb, conv_id: str, photo_id: str, options: StudioOption
     async def persist() -> Photo:
         try:
             await asyncio.to_thread(_store_result, key, mime_type, result, options)
-            return await run_db(_save, conv_id, photo_id, served, key, options)
+            return await run_db(_save, conv_id, photo_id, served, key, options, reviewed_version, scheduled_confirmed_at)
         except Exception:
             # A refresh or acknowledgement can fail after commit. Read through
             # a fresh session; if ownership is unknown, keep the object.
@@ -107,8 +148,6 @@ def _uses_result(db, conv_id: str, photo_id: str, key: str) -> bool:
 
 
 def _failure(photo_id: str, error: BaseException) -> dict:
-    from fastapi import HTTPException
-
     if isinstance(error, PhotoroomError):
         detail = str(error)
     elif isinstance(error, photo_edits.PhotoNotFoundError):
@@ -124,10 +163,14 @@ def _failure(photo_id: str, error: BaseException) -> dict:
     else:
         log.warning("AI Studio failed for a photo", exc_info=error)
         detail = "AI Studio could not save this photo. Try again."
-    return {"photo_id": photo_id, "detail": detail}
+    needs_review = isinstance(error, (photo_edits.PhotoNotFoundError, photo_edits.PhotoConflictError))
+    return {"photo_id": photo_id, "detail": detail, "needs_review": needs_review}
 
 
-async def run(run_db: RunDb, conv_id: str, photo_ids: list[str], options: StudioOptions) -> dict:
+async def run(
+    run_db: RunDb, conv_id: str, photo_ids: list[str], options: StudioOptions, *,
+    photo_versions: dict[str, str] | None = None, scheduled_confirmed_at: str | None = None,
+) -> dict:
     """Run AI Studio on each photo, a few at a time; returns saved ``Photo`` rows and per-photo failures."""
     if not photo_ids:
         raise ValueError("Choose at least one photo.")
@@ -135,13 +178,25 @@ async def run(run_db: RunDb, conv_id: str, photo_ids: list[str], options: Studio
         raise ValueError(f"Choose at most {photoroom.MAX_BATCH} photos at once.")
     if len(set(photo_ids)) != len(photo_ids):
         raise ValueError("Choose each photo once.")
+    if photo_versions is not None and set(photo_versions) != set(photo_ids):
+        raise ValueError("Review each selected photo before applying.")
     if not await asyncio.to_thread(photoroom.available):
         raise PhotoroomError("Add a Photoroom API key in Settings → Connections to use AI Studio.", 400)
     slots = asyncio.Semaphore(photoroom.CONCURRENCY)
+    blocked: PhotoroomError | None = None
 
     async def bounded(photo_id: str) -> Photo:
+        nonlocal blocked
         async with slots:
-            return await _one(run_db, conv_id, photo_id, options)
+            if blocked is not None:
+                raise PhotoroomError("This photo was not sent. Check your Photoroom plan or API key.", 400)
+            try:
+                return await _one(run_db, conv_id, photo_id, options,
+                                  photo_versions[photo_id] if photo_versions is not None else None, scheduled_confirmed_at)
+            except PhotoroomError as exc:
+                if photo_versions is not None and exc.status == 400:
+                    blocked = exc
+                raise
 
     outcomes = await asyncio.gather(*(bounded(photo_id) for photo_id in photo_ids), return_exceptions=True)
     saved, failed = [], []
@@ -152,4 +207,4 @@ async def run(run_db: RunDb, conv_id: str, photo_ids: list[str], options: Studio
             failed.append(_failure(photo_id, outcome))
         else:
             saved.append(outcome)
-    return {"photos": saved, "errors": failed}
+    return {"photos": saved, "errors": failed, "provider_blocked": blocked is not None}

@@ -21,10 +21,12 @@ export function BulkActionBar({
   bulk,
   selection,
   eligibleIds,
+  editPhotos,
 }: {
   bulk: BulkRegenerate;
   selection: ListingSelection;
   eligibleIds: string[];
+  editPhotos?: (ids: string[]) => void;
 }) {
   const { features } = useWorkspaceRuntime();
   const { selectedIds, toggleSelectAll, regenerateSelected, setMarkdownIds, setEditIds, setCopyIds, setMarketIds, setPromoteIds, setDeleteIds, exitSelecting } = selection;
@@ -35,6 +37,7 @@ export function BulkActionBar({
   const share = features.has("marketplace_actions");
   const regenerate = features.has("bulk_regenerate");
   const remove = features.has("bulk_delete");
+  const studio = features.has("photo_studio") && editPhotos;
   return (
     <div
       className="flex shrink-0 flex-col gap-2 border-t border-sidebar-border px-(--sidebar-content-inset) py-2 max-[900px]:sticky max-[900px]:bottom-0 max-[900px]:z-10 max-[900px]:bg-sidebar max-[900px]:pb-[max(8px,env(safe-area-inset-bottom,0px))]"
@@ -71,15 +74,16 @@ export function BulkActionBar({
           title="Review a lower price for each selected listing. Saves in Anteroom only." onClick={() => setMarkdownIds(picked())}>Mark down</Button>)}
         {features.has("bulk_copy") && (<Button type="button" variant="outline" size="xs" disabled={none || count > 300}
           title="Review separate draft copies of up to 300 selected items" onClick={() => setCopyIds(picked())}>Copy items</Button>)}
-        {(share || regenerate || remove) && (
+        {(share || regenerate || remove || studio) && (
           <Menu>
             <MenuTrigger disabled={none} render={<Button type="button" variant="outline" size="xs" />}>
               More<ChevronDownIcon aria-hidden />
             </MenuTrigger>
             <MenuPopup align="start" side="top" width="content">
+              {studio && <MenuItem onClick={() => studio(picked())}>Edit photos…</MenuItem>}
               {share && <MenuItem disabled={count > 100} onClick={() => setPromoteIds(picked())}>Share / offers</MenuItem>}
               {regenerate && <MenuItem disabled={selection.regenerateIds.length === 0} onClick={() => { void regenerateSelected(); }}>Regenerate…</MenuItem>}
-              {remove && (share || regenerate) && <MenuSeparator />}
+              {remove && (share || regenerate || studio) && <MenuSeparator />}
               {remove && <MenuItem variant="destructive" disabled={count > 300} onClick={() => setDeleteIds(picked())}>Delete…</MenuItem>}
             </MenuPopup>
           </Menu>

@@ -48,17 +48,21 @@ def test_hosted_ai_studio_keeps_the_private_original_and_resets(cloud, signing_k
     photo_id = client.post(f'/api/drafts/{identity}/photos', headers=alice, content=_jpeg()).json()['id']
     original_key = next(iter(stored))
     path = f'/api/conversations/{identity}/photos/studio'
+    reviewed = client.get(f'/api/conversations/{identity}/photos', headers=alice).json()
+    version = reviewed[0]['url'].partition('?v=')[2]
+    payload = {'photo_ids': [photo_id], 'options': {'flat_lay': True, 'background': '#F5F0E6'},
+               'review': {'photo_versions': {photo_id: version}}}
 
     # Another seller cannot run AI Studio on this photo.
-    refused = client.post(path, headers=bob, json={'photo_ids': [photo_id], 'options': {'remove_background': True}})
+    refused = client.post(path, headers=bob, json=payload)
     assert refused.status_code in (200, 404)
     if refused.status_code == 200:
         assert refused.json()['photos'] == [] and refused.json()['errors'][0]['detail'] in ('Photo not found', 'Listing not found')
     assert len(stored) == 1
 
-    response = client.post(path, headers=alice, json={'photo_ids': [photo_id],
-                                                      'options': {'flat_lay': True, 'background': '#F5F0E6'}})
+    response = client.post(path, headers=alice, json=payload)
     assert response.status_code == 200, response.text
+    assert response.json()['errors'] == []
     saved = response.json()['photos'][0]
     studio_key = saved['edits']['studio']['key']
     assert studio_key.startswith(f'{USER_ID}/{identity}/')

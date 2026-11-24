@@ -605,6 +605,7 @@ def apply_photo_edit(
     resolve_edits: Callable[[PhotoEdits], PhotoEdits | None],
     *,
     expected_stored: str | None = None,
+    validate_save: Callable[[], None] | None = None,
 ):
     """Apply or reset photo edits with per-photo locking and no DB transaction open during Storage/Pillow I/O.
 
@@ -671,6 +672,8 @@ def apply_photo_edit(
                 raise PhotoNotFoundError("Photo not found")
             if fresh.stored_filename != current_stored or fresh.source_filename != current_source:
                 raise PhotoConflictError("Photo changed while editing; try again.")
+            if validate_save is not None:
+                validate_save()
             from anteroom.services.draft_scheduling import unschedule_on_edit
 
             unschedule_on_edit(db, conv_id, reason="Photos changed after scheduling; review and reschedule before publishing.")

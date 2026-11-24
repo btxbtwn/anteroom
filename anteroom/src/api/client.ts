@@ -820,7 +820,7 @@ export const api = {
     approvals: () => request<AutomationApproval[]>("/automations/approvals"),
     approve: (row: AutomationApproval) =>
       request<AutomationApproval>(`/automations/approvals/${row.id}/approve`, { method: "POST", body: JSON.stringify({ confirm: true, action: row.action, marketplaces: row.marketplaces, revision_id: row.revision_id, review_token: row.review_token }) }),
-    scheduledDrafts: () => request<{ drafts: DraftScheduleState[] }>("/automations/scheduled-drafts").then((r) => r.drafts),
+    scheduledDrafts: (options?: ReadOptions) => read<{ drafts: DraftScheduleState[] }>("/automations/scheduled-drafts", options).then((r) => r.drafts),
     scheduledDraftLogs: (limit = 50) =>
       request<{ logs: ScheduledPublishLog[] }>(`/automations/scheduled-drafts/logs?limit=${limit}`).then((r) => r.logs),
     bulkScheduleDrafts: (conversationIds: string[], publishAt: string, marketplaces: string[]) =>
@@ -1228,10 +1228,10 @@ export const api = {
     resetPhoto: (convId: string, photoId: string) =>
       request<ListingPhoto>(`/conversations/${convId}/photos/${photoId}/edits`, { method: "DELETE" }),
     /** AI Studio (Photoroom) on several photos at once; each keeps its upload so Reset returns to it. */
-    photoStudio: (convId: string, photoIds: string[], options: StudioOptions, signal?: AbortSignal) =>
+    photoStudio: (convId: string, photoIds: string[], options: StudioOptions, signal?: AbortSignal, review?: PhotoStudioRequest["review"]) =>
       request<PhotoStudioResult>(`/conversations/${convId}/photos/studio`, {
         method: "POST",
-        body: JSON.stringify({ photo_ids: photoIds, options } satisfies PhotoStudioRequest),
+        body: JSON.stringify({ photo_ids: photoIds, options, review } satisfies PhotoStudioRequest),
         signal,
       }),
     /** A smaller JPEG of unsaved edits; `crop: false` keeps the whole frame to draw the crop on. */

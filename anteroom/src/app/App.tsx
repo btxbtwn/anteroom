@@ -24,6 +24,7 @@ import { ConfirmDialogHost } from "../components/ConfirmDialogHost";
 import { PhotoDropOverlay } from "../components/PhotoDropOverlay";
 import { canAddPhotos, DRAFT_ONLY_PHOTOS } from "../components/photoAdding";
 import { BulkUploadDialog } from "../components/BulkUploadDialog";
+import type { Listing } from "../components/sidebar/listingShelves";
 import { useBulkRegenerate } from "../components/useBulkRegenerate";
 import { PanelResizeHandle, usePanelCollapsed, usePanelWidth, type PanelWidthLimits } from "../components/PanelResizeHandle";
 import { WorkspaceTopbar, stopTitlebarDrag } from "../components/WorkspaceTopbar";
@@ -75,6 +76,9 @@ import { prefetchPageReads } from "../api/pageQueries";
 const PAGE_LOADERS = [...Object.values(pageLoaders), loadListingEditor, loadChatPanel];
 const FirstRunGuide = lazy(() =>
   import("../components/FirstRunGuide").then((module) => ({ default: module.FirstRunGuide })),
+);
+const BulkPhotoBatches = lazy(() =>
+  import("../components/BulkPhotoStudioDialog").then((module) => ({ default: module.BulkPhotoBatches })),
 );
 
 const ACTIVE_JOB_STATUSES = new Set(["queued", "awaiting_extension", "dispatched"]);
@@ -607,6 +611,13 @@ export function App() {
   };
 
   const bulk = useBulkRegenerate((id) => activeView === "listings" && selectedConvId === id);
+  // Each batch runs independently, so a running batch never blocks starting one for other drafts.
+  const [bulkPhotoBatches, setBulkPhotoBatches] = useState<{ id: number; listings: Listing[] }[]>([]);
+  const nextPhotoBatch = useRef(0);
+  const startPhotoBatch = (listings: Listing[]) => {
+    const id = ++nextPhotoBatch.current;
+    setBulkPhotoBatches((batches) => [...batches, { id, listings }]);
+  };
   const [bulkProgressOpen, setBulkProgressOpen] = useState(false);
   const [bulkDrafts, setBulkDrafts] = useState<Record<string, { title: string; status: string; retry?: boolean }>>({});
   // Bulk-uploaded drafts already carry their SKUs and measurements, so they generate straight away.
@@ -866,6 +877,7 @@ export function App() {
             onCloseSettings={closeSettings}
             onSettingsSectionChange={handleSettingsSectionChange}
             onSettingsSearchResult={handleSettingsSearchResult}
+            onEditPhotos={startPhotoBatch}
             bulk={bulk}
           />
         )}
@@ -1140,6 +1152,12 @@ export function App() {
           dropPhotos.mutate({ files });
         }}
       />
+      {bulkPhotoBatches.length > 0 && (
+        <Suspense fallback={null}>
+          <BulkPhotoBatches batches={bulkPhotoBatches}
+            onDone={(id) => setBulkPhotoBatches((batches) => batches.filter((batch) => batch.id !== id))} />
+        </Suspense>
+      )}
       {pendingBulkGroups ? (
         <BulkUploadDialog
           groups={pendingBulkGroups}
