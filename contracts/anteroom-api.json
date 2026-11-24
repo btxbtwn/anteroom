@@ -5165,6 +5165,16 @@
             },
             "description": "The listing does not exist for this seller."
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The listing changed elsewhere or is busy."
+          },
           "422": {
             "content": {
               "application/json": {

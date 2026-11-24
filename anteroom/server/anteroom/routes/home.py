@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from anteroom.database import get_db
 from anteroom.routes.api_contract import (
+    CONFLICT,
     NOT_FOUND,
     AttentionInbox,
     AttentionResolveInput,
@@ -138,7 +139,7 @@ def dismiss_attention(
     return {"ok": True, "dismissal": dismissal}
 
 
-@router.post("/attention/resolve", response_model=AttentionResolveResult, responses=NOT_FOUND)
+@router.post("/attention/resolve", response_model=AttentionResolveResult, responses={**NOT_FOUND, **CONFLICT})
 def resolve_attention(
     body: AttentionResolveInput,
     db: Session = Depends(get_db, scope="function"),
