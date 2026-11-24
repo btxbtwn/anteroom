@@ -24,6 +24,7 @@ from sqlalchemy import event
 from anteroom.database import in_worker_session
 from anteroom.routes import mcp_photo_uploads
 from anteroom.services import (
+    mcp_catalog_tools,
     mcp_feedback_tools,
     mcp_http,
     mcp_import_match_tools,
@@ -224,6 +225,9 @@ async def mcp_post(request: Request):
             if uploads:
                 # Photos sent to add_listing_photos are stored with the session closed, then saved.
                 await mcp_photo_tools.finish_pending_uploads(uploads, expired=expired, request=request)
+            forms = mcp_catalog_tools.pending_form_reads(outcome[0])
+            if forms:
+                await mcp_catalog_tools.finish_form_reads(forms, deadline=deadline - _MCP_REPLY_MARGIN_SECONDS)
             if not result.done():
                 result.set_result(outcome)
         except Exception as exc:

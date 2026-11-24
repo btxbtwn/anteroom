@@ -6,9 +6,9 @@ const MARKETPLACE_CATALOG_TTL_MS = 6 * 60 * 60 * 1000;
 const marketplaceCatalogs = new Map();
 
 // One cached catalog read. Failures are not kept.
-async function marketplaceCatalog(key, read) {
+async function marketplaceCatalog(key, read, refresh = false) {
   const hit = marketplaceCatalogs.get(key);
-  if (hit && Date.now() - hit.at < MARKETPLACE_CATALOG_TTL_MS) return hit.value;
+  if (!refresh && hit && Date.now() - hit.at < MARKETPLACE_CATALOG_TTL_MS) return hit.value;
   const value = await read();
   marketplaceCatalogs.set(key, { at: Date.now(), value });
   return value;

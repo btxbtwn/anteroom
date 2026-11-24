@@ -347,7 +347,7 @@ const depopName = entry => String(entry?.name_i18n?.['en-US'] ?? entry?.name_i18
 // The listing site splits the same document across two reads: categories,
 // brands and attributes, then the category size sets. Both refuse a request
 // that does not carry the seller's session, and the form then has no choices.
-async function depopAttributes(deadline) {
+async function depopAttributes(deadline, refresh = false) {
   return await marketplaceCatalog('depop:attributes', () => marketplaceCatalogRead('depop', 'category and size list', async () => {
     const authorization = await depopBearer();
     const read = async path => {
@@ -366,7 +366,7 @@ async function depopAttributes(deadline) {
       throw marketplaceError('Depop\'s category list changed.', { code: 'schema_drift' });
     }
     return data;
-  }, { signedIn: true }));
+  }, { signedIn: true }), refresh);
 }
 
 async function depopBearer() {

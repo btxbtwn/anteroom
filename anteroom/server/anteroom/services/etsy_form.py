@@ -109,7 +109,7 @@ def property_rows(snapshot: dict, properties: list[dict], captured: dict) -> lis
     return rows
 
 
-async def _properties(category: str) -> tuple[list[dict], str]:
+async def _properties(category: str, *, strict: bool = False) -> tuple[list[dict], str]:
     from anteroom.services import marketplace_schemas
 
     if not category:
@@ -117,12 +117,14 @@ async def _properties(category: str) -> tuple[list[dict], str]:
     try:
         return await asyncio.wait_for(marketplace_schemas.etsy_properties(category), ETSY_READ_TIMEOUT_S), ""
     except Exception as exc:  # noqa: BLE001 - the rest of the form still opens; List reads them again
+        if strict:
+            raise
         log.info("Etsy properties for %s not loaded: %s", category, exc)
         return [], ("Etsy's attributes for this category could not be loaded. Connect Etsy in Settings → Connections, "
                     "then reopen the listing.")
 
 
-async def _settings_choices() -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+async def _settings_choices(*, fresh: bool = False) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
     """Settings' shop profiles for new drafts, with their names when Etsy can be read."""
     from anteroom.services import etsy_listings, saved_choices
     from anteroom.services.marketplace_accounts import account_id
@@ -133,7 +135,10 @@ async def _settings_choices() -> tuple[dict[str, str], dict[str, dict[str, str]]
     except Exception:  # noqa: BLE001 - shown as not chosen; List checks Settings again
         defaults = {}
     names: dict[str, dict[str, str]] = {}
-    if any(defaults.values()):
+    if fresh:
+        profiles = await asyncio.wait_for(etsy_listings.listing_profiles(fresh=True), ETSY_READ_TIMEOUT_S)
+        names = {kind: {str(item["id"]): str(item["title"]) for item in profiles.get(kind) or []} for kind in _SETTINGS_KEYS}
+    elif any(defaults.values()):
         try:
             account = await asyncio.wait_for(account_id("etsy"), ETSY_READ_TIMEOUT_S)
             profiles = await asyncio.wait_for(saved_choices.kept("etsy-profiles", account, etsy_listings.listing_profiles),
@@ -144,7 +149,7 @@ async def _settings_choices() -> tuple[dict[str, str], dict[str, dict[str, str]]
     return defaults, names
 
 
-async def editor_form(snapshot: dict) -> dict:
+async def editor_form(snapshot: dict, *, fresh_choices: bool = False) -> dict:
     """Etsy's form rows for this listing, in the page's order."""
     from anteroom.services.direct_categories import direct_category_id
     from anteroom.services.etsy_fields import (DEFAULT_ETSY_RENEWAL, etsy_renewal_raw, etsy_what_raw,
@@ -157,7 +162,8 @@ async def editor_form(snapshot: dict) -> dict:
     from anteroom.services.user_settings import get_listing_field_defaults
 
     (properties, property_note), (defaults, names), saved = await asyncio.gather(
-        _properties(category), _settings_choices(), asyncio.to_thread(get_listing_field_defaults),
+        _properties(category, strict=fresh_choices), _settings_choices(fresh=fresh_choices),
+        asyncio.to_thread(get_listing_field_defaults),
     )
     details = snapshot.get("etsy_specifics")
     if not isinstance(details, dict):
@@ -208,4 +214,5 @@ async def editor_form(snapshot: dict) -> dict:
         notes.append("This Etsy category is not in Anteroom's list. Choose the most specific category again.")
     return {"marketplace": "etsy", "native": True, "known": not category or known, "page_labels": True,
             "category_id": category if known else "", "fields": rows, "notes": notes,
+            **({"shop_profiles": names} if fresh_choices else {}),
             **({"properties_unavailable": True} if property_note else {})}

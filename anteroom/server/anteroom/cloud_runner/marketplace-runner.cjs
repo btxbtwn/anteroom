@@ -29,6 +29,7 @@ const EXTENSION_SCRIPTS = [
   'marketplace-sales.js',
   'marketplace-order-history.js',
   'marketplace-import.js',
+  'direct-check.js',
   'native-forms.js',
   'cloud-marketplace-actions.js',
 ];
@@ -589,8 +590,9 @@ async function executeMarketplaceOperation({
       }
     }
   } else if (cmdType === 'marketplace.form' && marketplace === 'poshmark') {
-    const form = await context.readPoshmarkEditorForm(command.payload?.listing || {}, Date.now() + 25000);
-    result = { ok: true, form };
+    const refresh = command.payload?.refresh === true;
+    const form = await context.readPoshmarkEditorForm(command.payload?.listing || {}, Date.now() + 25000, refresh);
+    result = { ok: true, refreshed: refresh, form };
   } else {
     result = await context.runCloudMarketplaceCommand(command, Array.isArray(photos) ? photos : []);
   }

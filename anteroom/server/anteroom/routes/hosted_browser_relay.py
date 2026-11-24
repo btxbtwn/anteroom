@@ -61,7 +61,7 @@ class Heartbeat(BaseModel):
     model_config = ConfigDict(extra='forbid')
     capabilities: list[Literal['marketplace.actions', 'marketplace.regions',
                                'marketplace.sessions', 'marketplace.sales_history',
-                               'marketplace.promotions', 'marketplace.import', 'vendoo.drafts',
+                               'marketplace.promotions', 'marketplace.import', 'marketplace.form.read', 'vendoo.drafts',
                                'marketplace.signed_approvals', 'marketplace.signed_commands',
                                'marketplace.cloud_connect']] = Field(max_length=12)
 

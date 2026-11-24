@@ -2,19 +2,21 @@
 
 Categories, the fields a category asks for and the values each accepts, the
 form a listing shows for one marketplace, and the seller's region and connections.
-Each comes from what Anteroom already keeps: the
-bundled marketplace catalogs, the synced category trees, and the eBay and Etsy
-category fields Anteroom saved when it last read them. None of them waits on
-Chrome or a marketplace (they run inside the MCP call's database session), and
-none of them changes anything.
+Catalog reads use data Anteroom already keeps. An explicit form refresh reads
+the marketplace after the MCP database session closes and returns the form
+without saving a listing revision.
 """
 from __future__ import annotations
 
+import asyncio
 import concurrent.futures
 import contextvars
 import copy
+import json
 from collections.abc import Callable, Collection
 from datetime import UTC, datetime
+from time import monotonic
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -41,6 +43,7 @@ _FORM_SOURCES = {
     "catalog": "Built from the marketplace's form as Anteroom's bundled catalog records it",
     "saved": "The form Anteroom saved the last time it read this marketplace's fields for this listing",
 }
+_FORM_PLACEHOLDER = "_anteroom_form_refresh"
 
 TOOLS: list[dict[str, Any]] = [
     {
@@ -114,17 +117,42 @@ TOOLS: list[dict[str, Any]] = [
         "description": (
             "Read the fields and current values one marketplace's form shows for a listing in the "
             "Anteroom editor, with which are required and what each accepts. Says where the form came "
-            "from and when its fields were read. Never opens Chrome or contacts the marketplace: when "
-            "Anteroom has not read eBay's or Etsy's fields for this listing yet, it says so. Read-only."
+            "from and when its fields were read. By default uses saved data. Set refresh=true and supply "
+            "expected_revision_id to read the current choices on that marketplace, including Mercari "
+            "prepaid quotes for the saved package. Uses the seller's marketplace connection when needed. "
+            "Never saves a listing revision or changes a marketplace listing."
         ),
-        "annotations": _READ_ANNOTATIONS,
+        "annotations": {**_READ_ANNOTATIONS, "openWorldHint": True},
         "inputSchema": {
             "type": "object",
             "properties": {
                 "conversation_id": {"type": "string", "description": "Listing / conversation ID."},
                 "marketplace": {"type": "string", "enum": sorted(MARKETS)},
+                "refresh": {"type": "boolean", "default": False},
+                "expected_revision_id": {"type": "string", "description": "Current revision ID from get_listing, required for refresh."},
+                "field": {"type": "string", "description": "With refresh, return choices for this field path or label."},
+                "query": {"type": "string", "description": "Filter a refreshed field's choices by label."},
             },
             "required": ["conversation_id", "marketplace"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "get_auto_relist_status",
+        "title": "Preview Auto-Relist readiness",
+        "description": (
+            "Read Auto-Relist and eBay Auto-Recreate rules and preview due candidates from Anteroom's "
+            "records. Shows the remaining cap, proposed prices, pending attempts, retry backoff, and known "
+            "listing requirements. Does not run relists, reconcile attempts, or verify live connections."
+        ),
+        "annotations": _READ_ANNOTATIONS,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "marketplace": {"type": "string", "enum": ["poshmark", "ebay", "mercari", "depop"]},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25,
+                          "description": "Maximum candidate details to include per marketplace."},
+            },
             "additionalProperties": False,
         },
     },
@@ -504,12 +532,37 @@ def _tool_get_marketplace_form(db: Session, args: dict[str, Any], **_kw: Any) ->
 
     conv_id = _text(args, "conversation_id", max_len=500)
     market = _market(args)
+    refresh = args.get("refresh", False)
+    if not isinstance(refresh, bool):
+        raise ValueError("refresh must be true or false.")
+    revision_id = args.get("expected_revision_id")
+    if revision_id is not None and (not isinstance(revision_id, str) or not 1 <= len(revision_id) <= 100):
+        raise ValueError("Use the current revision ID from get_listing as expected_revision_id.")
+    if refresh and not revision_id:
+        raise ValueError("To refresh choices, pass expected_revision_id from get_listing.")
+    field = _text(args, "field", required=False)
+    query = _text(args, "query", required=False, max_len=200)
+    if (field and not refresh) or (query and not field):
+        raise ValueError("Use field with refresh=true and optionally pass a query for its choices.")
     try:
         # Reads the listing the way the editor does; rolls back before returning.
-        inputs = form_snapshot(db, conv_id, market, None)
+        inputs = form_snapshot(db, conv_id, market, revision_id, preload=not refresh)
     except NativeMarketplaceError as exc:
         raise ValueError("Listing not found." if exc.status_code == 404 else str(exc)) from None
     out: dict[str, Any] = {"conversation_id": conv_id, "marketplace": market}
+    if refresh:
+        from anteroom.services import cloud_sessions
+        from anteroom.services.seller_region import seller_region
+
+        region = seller_region(db=db)
+        if market not in region.marketplaces:
+            return {**out, "available": False, "source": "unavailable", "reason": "unsupported_region",
+                    "message": f"{NAMES[market]} is unavailable in the seller's Anteroom region ({region.country})."}
+        use_cloud = market == "poshmark" and cloud_sessions.has_active_session(market, db)
+        return {"_after": [{_FORM_PLACEHOLDER: {
+            **out, "revision_id": revision_id, "snapshot": {**inputs.snapshot, "_seller_region": region.country}, "use_cloud": use_cloud,
+            "field": field, "query": query,
+        }}]}
     if market in {"ebay", "etsy"}:
         # These forms are read from eBay's and Etsy's APIs. Use the copy Anteroom saved for this
         # listing; reading them again here would hold this call's database session open.
@@ -533,6 +586,10 @@ def _tool_get_marketplace_form(db: Session, args: dict[str, Any], **_kw: Any) ->
         form = _catalog_form(inputs.snapshot, market)
         out.update(available=True, source="catalog", source_detail=_FORM_SOURCES["catalog"],
                    catalog_read=_catalog_source(market))
+    return _form_result(out, form)
+
+
+def _form_result(out: dict[str, Any], form: dict) -> dict[str, Any]:
     out["category_id"] = form.get("category_id")
     out["fields"] = [_summary(row, with_value=True) for row in form.get("fields") or [] if not _photo_or_note(row)]
     out["missing_required"] = [row["path"] for row in out["fields"]
@@ -541,6 +598,194 @@ def _tool_get_marketplace_form(db: Session, args: dict[str, Any], **_kw: Any) ->
     if notes:
         out["notes"] = notes
     return out
+
+
+def pending_form_reads(body: Any) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    reads = []
+    for response in body if isinstance(body, list) else [body]:
+        result = response.get("result") if isinstance(response, dict) else None
+        if isinstance(result, dict):
+            for item in result.get("content", []):
+                if isinstance(item, dict) and _FORM_PLACEHOLDER in item:
+                    reads.append((result, item[_FORM_PLACEHOLDER]))
+    return reads
+
+
+class _FormUnavailable(Exception):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+async def _browser_form(market: str, snapshot: dict, use_cloud: bool, timeout: float) -> tuple[dict, str]:
+    from anteroom.services import browser_bridge, cloud_marketplace, hosted_browser_relay, service_context
+
+    keys = ("title", "description", "brand", "condition", "category_path", "category", "department", "form",
+            "price", "cost", "quantity", "sku", "size", "colors", "color", "primaryColor", "secondaryColor",
+            "direct_category_ids", "seller_fields", "_seller_region", f"{market}_specifics")
+    listing = {key: snapshot[key] for key in keys if key in snapshot}
+    if isinstance(listing.get("form"), dict):
+        listing["form"] = {key: listing["form"][key] for key in ("overrides", "specifics", "aspects") if key in listing["form"]}
+    payload = {"marketplace": market, "listing": listing, "refresh": True}
+    if use_cloud:
+        if timeout < 5:
+            raise TimeoutError
+        transport = "poshmark_cloud"
+        reply = await cloud_marketplace.execute(market, {"type": "marketplace.form", "payload": payload},
+                                                timeout=timeout)
+    else:
+        transport = "chrome_bridge"
+        try:
+            ctx = service_context.current()
+            if ctx is not None:
+                relay = hosted_browser_relay.relay_for(ctx.seller_id)
+                reply = await relay.read("marketplace.form", payload, timeout)
+            else:
+                reply = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.form", payload, timeout=timeout)
+        except (browser_bridge.BrowserBridgeError, hosted_browser_relay.ChromeReadError) as exc:
+            if str(exc).startswith("Update Anteroom Bridge"):
+                raise _FormUnavailable("refresh_unsupported", str(exc)) from None
+            if "connect chrome first" in str(exc).lower():
+                raise _FormUnavailable("connection_required", f"Connect Chrome with Anteroom Bridge and sign in to {NAMES[market]}.") from None
+            if "in time" in str(exc) or "cancelled" in str(exc):
+                raise TimeoutError from None
+            raise _FormUnavailable("connection_unavailable", "Anteroom Bridge did not answer. Check the Chrome connection.") from None
+    form = reply.get("form")
+    if not reply.get("ok") or not isinstance(form, dict) or form.get("marketplace") != market:
+        code = reply.get("error_code")
+        if code == "signed_out":
+            where = "in Anteroom Settings → Connections" if use_cloud else "in the connected Chrome browser"
+            raise _FormUnavailable("connection_required", f"Sign in to {NAMES[market]} {where}.")
+        if code == "timeout":
+            raise TimeoutError
+        if code in ("challenge", "rate_limited", "schema_drift"):
+            raise _FormUnavailable(code, f"{NAMES[market]} could not return its current choices ({code}).")
+        raise _FormUnavailable("unavailable", f"Could not read {NAMES[market]}'s choices. Check its connection and try again.")
+    if reply.get("refreshed") is not True:
+        raise _FormUnavailable("refresh_unsupported", f"Update the {NAMES[market]} connection or Anteroom Bridge to refresh choices.")
+    return form, transport
+
+
+async def _refresh_marketplace_form(spec: dict, timeout: float) -> dict:
+    from anteroom.services import etsy_form, marketplace_schemas, mercari_form, native_editor
+
+    market, snapshot = spec["marketplace"], spec["snapshot"]
+    out = {key: spec[key] for key in ("conversation_id", "marketplace", "revision_id")}
+    out.update(available=True, source="live", choice_sources={"listing_values": "saved"})
+    choices = out["choice_sources"]
+    if market == "ebay":
+        form = await native_editor.ebay_form(snapshot, fresh_choices=True)
+        out["fetched_via"] = "ebay_api"
+        choices.update(category_fields="live" if form.get("category_id") else "unavailable", account_choices="live")
+    elif market == "etsy":
+        with marketplace_schemas.schema_session(fresh=True):
+            form = await etsy_form.editor_form(snapshot, fresh_choices=True)
+        out.update(fetched_via="etsy_api", shop_profiles=form["shop_profiles"])
+        choices.update(category_fields="live" if form.get("category_id") else "unavailable", account_choices="live",
+                       category_picker="bundled_catalog")
+    elif market == "mercari":
+        status, classes = await mercari_form.prepaid_shipping_quotes(snapshot, refresh=True)
+        form = mercari_form.form(snapshot, classes)
+        out.update(shipping_quote_status=status, shipping_quotes=[{
+            "id": str(row["id"]), "carrier": row["carrierDisplayName"], "fee_cents": row["fee"],
+            "currency": "USD", "max_ounces": row["weightRange"]["max"], "eta": row.get("etaForSeller"),
+        } for row in classes])
+        choices["product_fields"] = "bundled_catalog"
+        if status in ("quoted", "no_options"):
+            choices["shipping_quotes"] = "live"
+            out["fetched_via"] = "mercari_guest_api"
+        else:
+            choices["shipping_quotes"] = "unavailable"
+            out.update(source="catalog", catalog_read=_catalog_source(market))
+    else:
+        form, out["fetched_via"] = await _browser_form(market, snapshot, spec["use_cloud"], timeout)
+        choices.update(category_fields="live", shipping_choices="unavailable" if form.get("notes") else "live")
+        if market == "depop":
+            form = {**form, "fields": [row for row in form.get("fields", []) if row.get("path") != "depop_specifics.shipFrom"]}
+            if snapshot.get("_seller_region") == "CA":
+                choices["shipping_choices"] = "seller_entered"
+    if out["source"] == "live":
+        out["fetched_at"] = _iso(datetime.now(UTC))
+    return await asyncio.to_thread(_refreshed_form_result, out, form, spec["field"], spec["query"])
+
+
+def _refreshed_form_result(out: dict, form: dict, path: str, query: str) -> dict:
+    result = _form_result(out, form)
+    if path:
+        row = _find_row([row for row in form.get("fields") or [] if not _photo_or_note(row)], path)
+        if row is None:
+            raise _FormUnavailable("field_not_found", "The marketplace did not return that field. Refresh the form to see its fields.")
+        options = _row_options(row)
+        labels = [str(option["label"]) if isinstance(option, dict) else option for option in options]
+        order = _ranked(query, labels) if query else range(len(options))
+        field = _summary(row, with_value=True)
+        field.pop("options_hint", None)
+        field.update(options=[options[index] for index in order[:MAX_INLINE_OPTIONS]], option_count=len(order),
+                     options_truncated=len(order) > MAX_INLINE_OPTIONS)
+        result["fields"] = [field]
+    else:
+        for row in result["fields"]:
+            if row.get("options_truncated"):
+                row["options_hint"] = "Refresh again with this field and a query to find a current choice."
+    return result
+
+
+def _refresh_error(market: str, exc: Exception) -> tuple[str, str]:
+    import httpx
+
+    from anteroom.services.ebay_client import EbayFailure
+    from anteroom.services.marketplace_accounts import SignInRequired
+
+    name = NAMES[market]
+    if isinstance(exc, _FormUnavailable):
+        return exc.code, str(exc)
+    if isinstance(exc, (TimeoutError, httpx.TimeoutException)):
+        return "timeout", f"{name} did not return its choices in time. Try again."
+    if isinstance(exc, SignInRequired) or (market == "etsy" and str(exc).startswith("Connect Etsy in Settings")):
+        return "connection_required", f"Connect {name} in Anteroom Settings → Connections."
+    status = exc.status if isinstance(exc, EbayFailure) else exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+    if status == 403 and market in ("ebay", "etsy"):
+        return "permission_denied", f"{name} denied access to these choices. Check the marketplace connection."
+    if status == 429:
+        return "rate_limited", f"{name} is limiting requests. Try again shortly."
+    return "unavailable", f"Could not read {name}'s choices. Try again."
+
+
+def _revision_matches(db: Session, conversation_id: str, revision_id: str) -> bool:
+    from anteroom.repositories.queries import ListingRepo
+
+    current = ListingRepo(db).get_current(conversation_id)
+    return current is not None and current.current_revision_id == revision_id
+
+
+async def finish_form_reads(reads: list[tuple[dict[str, Any], dict[str, Any]]], *, deadline: float) -> None:
+    """Complete explicit reads off the MCP database session, within the shared request budget."""
+    from anteroom.database import in_worker_session
+
+    async def finish(result: dict, spec: dict) -> None:
+        market, conv_id, revision_id = (spec[key] for key in ("marketplace", "conversation_id", "revision_id"))
+        try:
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            async with asyncio.timeout(remaining):
+                data = await _refresh_marketplace_form(spec, min(25.0, remaining))
+                if not await in_worker_session(_revision_matches, conv_id, revision_id):
+                    raise _FormUnavailable("listing_changed", "The listing changed while choices loaded. Read its revision and try again.")
+        except Exception as exc:  # noqa: BLE001 - never expose provider errors or the internal snapshot
+            code, message = _refresh_error(market, exc)
+            data = {"marketplace": market, "conversation_id": conv_id, "revision_id": revision_id,
+                    "available": False, "source": "unavailable", "reason": code, "message": message}
+        result["content"] = [{"type": "text", "text": json.dumps(data, indent=2, default=str)}]
+
+    await asyncio.gather(*(finish(result, spec) for result, spec in reads))
+
+
+def _tool_get_auto_relist_status(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str, Any]:
+    from anteroom.services import auto_relist
+
+    market = _market(args, auto_relist.RELIST_MARKETPLACES) if "marketplace" in args else None
+    return auto_relist.preview_status(db, marketplace=market, limit=_limit(args, default=25, maximum=100))
 
 
 def _tool_get_account_settings(db: Session, _args: dict[str, Any], **_kw: Any) -> dict[str, Any]:
@@ -602,5 +847,6 @@ HANDLERS: dict[str, Callable[..., dict[str, Any]]] = {
     "get_category_attributes": _tool_get_category_attributes,
     "search_attribute_options": _tool_search_attribute_options,
     "get_marketplace_form": _tool_get_marketplace_form,
+    "get_auto_relist_status": _tool_get_auto_relist_status,
     "get_account_settings": _tool_get_account_settings,
 }

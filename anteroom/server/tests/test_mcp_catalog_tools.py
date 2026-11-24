@@ -20,7 +20,7 @@ from anteroom.services.native_category_match import native_rows
 
 CATALOG_TOOLS = {
     "search_categories", "get_category_attributes", "search_attribute_options",
-    "get_marketplace_form", "get_account_settings",
+    "get_marketplace_form", "get_account_settings", "get_auto_relist_status",
 }
 
 
@@ -268,6 +268,37 @@ def test_marketplace_form_shows_the_editor_rows_and_values_without_chrome():
 
     missing, is_error = _call_tool(client, "get_marketplace_form", {"conversation_id": "nope", "marketplace": "depop"})
     assert is_error and "not found" in missing["error"].lower()
+
+
+def test_mercari_mcp_refresh_quotes_the_package_without_saving(monkeypatch):
+    from anteroom.services import mercari_api
+
+    async def quotes(category, weight, dimensions):
+        assert (category, weight, dimensions) == (275, 16, (14, 10, 5))
+        return [{"id": 2552, "fee": 799, "weightRange": {"min": 13, "max": 16}, "etaForSeller": "2–5 days"}]
+
+    monkeypatch.setattr(mercari_api, "shipping_quotes", quotes)
+    client = TestClient(app)
+    draft, error = _call_tool(client, "create_draft_listing", {"title": "Tee", "price": 30})
+    assert not error, draft
+    conv_id = draft["conversation_id"]
+    saved, error = _call_tool(client, "edit_listing", {
+        "conversation_id": conv_id,
+        "fields": {"direct_category_ids": {"mercari": "275"}, "mercari_specifics": {
+            "package": {"pounds": 1, "ounces": 0, "fitsShoebox": "yes"},
+        }},
+    })
+    assert not error, saved
+    form, error = _call_tool(client, "get_marketplace_form", {
+        "conversation_id": conv_id, "marketplace": "mercari", "refresh": True,
+        "expected_revision_id": saved["revision_id"],
+    })
+    assert not error, form
+    assert form["source"] == "live"
+    assert form["shipping_quotes"][0]["fee_cents"] == 799
+    assert form["shipping_quotes"][0]["eta"] == "2–5 days"
+    current, error = _call_tool(client, "get_listing", {"conversation_id": conv_id})
+    assert not error and current["current_revision_id"] == saved["revision_id"]
 
 
 def test_saved_ebay_form_is_returned_with_when_its_fields_were_read(ebay_tree):

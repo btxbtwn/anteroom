@@ -4,6 +4,7 @@ const CLOUD_READS = {
   'marketplace.sales_history': ({ marketplace, settled, seller_region }) => readMarketplaceOrderHistory(marketplace, settled, seller_region),
   // Settings → Connections: sign-in status only, never cookie or token values.
   'marketplace.sessions': async ({ seller_region }) => ({ sessions: await readExtensionSessions(undefined, seller_region) }),
+  'marketplace.form': payload => new Promise(resolve => handleNativeMarketplaceForm({ payload }, resolve)),
   // The seller asked to sign in: open that marketplace's sign-in page in this Chrome, as the Mac does.
   'marketplace.connect': ({ marketplace, seller_region }) => new Promise(resolve => handleMarketplaceConnect({ payload: { marketplace, seller_region } }, resolve)),
   // Inventory import: the same reads the Mac's import makes, each listing checked against the signed-in account.

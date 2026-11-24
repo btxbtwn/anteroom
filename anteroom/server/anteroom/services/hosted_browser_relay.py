@@ -43,18 +43,21 @@ MARKETPLACE_SESSIONS = "marketplace.sessions"
 MARKETPLACE_IMPORT = "marketplace.import"
 SALES_HISTORY = "marketplace.sales_history"
 MARKETPLACE_PROMOTIONS = "marketplace.promotions"
+MARKETPLACE_FORM_READ = "marketplace.form.read"
 # The Bridge version that first declares each capability, and what it lets the web do.
 NEEDS = {"vendoo.drafts": ("0.2.55", "save Vendoo drafts"), MARKETPLACE_ACTIONS: ("0.2.40", "list on this marketplace"),
          MARKETPLACE_SESSIONS: ("0.2.44", "check marketplace sign-in"),
          MARKETPLACE_IMPORT: ("0.2.53", "import your listings"),
          SALES_HISTORY: ("0.2.47", "read marketplace orders"),
-         MARKETPLACE_PROMOTIONS: ("0.2.52", "share listings and send offers")}
+         MARKETPLACE_PROMOTIONS: ("0.2.52", "share listings and send offers"),
+         MARKETPLACE_FORM_READ: ("0.2.99", "refresh marketplace form choices")}
 
 # Each command, and the capability the Bridge must declare to receive it.
 COMMANDS = {"job.vendoo_api": "vendoo.drafts", "marketplace.execute": MARKETPLACE_ACTIONS, "marketplace.result": MARKETPLACE_ACTIONS,
             "marketplace.delete": MARKETPLACE_ACTIONS, "job.cancel": MARKETPLACE_ACTIONS,
             "marketplace.sessions": MARKETPLACE_SESSIONS, "marketplace.connect": MARKETPLACE_SESSIONS,
             "marketplace.import.page": MARKETPLACE_IMPORT, "marketplace.import.listing": MARKETPLACE_IMPORT,
+            "marketplace.form": MARKETPLACE_FORM_READ,
             "marketplace.sales_history": SALES_HISTORY,
             "marketplace.promotion_check": MARKETPLACE_PROMOTIONS, "marketplace.promote": MARKETPLACE_PROMOTIONS,
             "marketplace.promotion_result": MARKETPLACE_PROMOTIONS, "marketplace.like_events": MARKETPLACE_PROMOTIONS}
@@ -189,8 +192,9 @@ class BrowserRelay(ReplyWaits):
         deadline = time.monotonic() + timeout
         while True:
             index = next((index for index, queued in enumerate(self._outbox)
-                          if MARKETPLACE_REGIONS in capabilities
-                          or not needs_regional_bridge(str(queued.get("type")), queued.get("payload") or {})), None)
+                          if COMMANDS.get(str(queued.get("type"))) in capabilities
+                          and (MARKETPLACE_REGIONS in capabilities
+                               or not needs_regional_bridge(str(queued.get("type")), queued.get("payload") or {}))), None)
             if index is not None:
                 command = self._outbox[index]
                 del self._outbox[index]

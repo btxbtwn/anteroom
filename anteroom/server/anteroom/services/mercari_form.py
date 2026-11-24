@@ -417,22 +417,34 @@ async def _cached_shipping_quotes(
     return await asyncio.shield(task)
 
 
-async def editor_form(listing: dict, *, refresh: bool = False) -> dict:
+async def prepaid_shipping_quotes(listing: dict, *, refresh: bool = False) -> tuple[str, list[dict]]:
     ounces, dimensions, _ = package(listing)
     category_id = str((listing.get("direct_category_ids") or {}).get("mercari") or "")
+    if (listing.get("mercari_specifics") or {}).get("shippingMethod") == "SOYO":
+        return "ship_on_your_own", []
+    if not category_id.isdigit():
+        return "missing_category", []
+    if not ounces:
+        return "missing_weight", []
+    if dimensions is None:
+        return "missing_package_size", []
+    quotes = await _cached_shipping_quotes(int(category_id), ounces, dimensions, refresh=refresh)
+    labels = _shipping_labels_by_id()
+    classes = []
+    for quote in quotes:
+        if quote["id"] not in labels:
+            raise ValueError("Unknown Mercari shipping label")
+        if quote["weightRange"]["max"] >= ounces:
+            classes.append({**labels[quote["id"]], **quote})
+    return ("quoted" if classes else "no_options"), classes
+
+
+async def editor_form(listing: dict, *, refresh: bool = False) -> dict:
     classes, notes = [], []
-    if (listing.get("mercari_specifics") or {}).get("shippingMethod") != "SOYO" and category_id.isdigit() and ounces and dimensions is not None:
-        try:
-            quotes = await _cached_shipping_quotes(int(category_id), ounces, dimensions, refresh=refresh)
-            labels = _shipping_labels_by_id()
-            for quote in quotes:
-                if quote["id"] not in labels:
-                    raise ValueError("Unknown Mercari shipping label")
-                if quote["weightRange"]["max"] >= ounces:
-                    classes.append({**labels[quote["id"]], **quote})
-        except Exception:  # noqa: BLE001 - all product fields remain available without a shipping quote
-            classes = []
-            notes.append("Mercari shipping labels could not be loaded. Reload choices to try again.")
+    try:
+        _, classes = await prepaid_shipping_quotes(listing, refresh=refresh)
+    except Exception:  # noqa: BLE001 - all product fields remain available without a shipping quote
+        notes.append("Mercari shipping labels could not be loaded. Reload choices to try again.")
     result = form(listing, classes, notes=notes)
     if notes:
         result["reload_recommended"] = True
