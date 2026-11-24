@@ -270,6 +270,12 @@ test('Depop keeps a seller-paid shipping price when the listing does not use Dep
   const own = (await listing(depop({ ...DEPOP_PRODUCT, shipping_methods: [], national_shipping_cost: '6.50',
     international_shipping_cost: null }).c, 'depop', DEPOP_PRODUCT.slug)).listing;
   assert.deepEqual([own.parcel_size, own.domestic_shipping, own.worldwide_shipping], [null, 6.5, null]);
+  // Free shipping ('0.00') is a price of 0, not shipping that is not offered.
+  const free = (await listing(depop({ ...DEPOP_PRODUCT, shipping_methods: [], national_shipping_cost: '0.00',
+    international_shipping_cost: '0.00' }).c, 'depop', DEPOP_PRODUCT.slug)).listing;
+  assert.deepEqual([free.domestic_shipping, free.worldwide_shipping], [0, 0]);
+  const blank = (await listing(depop({ ...DEPOP_PRODUCT, international_shipping_cost: '' }).c, 'depop', DEPOP_PRODUCT.slug)).listing;
+  assert.equal(blank.worldwide_shipping, null);
   // A parcel Depop's list no longer names keeps its own id, which List still matches.
   const { c } = depop({ ...DEPOP_PRODUCT, shipping_methods: [{ parcel_size: 'under_4oz' }] });
   assert.equal((await listing(c, 'depop', DEPOP_PRODUCT.slug)).listing.parcel_size, 'under_4oz');
