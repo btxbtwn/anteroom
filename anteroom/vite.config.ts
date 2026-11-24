@@ -25,6 +25,7 @@ function buildStamp() {
 const stamp = buildStamp();
 
 export default defineConfig({
+  cacheDir: process.env.VITE_CACHE_DIR,
   define: { __STUDIO_BUILD__: JSON.stringify(stamp) },
   plugins: [
     {

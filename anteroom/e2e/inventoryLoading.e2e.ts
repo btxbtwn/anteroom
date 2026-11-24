@@ -34,7 +34,7 @@ test("the inventory shows placeholder rows until it loads, and opens on Active",
     const tabs = page.getByRole("tablist", { name: "Listing status" });
     // No count until there is one to show.
     await expect(tabs.getByRole("tab", { name: "Active", exact: true })).toBeVisible();
-    await page.screenshot({ path: `e2e/results/inventory-loading-${info.project.name}.png` });
+    await page.screenshot({ path: info.outputPath("inventory-loading.png") });
     release();
     await expect(loading).toHaveCount(0);
     await expect(tabs.getByRole("tab", { name: /^Active \d+$/ })).toHaveAttribute("aria-selected", "true");
@@ -43,7 +43,7 @@ test("the inventory shows placeholder rows until it loads, and opens on Active",
     await expect(page.getByRole("list", { name: "Listings" }).getByRole("link", { name: title, exact: true })).toHaveCount(0);
     await showStatusTab(page, "Draft");
     await expect(page.getByRole("list", { name: "Listings" }).getByRole("link", { name: title, exact: true })).toBeVisible();
-    await page.screenshot({ path: `e2e/results/inventory-loaded-${info.project.name}.png` });
+    await page.screenshot({ path: info.outputPath("inventory-loaded.png") });
   } finally {
     await request.delete(`/api/conversations/${id}`);
   }

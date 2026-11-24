@@ -77,7 +77,7 @@ run "Anteroom version and changelog" bash -c "'$PY' anteroom/scripts/check-versi
 
 if component frontend; then
   run "Anteroom frontend" bash -c "cd anteroom && npm run lint && npm run knip && npm test && npm run build"
-  run "Anteroom hosted build" bash -c "cd anteroom && ANTEROOM_HOSTED_BUILD=1 VITE_SUPABASE_URL=https://build-validation.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=public-build-validation npm run build"
+  run "Anteroom hosted build" bash -c "cd anteroom && ANTEROOM_HOSTED_BUILD=1 VITE_SUPABASE_URL=https://build-validation.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=public-build-validation ./node_modules/.bin/vite build"
 fi
 
 # Backend tests also inspect frontend, extension and skill sources. The shared
@@ -139,7 +139,8 @@ fi
 
 if component browser; then
   if [[ "$FAST" == "0" ]]; then
-    run "Anteroom browser tests (sandbox)" bash -c "cd anteroom && node scripts/check-bridge-network.mjs && node scripts/check-bridge-connection.mjs && npm run e2e && npm run e2e:hosted"
+    run "Anteroom browser tests (sandbox)" bash -c "cd anteroom && node scripts/check-bridge-network.mjs && node scripts/check-bridge-connection.mjs && output=\$(mktemp -d) && bash scripts/check-browser-shards.sh \"\$output\" --serial"
+    run "Anteroom browser tests (hosted)" bash -c "cd anteroom && npm run e2e:hosted"
   else
     skip "Anteroom browser tests" "--fast"
   fi

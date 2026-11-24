@@ -38,6 +38,13 @@ knip scans e2e imports. Generated API contracts keep their backend verification.
 Unknown inputs conservatively run every Studio suite. Repo checks and changelog
 validation always run. Native iPhone checks remain in their separate workflow.
 
+On PRs, standalone `*.e2e.ts` specs at the top of `anteroom/e2e/` or
+`anteroom/hosted-e2e/` select their owning browser suite. Treat shared helpers
+as inputs to both. For example, hosted specs import `e2e/fixtures.ts`. A rename
+across suites selects both, as does a change to runtime code or shared inputs.
+Main pushes and manual full verification retain both suites when browser tests
+are selected. The local check driver exercises the push coverage.
+
 The reusable `.github/workflows/dependency-audit.yml` audits the locked Python
 packages for dev, hosted and Mac builds when their dependency inputs change.
 It also runs daily at 08:23 UTC and supports manual dispatch, so newly reported
@@ -235,22 +242,60 @@ production is verified past `a1a55df0` (artifact `14743680528` expires about
 30 days after 2026-11-22). The offline gate-recovery tests live in
 `.github/scripts/test_wait_for_tested_code.py` and run in `Repo checks`.
 
-## Sandbox browser timing evidence
+## CI timing and coverage
 
-The sandbox job runs the existing full suite, then compares the actual test
-inventory with three Playwright collection-only observations. The two proposed
-file-level shard inventories must cover the full set exactly once across
-desktop Chromium, phone Chromium and phone WebKit. The ordinary sandbox and
-hosted test commands still decide the browser check result. Missing, failed or
-inconsistent measurements leave the optional profile unavailable.
+In a November 23 sample of eight successful CI runs that selected Studio
+browser tests, median elapsed time from run creation to the last job finish
+was 36.2 minutes. Completed jobs used a median of 73.2 runner-minutes per run.
+The sandbox browser job took a median of 31.9 minutes and was the longest job
+in all eight. Runner-minutes are summed job start-to-finish times from
+GitHub Actions. The sample covers successful jobs in runs 45197680891,
+45195598029, 45187548996, 45187288443, 45186367430, 45185833788, 45184199851
+and 45183254721.
+
+Install the engines each browser suite uses. The hosted job runs desktop and
+phone Chromium. The offline sandbox also runs phone WebKit. The sandbox
+assistant's slow-stream fixture applies to the current user turn so a test can
+exercise cancellation and queueing without paying for a second slow reply
+on an ordinary follow-up.
+
+One local before/after pair ran the same 12 cases from
+`e2e/chatStreaming.e2e.ts` across all three projects. Summed successful case
+durations fell from 152.6 to 81.5 seconds. The baseline also needed two retries,
+and the updated run passed on its first attempts. Compare job timestamps again
+on GitHub-hosted runners to measure the effect on CI.
+
+The two sandbox shards run on one GitHub machine with one browser worker and
+one disposable sandbox each. They share dependency installation and use
+distinct API ports, web ports, data folders, Vite caches and report paths.
+Each shard must pass. The combined executed inventory must cover the full
+collection exactly once across desktop Chromium, phone Chromium and phone
+WebKit. `check.sh` runs the same shards serially on the local machine.
+The local validation matched all 312 cases exactly once, with 276 passes,
+36 skips and zero retries. The two runs took 8.0 and 8.3 minutes on the Mac.
 
 The seven-day profile records keyed hashes of Playwright case and file identities,
 project names, retry outcomes, skips, expected failures, attempt durations and
-checkout, lock and runner provenance. The private key stays on the runner.
-Identities match within one job. A later cross-job experiment needs its own
-identity contract. Runtime-derived sensitive titles must stay out of public
-evidence even when hashed. Install steps expose Python, npm, browser OS dependencies and
-browser download timings separately for both jobs.
+checkout, lock and runner provenance. The private key stays on the runner,
+and identities match within one job. Runtime-derived sensitive titles must stay
+out of public evidence even when hashed. Install steps expose Python, npm,
+browser OS dependencies and browser download timings separately for both jobs.
+
+Postgres job medians in the same baseline were 13.0 and 6.9 minutes. The
+checked-in `pg-file-durations.json` contains per-file average case durations
+from run 45197680891. Expanding the averages to the current collection let
+pytest-split redistribute the recorded work from 1,680.9 and 571.7 test-seconds
+to 1,128.1 and 1,124.5 in a replay. These sums include parallel test work and
+are a planning estimate. Unknown files get pytest-split's average estimate.
+The updated collection contained 6,032 distinct tests split across 2,786 and
+3,246 items.
+Every execution replaces the seed with fresh timings before artifact hashing
+and exact union validation. Refresh the seed from a complete successful
+profile by matching its digests to collected test IDs and averaging setup,
+call and teardown seconds by test file.
+
+The frontend job pays for the TypeScript check once, then builds both bundles.
+The Postgres jobs reuse the npm cache for the locked cloud runner dependencies.
 
 For a later hosted A/B, use the same frozen source, locks, toolchain and runner
 image. Compare the full one-worker run with two isolated one-worker shards.

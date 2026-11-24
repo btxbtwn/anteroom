@@ -23,6 +23,7 @@ import subprocess
 import sys
 
 COMPONENTS = ("frontend", "backend", "browser", "health", "audit", "extension", "relay")
+BROWSER_SUITES = ("sandbox", "hosted")
 
 # Files every job reads: a change here runs everything.
 CI_FILES = (".github/workflows/ci.yml", ".github/workflows/dependency-audit.yml", ".github/scripts/", "check.sh")
@@ -130,25 +131,37 @@ def components(files: list[str]) -> dict[str, bool]:
     return {name: name in selected for name in COMPONENTS}
 
 
+def browser_suites(files: list[str]) -> list[str]:
+    """A spec owns its suite. Shared helpers and runtime inputs belong to both."""
+    selected = set()
+    for path in files:
+        spec = re.fullmatch(r"anteroom/(e2e|hosted-e2e)/[^/]+\.e2e\.ts", path)
+        if spec:
+            selected.add("sandbox" if spec[1] == "e2e" else "hosted")
+        elif components([path])["browser"]:
+            return list(BROWSER_SUITES)
+    return [suite for suite in BROWSER_SUITES if suite in selected]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--base", default="")
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--stdin", action="store_true", help="read changed paths from stdin")
+    parser.add_argument("--workflow", choices=("pull_request", "push", "workflow_dispatch"),
+                        help="emit the browser matrix for a GitHub Actions run")
     args = parser.parse_args()
-
-    if args.stdin:
-        result = components([line.strip() for line in sys.stdin if line.strip()])
-        for name in COMPONENTS:
-            print(f"{name}={'true' if result[name] else 'false'}")
-        return 0
 
     base = args.base.strip()
     known = bool(base) and set(base) != {"0"} and subprocess.run(
         ["git", "cat-file", "-e", f"{base}^{{commit}}"], capture_output=True
     ).returncode == 0
-    if not known:
+    if args.stdin:
+        files = [line.strip() for line in sys.stdin if line.strip()]
+        result = components(files)
+    elif not known:
         print(f"No usable base commit ({base or 'none'}); running every component.", file=sys.stderr)
+        files = []
         result = dict.fromkeys(COMPONENTS, True)
     else:
         # A rename must count both the removed and added path, including when
@@ -161,6 +174,11 @@ def main() -> int:
         result = components(files)
     for name in COMPONENTS:
         print(f"{name}={'true' if result[name] else 'false'}")
+    if args.workflow:
+        suites = browser_suites(files) if args.workflow == "pull_request" else []
+        if not suites:
+            suites = list(BROWSER_SUITES)
+        print("browser_suites=" + json.dumps([{"name": name} for name in suites], separators=(",", ":")))
     return 0
 
 

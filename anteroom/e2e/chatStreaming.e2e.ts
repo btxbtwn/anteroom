@@ -56,11 +56,11 @@ test("a follow-up sent while an answer streams cuts it off and goes next", async
   const answers = page.locator('[data-message-role="assistant"]:not([aria-busy="true"])');
   await expect(answers.first()).toContainText("Sandbox is streaming");
   await expect(answers.first()).not.toContainText("The end.");
-  // The follow-up gets its own full answer (the sandbox streams it slowly too).
+  // The follow-up gets its own full answer.
   // There can be a moment with no live row between the interrupted answer and its successor.
   await expect(answers).toHaveCount(2, { timeout: 30_000 });
   await expect(streaming).toHaveCount(0);
-  await expect(answers.last()).toContainText("The end.");
+  await expect(answers.last()).toContainText("Sandbox Levi's M Blue Cotton Crew Neck T-Shirt");
 });
 
 /**
@@ -68,9 +68,13 @@ test("a follow-up sent while an answer streams cuts it off and goes next", async
  * start a moment after the queue empties, with nothing streaming in between,
  * and the sandbox answers one question at a time: a test that ends in that
  * moment leaves the answer running and the next test's question is refused.
+ * The slow answer ends with "The end."; the follow-up has no slow marker, so
+ * the sandbox sends its whole reply at once.
  */
 function finishedAnswers(page: import("@playwright/test").Page) {
-  return page.locator('[data-message-role="assistant"]:not([aria-busy="true"])', { hasText: "The end." });
+  return page.locator('[data-message-role="assistant"]:not([aria-busy="true"])', {
+    hasText: /The end\.|Sandbox Levi's M Blue Cotton Crew Neck T-Shirt/,
+  });
 }
 
 /** Mod+Enter queues instead; a queued follow-up can be edited, then sends when the answer ends. */

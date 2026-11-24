@@ -9,17 +9,17 @@ import { verifyCollections } from "./verify-browser-evidence.mjs";
 const full = ["desktop", "phone", "phone-webkit"].map((project, index) => ({
   id: String(index).repeat(64), file: "a".repeat(64), project, expected: "passed", attempts: [],
 }));
-const first = full.slice(0, 2);
-const second = full.slice(2);
 const attempt = (status, retry = 0) => ({ status, duration: 12, retry });
 const actual = [
   { ...full[0], attempts: [attempt("failed"), attempt("passed", 1)] },
   { ...full[1], expected: "skipped", attempts: [attempt("skipped")] },
   { ...full[2], attempts: [attempt("passed")] },
 ];
+const first = actual.slice(0, 2);
+const second = actual.slice(2);
 
 test("retains all three projects, retries and runtime skips", () => {
-  const counts = verifyCollections(full, first, second, actual);
+  const counts = verifyCollections(full, first, second);
   assert.equal(counts.desktop.retried, 1);
   assert.equal(counts.phone.skipped, 1);
   assert.deepEqual(counts["phone-webkit"].shardCounts, [0, 1]);
@@ -27,24 +27,22 @@ test("retains all three projects, retries and runtime skips", () => {
 
 test("rejects missing, duplicated, foreign or relabeled cases", () => {
   for (const shard of [
-    [], [full[0]], [...first, full[2]], [full[0], full[0]],
-    [full[0], { ...full[1], id: "b".repeat(64) }],
-    [full[0], { ...full[1], project: "desktop" }],
-    [full[0], { ...full[1], file: "b".repeat(64) }],
-    [full[0], { ...full[1], expected: "skipped" }],
-    [full[0], { ...full[1], id: [full[1].id] }],
+    [], [first[0]], [...first, second[0]], [first[0], first[0]],
+    [first[0], { ...first[1], id: "b".repeat(64) }],
+    [first[0], { ...first[1], project: "desktop" }],
+    [first[0], { ...first[1], file: "b".repeat(64) }],
+    [first[0], { ...first[1], id: [first[1].id] }],
   ]) {
-    assert.throws(() => verifyCollections(full, shard, second, actual));
+    assert.throws(() => verifyCollections(full, shard, second));
   }
 });
 
 test("rejects incomplete or unsuccessful execution and malformed durations", () => {
-  assert.throws(() => verifyCollections(full, first, second, actual.slice(1)));
   for (const attempts of [
     [], [attempt("interrupted")], [attempt("failed")],
     [{ ...attempt("passed"), duration: Infinity }], [attempt("passed", 1)],
   ]) {
-    assert.throws(() => verifyCollections(full, first, second, [{ ...actual[0], attempts }, ...actual.slice(1)]));
+    assert.throws(() => verifyCollections(full, [{ ...first[0], attempts }, first[1]], second));
   }
 });
 
