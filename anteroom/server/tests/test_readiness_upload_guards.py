@@ -6,7 +6,7 @@ from contextlib import AsyncExitStack
 import pytest
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 
-from anteroom.routes import measurements, scout
+from anteroom.routes import measurements
 from anteroom.services import hosted_limits, redaction
 from anteroom.services.hosted_limits import UploadSlots, bounded_route_class
 from anteroom.services.service_context import use
@@ -15,7 +15,6 @@ from anteroom.services.service_context import use
 @pytest.mark.parametrize('router,path', [
     (measurements._hosted_upload_router, '/api/measurements/read'),
     (measurements._hosted_upload_router, '/api/size-tags/read'),
-    (scout._upload_router, '/api/scout'),
 ])
 def test_admission_rejects_before_receiving_multipart(router, path):
     async def run():
@@ -118,7 +117,6 @@ def test_complete_credential_redaction(raw, expected):
 
 @pytest.mark.parametrize('router,method,path,body', [
     (measurements.hosted_router, 'POST', '/api/conversations/item/measurements/read', {}),
-    (scout.router, 'PATCH', '/api/scout/item', {'asking_price': 'invalid'}),
 ])
 def test_non_upload_requests_do_not_wait_for_upload_slots(router, method, path, body):
     import httpx

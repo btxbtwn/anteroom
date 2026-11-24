@@ -36,7 +36,6 @@ let socketOpenedAt = 0;
 let duplicateBridge = false;
 
 importScripts('background/marketplace-tabs.js');
-importScripts('background/sold-listings.js');
 importScripts('background/depop-native.js');
 importScripts('background/marketplace-fetch.js');
 importScripts('background/marketplace-catalog.js');
@@ -400,15 +399,6 @@ async function handleStudioMessage(msg) {
         sent_at: new Date().toISOString(),
       });
       break;
-
-    case 'market.sold_listings': {
-      const queries = Array.isArray(msg.payload?.queries) ? msg.payload.queries.map(String) : [];
-      const result = msg.payload?.marketplace === 'ebay'
-        ? await readEbaySoldListings(queries)
-        : { ok: false, results: {}, error: 'Unsupported marketplace' };
-      send({ type: 'market.sold_listings_result', payload: { ...result, request_id: msg.payload?.request_id } });
-      break;
-    }
 
     case 'extension.reload':
       await handleExtensionReload(msg.payload?.generation);

@@ -1,7 +1,7 @@
 """While the Mac's window shows the seller's account, this Mac's copy starts nothing on its own.
 
-The account checks sales, delists after a sale and runs automations, promotions,
-eBay offers and sourcing. Running them here as well handled one sale twice, so
+The account checks sales, delists after a sale and runs automations, promotions
+and eBay offers. Running them here as well handled one sale twice, so
 they wait until the window shows This Mac's Listings again.
 """
 from __future__ import annotations
@@ -13,7 +13,6 @@ import pytest
 
 from anteroom.services import (
     automation_scheduler,
-    box_scout,
     chrome_sales,
     ebay_offers,
     mac_workspace,
@@ -107,12 +106,3 @@ def test_ebay_offers_wait_while_the_account_is_shown(workspace, shown):
     with mock.patch.object(ebay_offers, "run_automation", new=mock.AsyncMock()) as run:
         _one_round(ebay_offers, ebay_offers._timer, sleeps_first=True)
     assert run.called is not shown
-
-
-@pytest.mark.parametrize("shown", [True, False])
-def test_sourcing_waits_while_the_account_is_shown(workspace, shown):
-    workspace.save("account" if shown else "mac")
-    with mock.patch.object(box_scout, "refresh_is_due", return_value=True), \
-            mock.patch.object(box_scout, "refresh") as refresh:
-        box_scout.timed_refresh()
-    assert refresh.called is not shown

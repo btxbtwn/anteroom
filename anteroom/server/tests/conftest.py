@@ -174,29 +174,6 @@ def _fresh_saved_choices(_isolate_studio_settings):
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _no_sourcing_timer():
-    """Keep app startup from refreshing Sourcing in the background.
-
-    A test that enters the app's lifespan (``with TestClient(app)``) would start
-    the timer, which crawls the live supplier sites at once. Shutdown cannot
-    interrupt a refresh underway, so it went on writing ``sourcing.json`` into
-    whichever test's data directory was current, and that test's cleanup failed
-    with "Directory not empty". Sourcing tests call ``refresh`` themselves.
-    The web app's timer starts with its background worker, so it is off too.
-    """
-    from unittest import mock
-
-    from anteroom.services import box_scout, hosted_sourcing_scheduler
-
-    async def no_timer(_engine):
-        return None
-
-    with mock.patch.object(box_scout, "start_sourcing_timer", return_value=None), \
-            mock.patch.object(hosted_sourcing_scheduler, "serve", no_timer):
-        yield
-
-
-@pytest.fixture(scope="session", autouse=True)
 def _no_category_fills():
     """Keep app startup from arming the category field fill.
 

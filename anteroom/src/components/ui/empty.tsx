@@ -1,8 +1,6 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code), MIT License,
 // (c) 2026 T3 Tools Inc. Adapted only where it imported T3-specific modules.
 
-import { cva, type VariantProps } from "class-variance-authority";
-
 import { cn } from "../../lib/utils";
 
 const emptySizeClassName = {
@@ -40,56 +38,6 @@ function EmptyHeader({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
-const emptyMediaVariants = cva(
-  "flex shrink-0 items-center justify-center [&_svg]:pointer-events-none [&_svg]:shrink-0",
-  {
-    defaultVariants: {
-      variant: "default",
-    },
-    variants: {
-      variant: {
-        default: "bg-transparent",
-        icon: "relative flex size-9 shrink-0 items-center justify-center rounded-md border bg-card not-dark:bg-clip-padding text-foreground shadow-sm/5 before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-md)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)] [&_svg:not([class*='size-'])]:size-4.5",
-      },
-    },
-  },
-);
-
-function EmptyMedia({
-  className,
-  variant = "default",
-  ...props
-}: React.ComponentProps<"div"> & VariantProps<typeof emptyMediaVariants>) {
-  return (
-    <div
-      className={cn("relative mb-6", className)}
-      data-slot="empty-media"
-      data-variant={variant}
-      {...props}
-    >
-      {variant === "icon" && (
-        <>
-          <div
-            aria-hidden="true"
-            className={cn(
-              emptyMediaVariants({ className, variant }),
-              "-translate-x-0.5 -rotate-10 pointer-events-none absolute bottom-px origin-bottom-left scale-84 shadow-none",
-            )}
-          />
-          <div
-            aria-hidden="true"
-            className={cn(
-              emptyMediaVariants({ className, variant }),
-              "pointer-events-none absolute bottom-px origin-bottom-right translate-x-0.5 rotate-10 scale-84 shadow-none",
-            )}
-          />
-        </>
-      )}
-      <div className={cn(emptyMediaVariants({ className, variant }))} {...props} />
-    </div>
-  );
-}
-
 function EmptyTitle({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div className={cn("font-semibold text-xl", className)} data-slot="empty-title" {...props} />
@@ -122,4 +70,4 @@ function EmptyContent({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
-export { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyContent, EmptyMedia };
+export { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyContent };

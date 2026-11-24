@@ -70,7 +70,7 @@ export function BoughtBoxes() {
       {query.isError ? <FormError>{(query.error as Error).message}</FormError> : null}
       {data && data.boxes.length === 0 && !adding ? (
         <EmptyRow>
-          No boxes yet. Press <strong className="font-medium text-foreground">I bought this</strong> on a box above once you've paid for it.
+          No boxes yet. Press <strong className="font-medium text-foreground">Add a box</strong> to record what you paid and track what its listings earn back.
         </EmptyRow>
       ) : null}
       {data && data.stores.length > 1 ? (

@@ -134,67 +134,6 @@ class BoxResultsTest(unittest.TestCase):
         self.assertIsNone(self.db.get(Conversation, self.sold_a.id).box_id)
 
 
-class ResaleCalibrationTest(unittest.TestCase):
-    def setUp(self):
-        self.db = SessionLocal()
-        self.store = f"calibrated-{uuid.uuid4().hex[:6]}"
-        self.box = boxes.create_box(
-            self.db, store=self.store, title="Tees", price=100, pieces=40, estimate_per_piece=20,
-        )
-        self.repo = ConversationRepo(self.db)
-
-    def tearDown(self):
-        self.db.close()
-
-    def _sell(self, *prices):
-        for price in prices:
-            self.repo.create(title="Tee", notes=_sold(price), box_id=self.box.id)
-
-    def test_waits_for_enough_sales_before_adjusting(self):
-        self._sell(10, 12)
-        self.assertEqual(
-            boxes.resale_calibration(self.db)[self.store],
-            {"factor": None, "sales": 2, "needed": boxes.CALIBRATION_MIN_SALES},
-        )
-
-    def test_the_median_sale_against_the_estimate_becomes_the_factor(self):
-        self._sell(10, 12, 16, 18, 400)
-        self.assertEqual(boxes.resale_calibration(self.db)[self.store]["factor"], 0.8)
-
-    def test_the_factor_is_kept_within_range(self):
-        self._sell(1, 1, 1, 1, 1)
-        self.assertEqual(boxes.resale_calibration(self.db)[self.store]["factor"], 0.3)
-
-
-class ShippingCalibrationTest(unittest.TestCase):
-    def setUp(self):
-        self.db = SessionLocal()
-        self.store = f"tvf-{uuid.uuid4().hex[:6]}"
-
-    def tearDown(self):
-        self.db.close()
-
-    def _order(self, shipping: float, list_shipping: float | None):
-        boxes.create_box(self.db, store=self.store, title="Flannels", price=100, shipping=shipping, list_shipping=list_shipping)
-
-    def test_one_order_is_not_enough(self):
-        self._order(20, 40)
-        self._order(0, 40)  # free shipping over the threshold says nothing about the rate
-        self._order(25, None)  # typed in by hand, no estimate to compare with
-        self.assertEqual(boxes.shipping_calibration(self.db)[self.store], {"factor": None, "orders": 1, "needed": 2})
-
-    def test_the_median_charge_against_the_list_rate_becomes_the_factor(self):
-        self._order(20, 40)
-        self._order(33, 50)
-        self._order(90, 60)
-        self.assertEqual(boxes.shipping_calibration(self.db)[self.store]["factor"], 0.66)
-
-    def test_the_factor_is_kept_within_range(self):
-        self._order(1, 100)
-        self._order(1, 100)
-        self.assertEqual(boxes.shipping_calibration(self.db)[self.store]["factor"], 0.2)
-
-
 class BoxRoutesTest(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)

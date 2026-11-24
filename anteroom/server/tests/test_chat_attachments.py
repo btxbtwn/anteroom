@@ -173,7 +173,6 @@ def test_the_assistant_takes_an_image_without_a_question(store, monkeypatch, tmp
     factory = sessionmaker(bind=engine)
     monkeypatch.setattr(assistant_route, "SessionLocal", factory)
     monkeypatch.setattr("anteroom.database.SessionLocal", factory)
-    monkeypatch.setattr("anteroom.services.box_scout.state_path", lambda: tmp_path / "sourcing.json")
     provider = SeeingProvider()
     monkeypatch.setattr(assistant_route, "get_listing_provider", lambda: provider)
     db = factory()

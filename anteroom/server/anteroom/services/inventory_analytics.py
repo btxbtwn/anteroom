@@ -775,11 +775,9 @@ def _aging(items: list[AnalyticsItem], now: datetime) -> list[dict[str, Any]]:
 
 def lowest_price(cost: float | None) -> int | None:
     """The whole-dollar price that still returns the item's cost after fees."""
-    from anteroom.services.scout import FEES
-
     if not cost or cost <= 0:
         return None
-    return math.ceil(cost / (1 - FEES))
+    return math.ceil(cost / (1 - 0.20))
 
 
 def deep_discount(price: float, floor: int | None) -> int | None:

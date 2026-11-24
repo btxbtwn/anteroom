@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { InventoryAnalytics } from "../api/types";
-import { InventoryAnalyticsView } from "./AnalyticsPage";
+import { AnalyticsPage, InventoryAnalyticsView } from "./AnalyticsPage";
 
 const { useQuery, useMutation } = vi.hoisted(() => ({ useQuery: vi.fn(), useMutation: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
@@ -203,4 +203,17 @@ describe("InventoryAnalyticsView", () => {
     expect(html).toContain("no date and isn&#x27;t charted");
   });
 
+});
+
+describe("AnalyticsPage", () => {
+  it("includes the Boxes tab alongside the other analytics views", () => {
+    useMutation.mockReturnValue({ mutate: vi.fn(), isPending: false });
+    useQuery.mockImplementation(() => ({ data: undefined, isLoading: false, isError: false, isFetching: false }));
+    const html = renderToStaticMarkup(<AnalyticsPage onOpenListing={vi.fn()} />);
+    expect(html).toContain("Sales records");
+    expect(html).toContain("Inventory analytics");
+    expect(html).toContain("Expenses");
+    expect(html).toContain("Profit &amp; loss");
+    expect(html).toContain("Boxes");
+  });
 });

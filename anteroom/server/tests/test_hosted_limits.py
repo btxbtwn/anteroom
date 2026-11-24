@@ -351,26 +351,14 @@ def test_draft_photo_upload_uses_per_seller_upload_slots(migration_engine, jwks,
         assert result['first'].status_code == 201, result['first'].text
 
 
-def test_scout_sourcing_and_comps_routes_are_rate_limited_per_seller(jwks, signing_keys):  # noqa: F811
-    image = io.BytesIO()
-    Image.new('RGB', (8, 8), 'red').save(image, 'JPEG')
-    raw = image.getvalue()
-
+def test_comps_route_is_rate_limited_per_seller(jwks, signing_keys):  # noqa: F811
     with TestClient(create_app(PROJECT_URL)) as client:
         alice = headers(signing_keys)
         client.app.state.submission_limit = SellerRateLimit(burst=0, per_second=0.001)
 
-        scout_res = client.post('/api/scout', headers=alice, files=[('files', ('a.jpg', raw, 'image/jpeg'))])
-        assert scout_res.status_code == 429
-        assert scout_res.headers['Retry-After']
-
         comps_res = client.post('/api/conversations/draft-1/price-drop/comps', headers=alice)
         assert comps_res.status_code == 429
         assert comps_res.headers['Retry-After']
-
-        sourcing_res = client.post('/api/sourcing/refresh', headers=alice)
-        assert sourcing_res.status_code == 429
-        assert sourcing_res.headers['Retry-After']
 
 
 def test_relay_ensure_device_sends_hosted_register_secret_when_configured(monkeypatch):

@@ -13,7 +13,7 @@ from anteroom.config import HOST, PORT, CORS_ORIGINS, frontend_dist_dir
 from anteroom.database import init_db, SessionLocal
 from anteroom.static_files import FrontendFiles
 from anteroom.routes import health, conversations, photos, listings, jobs, settings, extension, chat, updates, desktop, listing_commands
-from anteroom.routes import ad_spend, analytics, etsy, assistant, attachments, backups, boxes, catalog, changelog, marketplace_accounts, measurements, sale_calendar, scout, sourcing, vendoo_api, suggestions
+from anteroom.routes import ad_spend, analytics, etsy, assistant, attachments, backups, boxes, catalog, changelog, marketplace_accounts, measurements, sale_calendar, vendoo_api, suggestions
 from anteroom.version import app_version
 from anteroom.services.local_requests import LocalRequestMiddleware
 from anteroom.services.request_timing import RequestTimingMiddleware
@@ -73,12 +73,6 @@ async def lifespan(app: FastAPI):
     try:
         from anteroom.services.backups import start_snapshot_timer
         start_snapshot_timer()
-    except Exception:
-        pass
-    try:
-        from anteroom.services.box_scout import start_sourcing_timer
-        if not offline:
-            start_sourcing_timer()
     except Exception:
         pass
     try:
@@ -176,11 +170,6 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     try:
-        from anteroom.services.box_scout import stop_sourcing_timer
-        stop_sourcing_timer()
-    except Exception:
-        pass
-    try:
         from anteroom.services.job_watchdog import stop_job_watchdog
         stop_job_watchdog()
     except Exception:
@@ -239,8 +228,8 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Content-Type"],
 )
-# The inventory, the buy list and the bundle are each around a megabyte of
-# text, and over Tailscale a phone pulls them across a mobile connection.
+# The inventory and the bundle are each around a megabyte of text, and over
+# Tailscale a phone pulls them across a mobile connection.
 # Live event streams and photos are left alone by the middleware's defaults.
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(LocalRequestMiddleware)
@@ -284,7 +273,6 @@ app.include_router(etsy.router)
 app.include_router(chrome_import.router)
 app.include_router(import_reviews.router)
 app.include_router(similar_items.router)
-app.include_router(sourcing.router)
 app.include_router(boxes.router)
 app.include_router(sale_calendar.router)
 app.include_router(ad_spend.router)
@@ -292,7 +280,6 @@ app.include_router(assistant.router)
 app.include_router(automations_route.router)
 app.include_router(errors_route.router)
 app.include_router(attachments.router)
-app.include_router(scout.router)
 app.include_router(vendoo_api.router)
 app.include_router(vendoo_drafts_router)
 app.include_router(backups.router)

@@ -11,7 +11,6 @@ from test_hosted_drafts import BOB, headers
 from test_seller_ownership import migration_engine  # noqa: F401
 from test_seller_sessions import USER_ID, jwks, signing_keys  # noqa: F401
 from anteroom.routes import assistant as assistant_route
-from anteroom.services import box_scout
 
 
 @pytest.fixture
@@ -20,7 +19,7 @@ def worker_cloud(migration_engine, jwks, monkeypatch):  # noqa: F811
         yield client
 
 
-def test_assistant_answers_privately_per_seller_without_reading_local_sourcing(worker_cloud, signing_keys, monkeypatch):  # noqa: F811
+def test_assistant_answers_privately_per_seller(worker_cloud, signing_keys, monkeypatch):  # noqa: F811
     client = worker_cloud
     alice, bob = headers(signing_keys), headers(signing_keys, BOB)
     objects = {}
@@ -38,7 +37,6 @@ def test_assistant_answers_privately_per_seller_without_reading_local_sourcing(w
     monkeypatch.setattr('anteroom.services.hosted_photos.storage_call', storage)
     monkeypatch.setattr('anteroom.services.hosted_storage.photo_call',
                         lambda method, key, data=None: storage(method, key, data=data))
-    monkeypatch.setattr(box_scout, 'state_path', lambda: (_ for _ in ()).throw(AssertionError('read the Mac sourcing file')))
     monkeypatch.setattr(assistant_route, 'get_listing_provider', lambda: Provider(('You sold ', 'one item.')))
     runtime = client.get('/api/runtime', headers=alice).json()
     assert 'assistant' in runtime['views'] and 'assistant' in runtime['features']
@@ -339,7 +337,7 @@ def test_shop_snapshot_waits_for_the_sales_archive_lock_outside_a_transaction(
     import time
     from test_business_assistant import NOW, add_listing
     from anteroom.database import SessionLocal
-    from anteroom.services import business_assistant, hosted_database, scout, vendoo_sales_archive
+    from anteroom.services import business_assistant, hosted_database, vendoo_sales_archive
     from anteroom.services.hosted_context import for_seller
     from anteroom.services.service_context import use
 
@@ -375,24 +373,6 @@ def test_shop_snapshot_waits_for_the_sales_archive_lock_outside_a_transaction(
             db.commit()
             monkeypatch.setattr(hosted_database, 'IDLE_IN_TRANSACTION_TIMEOUT', '150ms')
             monkeypatch.setattr(vendoo_sales_archive, '_archive_lock', HeldByAnotherThread())
-            outcomes = scout.outcomes
-
-            def read_scout(session, rows):
-                # The preceding sales-event read must not leave an idle transaction
-                # for Postgres to kill if work is delayed before Scout starts.
-                assert not session.in_transaction()
-                return outcomes(session, rows)
-
-            monkeypatch.setattr(scout, 'outcomes', read_scout)
-            recent = scout.recent
-
-            def delayed_recent(session):
-                # A pause before the next Scout query must not leave the
-                # track-record transaction idle past the same deadline.
-                time.sleep(.25)
-                return recent(session)
-
-            monkeypatch.setattr(scout, 'recent', delayed_recent)
             shop = business_assistant.read_shop(db, now=NOW)
             assert 'Coat M' in business_assistant.run_lookup(shop.lookups, 'SELECT title FROM listings')
             shop.lookups.close()

@@ -24,20 +24,20 @@ async function watchForLoading(page: Page) {
 const loadingSeen = (page: Page) => page.evaluate(() => (window as unknown as { loadingSeen: string[] }).loadingSeen);
 
 test("sidebar pages open with their data already loaded", async ({ page, phone }, info) => {
-  const warmed = Promise.all(["/api/sourcing", "/api/automations", "/api/marketplace-accounts"].map((path) =>
+  const warmed = Promise.all(["/api/boxes", "/api/automations", "/api/marketplace-accounts"].map((path) =>
     page.waitForResponse((response) => new URL(response.url()).pathname === path)));
   // The dev server loads hundreds of modules; keep timings for all of them.
   await page.addInitScript(() => performance.setResourceTimingBufferSize(10_000));
   await page.goto("/");
   await warmed;
   // Page code loads one chunk per idle turn after the reads.
-  const loaded = () => page.evaluate(() => ["SourcingPage", "AutomationsPage", "MarketplacesPage", "SettingsPage"]
+  const loaded = () => page.evaluate(() => ["AnalyticsPage", "AutomationsPage", "MarketplacesPage", "SettingsPage"]
     .filter((name) => performance.getEntriesByType("resource").some((entry) => entry.name.includes(`/${name}`))));
   await expect.poll(loaded, { timeout: 15_000 }).toHaveLength(4);
   await watchForLoading(page);
 
   const pages = [
-    { name: "Sourcing", ready: page.getByText("Source with sales evidence", { exact: true }) },
+    { name: "Analytics", ready: page.getByText("Boxes you bought", { exact: true }) },
     { name: "Automations", ready: page.getByRole("heading", { name: "Automations", exact: true }) },
     { name: "Marketplaces", ready: page.getByRole("tab", { name: "eBay" }) },
     { name: "Settings", ready: page.getByRole("heading", { name: phone ? "Settings" : "Theme", exact: true }) },
@@ -46,7 +46,7 @@ test("sidebar pages open with their data already loaded", async ({ page, phone }
     if (phone) await page.getByRole("button", { name: "Open navigation" }).first().click();
     await page.evaluate(() => { (window as unknown as { loadingSeen: string[] }).loadingSeen.length = 0; });
     await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name, exact: true }).click();
-    if (name === "Sourcing") await page.getByRole("tab", { name: "Wholesale boxes" }).click();
+    if (name === "Analytics") await page.getByRole("tab", { name: "Boxes" }).click();
     await expect(ready.first()).toBeVisible();
     await page.screenshot({ path: info.outputPath(`${name.toLowerCase()}.png`) });
     expect(await loadingSeen(page), `${name} showed a loading state`).toEqual([]);

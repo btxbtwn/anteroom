@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -24,7 +23,6 @@ from anteroom.routes import (
     hosted_workspace,
     mac_inference,
     measurements,
-    scout as scout_route,
 )
 from anteroom.services import account_deletion, account_import, hosted_photos, redaction, safe_fetch
 from anteroom.services.chat_attachments import MAX_ATTACHMENTS
@@ -343,40 +341,6 @@ def test_assistant_proposal_apply_and_automation_confirm_prevent_double_executio
             assert exc_info.value.status_code == 409
     finally:
         engine.dispose()
-
-
-def test_scout_streaming_cap_and_db_release_before_photo_store(monkeypatch, tmp_path):
-    app = FastAPI()
-    app.include_router(scout_route.router)
-    monkeypatch.setattr(scout_route, "MAX_PHOTO_SIZE_MB", 1)
-
-    client = TestClient(app)
-    oversized = b"z" * (1024 * 1024 + 256)
-    resp = client.post(
-        "/api/scout",
-        files={"files": ("huge.jpg", oversized, "image/jpeg")},
-    )
-    assert resp.status_code == 413
-
-    # Verify serve_photo calls db.rollback() BEFORE photo_store().local_path(...)
-    events: list[str] = []
-    photo_file = tmp_path / "scout.jpg"
-    photo_file.write_bytes(b"\xff\xd8\xff\xd9")
-
-    fake_check = SimpleNamespace(photos=["scout-photo.jpg"])
-    fake_db = MagicMock()
-    fake_db.get.return_value = fake_check
-    fake_db.rollback.side_effect = lambda: events.append("db.rollback")
-
-    class _Store:
-        def local_path(self, key: str) -> Path:
-            events.append(f"photo_store:{key}")
-            return photo_file
-
-    monkeypatch.setattr(scout_route, "photo_store", lambda: _Store())
-    response = scout_route.serve_photo("check-1", 0, db=fake_db)
-    assert response.path == photo_file
-    assert events == ["db.rollback", "photo_store:scout-photo.jpg"]
 
 
 def test_hosted_account_import_body_caps_and_upload_slots(monkeypatch):

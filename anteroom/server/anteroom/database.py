@@ -236,7 +236,6 @@ def load_models() -> None:
     from anteroom.models.registry import FieldRegistry  # noqa: F401
     from anteroom.models.fill_log import FillLogEntry  # noqa: F401
     from anteroom.models.sourcing import SourceBox  # noqa: F401
-    from anteroom.models.scout import ScoutCheck  # noqa: F401
     from anteroom.models.listing_evidence import ListingCorrection, SaleSnapshot  # noqa: F401
     from anteroom.models.sale_event import SaleEvent  # noqa: F401
     from anteroom.models.marketplace_sale import MarketplaceSale, SaleSyncEvent  # noqa: F401

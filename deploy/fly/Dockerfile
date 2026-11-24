@@ -51,9 +51,8 @@ COPY --from=cloud-runner /src/cloud_runner/node_modules /app/anteroom/server/ant
 COPY anteroom-extension/background/ /app/anteroom-extension/background/
 COPY skills/list-this/SKILL.md /app/skills/list-this/SKILL.md
 COPY skills/list-this/references/ /app/skills/list-this/references/
-# Bulk listing reads measurements and Sourcing runs Box Scout from these skills' scripts.
+# Bulk listing reads measurements from measure-this scripts.
 COPY skills/measure-this/ /app/skills/measure-this/
-COPY skills/box-scout/ /app/skills/box-scout/
 COPY --from=requirements /requirements.txt /tmp/requirements.txt
 # The app itself is not pip-installed: PYTHONPATH serves it from its source
 # folder, and installing it would build it with an unpinned setuptools.

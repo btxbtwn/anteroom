@@ -57,7 +57,6 @@ datas = [
     # the bundle beside the package rather than only inside the archive.
     *tree(STUDIO / "server" / "anteroom" / "migrations", "anteroom/migrations"),
     *tree(REPO / "skills" / "list-this", "skills/list-this"),
-    *tree(REPO / "skills" / "box-scout", "skills/box-scout"),
     *tree(REPO / "skills" / "measure-this", "skills/measure-this"),
     *tree(REPO / "anteroom-extension", "anteroom-extension"),
     *collect_data_files("webview"),

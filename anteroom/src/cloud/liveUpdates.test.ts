@@ -27,7 +27,7 @@ describe("queryKeyMatchesTopic", () => {
     // A send that finishes updates the offer card and an open offer log.
     expect(queryKeyMatchesTopic("automations", ["offer-log"])).toBe(true);
     expect(queryKeyMatchesTopic("automations", ["offer-analytics", "2026-11-16"])).toBe(true);
-    expect(queryKeyMatchesTopic("sourcing", ["sourcing"])).toBe(true);
+    expect(queryKeyMatchesTopic("sales", ["boxes"])).toBe(true);
   });
 
   it("leaves other screens and unknown topics alone", () => {
@@ -40,7 +40,7 @@ describe("queryKeyMatchesTopic", () => {
 
   it("covers every topic the server writes", () => {
     expect(Object.keys(TOPIC_QUERY_KEYS).sort()).toEqual(
-      ["assistant", "automations", "jobs", "listings", "photos", "sales", "settings", "sourcing"]);
+      ["assistant", "automations", "jobs", "listings", "photos", "sales", "settings"]);
   });
 });
 

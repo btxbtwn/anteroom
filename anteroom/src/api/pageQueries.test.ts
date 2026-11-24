@@ -8,7 +8,6 @@ const { api } = vi.hoisted(() => {
     settings: { ui: read("settings-ui") },
     salesLedger: { list: read("sales-ledger") },
     analytics: { overview: read("overview") },
-    sourcing: { get: read("sourcing") },
     boxes: { list: read("boxes") },
     automations: {
       list: read("automations"),
@@ -28,11 +27,10 @@ vi.mock("./client", () => ({ api }));
 import {
   automationsQuery, autoRelistRulesQuery, boxesQuery, directConnectionsQuery, ebayFinancesQuery, homeQuery,
   lastThirtyDays, prefetchPageReads, salesLedgerQuery, salesOverviewQuery, scheduledDraftsQuery, settingsUiQuery,
-  sourcingQuery,
 } from "./pageQueries";
 
 const NOW = Date.parse("2026-11-08T14:24:00Z");
-const allViews = { views: new Set(["home", "analytics", "sourcing", "automations", "marketplaces"]), features: new Set(["ebay_offers", "marketplace_sessions"]) };
+const allViews = { views: new Set(["home", "analytics", "automations", "marketplaces"]), features: new Set(["ebay_offers", "marketplace_sessions"]) };
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -46,7 +44,7 @@ describe("page prefetch", () => {
     await prefetchPageReads(client, allViews, NOW);
     const { start, end } = lastThirtyDays(NOW);
     for (const key of [
-      settingsUiQuery.queryKey, homeQuery().queryKey, sourcingQuery.queryKey, boxesQuery.queryKey, automationsQuery.queryKey,
+      settingsUiQuery.queryKey, homeQuery().queryKey, boxesQuery.queryKey, automationsQuery.queryKey,
       scheduledDraftsQuery.queryKey, autoRelistRulesQuery.queryKey,
       directConnectionsQuery.queryKey, ebayFinancesQuery(start, end).queryKey,
       salesLedgerQuery({ start, end, q: "", attention: "all", sort: "newest" }, 1).queryKey,
@@ -58,12 +56,13 @@ describe("page prefetch", () => {
 
   it("skips pages and features this app does not show", async () => {
     const client = new QueryClient();
-    await prefetchPageReads(client, { views: new Set(["sourcing"]), features: new Set() }, NOW);
-    expect(api.sourcing.get).toHaveBeenCalledTimes(1);
+    await prefetchPageReads(client, { views: new Set(["analytics"]), features: new Set() }, NOW);
+    expect(api.boxes.list).toHaveBeenCalledTimes(1);
+    expect(api.salesLedger.list).toHaveBeenCalledTimes(1);
     expect(api.settings.ui).toHaveBeenCalledTimes(1);
     for (const read of [
       api.home.summary, api.automations.list, api.automations.scheduledDrafts, api.automations.autoRelistRules,
-      api.ebayOffers.status, api.promotionAutomations.list, api.salesLedger.list, api.directConnections.status, api.ebay.read,
+      api.ebayOffers.status, api.promotionAutomations.list, api.directConnections.status, api.ebay.read,
     ]) {
       expect(read).not.toHaveBeenCalled();
     }
@@ -80,7 +79,7 @@ describe("page prefetch", () => {
     const client = new QueryClient();
     await prefetchPageReads(client, allViews, NOW);
     vi.advanceTimersByTime(10 * 60_000);
-    expect(client.getQueryData(sourcingQuery.queryKey)).toBeDefined();
+    expect(client.getQueryData(boxesQuery.queryKey)).toBeDefined();
     vi.useRealTimers();
   });
 
@@ -100,7 +99,6 @@ describe("page prefetch", () => {
     track(api.settings.ui, { read: "settings-ui" });
     track(api.salesLedger.list, { read: "sales-ledger" });
     track(api.analytics.overview, { read: "overview" });
-    track(api.sourcing.get, { read: "sourcing" });
     track(api.boxes.list, { read: "boxes" });
     track(api.automations.list, { read: "automations" });
     track(api.automations.approvals, { read: "approvals" });
@@ -116,11 +114,10 @@ describe("page prefetch", () => {
     const now = Date.now();
     await prefetchPageReads(client, allViews, now);
     expect(peak).toBeLessThanOrEqual(2);
-    expect(api.sourcing.get).toHaveBeenCalledTimes(1);
+    expect(api.boxes.list).toHaveBeenCalledTimes(1);
 
     // A second immediate pass skips already-warm queries.
     await prefetchPageReads(client, allViews, now + 1000);
-    expect(api.sourcing.get).toHaveBeenCalledTimes(1);
     expect(api.boxes.list).toHaveBeenCalledTimes(1);
   });
 });

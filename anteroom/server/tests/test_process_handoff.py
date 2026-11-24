@@ -142,7 +142,7 @@ def test_a_machine_waiting_for_the_lease_runs_drafts_and_offers_every_feature(mo
 
     monkeypatch.setattr(background_worker, 'serve', worker)
     for name in ('hosted_automation_scheduler', 'hosted_offer_scheduler', 'hosted_job_watchdog',
-                 'hosted_sourcing_scheduler', 'hosted_sale_checks', 'hosted_promotion_scheduler',
+                 'hosted_sale_checks', 'hosted_promotion_scheduler',
                  'hosted_sales_scheduler'):
         monkeypatch.setattr(f'anteroom.services.{name}.serve', must_not_run)
     with TestClient(create_app('https://example.supabase.co')) as client:
@@ -190,7 +190,7 @@ def test_a_stop_signal_starts_the_handoff_before_requests_drain(monkeypatch):
 
 
 SCHEDULERS = ('hosted_automation_scheduler', 'hosted_offer_scheduler', 'hosted_job_watchdog',
-              'hosted_sourcing_scheduler', 'hosted_sales_scheduler')
+              'hosted_sales_scheduler')
 CHROME_SCHEDULERS = ('hosted_sale_checks', 'hosted_promotion_scheduler')
 
 

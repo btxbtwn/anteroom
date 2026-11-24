@@ -16,7 +16,7 @@ import type { PersistedClient, Persister } from "@tanstack/react-query-persist-c
 /** First query-key part of each read kept on the device. */
 export const KEPT_ON_DEVICE = [
   "conversations", "settings-ui", "home",
-  "sourcing", "boxes",
+  "boxes",
   "automations", "automation-approvals", "automation-gaps", "ebay-offers", "promotion-automations",
   "direct-connections", "sales-ledger", "analytics",
 ] as const;

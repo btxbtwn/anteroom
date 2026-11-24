@@ -32,7 +32,6 @@ const analytics = preloadablePage(() => import("../components/AnalyticsPage").th
 const assistant = preloadablePage(() => import("../components/AssistantPage").then(m => ({ default: m.AssistantPage })));
 const marketplaces = preloadablePage(() => import("../components/MarketplacesPage").then(m => ({ default: m.MarketplacesPage })));
 const automations = preloadablePage(() => import("../components/AutomationsPage").then(m => ({ default: m.AutomationsPage })));
-const sourcing = preloadablePage(() => import("../components/SourcingPage").then(m => ({ default: m.SourcingPage })));
 const inventory = preloadablePage(() => import("../components/InventoryTablePage").then(m => ({ default: m.InventoryTablePage })));
 
 export const pageLoaders = {
@@ -42,7 +41,6 @@ export const pageLoaders = {
   assistant: assistant.preload,
   marketplaces: marketplaces.preload,
   automations: automations.preload,
-  sourcing: sourcing.preload,
   inventory: inventory.preload,
 };
 
@@ -52,7 +50,6 @@ export const AnalyticsPage = analytics.Page;
 export const AssistantPage = assistant.Page;
 export const MarketplacesPage = marketplaces.Page;
 export const AutomationsPage = automations.Page;
-export const SourcingPage = sourcing.Page;
 export const InventoryTablePage = inventory.Page;
 
 export function preloadListingCode() {

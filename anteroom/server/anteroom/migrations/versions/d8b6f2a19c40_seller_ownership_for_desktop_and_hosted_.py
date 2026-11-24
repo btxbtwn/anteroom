@@ -70,6 +70,8 @@ SELLER_TABLES = (
 def upgrade() -> None:
     inspector = sa.inspect(op.get_bind())
     for table in SELLER_TABLES:
+        if not inspector.has_table(table):
+            continue  # A retired table is not recreated during legacy adoption.
         # Legacy adoption creates any missing tables from current metadata
         # first, so those tables already have this column and index.
         if "user_id" not in {column["name"] for column in inspector.get_columns(table)}:

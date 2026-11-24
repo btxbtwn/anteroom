@@ -62,7 +62,7 @@ import type { AttentionTarget } from "../api/home";
 import type { ListingDocument } from "../api/types";
 import { initialOpenListing, openListingReducer, phonePaneOnOpen } from "./openListing";
 import {
-  AnalyticsPage, AssistantPage, AutomationsPage, HomePage, InventoryTablePage, MarketplacesPage, SettingsPage, SourcingPage,
+  AnalyticsPage, AssistantPage, AutomationsPage, HomePage, InventoryTablePage, MarketplacesPage, SettingsPage,
   loadListingEditor, loadChatPanel, pageLoaders, preloadListingCode,
 } from "./pageLoaders";
 import { ListingChatPane, ListingEditorPane, pageLoading, type ListingPaneActions } from "./ListingPanes";
@@ -306,8 +306,6 @@ export function App() {
         ? "Automations"
       : activeView === "assistant"
         ? (assistantThreads.data?.find((thread) => thread.id === assistantThreadId)?.title || "Assistant")
-      : activeView === "sourcing"
-        ? "Sourcing"
       : activeView === "inventory"
         ? "Inventory"
         : String(selectedListing?.title || "Anteroom");
@@ -361,8 +359,8 @@ export function App() {
     closeMobileSidebar();
   };
 
-  // Today, Analytics, Marketplaces, Automations and Sourcing toggle back to whichever of home or inventory was open.
-  const togglePage = (view: "home" | "analytics" | "marketplaces" | "sourcing" | "automations") => {
+  // Today, Analytics, Marketplaces and Automations toggle back to whichever of home or inventory was open.
+  const togglePage = (view: "home" | "analytics" | "marketplaces" | "automations") => {
     if (!runtime.views.has(view)) return;
     setMobilePane(runtime.hosted ? "editor" : "workspace");
     if (activeView === view) {
@@ -411,7 +409,6 @@ export function App() {
     if (activeView === "inventory") goListings();
     else setActiveView("inventory");
   };
-  const openSourcing = () => togglePage("sourcing");
 
   const openListing = useCallback((id: string, tab?: string) => {
     setReturnToSuggestions(false);
@@ -838,7 +835,6 @@ export function App() {
           <NavRail
             activeView={activeView}
             onOpenHome={openHome}
-            onOpenSourcing={openSourcing}
             onOpenAnalytics={openAnalytics}
             onOpenMarketplaces={openMarketplaces}
             onOpenAutomations={openAutomations}
@@ -995,10 +991,6 @@ export function App() {
                       onThreadReady={setPickedThreadId}
                       onShowHistory={showHistory}
                     />
-                  </Suspense>
-                ) : activeView === "sourcing" ? (
-                  <Suspense fallback={pageLoading}>
-                    <SourcingPage onOpenListing={openListing} />
                   </Suspense>
                 ) : activeView === "inventory" ? (
                   <Suspense fallback={pageLoading}>

@@ -228,7 +228,7 @@ mix it with a fix or a feature.
 
 ## Repository Structure
 
-- **`skills/`** — Agent skills for listing generation (`list-this`), sourcing (`box-scout`) and reading measurements from ruler photos (`measure-this`).
+- **`skills/`** — Agent skills for listing generation (`list-this`) and reading measurements from ruler photos (`measure-this`).
 - **`anteroom-extension/`** — Chrome MV3 extension that consumes listing JSON and fills marketplace forms. `background.js` routes messages and loads the worker modules in `background/`, which drive the marketplaces (`background/<marketplace>-native.js` and friends, injected with `chrome.scripting`). The extension has no editor of its own: listing review and marketplace actions are confirmed in Anteroom. Its only page, `cloud-connect.html`, asks the seller to approve connecting Chrome to their hosted account; the `myanteroom.com` content script carries hosted requests to the worker. Node unit tests live in `tests/`.
 - **`webhook-relay/`** — Cloudflare Worker that receives eBay and Etsy webhooks, verifies their signatures, keeps only IDs, and holds them in a per-device inbox until that Mac's Anteroom pulls them over an outbound connection. It also brokers eBay and Etsy sign-in and forwards Etsy API calls, so eBay's Cert ID and Etsy's shared secret never ship in the app. See its `README.md`.
 - **`anteroom/`** — React + TypeScript frontend (`src/`) and FastAPI Python backend (`server/anteroom/`). Frontend API clients live under `src/api/`. Backend routes live under `server/anteroom/routes/`; domain behavior lives in `server/anteroom/services/` and `server/anteroom/repositories/`.

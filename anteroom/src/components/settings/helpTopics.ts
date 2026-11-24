@@ -56,15 +56,13 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     ],
   },
   {
-    id: "help-sourcing",
-    title: "Find boxes to buy and record what you bought",
+    id: "help-boxes",
+    title: "Record boxes you bought",
     steps: [
-      "Open **Sourcing** in the sidebar and stay on **Wholesale boxes**.",
-      "Set your **Budget**, **Ship to** ZIP and **Minimum return**. **More options** holds your selling pace, fees and cost per sold piece; they follow your own sales unless you type a number.",
-      "Anteroom lists the boxes worth buying under **Choose a buy list**. Open the store's cart from there and pay on the store's site; Anteroom never buys for you.",
-      "Once you have paid, press **I bought this** on that box. For a box bought elsewhere, press **Add a box** under **Boxes you bought**, fill in the store, box, price, shipping and pieces, and press **Add box**.",
+      "Open **Analytics** in the sidebar and switch to **Boxes**.",
+      "Press **Add a box**, fill in the store, box, price, shipping and pieces, and press **Add box**.",
       "When you upload that box's items, pick it in **Box** so each piece carries its share of the cost.",
-      "To check a single item before you buy it, use the **Scout an item** tab.",
+      "Record any unsellable pieces on the box so their cost counts toward the pieces that sell.",
     ],
   },
   {
