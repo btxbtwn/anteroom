@@ -64,7 +64,7 @@ wheels = [
 
 [[package]]
 name = "anteroom"
-version = "0.1.1228"
+version = "0.1.1229"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },

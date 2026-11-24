@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1229 — 2026-11-24
+
+- Mercari no longer connects in Cloud. Mercari's site blocks requests from Anteroom's servers, so Mercari sales checks, delists and offers sent from the cloud were failing. Every Mercari action now runs in your connected Chrome, and saved Mercari cloud sign-ins are removed.
+
 ## 0.1.1228 — 2026-11-24
 
 - When a marketplace blocks, limits or signs you out while Anteroom reviews offers for several items, the review stops at that item and marks the rest "Not checked" instead of asking the marketplace about each one.
