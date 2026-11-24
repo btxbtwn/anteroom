@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1194 — 2026-11-24
+
+- On myanteroom.com, a draft's General view now shows Ready to list & schedule publish, so you can schedule a listing from the listing itself.
+
 ## 0.1.1193 — 2026-11-24
 
 - AI Studio Apply no longer fails when photo storage briefly drops a connection
