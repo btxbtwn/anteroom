@@ -2226,5 +2226,13 @@ def test_sync_title_size_leaves_a_title_that_already_names_the_size():
         assert listing["title"] == title
 
 
+def test_sync_title_size_swaps_the_old_size_after_the_brand():
+    from anteroom.services.listing_generate import sync_title_size
+
+    listing = {"title": "M Missoni M Zigzag Knit Sweater Blue", "brand": "M Missoni", "size": "L"}
+    assert sync_title_size(listing, previous_size="M") is True
+    assert listing["title"] == "M Missoni L Zigzag Knit Sweater Blue"
+
+
 if __name__ == "__main__":
     unittest.main()

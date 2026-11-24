@@ -900,9 +900,10 @@ def sync_title_size(listing: dict, *, previous_size: str | None = None) -> bool:
     elif title_names_size(title, size):
         # Large, Men's L, 11/30 or S (6-7): the title names the size as written.
         return False
-    elif previous and (at := _sequence_at(tokens, previous.split())) is not None:
-        # A size change swaps the old size where the title names it.
-        tokens[at:at + len(previous.split())] = size_tokens
+    elif previous and (at := _sequence_at(tokens[slot:], previous.split())) is not None:
+        # A size change swaps the old size where the title names it, after the
+        # brand, so a brand word that matches the old size is never replaced.
+        tokens[slot + at:slot + at + len(previous.split())] = size_tokens
     elif slot < len(tokens) and _TITLE_SIZE_TOKEN_RE.match(tokens[slot].strip(",")):
         existing = tokens[slot].strip(",")
         # Petite "PM" is the tag. Replacing it with the letter "M" drops the P.
