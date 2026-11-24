@@ -86,6 +86,8 @@ JOB_LEASE_DEFAULTS = {"lease_owner": None, "leased_until": None, "cancel_request
 # Revision d0e4f3a92b68: Finished items from older builds stay the seller's decision.
 # Revision e5c2a8f4d1b7 adds the star, off for every existing item.
 CONVERSATION_SETTLEMENT_DEFAULTS = {"settled_by_seller": True, "favorite": False}
+# A photo reading from before notes were recorded is not reused by a retry.
+MESSAGE_NOTES_DEFAULTS = {"notes_fingerprint": None}
 # Revision c2d9f4a8e103: Draft scheduling is opt-in and off by default.
 LISTING_SCHEDULE_DEFAULTS = {
     "ready_to_list": False,
@@ -142,7 +144,8 @@ def test_previous_release_upgrade_preserves_records_and_constraints(migration_en
                                        "season": None, "material": None,
                                    }} if name == "listing_revisions" else {}), **(JOB_LEASE_DEFAULTS if name == "jobs" else {}),
                                    **(CONVERSATION_SETTLEMENT_DEFAULTS if name == "conversations" else {}),
-                                   **(LISTING_SCHEDULE_DEFAULTS if name == "listings" else {})) for row in rows]
+                                   **(LISTING_SCHEDULE_DEFAULTS if name == "listings" else {}),
+                                   **(MESSAGE_NOTES_DEFAULTS if name == "messages" else {})) for row in rows]
 
     inspector = sa.inspect(engine)
     for table in Base.metadata.tables.values():
@@ -199,7 +202,8 @@ def test_pre_alembic_database_gets_ownership_without_losing_rows(migration_engin
                 "season": None, "material": None,
             }} if name == "listing_revisions" else {}), **(JOB_LEASE_DEFAULTS if name == "jobs" else {}),
                                    **(CONVERSATION_SETTLEMENT_DEFAULTS if name == "conversations" else {}),
-                                   **(LISTING_SCHEDULE_DEFAULTS if name == "listings" else {})) for row in rows]
+                                   **(LISTING_SCHEDULE_DEFAULTS if name == "listings" else {}),
+                                   **(MESSAGE_NOTES_DEFAULTS if name == "messages" else {})) for row in rows]
     assert schema_migrations.recorded_revision(engine) == CURRENT_REVISION
     assert len(backups.list_snapshots(backups.BACKUPS_DIR)) == 1
 
