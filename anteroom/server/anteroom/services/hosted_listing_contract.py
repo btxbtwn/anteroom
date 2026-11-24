@@ -6,7 +6,10 @@ from anteroom.services.hosted_fields import DraftFields
 
 MARKETS = frozenset({'ebay', 'poshmark', 'mercari', 'depop', 'etsy'})
 
-ROOTS = frozenset(DraftFields.model_fields) | {'title', 'originalPrice', 'tags', 'material', 'style', 'care', 'flaws', 'measurements', 'direct_category_ids', 'marketplace_photos'} | {f'{market}_specifics' for market in MARKETS}
+# `seller_fields` names the values the seller set: the editor shows a marketplace
+# price that follows General apart from one set on that marketplace. A save can
+# only add to the saved list (`prepare_user_listing` unions both).
+ROOTS = frozenset(DraftFields.model_fields) | {'title', 'originalPrice', 'tags', 'material', 'style', 'care', 'flaws', 'measurements', 'direct_category_ids', 'marketplace_photos', 'seller_fields'} | {f'{market}_specifics' for market in MARKETS}
 BLOCKED = frozenset({'userid', 'conversationid', 'revisionid', 'parentrevisionid', 'apikey', 'token', 'accesstoken', 'refreshtoken',
                      'authorization', 'cookie', 'cookies', 'password', 'headers', 'postid', 'listingid', 'draftid', 'itemid',
                      'storedfilename', 'sourcefilename', 'filename', 'filepath', 'url', 'listingurl', 'drafturl', 'vendooitemid'})
@@ -27,7 +30,19 @@ def stored_listing_fields(raw):
         payload['direct_category_ids'] = {
             key: value for key, value in categories.items() if category_key(key, value)
         }
+    if 'seller_fields' in payload:
+        # Read only what a save may send back, so an odd stored entry never stops the listing opening.
+        locks = payload['seller_fields']
+        payload['seller_fields'] = [path for path in locks if seller_field(path)][:MAX_SELLER_FIELDS] \
+            if isinstance(locks, list) else []
     return editable_listing(without_operational_keys(payload))
+
+
+MAX_SELLER_FIELDS = 2000
+
+
+def seller_field(path):
+    return isinstance(path, str) and 0 < len(path) <= 200
 
 
 def category_key(key, value):
@@ -64,6 +79,10 @@ def editable_listing(raw):
         raise HTTPException(422, 'Enter valid General listing values') from None
     if raw.get('title') is not None and (not isinstance(raw['title'], str) or len(raw['title']) > 200):
         raise HTTPException(422, 'Enter a title of up to 200 characters')
+    locks = raw.get('seller_fields')
+    if locks is not None and (not isinstance(locks, list) or len(locks) > MAX_SELLER_FIELDS
+                              or not all(seller_field(path) for path in locks)):
+        raise HTTPException(422, 'Protected fields must be a list of field names')
     nodes = 0
 
     def validate(value, depth=0):
