@@ -315,7 +315,7 @@ All eBay Item Specifics fields. Use Appendix values. Omit fields that do not app
 
 **Poshmark Specifics:**
 - `originalPrice`: always `0`
-- `smartSell`: `{ "enabled": boolean, "minimumPrice": number | null }` (Smart Sell auto-offers; when `enabled` is `true`, `minimumPrice` is required in whole dollars and follows the PRICING Formula minimum)
+- `smartSell`: `{ "enabled": boolean, "minimumPrice": number | null }` (Smart Sell auto-offers; when `enabled` is `true`, `minimumPrice` is required in whole dollars and follows the PRICING Formula minimum; leave it off when that minimum is below $3, which does not cover Poshmark's fee)
 - `sellerNotes`: private seller notes mapped to Poshmark's "Other Info" field (max 500 chars)
 - `poshmarkSku`: optional Poshmark-specific Listing SKU override (otherwise top-level `sku` is used; max 50 chars)
 - Cost Price is read from top-level `cost` (do not set `poshmark_specifics.costPrice`)
