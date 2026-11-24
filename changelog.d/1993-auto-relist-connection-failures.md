@@ -1,1 +1,0 @@
-- Auto-relist checks access to Depop drafts before removing a live listing. It pauses the rest of a marketplace's batch if the connection needs attention, the marketplace is limiting requests, or a replacement fails to confirm.

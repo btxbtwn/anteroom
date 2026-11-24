@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1204 — 2026-11-24
+
+- Auto-relist checks access to Depop drafts before removing a live listing. It pauses the rest of a marketplace's batch if the connection needs attention, the marketplace is limiting requests, or a replacement fails to confirm.
+
 ## 0.1.1203 — 2026-11-24
 
 - Cheap items no longer fail to list on Poshmark because Smart Sell's Lowest Price was below Poshmark's fee. Anteroom leaves Smart Sell off when the lowest offer wouldn't cover the fee, and the Poshmark tab tells you before you list when a Lowest Price you set doesn't cover Poshmark's fee and your shipping discount.
