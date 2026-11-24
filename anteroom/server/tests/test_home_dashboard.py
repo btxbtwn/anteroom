@@ -668,9 +668,12 @@ def _seed_sold_elsewhere(db, now: datetime) -> Conversation:
     _add_listing(db, conv, {"title": "Wool Peacoat", "price": 90.0, "quantity": 1})
     db.add_all([
         MarketplaceListing(conversation_id=conv.id, marketplace="ebay", state="sold",
-                           listing_id="223344556677", listed_at=now - timedelta(days=3)),
+                           listing_id="223344556677", listing_url="https://www.ebay.com/itm/223344556677",
+                           listed_at=now - timedelta(days=3)),
         MarketplaceListing(conversation_id=conv.id, marketplace="poshmark", state="published",
-                           listing_id="66aa11bb22cc33dd44ee55ff", listed_at=now - timedelta(days=3)),
+                           listing_id="66aa11bb22cc33dd44ee55ff",
+                           listing_url="https://poshmark.com/listing/Wool-Peacoat-66aa11bb22cc33dd44ee55ff",
+                           listed_at=now - timedelta(days=3)),
         MarketplaceSale(conversation_id=conv.id, marketplace="ebay", order_id="ord-coat-1", line_id="line-coat-1",
                         listing_id="223344556677", quantity=1, order_status="paid", source="marketplace",
                         state="new", sold_at=now - timedelta(hours=2), received_at=now - timedelta(hours=2)),
@@ -689,7 +692,7 @@ def test_resolved_sold_elsewhere_alert_returns_with_a_new_sale():
     client = TestClient(app)
     now = datetime.now(UTC).replace(tzinfo=None)
     with SessionLocal() as db:
-        conv = _seed_sold_elsewhere(db, now)
+        conv_id = _seed_sold_elsewhere(db, now).id
 
     item = next(i for i in _attention(client)["needs_attention"] if i["kind"] == "still_listed")
     assert item["fingerprint"]
@@ -711,7 +714,7 @@ def test_resolved_sold_elsewhere_alert_returns_with_a_new_sale():
     # The same listing sells again: a new sale must raise the alert again.
     with SessionLocal() as db:
         db.add(MarketplaceSale(
-            conversation_id=conv.id, marketplace="ebay", order_id="ord-coat-2", line_id="line-coat-2",
+            conversation_id=conv_id, marketplace="ebay", order_id="ord-coat-2", line_id="line-coat-2",
             listing_id="223344556677", quantity=1, order_status="paid", source="marketplace",
             state="new", sold_at=now, received_at=now,
         ))
@@ -726,7 +729,7 @@ def test_resolved_alert_returns_when_its_state_changes_under_the_same_key():
     client = TestClient(app)
     now = datetime.now(UTC).replace(tzinfo=None)
     with SessionLocal() as db:
-        conv = _seed_sold_elsewhere(db, now)
+        conv_id = _seed_sold_elsewhere(db, now).id
     item = next(i for i in _attention(client)["needs_attention"] if i["kind"] == "still_listed")
     client.post("/api/home/attention/resolve", json={
         "item_key": item["key"], "kind": item["kind"], "fingerprint": item["fingerprint"],
@@ -735,8 +738,9 @@ def test_resolved_alert_returns_when_its_state_changes_under_the_same_key():
 
     # The sold item turns up live on another marketplace: same sale, new situation.
     with SessionLocal() as db:
-        db.add(MarketplaceListing(conversation_id=conv.id, marketplace="mercari", state="published",
-                                  listing_id="m12345678901", listed_at=now))
+        db.add(MarketplaceListing(conversation_id=conv_id, marketplace="mercari", state="published",
+                                  listing_id="m12345678901", listing_url="https://www.mercari.com/us/item/m12345678901/",
+                                  listed_at=now))
         db.commit()
     shown = next(i for i in _attention(client)["needs_attention"] if i["key"] == item["key"])
     assert shown["fingerprint"] != item["fingerprint"]
@@ -748,7 +752,7 @@ def test_resolved_failed_job_returns_on_a_new_failure_and_needs_a_fingerprint():
         conv = Conversation(id="conv-resolve-fail", title="Brass Lamp", status="draft")
         db.add(conv)
         db.flush()
-        db.add(Job(conversation_id=conv.id, approved_revision_id="rev-1", listing_snapshot={},
+        db.add(Job(conversation_id="conv-resolve-fail", approved_revision_id="rev-1", listing_snapshot={},
                    status="failed", last_error="Missing shipping profile"))
         db.commit()
     item = next(i for i in _attention(client)["needs_attention"] if i["kind"] == "failed_job")
@@ -777,7 +781,7 @@ def test_resolved_failed_job_returns_on_a_new_failure_and_needs_a_fingerprint():
     assert inbox["dismissed"] == [] and [i["key"] for i in inbox["resolved"]] == [item["key"]]
 
     with SessionLocal() as db:
-        db.add(Job(conversation_id=conv.id, approved_revision_id="rev-2", listing_snapshot={},
+        db.add(Job(conversation_id="conv-resolve-fail", approved_revision_id="rev-2", listing_snapshot={},
                    status="failed", last_error="Photo upload stalled",
                    created_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=5)))
         db.commit()
@@ -835,21 +839,24 @@ def test_resolved_duplicates_do_not_crowd_out_the_pair_limit():
     from anteroom.services import similar_items
 
     with SessionLocal() as db:
-        for index in range(9):  # 36 pairs, above the 25 shown
-            conv = Conversation(id=f"crowd-{index}", title=f"unique{index}", status="draft",
-                                notes=json.dumps({"sku": "shared-crowd"}))
-            db.add(conv)
-            db.flush()
-            _add_listing(db, conv, {"title": conv.title, "sku": "shared-crowd"})
+        # Three groups of six identical SKUs give 45 pairs, above the 25 shown.
+        for group in ("A", "B", "C"):
+            for index in range(6):
+                conv = Conversation(id=f"crowd-{group}{index}", title=f"unique{group}{index}", status="draft",
+                                    notes=json.dumps({"sku": f"shared-{group}"}))
+                db.add(conv)
+                db.flush()
+                _add_listing(db, conv, {"title": conv.title, "sku": f"shared-{group}"})
         db.commit()
         pairs = similar_items.find_similar(db, compute_fingerprints=False, limit=100)["pairs"]
         keys = [f"duplicate:{p['first']['id']}:{p['second']['id']}" for p in pairs]
-        assert len(keys) == 36
-        for key in keys[:30]:
+        assert len(keys) == 45
+        for key in keys[:20]:
             home_dashboard.resolve_attention_item(db, item_key=key, kind="duplicate_listing", fingerprint="")
         inbox = home_dashboard.attention_inbox(db)
-    assert {i["key"] for i in inbox["needs_attention"] if i["kind"] == "duplicate_listing"} == set(keys[30:])
-    assert len(inbox["resolved"]) == 30
+    # Every one of the 25 unresolved pairs shows: resolved ones take no slots.
+    assert {i["key"] for i in inbox["needs_attention"] if i["kind"] == "duplicate_listing"} == set(keys[20:])
+    assert len(inbox["resolved"]) == 20
 
 
 def test_resolve_migration_keeps_snoozes_and_row_security(tmp_path, monkeypatch):
