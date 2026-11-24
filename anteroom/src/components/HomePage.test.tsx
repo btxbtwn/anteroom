@@ -15,11 +15,12 @@ const { api } = vi.hoisted(() => ({
       dismissAttention: vi.fn(),
       restoreAttention: vi.fn(),
     },
+    similarItems: { dismiss: vi.fn() },
   },
 }));
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
-  return { ...actual, api: { ...actual.api, home: api.home } };
+  return { ...actual, api: { ...actual.api, home: api.home, similarItems: { ...actual.api.similarItems, ...api.similarItems } } };
 });
 
 import { HomePage } from "./HomePage";
@@ -482,6 +483,39 @@ describe("HomePage", () => {
     await settle();
     expect(container.textContent).toContain(coat);
     expect(container.textContent).toContain("99");
+  });
+
+  it("marks a possible duplicate as not a duplicate for good", async () => {
+    const duplicate = {
+      key: "duplicate:conv_a:conv_b",
+      kind: "duplicate_listing" as const,
+      priority: "low" as const,
+      title: "Possible duplicate: Levi's 501",
+      detail: "Matches “Levi's 501 Jeans” (same sku).",
+      action_label: "Review duplicates",
+      target: { view: "settings" as const, settings_section: "listings", target_id: "similar-items" },
+      occurred_at: null,
+    };
+    api.home.summary.mockResolvedValue({
+      ...sampleHome,
+      needs_attention: [...sampleHome.needs_attention, duplicate],
+      counts: { ...sampleHome.counts, active: 3, by_kind: { ...sampleHome.counts.by_kind, duplicate_listing: 1 } },
+    });
+    let finish!: (value: { ok: boolean }) => void;
+    api.similarItems.dismiss.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    await renderHome();
+
+    const buttons = [...container.querySelectorAll("button")].filter((b) => b.textContent?.trim() === "Not a duplicate");
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]!.getAttribute("aria-label")).toBe("Possible duplicate: Levi's 501 is not a duplicate");
+    await act(() => buttons[0]!.click());
+    await settle();
+    expect(api.similarItems.dismiss).toHaveBeenCalledWith("conv_a", "conv_b");
+    expect(container.textContent).not.toContain("Possible duplicate: Levi's 501");
+    await act(() => finish({ ok: true }));
+    await settle();
+    expect(container.textContent).not.toContain("Possible duplicate: Levi's 501");
+    expect(api.home.dismissAttention).not.toHaveBeenCalled();
   });
 
 });

@@ -165,6 +165,23 @@ export function patchHomeAfterRestore(
   };
 }
 
+/** The two items a "Possible duplicate" alert is about, from its `duplicate:<first>:<second>` key. */
+export function duplicatePair(item: AttentionItem): [string, string] | null {
+  if (item.kind !== "duplicate_listing") return null;
+  const [prefix, first, second, ...rest] = item.key.split(":");
+  return prefix === "duplicate" && first && second && rest.length === 0 ? [first, second] : null;
+}
+
+/** Remove a pair the seller marked as different: it is never suggested again, so it leaves both tabs. */
+export function patchHomeAfterNotDuplicate(
+  home: HomeSummaryResponse,
+  itemKey: string,
+): HomeSummaryResponse {
+  const needs_attention = home.needs_attention.filter((entry) => entry.key !== itemKey);
+  const dismissed = home.dismissed.filter((entry) => entry.key !== itemKey);
+  return { ...home, needs_attention, dismissed, counts: recountAttention({ needs_attention, dismissed }) };
+}
+
 /**
  * Goal mutations still rebuild home_summary for progress bars, but must not
  * replace Needs attention — that scan can lag an optimistic Dismiss/Restore.

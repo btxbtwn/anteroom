@@ -15,7 +15,9 @@ import { api } from "../api/client";
 import {
   applyGoalHomeSnapshot,
   browserTimeZone,
+  duplicatePair,
   patchHomeAfterDismiss,
+  patchHomeAfterNotDuplicate,
   patchHomeAfterRestore,
   type AttentionItem,
   type AttentionKind,
@@ -257,6 +259,25 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
     },
     onError: async (_err, itemKey, ctx) => {
       if (!attentionOpIsCurrent(itemKey, ctx?.epoch)) return;
+      await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
+    },
+  });
+
+  // Permanent, like "Not duplicates" in Similar items: the pair is never suggested again.
+  const notDuplicate = useMutation({
+    mutationFn: ({ item, pair }: { item: AttentionItem; pair: [string, string] }) =>
+      runAttentionOp(item.key, () => api.similarItems.dismiss(pair[0], pair[1])),
+    onMutate: async ({ item }) => {
+      await queryClient.cancelQueries({ queryKey: queryDef.queryKey, exact: true });
+      const epoch = bumpAttentionEpoch(item.key);
+      patchHomeCache((current) => patchHomeAfterNotDuplicate(current, item.key));
+      return { epoch };
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["similar-items"] });
+    },
+    onError: async (_err, { item }, ctx) => {
+      if (!attentionOpIsCurrent(item.key, ctx?.epoch)) return;
       await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
     },
   });
@@ -628,7 +649,7 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
                       </div>
                       <p className="text-xs text-muted-foreground">{item.detail}</p>
                     </div>
-                    <div className="flex shrink-0 items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Button
                         type="button"
                         variant="outline"
@@ -638,6 +659,17 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
                         {item.action_label}
                         <ArrowRightIcon />
                       </Button>
+                      {duplicatePair(item) ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="xs"
+                          onClick={() => notDuplicate.mutate({ item, pair: duplicatePair(item)! })}
+                          aria-label={`${item.title} is not a duplicate`}
+                        >
+                          Not a duplicate
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
                         variant="ghost"

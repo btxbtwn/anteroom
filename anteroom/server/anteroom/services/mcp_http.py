@@ -30,7 +30,7 @@ from anteroom.models.marketplace_listing import LIVE_STATES, MarketplaceListing
 from anteroom.models.marketplace_sale import MarketplaceSale
 from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
 from anteroom.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
-from anteroom.services import boxes, home_dashboard, listing_editor, mcp_tokens
+from anteroom.services import boxes, home_dashboard, inventory_labels, listing_editor, mcp_organize_tools, mcp_tokens
 from anteroom.services.background_tasks import ACTIVE as ACTIVE_TASK_STATUSES
 from anteroom.services.etsy_audit import etsy_not_allowed_live
 from anteroom.services.etsy_fields import etsy_eligible
@@ -47,7 +47,7 @@ from anteroom.services.offer_analytics import offer_analytics, offer_log
 from anteroom.services.photos import cover_thumb_url
 from anteroom.services.unsent_edits import unsent_edits
 from anteroom.services.validation import validate_listing
-from anteroom.services.vendoo_import import merge_notes, parse_notes, split_vendoo_labels
+from anteroom.services.vendoo_import import merge_notes, parse_notes
 from anteroom.version import app_version
 
 SUPPORTED_PROTOCOL_VERSIONS = ("2024-11-05", "2025-03-26", "2025-06-18")
@@ -101,6 +101,7 @@ TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
     "get_needs_attention": ("attention", "read"),
     "dismiss_attention_items": ("attention", "write"),
     "restore_attention_items": ("attention", "write"),
+    **mcp_organize_tools.PERMISSIONS,
 }
 
 MAX_ATTENTION_KEYS = 100
@@ -480,6 +481,7 @@ def tool_definitions() -> list[dict[str, Any]]:
             },
         },
     ]
+    tools += mcp_organize_tools.TOOLS
     return [{**tool, "annotations": {**tool["annotations"], "title": tool["title"]}} for tool in tools]
 
 
@@ -708,6 +710,7 @@ def _dispatch_tool(
         "manage_listing_photos": _tool_manage_listing_photos,
         "manage_labels_and_notes": _tool_manage_labels_and_notes,
         "delete_draft_listing": _tool_delete_draft_listing,
+        **mcp_organize_tools.HANDLERS,
     }
     handler = handlers.get(name)
     if handler is None:
@@ -765,7 +768,7 @@ def _tool_search_inventory(db: Session, args: dict[str, Any], **_kw: Any) -> dic
     for conv in convs:
         doc = fields_by_conv.get(conv.id) or {}
         notes = parse_notes(conv.notes)
-        labels = list(doc.get("labels") or []) if isinstance(doc.get("labels"), list) else split_vendoo_labels(notes.get("vendooLabels"))
+        labels = inventory_labels.item_labels(notes, doc)
         direct = direct_summaries.get(conv.id) or {}
         sold = {m for m, rec in direct.items() if rec.get("state") == "sold"} | {
             str(m).lower()
@@ -862,7 +865,7 @@ def _tool_get_listing(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str
 
     validation = validate_listing(copy.deepcopy(editable), len(photos), require_photos=True)
     notes = parse_notes(conv.notes)
-    labels = editable.get("labels") or split_vendoo_labels(notes.get("vendooLabels"))
+    labels = inventory_labels.item_labels(notes, editable)
     direct = MarketplaceListingRepo(db).summaries().get(conv_id, {})
     revisions_map = {conv_id: revision.id} if revision else {}
     has_unsent = conv_id in unsent_edits(db, [conv], revisions_map, commit_backfill=False)
@@ -1304,11 +1307,7 @@ def _tool_manage_labels_and_notes(db: Session, args: dict[str, Any], **_kw: Any)
     revision = listing_repo.get_revision(current.current_revision_id) if current and current.current_revision_id else None
     doc = copy.deepcopy(revision.listing_json) if revision and isinstance(revision.listing_json, dict) else {}
 
-    existing_labels = (
-        [str(x).strip() for x in doc["labels"] if str(x).strip()]
-        if isinstance(doc.get("labels"), list)
-        else split_vendoo_labels(notes.get("vendooLabels"))
-    )
+    existing_labels = inventory_labels.item_labels(notes, doc)
     updated_labels = list(existing_labels)
     labels_changed = False
 

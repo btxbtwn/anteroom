@@ -1,0 +1,3 @@
+- Your AI agent can now see which items have edits not yet sent to their live marketplaces and what changed field by field, and put an item back to the version that's live. It never contacts a marketplace.
+- Your AI agent can list your labels with how many items wear each, and rename or delete a label across your whole inventory.
+- Mark a possible duplicate on Home as "Not a duplicate" so that pair never comes back. Your AI agent can do the same.
