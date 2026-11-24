@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1223 — 2026-11-24
+
+- Fix Anteroom updates failing to start after another pair of changes each added a database step at the same time.
+
 ## 0.1.1222 — 2026-11-24
 
 - Your AI assistant can send feedback to the Anteroom team for you: a bug, a feature request, a question or something confusing. It shows you the message first. On myanteroom.com it is emailed to the team; on the Mac app it is saved and the assistant gives you an email link to send it yourself.
