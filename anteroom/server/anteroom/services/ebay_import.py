@@ -149,10 +149,9 @@ def _listing_settings(info: dict) -> dict:
         out["secondaryCategoryId"] = second
         if name := str(info.get("secondaryCategoryName") or "").strip():
             out["secondaryCategoryPath"] = name.replace(":", " > ")
-    if videos := [video for video in info.get("videoIds") or [] if video]:
-        out["videoId"] = videos[0]
     if info.get("conditionDescription"):
         out["conditionDescription"] = info["conditionDescription"]
+    # ``videoId`` names a local ListingVideo. eBay's video stays where it is: an unset choice leaves it on Update.
     return out
 
 

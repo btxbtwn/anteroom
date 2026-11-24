@@ -375,7 +375,9 @@ def test_import_brings_over_every_field_ebay_has_into_the_keys_the_ebay_tab_read
     assert ebay["listingFormat"] == "FIXED_PRICE" and ebay["listingDuration"] == "GTC"
     assert ebay["subtitle"] == "Fully lined" and ebay["lotSize"] == "2" and ebay["privateListing"] is True
     assert ebay["secondaryCategoryId"] == "11450" and ebay["secondaryCategoryPath"] == "Clothing > Vintage"
-    assert ebay["irregularPackage"] is True and ebay["upc"] == "012345678905" and ebay["videoId"] == "vid-1"
+    assert ebay["irregularPackage"] is True and ebay["upc"] == "012345678905"
+    # eBay's video ID is not a local video: leaving it unset keeps eBay's video on Update.
+    assert "videoId" not in ebay
     assert ebay["charityId"] == "1234" and ebay["donationPercent"] == "10"
     # Read only: GetItem and the seller's inventory locations, nothing written.
     assert [call[0] for call in imported.remote.calls] == ["GetItem", "/sell/inventory/v1/offer", "/sell/inventory/v1/location"]
@@ -398,6 +400,7 @@ def test_imported_fields_round_trip_into_what_ebay_update_sends(imported):
     assert options["subtitle"] == "Fully lined" and options["secondary_category_id"] == "11450"
     assert options["lot_size"] == 2 and options["private"] is True and options["irregular"] is True
     assert options["charity"] == {"charityId": "1234", "donationPercentage": "10.0"}
+    assert ebay_listings._video_choice(snapshot) is False
 
 
 def test_offers_turned_off_on_ebay_stay_off(imported):
