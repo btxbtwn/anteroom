@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1206 — 2026-11-24
+
+- Importing a listing from Poshmark now brings over everything Poshmark has for it: its category, both colors, style tags, original price, sizes and size group (including listings with several sizes), quantity type, shipping discount, availability, Smart Sell, cost, SKU and other info, so its Poshmark tab matches Poshmark and an update sends the same values back.
+
+## 0.1.1205 — 2026-11-24
+
+- Importing a listing from Etsy now also brings over its category path, primary and secondary colors, condition (when Etsy has one), and package weight and size, so the Etsy tab matches the listing on Etsy.
+
 ## 0.1.1204 — 2026-11-24
 
 - Auto-relist checks access to Depop drafts before removing a live listing. It pauses the rest of a marketplace's batch if the connection needs attention, the marketplace is limiting requests, or a replacement fails to confirm.
