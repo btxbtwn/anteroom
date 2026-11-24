@@ -21,13 +21,11 @@ is checked. It exits 1 if a check fails, is cancelled, never appears or does
 not finish in time.
 
 When recorded and live production are still on 23f8ab01 (0.1.1211), the
-three push CI failures caused by the split Alembic history (#2032 / #2031 /
-#2040; fixed in #2045 / afc3c2db) may be superseded only after all other
-commits in the span pass push CI and an exact Descendant verification receipt
-is live-verified against GitHub and local Git. Until a new receipt is pinned
-in HISTORICAL_RECOVERY_CHECKPOINT, those failures block every deploy. Once
-Deploy hosted succeeds and records a newer Deployed commit, the checkpoint
-never matches again and ordinary gating applies unchanged.
+push CI failures caused by split Alembic history (fixed in #2045, #2059 and
+#2065) may be superseded only after all other commits in the span pass push CI
+and an exact Descendant verification receipt
+is live-verified against GitHub and local Git. Once Deploy hosted succeeds
+and records a newer Deployed commit, the checkpoint never matches again.
 """
 
 from __future__ import annotations
@@ -80,20 +78,41 @@ PRE_RENAME_PREFIXES = (
     ("vendoo-ios/", "anteroom-ios/"),
 )
 
-# These pushes all tested the same split Alembic history. #2045 joined both
-# heads. Pin a Descendant verification receipt (production_base=23f8ab01)
-# before Deploy hosted can supersede them; None fails closed.
+# The checkpoint must follow all three migration repairs on main.
 HISTORICAL_RECOVERY_FAILURES = frozenset({
+    # e3b7a1c9d402 / e4b7c2a9d6f1, joined by #2045 (afc3c2db).
     "99c3b7003d1d79cfc20cea283bebde7e54572081",  # CI 45390465842
     "08b97e99edaa02f021bc7bcf876d2fd2ade83c69",  # CI 45391561313
     "fb7d5c076cce6021b48240014ba6fb0e71256300",  # CI 45394131194
+    # e3a7c91d5b20 / f2a8d5c3e917, joined by #2059 (f9319bf9).
+    "1e3756a043eb56aed73ff72b9401da5076533f64",  # CI 45410255121
+    "7d9b51611d4923565d817e172170bb70d7d05f8b",  # CI 45411548213
+    "55c4ceaf7b767cd9094881f2730013a62d33e29c",  # CI 45413851357
+    "8e9a08803af54e159495ed80f3ca0c2735fde36e",  # CI 45414095450
+    "8265f86e3639860a9560088b7d50fe212a186cc4",  # CI 45415988182
+    # b0731d829c7b / e4b8c2f17a93, joined by #2065 (684c73b7).
+    "ab40d2ef7120f16747246c6ee20aa52a32fd92ba",  # CI 45422373463
 })
-HISTORICAL_RECOVERY_CORRECTION = "afc3c2dbde647b59203c0b761c8c0dfb2b697264"
+HISTORICAL_RECOVERY_CORRECTION = "684c73b7618390a92555666589d7b0c8f6efec8b"
 
-# Spent d19adbff / 0.1.1091 pin removed after production reached 23f8ab01.
-# Pin a Descendant verification receipt here before Deploy hosted can
-# supersede HISTORICAL_RECOVERY_FAILURES; None fails closed.
-HISTORICAL_RECOVERY_CHECKPOINT: recovery_evidence.EvidencePin | None = None
+# The receipt records the first repaired pair. The deploy gate also requires
+# the verified target to include the last migration repair.
+HISTORICAL_RECOVERY_CHECKPOINT: recovery_evidence.EvidencePin | None = recovery_evidence.EvidencePin(
+    repository="btxbtwn/anteroom",
+    repository_id=1183824317,
+    workflow_id=422931456,
+    target="7d6331d23315e32edbc5f575d74bbf2b8f48c938",
+    tree="6ef80b0b7f5ab8847a0613635bb5a3d130c1816b",
+    production_base="23f8ab0110c1ef359949462996c321acdbc92c49",
+    historical_failure="99c3b7003d1d79cfc20cea283bebde7e54572081",
+    correcting_merge="afc3c2dbde647b59203c0b761c8c0dfb2b697264",
+    workflow_blob="a0a097906554252a26f35c957169ec6d0e3c93db",
+    ci_blob="7509b686e52d63b8751bd2fbd416c3a0fb5e2c49",
+    run_id=45456408146,
+    attempt=1,
+    receipt_artifact_id=14951178773,
+    receipt_digest="sha256:b24dcf6ad427cb6e9fe60a0ac4bea7b790b018e0e8cd794d524df81da83dfeea",
+)
 HISTORICAL_BASE_FLY_APP = "peaceful-meadowstone-6944"
 HISTORICAL_BASE_IMAGE_DIGEST = "sha256:22df137ee877807504d7223d6aff53e8cee6777cf2ddfd70838a14a822641591"
 HISTORICAL_BASE_DB_REVISION = "e3b7a1c9d402"

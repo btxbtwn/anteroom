@@ -229,17 +229,23 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
             return {"total_count": len(self.artifacts), "artifacts": copy.deepcopy(self.artifacts)}
         raise AssertionError(f"Unexpected API path: {path}")
 
-    def test_committed_recovery_targets_match_documented_pair(self):
-        # Pin is unset until a Descendant verification receipt is recorded in a
-        # follow-up PR; the diagnosed failures and live base facts are fixed here.
-        self.assertIsNone(self.gate.HISTORICAL_RECOVERY_CHECKPOINT)
-        self.assertEqual(verification.HISTORICAL, "99c3b7003d1d79cfc20cea283bebde7e54572081")
-        self.assertEqual(verification.CORRECTED, "afc3c2dbde647b59203c0b761c8c0dfb2b697264")
-        self.assertEqual(self.committed_correction, "afc3c2dbde647b59203c0b761c8c0dfb2b697264")
+    def test_committed_recovery_spans_the_three_split_head_windows(self):
+        pin = self.gate.HISTORICAL_RECOVERY_CHECKPOINT
+        self.assertIsNotNone(pin)
+        self.assertEqual(pin.production_base, "23f8ab0110c1ef359949462996c321acdbc92c49")
+        self.assertEqual(pin.historical_failure, verification.HISTORICAL)
+        self.assertEqual(pin.correcting_merge, verification.CORRECTED)
+        self.assertEqual(self.committed_correction, "684c73b7618390a92555666589d7b0c8f6efec8b")
         self.assertEqual(self.committed_failures, {
             "99c3b7003d1d79cfc20cea283bebde7e54572081",
             "08b97e99edaa02f021bc7bcf876d2fd2ade83c69",
             "fb7d5c076cce6021b48240014ba6fb0e71256300",
+            "1e3756a043eb56aed73ff72b9401da5076533f64",
+            "7d9b51611d4923565d817e172170bb70d7d05f8b",
+            "55c4ceaf7b767cd9094881f2730013a62d33e29c",
+            "8e9a08803af54e159495ed80f3ca0c2735fde36e",
+            "8265f86e3639860a9560088b7d50fe212a186cc4",
+            "ab40d2ef7120f16747246c6ee20aa52a32fd92ba",
         })
         self.assertEqual(
             self.gate.HISTORICAL_BASE_IMAGE_DIGEST,

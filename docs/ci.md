@@ -202,27 +202,31 @@ repository.
 
 ## Hosted deploy gate recovery checkpoint
 
-For [#2053](https://github.com/btxbtwn/anteroom/issues/2053), hosted deploy is
-stuck on production `0.1.1211` (`23f8ab01`) because three push CI runs failed
-while main had two Alembic heads. `#2045` (`afc3c2db`) joined the heads.
-`verification_evidence.HISTORICAL` / `CORRECTED` now name `99c3b700` /
-`afc3c2db`, and `wait-for-tested-code.HISTORICAL_RECOVERY_FAILURES` lists the
-three red pushes (`99c3b700`, `08b97e99`, `fb7d5c07`). The spent `d19adbff` /
-`0.1.1091` pin was removed once production moved past `a1a55df0`.
+For [#2053](https://github.com/btxbtwn/anteroom/issues/2053), nine push CI runs
+blocked deployments from production `0.1.1211` (`23f8ab01`). They failed across
+three periods when main had two Alembic heads.
 
-`HISTORICAL_RECOVERY_CHECKPOINT` is currently unset (`None`), so those failures
-still block every deploy. Next step after this retarget merges: dispatch
-**Descendant verification** at a main tip with `production_base=23f8ab01`, then
-pin the receipt (separate PR). Recovery will then require all of the following
-inside `Deploy hosted`'s serialized `deploy-hosted` concurrency group:
+| Failed push commits | Migration repair |
+| --- | --- |
+| `99c3b700`, `08b97e99`, `fb7d5c07` | [#2045](https://github.com/btxbtwn/anteroom/pull/2045) (`afc3c2db`) |
+| `1e3756a0`, `7d9b5161`, `55c4ceaf`, `8e9a0880`, `8265f86e` | [#2059](https://github.com/btxbtwn/anteroom/pull/2059) (`f9319bf9`) |
+| `ab40d2ef` | [#2065](https://github.com/btxbtwn/anteroom/pull/2065) (`684c73b7`) |
+
+The pinned [Descendant verification run](https://github.com/btxbtwn/anteroom/actions/runs/45456408146)
+passed on `7d6331d2` (0.1.1227). Its attempt 1 receipt (artifact `14951178773`)
+identifies the original `99c3b700` / `afc3c2db` pair and covers the full source
+range from production through `7d6331d2`. The deploy gate requires that target
+to follow the final migration repair, `684c73b7`.
+Recovery requires all of the following inside `Deploy hosted`'s serialized
+`deploy-hosted` concurrency group.
 
 - Recorded `production_commit` equals `23f8ab0110c1ef359949462996c321acdbc92c49`,
   corroborated by HTTPS `HEALTH_URL` reporting `status: ok`,
   `service: anteroom-hosted`, and version `0.1.1211`.
-- The only non-green commits eligible for supersession are the three diagnosed
-  failures above, all preceding correcting merge `#2045` (`afc3c2db`) and the
-  exact verified checkpoint on `origin/main` first-parent history at or before
-  the target `HEAD`.
+- The nine commits above are eligible for supersession when their push CI
+  conclusion is `failure`. All must precede `684c73b7` and the exact verified
+  checkpoint on `origin/main` first-parent history at or before the target
+  `HEAD`.
 - Every other non-release commit in `production..HEAD` — including every commit
   merged after the checkpoint — passes its own push `CI` first; the receipt is
   never applied to any other SHA.
