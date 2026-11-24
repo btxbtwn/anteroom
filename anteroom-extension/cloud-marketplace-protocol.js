@@ -55,7 +55,6 @@
     'marketplace.promote',
     'marketplace.promotion_result',
     'marketplace.like_events',
-    'marketplace.active_offers',
   ]);
   function promotion(value) {
     const p = value.payload;
@@ -71,9 +70,6 @@
     } else if (value.type === 'marketplace.like_events') {
       keys.push('marketplace');
       if (!['poshmark', 'depop'].includes(p.marketplace)) return false;
-    } else if (value.type === 'marketplace.active_offers') {
-      keys.push('marketplace', 'listing_id');
-      if (!Object.hasOwn(ids, p.marketplace) || typeof p.listing_id !== 'string' || !ids[p.marketplace].test(p.listing_id)) return false;
     } else if (value.type === 'marketplace.promote' && p.action === 'follow') {
       keys.push('marketplace', 'action', 'listing_id', 'action_id', 'confirm', 'follow_config');
       const cfg = p.follow_config;

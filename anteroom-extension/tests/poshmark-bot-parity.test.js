@@ -341,42 +341,6 @@ test('Poshmark multi-item bundle refuses when combined offer is below combined f
   assert.equal(missing.bodies['POST poshmark.com/vm-rest/bundles/bundle-89/offers'], undefined);
 });
 
-test('readMarketplaceActiveOffers detects active incoming Poshmark buyer offers and fails closed on Mercari', async () => {
-  const withOffer = setupWorker({
-    [`GET poshmark.com/vm-rest/users/${USER}/offers`]: [
-      200,
-      { data: [{ post_id: POST, status: 'pending', creator_id: 'buyer-99' }] },
-    ],
-  });
-  const activeRes = await withOffer.c.readMarketplaceActiveOffers({ marketplace: 'poshmark', listing_id: POST });
-  assert.deepEqual(JSON.parse(JSON.stringify(activeRes)), { ok: true, verified: true, has_active_offer: true });
-
-  const clean = setupWorker({
-    [`GET poshmark.com/vm-rest/users/${USER}/offers`]: [
-      200,
-      {
-        data: [
-          { post_id: POST, status: 'pending', creator_id: USER },
-          { post_id: POST, status: 'declined', creator_id: 'buyer-99' },
-        ],
-      },
-    ],
-  });
-  const cleanRes = await clean.c.readMarketplaceActiveOffers({ marketplace: 'poshmark', listing_id: POST });
-  assert.deepEqual(JSON.parse(JSON.stringify(cleanRes)), { ok: true, verified: true, has_active_offer: false });
-
-  const partial = setupWorker({
-    [`GET poshmark.com/vm-rest/users/${USER}/offers`]: [200, { data: [], more: { next_max_id: 'another-page' } }],
-  });
-  assert.equal((await partial.c.readMarketplaceActiveOffers({ marketplace: 'poshmark', listing_id: POST })).verified, false);
-
-  const mercariRes = await clean.c.readMarketplaceActiveOffers({ marketplace: 'mercari', listing_id: 'm12345678' });
-  assert.equal(mercariRes.ok, false);
-  assert.equal(mercariRes.verified, false);
-  assert.equal(mercariRes.error_code, 'unsupported');
-  assert.equal('has_active_offer' in mercariRes, false);
-});
-
 test('Poshmark party-only share without an open party does not fall back to follower share', async () => {
   const { c, requests, results } = setupWorker({
     'GET poshmark.com/vm-rest/parties': [200, { data: [] }],

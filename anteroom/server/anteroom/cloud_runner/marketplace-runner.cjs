@@ -449,8 +449,7 @@ async function executeMarketplaceOperation({
   const allowed = ['marketplace.execute', 'marketplace.result', 'marketplace.delete',
     'marketplace.promote', 'marketplace.promotion_check', 'marketplace.promotion_result',
     'marketplace.sessions', 'marketplace.verify_session', 'marketplace.sales', 'marketplace.sales_history',
-    'marketplace.import.page', 'marketplace.import.listing', 'marketplace.like_events',
-    'marketplace.active_offers'];
+    'marketplace.import.page', 'marketplace.import.listing', 'marketplace.like_events'];
   if (marketplace === 'poshmark') allowed.push('marketplace.form');
   if (!allowed.includes(type)) {
     return { result: { ok: false, safe_to_retry: true, error_code: 'rejected', error: 'Unsupported cloud command.' },

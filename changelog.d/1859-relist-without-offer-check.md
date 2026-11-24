@@ -1,0 +1,1 @@
+- Auto-relist no longer skips listings with open or unconfirmed buyer offers, so due listings relist again (including on Mercari). An open offer on a relisted listing ends with the old listing.

@@ -221,7 +221,6 @@ class AutoRelistRuleBody(BaseModel):
     price_adjust_mode: Literal["percent", "amount"] | None = None
     price_adjust_value: float | None = None
     price_floor: float | None = Field(default=None, ge=0)
-    skip_active_offers: bool = True
     filters: AutoRelistFiltersBody | None = None
 
 

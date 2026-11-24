@@ -220,7 +220,6 @@ export interface AutoRelistRule {
   price_adjust_value: number | null;
   price_floor: number | null;
   filters: AutoRelistFilters;
-  skip_active_offers: boolean;
   relisted_today: number;
   remaining_today: number;
   last_run_at: string | null;
@@ -236,7 +235,6 @@ export interface AutoRelistRuleBody {
   price_adjust_value?: number | null;
   price_floor?: number | null;
   filters?: AutoRelistFilters;
-  skip_active_offers?: boolean;
 }
 
 export interface AutoRelistLog {

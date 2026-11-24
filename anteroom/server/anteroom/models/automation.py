@@ -29,7 +29,6 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     false,
-    true,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -233,7 +232,6 @@ class MarketplaceRelistRule(SellerOwned, Base):
     price_floor: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Filters: min_likes, max_likes, conditions, min_price, max_price, keywords, labels
     filters: Mapped[Any] = mapped_column(JSON, nullable=False, default=dict)
-    skip_active_offers: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
@@ -257,7 +255,7 @@ class MarketplaceRelistLog(SellerOwned, Base):
     new_listing_id: Mapped[str | None] = mapped_column(String, nullable=True)
     old_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     new_price: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # completed, skipped_active_offer, failed, down_needs_relist
+    # completed, relist_pending, failed, down_needs_relist (older rows may say skipped_active_offer or skipped_offer_unverified)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
