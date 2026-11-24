@@ -152,6 +152,7 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
         expected_revision_id=expected_revision_id,
         commit=commit,
         depop_notes=depop_notes,
+        verbatim=verbatim,
     )
 
     from anteroom.services.seller_overrides import notes_for_listing_edits

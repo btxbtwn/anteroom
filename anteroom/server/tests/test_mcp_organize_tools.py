@@ -201,6 +201,49 @@ def test_discard_puts_the_item_back_to_what_is_live_without_touching_marketplace
     assert not is_error and again["discarded"] is False
 
 
+def test_discard_keeps_the_items_labels_and_cost():
+    client = TestClient(app)
+    with SessionLocal() as db:
+        _seed_item(db, "kept", current={**EDITED, "labels": ["Bin 4"], "cost": 12.5},
+                   labels="Bin 4", doc_labels=[])
+        conv = db.get(Conversation, "kept")
+        conv.notes = json.dumps({"vendooLabels": "Bin 4", "cog": "12.5"})
+        db.commit()
+
+    pending, _ = _call_tool(client, "get_pending_edits", {"conversation_id": "kept"})
+    [item] = pending["items"]
+    assert all("labels" not in {c["field"] for c in row["changes"]} for row in item["marketplaces"])
+
+    done, is_error = _call_tool(client, "discard_pending_edits",
+                                {"conversation_id": "kept", "expected_revision_id": "kept-new"})
+    assert not is_error and done["discarded"] is True, done
+    assert done["listing"]["title"] == "Vintage Brass Teapot"
+    assert done["listing"]["price"] == 65.0
+    assert done["listing"]["labels"] == ["Bin 4"]
+    assert done["listing"]["cost"] == 12.5
+    assert done["marketplaces_still_behind"] == []
+    with SessionLocal() as db:
+        notes = parse_notes(db.get(Conversation, "kept").notes)
+    assert notes["vendooLabels"] == "Bin 4"
+    assert notes["cog"] == "12.5"
+
+
+def test_discard_restores_the_sent_category_on_an_item_with_native_forms():
+    forms = {"ebay": {"fields": []}}
+    sent = {**SENT, "direct_category_ids": {"ebay": "111"}, "_native_forms": forms}
+    with SessionLocal() as db:
+        _seed_item(db, "native", current={**sent, "direct_category_ids": {"ebay": "222"}})
+        db.get(ListingRevision, "native-sent").listing_json = sent
+        db.commit()
+
+    client = TestClient(app)
+    done, is_error = _call_tool(client, "discard_pending_edits",
+                                {"conversation_id": "native", "expected_revision_id": "native-new"})
+    assert not is_error and done["discarded"] is True, done
+    assert done["listing"]["direct_category_ids"] == {"ebay": "111"}
+    assert done["marketplaces_still_behind"] == []
+
+
 def test_discard_refuses_an_item_that_is_not_live_anywhere():
     client = TestClient(app)
     with SessionLocal() as db:

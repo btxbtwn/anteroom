@@ -25,6 +25,8 @@ from anteroom.services.unsent_edits import normalized_listing_hash, unsent_edits
 
 # Keys whose children are named after a marketplace (``ebay``, ``ebay_path``, ``ebay_suggested``).
 _PER_MARKET_CHILDREN = ("direct_category_ids", "marketplace_photos")
+# The seller's own bookkeeping: never sent, so never behind, and kept when edits are discarded.
+_PRIVATE = ("labels", "cost")
 
 
 class PendingEditsError(ValueError):
@@ -33,7 +35,7 @@ class PendingEditsError(ValueError):
 
 def _comparable(listing: dict | None) -> dict[str, Any]:
     raw = listing if isinstance(listing, dict) else {}
-    return without_operational_keys({key: value for key, value in raw.items() if key in ROOTS})
+    return without_operational_keys({key: value for key, value in raw.items() if key in ROOTS and key not in _PRIVATE})
 
 
 def _changes(live: dict, new: dict, path: tuple[str, ...] = ()) -> list[dict[str, Any]]:
@@ -91,8 +93,10 @@ def pending_edits(db: Session, conversation_id: str | None = None) -> list[dict[
             if sent and (sent == rev_id or hashes.get(sent) == hashes.get(rev_id)):
                 continue
             changes = None
-            if sent in bodies:
+            if sent and sent in bodies:
                 changes = [c for c in _changes(_comparable(bodies[sent]), now) if _concerns(rec.marketplace, c["field"])]
+                if not changes:
+                    continue
             behind.append({
                 "marketplace": rec.marketplace,
                 "live_revision_id": sent,
@@ -142,12 +146,20 @@ def discard_pending_edits(
         raise PendingEditsError("The version last sent to this item's marketplaces is no longer stored.")
     target = max(sent, key=lambda rev: (rev.created_at is not None, rev.created_at, rev.id))
     current = db.get(ListingRevision, current_id)
-    if current is not None and normalized_listing_hash(current.listing_json) == normalized_listing_hash(target.listing_json):
+    current_json = current.listing_json if current is not None and isinstance(current.listing_json, dict) else {}
+    restored = copy.deepcopy(target.listing_json)
+    # Labels and cost are the seller's bookkeeping, not what marketplaces show: keep today's.
+    for key in _PRIVATE:
+        if key in current_json:
+            restored[key] = copy.deepcopy(current_json[key])
+        else:
+            restored.pop(key, None)
+    if current is not None and normalized_listing_hash(current_json) == normalized_listing_hash(restored):
         return {"discarded": False, "revision_id": current_id, "restored_from_revision_id": target.id,
                 "listing": current.listing_json}
 
     saved = listing_editor.save_listing_edit(
-        conv_id, copy.deepcopy(target.listing_json), db, source="restore",
+        conv_id, restored, db, source="restore",
         expected_revision_id=expected_revision_id, commit=False, verbatim=True,
     )
     # Going back is not a correction for generation to learn from.
