@@ -127,7 +127,13 @@ function mercari(item, search = []) {
 
 const MERCARI_ITEM = { itemId: 'm12345678901', name: 'Denim jacket', description: 'Classic fit', status: 'on_sale', price: 4500,
   photos: [{ imageUrl: 'https://u-mercari-images.mercdn.net/photos/m1_1.jpg' }], itemCondition: { id: 3 }, itemSize: { id: 5 },
-  brand: { id: 9 }, itemCategory: { id: 111 }, seller: { id: 42 } };
+  brand: { id: 9 }, itemCategory: { id: 111 }, seller: { id: 42, zipCode: '10001' }, shippingPayer: { id: 2 },
+  shippingClasses: [{ id: 2508 }], shippingPackageWeight: { weight: 20, unit: 'OUNCE' },
+  shippingPackageDimension: { length: 12, width: 10, height: 2, unit: 'INCH' }, isAutoPriceDrop: true, minPriceForAutoPriceDrop: 3800 };
+// What Mercari's form holds for MERCARI_ITEM, in the Mercari tab's own fields.
+const MERCARI_SPECIFICS = { condition: '3', nativeSizeId: '5', shippingMethod: 'MERCARI', shippingClassId: '2508', shippingPayerId: 2,
+  package: { pounds: 1, ounces: 4, fitsShoebox: 'no', length: 12, width: 10, height: 2 }, shipsFrom: '10001',
+  smartPricing: { enabled: true, minimumPrice: 38 } };
 
 test('Mercari lists only on-sale items for the signed-in seller', async () => {
   const items = Array.from({ length: 48 }, (_, index) => ({ id: `m1000000${String(index).padStart(4, '0')}`, name: `Item ${index}`, status: 'on_sale', price: 1200 }));
@@ -151,10 +157,37 @@ test('Mercari reads its edit-page item details and names the catalog ids', async
     id: 'm12345678901', url: 'https://www.mercari.com/us/item/m12345678901/', title: 'Denim jacket', description: 'Classic fit',
     price: 45, currency: 'USD', quantity: 1, brand: 'Levi\'s', size: 'M', condition: 'Good',
     category_path: 'Women > Coats & jackets > Jean jackets', category_id: '111', sku: null, colors: [],
-    photos: ['https://u-mercari-images.mercdn.net/photos/m1_1.jpg'],
+    photos: ['https://u-mercari-images.mercdn.net/photos/m1_1.jpg'], mercari_specifics: MERCARI_SPECIFICS,
   });
+  const query = ops.find(op => op.operationName === 'sellFetchItemsDetails').query;
+  // The same fields Mercari's edit page reads, which an update sends back.
+  for (const field of ['shippingPayer', 'shippingClasses', 'shippingPackageWeight', 'shippingPackageDimension', 'zipCode',
+    'isAutoPriceDrop', 'minPriceForAutoPriceDrop']) assert.match(query, new RegExp(`\\b${field}\\b`));
   assert.deepEqual(ops.find(op => op.operationName === 'sellFetchItemsDetails').variables, { itemId: 'm12345678901' });
   readOnly(requests);
+});
+
+test('Mercari import keeps no brand, ship on your own, a shoebox, a skipped size and Smart Pricing off', async () => {
+  const read = async item => (await listing(mercari({ ...MERCARI_ITEM, ...item }).c, 'mercari', 'm12345678901')).listing.mercari_specifics;
+  const own = await read({ brand: null, itemSize: null, shippingClasses: [{ id: 0 }], shippingPayer: { id: 2 },
+    shippingPackageDimension: null, isAutoPriceDrop: false, minPriceForAutoPriceDrop: 0, itemCondition: { id: 2 } });
+  assert.deepEqual(own, { condition: '2', noBrand: true, shippingMethod: 'SOYO', shippingPayerId: 2,
+    package: { pounds: 1, ounces: 4 }, shipsFrom: '10001', smartPricing: { enabled: false } });
+  assert.deepEqual((await read({ shippingPackageDimension: { length: 14, width: 10, height: 5, unit: 'INCH' } })).package,
+    { pounds: 1, ounces: 4, fitsShoebox: 'yes' });
+  assert.deepEqual((await read({ shippingPackageDimension: { length: 0, width: 0, height: 0, unit: 'INCH' },
+    shippingPackageWeight: { weight: 2, unit: 'POUND' } })).package, { pounds: 2, ounces: 0, fitsShoebox: 'no', skipDimensions: true });
+});
+
+test('An imported Mercari listing updates back to Mercari with nothing changed', async () => {
+  const { c } = mercari(MERCARI_ITEM);
+  const imported = (await listing(c, 'mercari', 'm12345678901')).listing;
+  // The item as Anteroom saves it (chrome_import.snapshot), with Mercari's label for its package.
+  const saved = c.mercariShippingListing({ title: imported.title, description: imported.description, price: imported.price,
+    size: imported.size, condition: 'Pre-Owned - Good', direct_category_ids: { mercari: imported.category_id },
+    mercari_specifics: imported.mercari_specifics }, [{ id: 2508 }]);
+  const live = c.mercariLiveForm(MERCARI_ITEM);
+  assert.deepEqual(plain(c.mercariLiveDifferences(live, c.mercariRevisionForm(c.mercariCommon(saved)), 1)), []);
 });
 
 test('Mercari refuses another seller and an item that is not on sale', async () => {

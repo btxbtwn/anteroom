@@ -119,6 +119,53 @@ def test_each_chrome_marketplace_imports_with_its_public_link(chrome, marketplac
     if marketplace == "mercari":
         assert response.json()["warnings"] == ["The marketplace did not provide photos. Add photos before crosslisting."]
 
+MERCARI_SPECIFICS = {"condition": "2", "nativeSizeId": "5", "shippingMethod": "MERCARI", "shippingClassId": "2508",
+                     "shippingPayerId": 2, "shipsFrom": "10001", "smartPricing": {"enabled": True, "minimumPrice": 38},
+                     "package": {"pounds": 1, "ounces": 4, "fitsShoebox": "no", "length": 12, "width": 10, "height": 2}}
+
+
+def test_mercari_import_fills_every_field_on_the_mercari_tab(chrome):
+    from anteroom.services import mercari_form
+
+    chrome.remote.listings["mercari"].update(brand="Levi's", category_id="1084", mercari_specifics=copy.deepcopy(MERCARI_SPECIFICS))
+    response = post(chrome, "mercari", "m12345678901")
+    assert response.status_code == 200, response.text
+    snapshot = chrome.db.query(ListingRevision).one().listing_json
+    assert snapshot["direct_category_ids"] == {"mercari": "1084"}
+    assert snapshot["mercari_specifics"] | MERCARI_SPECIFICS == snapshot["mercari_specifics"]
+    # Item Details carry the package too, for the other marketplaces.
+    assert (snapshot["weight_lb"], snapshot["weight_oz"], snapshot["package_dimensions_in"]) == (1, 4, "12x10x2")
+    fields = {row["path"]: row["value"] for row in mercari_form.form(snapshot)["fields"]}
+    assert fields["direct_category_ids.mercari"] == "1084"
+    assert (fields["mercari_specifics.brand"], fields["mercari_specifics.noBrand"]) == ("Levi's", False)
+    assert fields["mercari_specifics.condition"] == "2"
+    assert fields["mercari_specifics.shippingMethod"] == "MERCARI"
+    assert fields["mercari_specifics.shippingClassId"] == "2508"
+    assert fields["mercari_specifics.shippingPayerId"] == 2
+    assert fields["mercari_specifics.shipsFrom"] == "10001"
+    assert [fields[f"mercari_specifics.package.{key}"] for key in ("pounds", "ounces", "fitsShoebox", "length", "width", "height")] == [
+        1, 4, "no", 12, 10, 2]
+    assert (fields["mercari_specifics.smartPricing.enabled"], fields["mercari_specifics.smartPricing.minimumPrice"]) == (True, 38)
+    assert fields["price"] == 45.0
+
+
+def test_mercari_import_keeps_smart_pricing_off_no_brand_and_own_shipping(chrome):
+    from anteroom.services import mercari_form
+
+    chrome.remote.listings["mercari"]["mercari_specifics"] = {
+        "condition": "3", "noBrand": True, "shippingMethod": "SOYO", "shippingPayerId": 2, "smartPricing": {"enabled": False},
+        "package": {"pounds": 0, "ounces": 9}, "unknown": "dropped", "shippingClassId": "<b>"}
+    assert post(chrome, "mercari", "m12345678901").status_code == 200
+    snapshot = chrome.db.query(ListingRevision).one().listing_json
+    specifics = snapshot["mercari_specifics"]
+    assert "unknown" not in specifics and "shippingClassId" not in specifics
+    fields = {row["path"]: row["value"] for row in mercari_form.form(snapshot)["fields"]}
+    assert fields["mercari_specifics.smartPricing.enabled"] is False
+    assert fields["mercari_specifics.noBrand"] is True
+    assert (fields["mercari_specifics.shippingMethod"], fields["mercari_specifics.shippingPayerId"]) == ("SOYO", 2)
+    assert (fields["mercari_specifics.package.pounds"], fields["mercari_specifics.package.ounces"]) == (0, 9)
+
+
 def test_repeat_import_keeps_local_edits_without_reading_chrome(chrome):
     first = post(chrome, "depop", "shop-denim-jacket-136d").json()
     listing_persistence.save_revision(chrome.db, first["conversation_id"], {"title": "Edited", "price": 99}, "user")
