@@ -6,6 +6,7 @@ publishes, updates live listings, or delists anything.
 from __future__ import annotations
 
 import calendar
+import hashlib
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -27,6 +28,9 @@ from anteroom.models.marketplace_listing import MarketplaceListing
 from anteroom.models.ownership import LOCAL_USER_ID
 
 DISMISS_TTL_DAYS = 7
+# A resolved duplicate pair is recorded as a "not the same" review, the same
+# record Settings → Similar items keeps, so both places agree.
+_DUPLICATE_KIND = "duplicate_listing"
 _SENT_PROMOTION_STATES = ("sent", "confirmed", "completed")
 _DISCONNECTED_CLOUD_STATES = ("expired", "error", "revoked")
 _FAILED_LISTING_STATES = ("failed", "error")
@@ -360,6 +364,21 @@ def _duplicate_key(first: str, second: str) -> str:
     return f"duplicate:{a}:{b}"
 
 
+def _duplicate_pair(item_key: str) -> tuple[str, str] | None:
+    prefix, _, rest = item_key.partition(":")
+    first, sep, second = rest.partition(":")
+    if prefix != "duplicate" or not sep or not first or not second or first == second:
+        return None
+    return first, second
+
+
+def _fingerprint(*parts: object) -> str:
+    """A short hash of what makes an alert this alert. Resolve hides an item
+    only while it stays equal, so a new sale, failure or expiry shows again."""
+    joined = "\x1f".join("" if part is None else str(part) for part in parts)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:32]
+
+
 def _collect_attention_items(db: Session, *, now_utc: datetime, dismissed_keys: set[str]) -> list[dict[str, Any]]:
     from anteroom.services import marketplace_accounts, sale_delist_followup, similar_items
     from anteroom.services.unsent_edits import unsent_edits
@@ -373,7 +392,8 @@ def _collect_attention_items(db: Session, *, now_utc: datetime, dismissed_keys: 
         for alert in alerts:
             conv_id = str(alert["conversationId"])
             sale_id = str(alert["saleId"])
-            markets = ", ".join(_market_name(entry.get("marketplace")) for entry in alert.get("stillListed") or [])
+            left = alert.get("stillListed") or []
+            markets = ", ".join(_market_name(entry.get("marketplace")) for entry in left)
             sold_on = _market_name(alert.get("soldOn"))
             items.append({
                 "key": f"still-listed:{conv_id}:{sale_id}",
@@ -384,6 +404,10 @@ def _collect_attention_items(db: Session, *, now_utc: datetime, dismissed_keys: 
                 "action_label": "Open listing",
                 "target": {"view": "listings", "conversation_id": conv_id},
                 "occurred_at": alert.get("soldAt"),
+                # Which listings this sale left up: a relist or another sale changes it.
+                "fingerprint": _fingerprint(
+                    sale_id, *sorted(f"{entry.get('marketplace')}={entry.get('listingId')}" for entry in left),
+                ),
             })
     except Exception:
         pass
@@ -413,6 +437,7 @@ def _collect_attention_items(db: Session, *, now_utc: datetime, dismissed_keys: 
                     "action_label": "Open Connections",
                     "target": {"view": "settings", "settings_section": "connections"},
                     "occurred_at": _iso(row.updated_at),
+                    "fingerprint": _fingerprint(row.state, _iso(row.expires_at), _iso(row.updated_at), row.last_error),
                 })
     except Exception:
         pass
@@ -440,6 +465,7 @@ def _collect_attention_items(db: Session, *, now_utc: datetime, dismissed_keys: 
                         if isinstance(connected_at, (int, float))
                         else None
                     ),
+                    "fingerprint": _fingerprint(error, connected_at),
                 })
     except Exception:
         pass
@@ -474,6 +500,7 @@ def _collect_attention_items(db: Session, *, now_utc: datetime, dismissed_keys: 
                 "action_label": "Inspect listing",
                 "target": {"view": "listings", "conversation_id": conv_id},
                 "occurred_at": _iso(job.updated_at or job.created_at),
+                "fingerprint": _fingerprint(job.id, job.current_step, job.last_error),
             })
 
     failed_listings = (
@@ -502,6 +529,7 @@ def _collect_attention_items(db: Session, *, now_utc: datetime, dismissed_keys: 
             "action_label": "Fix listing",
             "target": {"view": "listings", "conversation_id": ml.conversation_id},
             "occurred_at": _iso(ml.updated_at),
+            "fingerprint": _fingerprint(ml.state, ml.error, _iso(ml.updated_at)),
         })
 
     # 4. Listings with unsent live edits
@@ -526,6 +554,8 @@ def _collect_attention_items(db: Session, *, now_utc: datetime, dismissed_keys: 
                 "action_label": "Review edits",
                 "target": {"view": "listings", "conversation_id": conv_id},
                 "occurred_at": _iso(conv.updated_at),
+                # The saved version not yet sent: another edit makes a new one.
+                "fingerprint": _fingerprint(revisions.get(conv_id)),
             })
     except Exception:
         pass
@@ -548,6 +578,7 @@ def _collect_attention_items(db: Session, *, now_utc: datetime, dismissed_keys: 
             "action_label": "Review approval",
             "target": {"view": "automations", "conversation_id": approval.conversation_id},
             "occurred_at": _iso(approval.created_at),
+            "fingerprint": _fingerprint(approval.status, approval.review_basis, _iso(approval.created_at)),
         })
 
     # 5b. Unresolved relist gaps (down, needs relist)
@@ -567,6 +598,7 @@ def _collect_attention_items(db: Session, *, now_utc: datetime, dismissed_keys: 
             "action_label": "Open Automations",
             "target": {"view": "automations", "conversation_id": gap.conversation_id},
             "occurred_at": _iso(gap.created_at),
+            "fingerprint": _fingerprint(gap.state, gap.error),
         })
 
     # 6. Potential duplicate / similar listings (read-only, no Storage fetches)
@@ -586,13 +618,14 @@ def _collect_attention_items(db: Session, *, now_utc: datetime, dismissed_keys: 
             reasons = ", ".join(str(r).replace("_", " ") for r in (pair.get("reasons") or []))
             items.append({
                 "key": _duplicate_key(first_id, second_id),
-                "kind": "duplicate_listing",
+                "kind": _DUPLICATE_KIND,
                 "priority": "low",
                 "title": f"Possible duplicate: {first.get('title') or 'Untitled'}",
                 "detail": f"Matches “{second.get('title') or 'Untitled'}” ({reasons or 'similar item'}).",
                 "action_label": "Review duplicates",
                 "target": {"view": "settings", "settings_section": "listings", "target_id": "similar-items"},
                 "occurred_at": None,
+                "fingerprint": _fingerprint(first_id, second_id),
             })
     except Exception:
         pass
@@ -628,42 +661,90 @@ def home_summary(
     )
     goals = [compute_goal_progress(db, goal, analytics_rows, now_utc=clock, tz=tz) for goal in goal_rows]
 
-    now_naive = _naive_utc(clock)
-    dismissals = {
-        row.item_key: row
-        for row in db.query(AttentionDismissal).filter(AttentionDismissal.expires_at > now_naive).all()
-    }
+    return {"today": today, "goals": goals, **attention_inbox(db, now=clock)}
 
-    all_items = _collect_attention_items(db, now_utc=clock, dismissed_keys=set(dismissals))
+
+def _hidden_rows(db: Session, now_utc: datetime) -> tuple[dict[str, AttentionDismissal], dict[str, AttentionDismissal]]:
+    """Snoozed rows still within their window, and resolved rows, by item key."""
+    now_naive = _naive_utc(now_utc)
+    snoozed: dict[str, AttentionDismissal] = {}
+    resolved: dict[str, AttentionDismissal] = {}
+    for row in db.query(AttentionDismissal).all():
+        if row.fingerprint is not None:
+            resolved[row.item_key] = row
+        elif row.expires_at is not None and row.expires_at > now_naive:
+            snoozed[row.item_key] = row
+    return snoozed, resolved
+
+
+def _resolved_duplicates(db: Session) -> list[dict[str, Any]]:
+    """Pairs the seller said are different items, newest first."""
+    from anteroom.models.similar_item import SimilarItemReview
+
+    rows = (
+        db.query(SimilarItemReview.first_id, SimilarItemReview.second_id, SimilarItemReview.created_at)
+        .filter(SimilarItemReview.decision == "dismissed")
+        .order_by(SimilarItemReview.created_at.desc())
+        .all()
+    )
+    ids = {conv_id for row in rows for conv_id in (row.first_id, row.second_id)}
+    titles = dict(db.query(Conversation.id, Conversation.title).filter(Conversation.id.in_(ids)).all()) if ids else {}
+    return [
+        {
+            "key": _duplicate_key(row.first_id, row.second_id),
+            "kind": _DUPLICATE_KIND,
+            "priority": "low",
+            "title": f"Possible duplicate: {titles.get(row.first_id) or 'Untitled'}",
+            "detail": f"Marked not a duplicate of “{titles.get(row.second_id) or 'Untitled'}”.",
+            "action_label": "Review duplicates",
+            "target": {"view": "settings", "settings_section": "listings", "target_id": "similar-items"},
+            "occurred_at": None,
+            "fingerprint": _fingerprint(row.first_id, row.second_id),
+            "resolved_at": _iso(row.created_at),
+        }
+        for row in rows
+    ]
+
+
+def attention_inbox(db: Session, *, now: datetime | None = None) -> dict[str, Any]:
+    """Needs Attention split into what shows, what is snoozed and what is resolved."""
+    clock = _utc(now) or datetime.now(UTC)
+    snoozed_rows, resolved_rows = _hidden_rows(db, clock)
+    all_items = _collect_attention_items(db, now_utc=clock, dismissed_keys=set(snoozed_rows))
 
     active_items: list[dict[str, Any]] = []
-    dismissed_items: list[dict[str, Any]] = []
+    snoozed_items: list[dict[str, Any]] = []
+    resolved_items: list[dict[str, Any]] = []
     by_kind: dict[str, int] = {}
 
     for item in all_items:
-        dismissal = dismissals.get(item["key"])
-        if dismissal is not None:
-            expires_utc = _utc(dismissal.expires_at) or clock
+        resolution = resolved_rows.get(item["key"])
+        snooze = snoozed_rows.get(item["key"])
+        if resolution is not None and resolution.fingerprint == item["fingerprint"]:
+            resolved_items.append({**item, "resolved_at": _iso(resolution.dismissed_at)})
+        elif snooze is not None:
+            expires_utc = _utc(snooze.expires_at) or clock
             remaining_seconds = max(0.0, (expires_utc - clock).total_seconds())
             reappears_in_days = max(1, int((remaining_seconds + 86399) // 86400))
-            dismissed_items.append({
+            snoozed_items.append({
                 **item,
-                "dismissed_at": _iso(dismissal.dismissed_at),
-                "expires_at": _iso(dismissal.expires_at),
+                "dismissed_at": _iso(snooze.dismissed_at),
+                "expires_at": _iso(snooze.expires_at),
                 "reappears_in_days": reappears_in_days,
             })
         else:
             active_items.append(item)
             by_kind[item["kind"]] = by_kind.get(item["kind"], 0) + 1
+    resolved_items.extend(_resolved_duplicates(db))
 
     return {
-        "today": today,
-        "goals": goals,
         "needs_attention": active_items,
-        "dismissed": dismissed_items,
+        "dismissed": snoozed_items,
+        "resolved": resolved_items,
         "counts": {
             "active": len(active_items),
-            "dismissed": len(dismissed_items),
+            "dismissed": len(snoozed_items),
+            "resolved": len(resolved_items),
             "by_kind": by_kind,
         },
     }
@@ -762,6 +843,24 @@ def delete_goal(db: Session, goal_id: str) -> bool:
     return True
 
 
+def _clean_key(item_key: str) -> str:
+    cleaned_key = (item_key or "").strip()
+    if not cleaned_key or len(cleaned_key) > 200:
+        raise ValueError("Invalid attention item key.")
+    return cleaned_key
+
+
+def _save_hide(db: Session, *, item_key: str, kind: str, values: dict[str, Any]) -> None:
+    insert = sqlite_insert if db.get_bind().dialect.name == "sqlite" else pg_insert
+    values = {"kind": ((kind or "").strip() or "general")[:40], **values}
+    statement = insert(AttentionDismissal).values(
+        user_id=getattr(db, "user_id", LOCAL_USER_ID), item_key=item_key, **values,
+    )
+    db.execute(statement.on_conflict_do_update(
+        index_elements=[AttentionDismissal.user_id, AttentionDismissal.item_key], set_=values,
+    ))
+
+
 def dismiss_attention_item(
     db: Session,
     *,
@@ -769,21 +868,14 @@ def dismiss_attention_item(
     kind: str,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    cleaned_key = (item_key or "").strip()
-    cleaned_kind = (kind or "").strip() or "general"
-    if not cleaned_key or len(cleaned_key) > 200:
-        raise ValueError("Invalid attention item key.")
+    """Snooze: hide the item for DISMISS_TTL_DAYS, then show it again if it still applies."""
+    cleaned_key = _clean_key(item_key)
     clock = _utc(now) or datetime.now(UTC)
     dismissed_at = _naive_utc(clock)
     expires_at = _naive_utc(clock + timedelta(days=DISMISS_TTL_DAYS))
-    insert = sqlite_insert if db.get_bind().dialect.name == "sqlite" else pg_insert
-    values = {"kind": cleaned_kind[:40], "dismissed_at": dismissed_at, "expires_at": expires_at}
-    statement = insert(AttentionDismissal).values(
-        user_id=getattr(db, "user_id", LOCAL_USER_ID), item_key=cleaned_key, **values,
-    )
-    db.execute(statement.on_conflict_do_update(
-        index_elements=[AttentionDismissal.user_id, AttentionDismissal.item_key], set_=values,
-    ))
+    _save_hide(db, item_key=cleaned_key, kind=kind, values={
+        "dismissed_at": dismissed_at, "expires_at": expires_at, "fingerprint": None,
+    })
     db.commit()
     return {
         "item_key": cleaned_key,
@@ -793,27 +885,69 @@ def dismiss_attention_item(
     }
 
 
-def attention_item_kinds(db: Session, *, now: datetime | None = None) -> dict[str, str]:
-    """Every Needs Attention item shown right now, dismissed or not, by key."""
+def resolve_attention_item(
+    db: Session,
+    *,
+    item_key: str,
+    kind: str,
+    fingerprint: str,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Resolve: hide the item until what it reports changes.
+
+    A duplicate pair is recorded as "not the same" and never flagged again;
+    either listing can still be flagged against another one. Every other item
+    stays hidden only while its fingerprint matches, so a new sale, failure or
+    expiry shows again. Changes no listing and nothing on a marketplace.
+    """
+    from anteroom.services import similar_items
+
+    cleaned_key = _clean_key(item_key)
     clock = _utc(now) or datetime.now(UTC)
-    now_naive = _naive_utc(clock)
-    dismissed = {
-        row.item_key
-        for row in db.query(AttentionDismissal).filter(AttentionDismissal.expires_at > now_naive).all()
-    }
+    resolved_at = _naive_utc(clock)
+    pair = _duplicate_pair(cleaned_key)
+    if pair is not None:
+        similar_items.dismiss(db, *pair)
+        # Clear a snooze so the pair is listed once, as resolved.
+        db.query(AttentionDismissal).filter(AttentionDismissal.item_key == cleaned_key).delete()
+        db.commit()
+        return {"item_key": cleaned_key, "kind": _DUPLICATE_KIND, "resolved_at": _iso(resolved_at)}
+    cleaned_fingerprint = (fingerprint or "").strip()
+    if not cleaned_fingerprint or len(cleaned_fingerprint) > 64:
+        raise ValueError("Invalid attention item fingerprint.")
+    _save_hide(db, item_key=cleaned_key, kind=kind, values={
+        "dismissed_at": resolved_at, "expires_at": None, "fingerprint": cleaned_fingerprint,
+    })
+    db.commit()
+    return {"item_key": cleaned_key, "kind": ((kind or "").strip() or "general")[:40], "resolved_at": _iso(resolved_at)}
+
+
+def attention_items(db: Session, *, now: datetime | None = None) -> dict[str, dict[str, Any]]:
+    """Every Needs Attention item that applies right now, hidden or not, by key."""
+    clock = _utc(now) or datetime.now(UTC)
+    snoozed, _resolved = _hidden_rows(db, clock)
     return {
-        item["key"]: item["kind"]
-        for item in _collect_attention_items(db, now_utc=clock, dismissed_keys=dismissed)
+        item["key"]: item
+        for item in _collect_attention_items(db, now_utc=clock, dismissed_keys=set(snoozed))
     }
 
 
 def restore_attention_item(db: Session, *, item_key: str) -> bool:
+    """Bring a snoozed or resolved item back. A resolved duplicate pair is
+    suggested again in Similar items too; a merge is never undone here."""
+    from anteroom.models.similar_item import SimilarItemReview
+
     cleaned_key = (item_key or "").strip()
     if not cleaned_key:
         return False
-    row = db.query(AttentionDismissal).filter(AttentionDismissal.item_key == cleaned_key).first()
-    if row is None:
-        return False
-    db.delete(row)
+    restored = db.query(AttentionDismissal).filter(AttentionDismissal.item_key == cleaned_key).delete() > 0
+    pair = _duplicate_pair(cleaned_key)
+    if pair is not None:
+        first, second = sorted(pair)
+        restored = db.query(SimilarItemReview).filter(
+            SimilarItemReview.first_id == first,
+            SimilarItemReview.second_id == second,
+            SimilarItemReview.decision == "dismissed",
+        ).delete() > 0 or restored
     db.commit()
-    return True
+    return restored

@@ -659,3 +659,280 @@ def test_failed_delist_alert_clears_once_every_marketplace_is_resolved():
     body = client.get("/api/home?timezone=UTC").json()
     alerted = {item["target"]["conversation_id"] for item in body["needs_attention"] if item["kind"] == "failed_job"}
     assert alerted == {"conv-delist-open", "conv-delist-deleting", "conv-delist-stopped"}
+
+
+def _seed_sold_elsewhere(db, now: datetime) -> Conversation:
+    conv = Conversation(id="conv-resolve-sold", title="Wool Peacoat", status="sold")
+    db.add(conv)
+    db.flush()
+    _add_listing(db, conv, {"title": "Wool Peacoat", "price": 90.0, "quantity": 1})
+    db.add_all([
+        MarketplaceListing(conversation_id=conv.id, marketplace="ebay", state="sold",
+                           listing_id="223344556677", listing_url="https://www.ebay.com/itm/223344556677",
+                           listed_at=now - timedelta(days=3)),
+        MarketplaceListing(conversation_id=conv.id, marketplace="poshmark", state="published",
+                           listing_id="66aa11bb22cc33dd44ee55ff",
+                           listing_url="https://poshmark.com/listing/Wool-Peacoat-66aa11bb22cc33dd44ee55ff",
+                           listed_at=now - timedelta(days=3)),
+        MarketplaceSale(conversation_id=conv.id, marketplace="ebay", order_id="ord-coat-1", line_id="line-coat-1",
+                        listing_id="223344556677", quantity=1, order_status="paid", source="marketplace",
+                        state="new", sold_at=now - timedelta(hours=2), received_at=now - timedelta(hours=2)),
+    ])
+    db.commit()
+    return conv
+
+
+def _attention(client: TestClient) -> dict:
+    response = client.get("/api/home/attention")
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_resolved_sold_elsewhere_alert_returns_with_a_new_sale():
+    client = TestClient(app)
+    now = datetime.now(UTC).replace(tzinfo=None)
+    with SessionLocal() as db:
+        conv_id = _seed_sold_elsewhere(db, now).id
+
+    item = next(i for i in _attention(client)["needs_attention"] if i["kind"] == "still_listed")
+    assert item["fingerprint"]
+    resolved = client.post("/api/home/attention/resolve", json={
+        "item_key": item["key"], "kind": item["kind"], "fingerprint": item["fingerprint"],
+    })
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["resolution"]["item_key"] == item["key"]
+
+    inbox = _attention(client)
+    assert item["key"] not in {i["key"] for i in inbox["needs_attention"]}
+    assert [i["key"] for i in inbox["resolved"]] == [item["key"]]
+    assert inbox["resolved"][0]["resolved_at"]
+    assert inbox["counts"]["resolved"] == 1
+    # Resolve has no expiry: still hidden well past the 7-day snooze.
+    later = home_dashboard.attention_inbox(SessionLocal(), now=datetime.now(UTC) + timedelta(days=30))
+    assert item["key"] not in {i["key"] for i in later["needs_attention"]}
+
+    # The same listing sells again: a new sale must raise the alert again.
+    with SessionLocal() as db:
+        db.add(MarketplaceSale(
+            conversation_id=conv_id, marketplace="ebay", order_id="ord-coat-2", line_id="line-coat-2",
+            listing_id="223344556677", quantity=1, order_status="paid", source="marketplace",
+            state="new", sold_at=now, received_at=now,
+        ))
+        db.commit()
+    inbox = _attention(client)
+    again = [i for i in inbox["needs_attention"] if i["kind"] == "still_listed"]
+    assert len(again) == 1 and again[0]["key"] != item["key"]
+    assert inbox["resolved"] == []
+
+
+def test_resolved_alert_returns_when_its_state_changes_under_the_same_key():
+    client = TestClient(app)
+    now = datetime.now(UTC).replace(tzinfo=None)
+    with SessionLocal() as db:
+        conv_id = _seed_sold_elsewhere(db, now).id
+    item = next(i for i in _attention(client)["needs_attention"] if i["kind"] == "still_listed")
+    client.post("/api/home/attention/resolve", json={
+        "item_key": item["key"], "kind": item["kind"], "fingerprint": item["fingerprint"],
+    })
+    assert item["key"] not in {i["key"] for i in _attention(client)["needs_attention"]}
+
+    # The sold item turns up live on another marketplace: same sale, new situation.
+    with SessionLocal() as db:
+        db.add(MarketplaceListing(conversation_id=conv_id, marketplace="mercari", state="published",
+                                  listing_id="m12345678901", listing_url="https://www.mercari.com/us/item/m12345678901/",
+                                  listed_at=now))
+        db.commit()
+    shown = next(i for i in _attention(client)["needs_attention"] if i["key"] == item["key"])
+    assert shown["fingerprint"] != item["fingerprint"]
+
+
+def test_resolved_failed_job_returns_on_a_new_failure_and_needs_a_fingerprint():
+    client = TestClient(app)
+    with SessionLocal() as db:
+        conv = Conversation(id="conv-resolve-fail", title="Brass Lamp", status="draft")
+        db.add(conv)
+        db.flush()
+        db.add(Job(conversation_id="conv-resolve-fail", approved_revision_id="rev-1", listing_snapshot={},
+                   status="failed", last_error="Missing shipping profile"))
+        db.commit()
+    item = next(i for i in _attention(client)["needs_attention"] if i["kind"] == "failed_job")
+
+    refused = client.post("/api/home/attention/resolve", json={"item_key": item["key"], "kind": item["kind"]})
+    assert refused.status_code == 422
+    # A fingerprint that is not the item's current one hides nothing.
+    client.post("/api/home/attention/resolve", json={
+        "item_key": item["key"], "kind": item["kind"], "fingerprint": "not-this-state",
+    })
+    assert item["key"] in {i["key"] for i in _attention(client)["needs_attention"]}
+
+    client.post("/api/home/attention/resolve", json={
+        "item_key": item["key"], "kind": item["kind"], "fingerprint": item["fingerprint"],
+    })
+    assert item["key"] not in {i["key"] for i in _attention(client)["needs_attention"]}
+
+    # Snoozing a resolved item replaces the resolve with a 7-day snooze.
+    client.post("/api/home/attention/dismiss", json={"item_key": item["key"], "kind": item["kind"]})
+    inbox = _attention(client)
+    assert [i["key"] for i in inbox["dismissed"]] == [item["key"]] and inbox["resolved"] == []
+    client.post("/api/home/attention/resolve", json={
+        "item_key": item["key"], "kind": item["kind"], "fingerprint": item["fingerprint"],
+    })
+    inbox = _attention(client)
+    assert inbox["dismissed"] == [] and [i["key"] for i in inbox["resolved"]] == [item["key"]]
+
+    with SessionLocal() as db:
+        db.add(Job(conversation_id="conv-resolve-fail", approved_revision_id="rev-2", listing_snapshot={},
+                   status="failed", last_error="Photo upload stalled",
+                   created_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=5)))
+        db.commit()
+    shown = [i for i in _attention(client)["needs_attention"] if i["kind"] == "failed_job"]
+    assert len(shown) == 1 and shown[0]["detail"] == "Photo upload stalled"
+
+    restored = client.post("/api/home/attention/restore", json={"item_key": item["key"]})
+    assert restored.json() == {"ok": True, "restored": True, "item_key": item["key"]}
+
+
+def test_not_duplicates_stays_resolved_and_other_pairs_still_show():
+    from anteroom.models.similar_item import SimilarItemReview
+    from anteroom.services import similar_items
+
+    client = TestClient(app)
+    with SessionLocal() as db:
+        for conv_id in ("dup-a", "dup-b", "dup-c"):
+            conv = Conversation(id=conv_id, title="Graphic Band Tee", status="draft",
+                                notes=json.dumps({"sku": "TEE-1"}))
+            db.add(conv)
+            db.flush()
+            _add_listing(db, conv, {"title": "Graphic Band Tee", "sku": "TEE-1"})
+        db.commit()
+    pairs = {i["key"] for i in _attention(client)["needs_attention"] if i["kind"] == "duplicate_listing"}
+    assert pairs == {"duplicate:dup-a:dup-b", "duplicate:dup-a:dup-c", "duplicate:dup-b:dup-c"}
+
+    response = client.post("/api/home/attention/resolve", json={
+        "item_key": "duplicate:dup-a:dup-b", "kind": "duplicate_listing",
+    })
+    assert response.status_code == 200, response.text
+
+    # Past the snooze window, and read by a fresh session as after a restart.
+    with SessionLocal() as db:
+        later = home_dashboard.attention_inbox(db, now=datetime.now(UTC) + timedelta(days=30))
+        assert {i["key"] for i in later["needs_attention"] if i["kind"] == "duplicate_listing"} == {
+            "duplicate:dup-a:dup-c", "duplicate:dup-b:dup-c",
+        }
+        assert [i["key"] for i in later["resolved"]] == ["duplicate:dup-a:dup-b"]
+        assert later["resolved"][0]["title"] == "Possible duplicate: Graphic Band Tee"
+        # Settings → Similar items agrees: the pair is no longer suggested.
+        suggested = {(p["first"]["id"], p["second"]["id"]) for p in similar_items.find_similar(db, compute_fingerprints=False)["pairs"]}
+        assert ("dup-a", "dup-b") not in suggested
+
+    restored = client.post("/api/home/attention/restore", json={"item_key": "duplicate:dup-a:dup-b"})
+    assert restored.json()["restored"] is True
+    assert "duplicate:dup-a:dup-b" in {i["key"] for i in _attention(client)["needs_attention"]}
+    with SessionLocal() as db:
+        assert db.query(SimilarItemReview).count() == 0
+
+    gone = client.post("/api/home/attention/resolve", json={"item_key": "duplicate:dup-a:nope", "kind": "duplicate_listing"})
+    assert gone.status_code == 404
+
+
+def test_not_duplicates_from_a_stale_screen_keeps_a_merge():
+    from anteroom.models.similar_item import SimilarItemReview
+
+    client = TestClient(app)
+    with SessionLocal() as db:
+        for conv_id in ("merged-a", "merged-b"):
+            db.add(Conversation(id=conv_id, title="Graphic Band Tee", status="draft"))
+        db.add(SimilarItemReview(first_id="merged-a", second_id="merged-b", decision="merged", kept_id="merged-a"))
+        db.commit()
+
+    key = "duplicate:merged-a:merged-b"
+    refused = client.post("/api/home/attention/resolve", json={"item_key": key, "kind": "duplicate_listing"})
+    assert refused.status_code == 409, refused.text
+    assert client.post("/api/similar-items/dismiss", json={
+        "first_id": "merged-a", "second_id": "merged-b",
+    }).status_code == 409
+    assert client.post("/api/home/attention/restore", json={"item_key": key}).json()["restored"] is False
+    with SessionLocal() as db:
+        row = db.query(SimilarItemReview).filter_by(first_id="merged-a", second_id="merged-b").one()
+        assert (row.decision, row.kept_id) == ("merged", "merged-a")
+
+
+def test_resolved_duplicates_do_not_crowd_out_the_pair_limit():
+    from anteroom.services import similar_items
+
+    with SessionLocal() as db:
+        # Three groups of six identical SKUs give 45 pairs, above the 25 shown.
+        for group in ("A", "B", "C"):
+            for index in range(6):
+                conv = Conversation(id=f"crowd-{group}{index}", title=f"unique{group}{index}", status="draft",
+                                    notes=json.dumps({"sku": f"shared-{group}"}))
+                db.add(conv)
+                db.flush()
+                _add_listing(db, conv, {"title": conv.title, "sku": f"shared-{group}"})
+        db.commit()
+        pairs = similar_items.find_similar(db, compute_fingerprints=False, limit=100)["pairs"]
+        keys = [f"duplicate:{p['first']['id']}:{p['second']['id']}" for p in pairs]
+        assert len(keys) == 45
+        for key in keys[:20]:
+            home_dashboard.resolve_attention_item(db, item_key=key, kind="duplicate_listing", fingerprint="")
+        inbox = home_dashboard.attention_inbox(db)
+    # Every one of the 25 unresolved pairs shows: resolved ones take no slots.
+    assert {i["key"] for i in inbox["needs_attention"] if i["kind"] == "duplicate_listing"} == set(keys[20:])
+    assert len(inbox["resolved"]) == 20
+
+
+def test_resolve_migration_keeps_snoozes_and_row_security(tmp_path, monkeypatch):
+    """Upgrade a database at the previous release's revision with a snooze in it."""
+    import sqlalchemy as sa
+    from alembic import command
+    from test_seller_ownership import migration_config
+
+    from anteroom.database import engine as application_engine
+    from anteroom.database import make_engine
+    from anteroom.services import backups
+
+    monkeypatch.setattr(backups, "BACKUPS_DIR", str(tmp_path / "backups"))
+    if application_engine.dialect.name == "sqlite":
+        engine = make_engine(f"sqlite:///{tmp_path / 'previous.db'}")
+        admin = name = None
+    else:
+        name = "resolve_migration_" + uuid.uuid4().hex
+        admin = application_engine.execution_options(isolation_level="AUTOCOMMIT")
+        with admin.connect() as connection:
+            connection.execute(sa.text(f'CREATE DATABASE "{name}"'))
+        engine = make_engine(application_engine.url.set(database=name).render_as_string(hide_password=False))
+    try:
+        command.upgrade(migration_config(engine), "d7e2a9c4b815")
+        expires = datetime(2026, 12, 1, 12, 0)
+        owner = str(uuid.uuid4())
+        with engine.begin() as db:
+            db.execute(sa.text("""
+                INSERT INTO attention_dismissals (id, user_id, item_key, kind, dismissed_at, expires_at)
+                VALUES ('kept', :owner, 'duplicate:a:b', 'duplicate_listing', :now, :expires)
+            """), {"owner": owner, "now": datetime(2026, 11, 24, 12, 0), "expires": expires})
+        command.upgrade(migration_config(engine), "head")
+        with engine.begin() as db:
+            kept = db.execute(sa.text(
+                "SELECT item_key, expires_at, fingerprint FROM attention_dismissals WHERE id = 'kept'"
+            )).one()
+            db.execute(sa.text("""
+                INSERT INTO attention_dismissals (id, user_id, item_key, kind, dismissed_at, expires_at, fingerprint)
+                VALUES ('resolved', :owner, 'failed-job:c:j', 'failed_job', :now, NULL, 'fp')
+            """), {"owner": owner, "now": datetime(2026, 11, 24, 12, 0)})
+            # The same seller cannot hold two rows for one item.
+            with pytest.raises(sa.exc.IntegrityError), db.begin_nested():
+                db.execute(sa.text("""
+                    INSERT INTO attention_dismissals (id, user_id, item_key, kind, dismissed_at)
+                    VALUES ('again', :owner, 'failed-job:c:j', 'failed_job', :now)
+                """), {"owner": owner, "now": datetime(2026, 11, 24, 12, 0)})
+            if engine.dialect.name == "postgresql":
+                assert db.execute(sa.text(
+                    "SELECT relrowsecurity FROM pg_class WHERE oid = 'attention_dismissals'::regclass"
+                )).scalar_one()
+        assert kept.item_key == "duplicate:a:b" and kept.fingerprint is None
+        assert str(kept.expires_at).startswith("2026-12-01 12:00")
+    finally:
+        engine.dispose()
+        if admin is not None:
+            with admin.connect() as connection:
+                connection.execute(sa.text(f'DROP DATABASE "{name}" WITH (FORCE)'))

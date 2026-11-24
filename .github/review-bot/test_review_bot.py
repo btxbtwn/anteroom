@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent))
+import release_autofix as release  # noqa: E402
 import review_bot as bot  # noqa: E402
 
 DIFF = """diff --git a/app.py b/app.py
@@ -46,6 +47,120 @@ def thread(root_login, root_body, replies=(), resolved=False):
     comments = [{"databaseId": 7, "author": {"login": root_login}, "body": root_body}]
     comments += [{"databaseId": 8 + i, "author": {"login": "github-actions"}, "body": b} for i, b in enumerate(replies)]
     return {"id": "T1", "isResolved": resolved, "path": "app.py", "line": 3, "comments": {"nodes": comments}}
+
+
+class ReleaseAutofixTests(unittest.TestCase):
+    def source(self, workflow, event):
+        return {
+            "path": workflow, "event": event, "head_branch": "main",
+            "head_repository": {"full_name": "owner/repo"}, "run_attempt": 2,
+            "status": "completed", "conclusion": "failure",
+        }
+
+    @patch.dict(os.environ, {"GITHUB_REPOSITORY": "owner/repo"})
+    def test_eligibility_checks_origin_event_and_current_attempt(self):
+        mac = self.source(release.MAC, "push")
+        deploy = self.source(release.DEPLOY, "workflow_run")
+        self.assertTrue(release.eligible(mac, 2))
+        self.assertTrue(release.eligible(deploy, 2))
+        self.assertFalse(release.eligible(deploy, 1))
+        for change in (
+            {"event": "pull_request"},
+            {"head_branch": "feature"},
+            {"head_repository": {"full_name": "fork/repo"}},
+            {"status": "in_progress"},
+            {"conclusion": "success"},
+        ):
+            self.assertFalse(release.eligible({**mac, **change}, 2), change)
+
+    def test_only_failed_safe_steps_provide_detailed_logs(self):
+        build = "Install dependencies and build frontend"
+        jobs = [{
+            "name": "package", "conclusion": "failure",
+            "steps": [{"name": name, "conclusion": "failure"} for name in (build, "Package app")],
+        }]
+        log = "\n".join((
+            f"package\t{build}\tfrontend build error",
+            "package\tPackage app\tNSURLErrorDomain Code=-1001 private submission metadata",
+            "package\tImport signing certificates\tprivate signing metadata",
+            f"another job\t{build}\tlog from a different job",
+        ))
+        evidence, safe_log = release.failure_evidence(release.MAC, jobs, log)
+        self.assertEqual(safe_log, f"package\t{build}\tfrontend build error")
+        self.assertIn("timed out", evidence["diagnostics"][0])
+        self.assertNotIn("metadata", str(evidence))
+
+    @patch.dict(os.environ, {"GITHUB_REPOSITORY": "owner/repo"})
+    def test_prepare_uses_the_selected_hosted_revision(self):
+        selected, trigger = "a" * 40, "b" * 40
+        source = {**self.source(release.DEPLOY, "workflow_run"), "head_sha": trigger}
+        jobs = [{"id": 123, "name": "Migrate and deploy", "conclusion": "failure"}]
+        notes = [{"title": "Deploy target", "message": selected}]
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ, {"RELEASE_REVIEW_DIR": tmp, "SOURCE_RUN": "10", "SOURCE_ATTEMPT": "2"},
+        ), patch.object(release, "api", side_effect=[source, {"jobs": jobs}, notes]) as api, patch.object(
+            release, "git", return_value=trigger,
+        ), patch.object(release, "is_ancestor", return_value=True) as ancestor, patch.object(
+            release, "repair_pr", return_value="",
+        ), patch.object(release, "run", return_value="") as run, patch.object(release, "set_output") as output:
+            release.prepare()
+            context = json.loads(Path(tmp, "context.json").read_text())
+        self.assertEqual(context["failed_revision"], selected)
+        self.assertTrue(context["repair_branch"].endswith(selected))
+        self.assertIn("/attempts/2/jobs", api.call_args_list[1].args[0])
+        self.assertIn("2", run.call_args.args)
+        ancestor.assert_called_once_with(selected, trigger)
+        output.assert_called_once_with(skip="false", can_repair="true")
+
+    @patch.dict(os.environ, {"GITHUB_REPOSITORY": "owner/repo"})
+    def test_publish_pushes_a_new_branch_and_opens_a_linked_pr(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            checkout, remote = root / "checkout", root / "remote.git"
+            subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+            subprocess.run(["git", "init", "-b", "main", str(checkout)], check=True, capture_output=True)
+
+            def git(*args):
+                return subprocess.check_output(["git", "-C", str(checkout), *args], text=True, stderr=subprocess.PIPE)
+
+            git("config", "user.name", "Test")
+            git("config", "user.email", "test@example.com")
+            git("remote", "add", "origin", str(remote))
+            git("commit", "--allow-empty", "-m", "Main")
+            git("push", "origin", "main")
+            base = git("rev-parse", "HEAD").strip()
+            branch = f"claude/release-fix/studio-macos/{base}"
+            url = "https://github.com/owner/repo/pull/8"
+            context = {
+                "repair_branch": branch, "base": base, "run_id": 10, "attempt": 2,
+                "url": "https://github.com/owner/repo/actions/runs/10/attempts/2",
+                "pipeline": "Studio macOS", "failed_revision": base,
+            }
+            (checkout / ".github").mkdir()
+            protected = checkout / ".github" / "protected.yml"
+            protected.write_text("protected")
+            (checkout / "fix.py").write_text("pass\n")
+            (root / "context.json").write_text(json.dumps(context))
+            (root / "report.md").write_text("Verified by a sandbox check.\n")
+            with patch.dict(os.environ, {"RELEASE_REVIEW_DIR": tmp}), patch.object(
+                release, "git", git,
+            ), patch.object(release, "api", side_effect=[
+                self.source(release.MAC, "push"), self.source(release.MAC, "push"),
+                {"number": 7}, {"html_url": url},
+            ]) as api, patch.object(release, "repair_pr", return_value=""), contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(SystemExit, "protected files"):
+                    release.publish()
+                self.assertEqual(git("ls-remote", "--heads", "origin").splitlines(), [f"{base}\trefs/heads/main"])
+                protected.unlink()
+                release.publish()
+            refs = git("ls-remote", "--heads", "origin")
+            self.assertIn(f"{base}\trefs/heads/main", refs)
+            self.assertIn(f"refs/heads/{branch}", refs)
+            payload = api.call_args.args[2]
+            self.assertEqual(payload["base"], "main")
+            self.assertEqual(payload["head"], branch)
+            self.assertTrue(payload["body"].startswith("Closes #7\n"))
+            self.assertEqual((root / "repair-pr.txt").read_text(), url)
 
 
 class DiffTests(unittest.TestCase):

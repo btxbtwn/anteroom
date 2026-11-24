@@ -13,14 +13,14 @@ const { api } = vi.hoisted(() => ({
       updateGoal: vi.fn(),
       deleteGoal: vi.fn(),
       dismissAttention: vi.fn(),
+      resolveAttention: vi.fn(),
       restoreAttention: vi.fn(),
     },
-    similarItems: { dismiss: vi.fn() },
   },
 }));
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
-  return { ...actual, api: { ...actual.api, home: api.home, similarItems: { ...actual.api.similarItems, ...api.similarItems } } };
+  return { ...actual, api: { ...actual.api, home: api.home } };
 });
 
 import { HomePage } from "./HomePage";
@@ -118,9 +118,24 @@ const sampleHome: HomeSummaryResponse = {
       reappears_in_days: 7,
     },
   ],
+  resolved: [
+    {
+      key: "duplicate:conv_7:conv_8",
+      kind: "duplicate_listing",
+      priority: "low",
+      title: "Possible duplicate: Band Tee",
+      detail: "Marked not a duplicate of “Band Tee”.",
+      action_label: "Review duplicates",
+      target: { view: "settings", settings_section: "listings", target_id: "similar-items" },
+      occurred_at: null,
+      fingerprint: "fp-dup",
+      resolved_at: "2026-11-20T07:00:00Z",
+    },
+  ],
   counts: {
     active: 2,
     dismissed: 1,
+    resolved: 1,
     by_kind: { still_listed: 1, expired_session: 1 },
   },
 };
@@ -140,6 +155,10 @@ beforeEach(() => {
       expires_at: "2026-11-29T12:00:00Z",
       reappears_in_days: 7,
     },
+  });
+  api.home.resolveAttention.mockResolvedValue({
+    ok: true,
+    resolution: { item_key: "still_listed:conv_1", kind: "still_listed", resolved_at: "2026-11-22T12:00:00Z" },
   });
   api.home.restoreAttention.mockResolvedValue({
     ok: true,
@@ -204,10 +223,10 @@ describe("HomePage", () => {
     expect(onNavigateAttention).toHaveBeenCalledWith({ view: "listings", conversation_id: "conv_1" });
   });
 
-  it("supports dismissing active items and restoring from the Dismissed tab", async () => {
+  it("supports dismissing active items and restoring from the Snoozed tab", async () => {
     await renderHome();
 
-    const dismissBtn = [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Dismiss");
+    const dismissBtn = [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Snooze 7 days");
     expect(dismissBtn).toBeDefined();
     await act(async () => {
       dismissBtn!.click();
@@ -216,7 +235,7 @@ describe("HomePage", () => {
     expect(api.home.dismissAttention).toHaveBeenCalledWith("still_listed:conv_1", "still_listed", expect.any(String));
     expect(container.textContent).not.toContain("Vintage Wool Coat sold on eBay — still live on Poshmark");
 
-    const dismissedTab = [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Dismissed");
+    const dismissedTab = [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Snoozed");
     expect(dismissedTab).toBeDefined();
     await act(async () => {
       dismissedTab!.click();
@@ -236,6 +255,40 @@ describe("HomePage", () => {
     expect(api.home.restoreAttention).toHaveBeenCalledWith("unsent_edits:conv_2", expect.any(String));
   });
 
+  it("resolves an alert into the Resolved tab and restores a pair marked not duplicates", async () => {
+    await renderHome();
+    const coat = "Vintage Wool Coat sold on eBay — still live on Poshmark";
+    const resolveBtn = [...container.querySelectorAll("button")].find(
+      (b) => b.getAttribute("aria-label") === `Resolve: ${coat}`,
+    );
+    expect(resolveBtn).toBeDefined();
+    await act(async () => {
+      resolveBtn!.click();
+    });
+    await settle();
+    expect(api.home.resolveAttention).toHaveBeenCalledWith(expect.objectContaining({ key: "still_listed:conv_1" }));
+    expect(container.textContent).not.toContain(coat);
+
+    const resolvedTab = [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Resolved");
+    await act(async () => {
+      resolvedTab!.click();
+    });
+    await settle();
+    expect(container.textContent).toContain(coat);
+    expect(container.textContent).toContain("Possible duplicate: Band Tee");
+    expect(container.textContent).toContain("Not duplicates");
+
+    const restoreDup = [...container.querySelectorAll("button")].find(
+      (b) => b.getAttribute("aria-label") === "Restore Possible duplicate: Band Tee",
+    );
+    await act(async () => {
+      restoreDup!.click();
+    });
+    await settle();
+    expect(api.home.restoreAttention).toHaveBeenCalledWith("duplicate:conv_7:conv_8", expect.any(String));
+    expect(container.textContent).not.toContain("Possible duplicate: Band Tee");
+  });
+
   it("moves an alert out of Active as soon as Dismiss is clicked", async () => {
     let finishDismiss!: (result: { ok: boolean; dismissal: {
       item_key: string;
@@ -247,7 +300,7 @@ describe("HomePage", () => {
     await renderHome();
 
     expect(container.textContent).toContain("Vintage Wool Coat sold on eBay — still live on Poshmark");
-    const dismissBtn = [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Dismiss");
+    const dismissBtn = [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Snooze 7 days");
     await act(() => dismissBtn!.click());
     await settle();
 
@@ -281,11 +334,11 @@ describe("HomePage", () => {
 
     const byLabel = (label: string) => [...container.querySelectorAll("button")]
       .find((node) => node.textContent?.trim() === label)!;
-    await act(() => byLabel("Dismiss").click());
+    await act(() => byLabel("Snooze 7 days").click());
     await settle();
     expect(api.home.dismissAttention).toHaveBeenCalledOnce();
 
-    await act(() => byLabel("Dismissed").click());
+    await act(() => byLabel("Snoozed").click());
     const restorePitcher = [...container.querySelectorAll("button")].find(
       (node) => node.getAttribute("aria-label") === "Restore Ceramic Pitcher has unsent edits",
     )!;
@@ -323,12 +376,12 @@ describe("HomePage", () => {
       .find((node) => node.textContent?.trim() === label)!;
     const coat = "Vintage Wool Coat sold on eBay — still live on Poshmark";
 
-    await act(() => byLabel("Dismiss").click());
+    await act(() => byLabel("Snooze 7 days").click());
     await settle();
     expect(api.home.dismissAttention).toHaveBeenCalledOnce();
     expect(container.textContent).not.toContain(coat);
 
-    await act(() => byLabel("Dismissed").click());
+    await act(() => byLabel("Snoozed").click());
     const restoreCoat = [...container.querySelectorAll("button")].find(
       (node) => node.getAttribute("aria-label") === `Restore ${coat}`,
     )!;
@@ -419,7 +472,7 @@ describe("HomePage", () => {
     await act(() => button("Save changes").click());
     await settle();
 
-    await act(() => button("Dismiss").click());
+    await act(() => button("Snooze 7 days").click());
     await settle();
     expect(container.textContent).not.toContain(coat);
     expect(api.home.dismissAttention).toHaveBeenCalledOnce();
@@ -451,7 +504,7 @@ describe("HomePage", () => {
       .find((node) => node.getAttribute("aria-label") === label || node.textContent?.trim() === label)!;
     const coat = "Vintage Wool Coat sold on eBay — still live on Poshmark";
 
-    await act(() => button("Dismiss").click());
+    await act(() => button("Snooze 7 days").click());
     await settle();
     expect(container.textContent).not.toContain(coat);
 
@@ -477,45 +530,12 @@ describe("HomePage", () => {
         ...sampleHome.dismissed,
         { ...sampleHome.needs_attention[0]!, reappears_in_days: 7 },
       ],
-      counts: { active: 1, dismissed: 2, by_kind: { expired_session: 1 } },
+      counts: { active: 1, dismissed: 2, resolved: 1, by_kind: { expired_session: 1 } },
     };
     await act(() => finishSave({ ok: true, home: staleWithDismissedCoat }));
     await settle();
     expect(container.textContent).toContain(coat);
     expect(container.textContent).toContain("99");
-  });
-
-  it("marks a possible duplicate as not a duplicate for good", async () => {
-    const duplicate = {
-      key: "duplicate:conv_a:conv_b",
-      kind: "duplicate_listing" as const,
-      priority: "low" as const,
-      title: "Possible duplicate: Levi's 501",
-      detail: "Matches “Levi's 501 Jeans” (same sku).",
-      action_label: "Review duplicates",
-      target: { view: "settings" as const, settings_section: "listings", target_id: "similar-items" },
-      occurred_at: null,
-    };
-    api.home.summary.mockResolvedValue({
-      ...sampleHome,
-      needs_attention: [...sampleHome.needs_attention, duplicate],
-      counts: { ...sampleHome.counts, active: 3, by_kind: { ...sampleHome.counts.by_kind, duplicate_listing: 1 } },
-    });
-    let finish!: (value: { ok: boolean }) => void;
-    api.similarItems.dismiss.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
-    await renderHome();
-
-    const buttons = [...container.querySelectorAll("button")].filter((b) => b.textContent?.trim() === "Not a duplicate");
-    expect(buttons).toHaveLength(1);
-    expect(buttons[0]!.getAttribute("aria-label")).toBe("Possible duplicate: Levi's 501 is not a duplicate");
-    await act(() => buttons[0]!.click());
-    await settle();
-    expect(api.similarItems.dismiss).toHaveBeenCalledWith("conv_a", "conv_b");
-    expect(container.textContent).not.toContain("Possible duplicate: Levi's 501");
-    await act(() => finish({ ok: true }));
-    await settle();
-    expect(container.textContent).not.toContain("Possible duplicate: Levi's 501");
-    expect(api.home.dismissAttention).not.toHaveBeenCalled();
   });
 
 });

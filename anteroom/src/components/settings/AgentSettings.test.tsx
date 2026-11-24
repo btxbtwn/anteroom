@@ -170,12 +170,14 @@ describe("Agent settings", () => {
           last_used_at: null,
           expires_at: null,
           revoked_at: null,
-          permissions: { listings: "write", analytics: "read", attention: "none" },
+          permissions: { listings: "write", analytics: "read", attention: "none", marketplaces: "publish" },
           active: true,
         },
       ],
     );
     const html = renderToStaticMarkup(<AgentSettings />);
+    expect(html).toContain('aria-label="Claude Desktop Marketplaces access"');
+    expect(html).toContain("Publish, update and delist");
     expect(html).toContain("https://myanteroom.com/api/mcp");
     expect(html).toContain('aria-label="Claude Desktop Listings access"');
     expect(html).toContain("Read and write");
@@ -195,5 +197,14 @@ describe("Agent settings", () => {
     expect(html).toContain('aria-label="New token Analytics access"');
     expect(html).toContain('aria-label="New token Needs Attention access"');
     expect(html).not.toContain("Read and write");
+  });
+
+  it("starts a new token with no marketplace actions, and says what each level allows", () => {
+    const html = renderToStaticMarkup(<AgentSettings />);
+    const trigger = html.split('aria-label="New token Marketplaces access"')[1] ?? "";
+    expect(trigger.slice(0, trigger.indexOf("</button>"))).toContain("No access");
+    expect(html).not.toContain("Publish, update and delist</span>");
+    expect(html).toContain("Save drafts lets them save private marketplace drafts");
+    expect(html).not.toContain("can never publish");
   });
 });

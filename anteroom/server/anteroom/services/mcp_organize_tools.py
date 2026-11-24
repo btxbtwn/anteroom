@@ -11,7 +11,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from anteroom.services import inventory_labels, pending_edits, similar_items
+from anteroom.services import home_dashboard, inventory_labels, pending_edits, similar_items
 from anteroom.services.hosted_listing_contract import MARKETS, stored_listing_fields
 
 MAX_PENDING_ITEMS = 50
@@ -109,8 +109,8 @@ TOOLS: list[dict[str, Any]] = [
         "title": "Mark items as not duplicates",
         "description": (
             "Record that two items are different, so the pair never shows as a potential "
-            "duplicate again (unlike dismiss_attention_items, which hides it for a while). Pass "
-            "the duplicate alert's item_key from get_needs_attention, or first_id and second_id."
+            "duplicate again, the same as resolve_attention_items on a duplicate alert. Pass the "
+            "duplicate alert's item_key from get_needs_attention, or first_id and second_id."
         ),
         "annotations": {**_WRITE, "idempotentHint": True},
         "inputSchema": {
@@ -200,6 +200,7 @@ def _delete_label(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str, An
 
 
 def _mark_not_duplicate(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str, Any]:
+    """The same decision as Resolve → Not duplicates on Home: listed under Resolved for good."""
     key = args.get("item_key")
     if key is not None:
         prefix, _, rest = _text(args, "item_key").partition(":")
@@ -208,11 +209,14 @@ def _mark_not_duplicate(db: Session, args: dict[str, Any], **_kw: Any) -> dict[s
             raise ValueError("item_key must be a potential duplicate's key from get_needs_attention (duplicate:…).")
     else:
         first, second = _text(args, "first_id"), _text(args, "second_id")
+    first, second = sorted((first, second))
+    if first == second:
+        raise ValueError("first_id and second_id must name two different items.")
     try:
-        similar_items.dismiss(db, first, second)
+        home_dashboard.resolve_attention_item(db, item_key=f"duplicate:{first}:{second}", kind="duplicate_listing",
+                                              fingerprint="")
     except similar_items.MergeError as exc:
         raise ValueError(str(exc)) from exc
-    first, second = sorted((first, second))
     return {"ok": True, "first_id": first, "second_id": second, "not_duplicate": True}
 
 

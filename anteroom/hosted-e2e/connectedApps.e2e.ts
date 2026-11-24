@@ -31,7 +31,9 @@ test("an app signs in, gets only the access the seller chose, and stops working 
   await page.goto("/oauth/consent?authorization_id=sandbox-claude");
   await signIn(page, email);
   await expect(page.getByRole("heading", { name: "Connect Claude to Anteroom" })).toBeVisible();
-  await expect(page.getByText(/never publish, update live listings or delist/)).toBeVisible();
+  await expect(page.getByText(/acts on your marketplaces only if you choose that under Marketplaces/)).toBeVisible();
+  // Marketplace actions start off; the seller has to choose them.
+  await expect(page.getByRole("combobox", { name: "Claude Marketplaces access" })).toHaveText("No access");
   await expect(page.getByText("After you answer, you go back to claude.invalid.")).toBeVisible();
   await page.getByRole("combobox", { name: "Claude Listings access" }).click();
   await page.getByRole("option", { name: "Read and write" }).click();

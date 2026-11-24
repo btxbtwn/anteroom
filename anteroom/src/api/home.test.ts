@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   applyGoalHomeSnapshot,
-  duplicatePair,
   patchHomeAfterDismiss,
-  patchHomeAfterNotDuplicate,
+  patchHomeAfterResolve,
   patchHomeAfterRestore,
   type AttentionItem,
   type HomeSummaryResponse,
@@ -37,7 +36,8 @@ const sample: HomeSummaryResponse = {
   goals: [],
   needs_attention: [baseItem("a"), baseItem("b", "still_listed")],
   dismissed: [],
-  counts: { active: 2, dismissed: 0, by_kind: { failed_job: 1, still_listed: 1 } },
+  resolved: [],
+  counts: { active: 2, dismissed: 0, resolved: 0, by_kind: { failed_job: 1, still_listed: 1 } },
 };
 
 describe("patchHomeAfterDismiss / restore", () => {
@@ -50,7 +50,7 @@ describe("patchHomeAfterDismiss / restore", () => {
     });
     expect(next.needs_attention.map((item) => item.key)).toEqual(["b"]);
     expect(next.dismissed.map((item) => item.key)).toEqual(["a"]);
-    expect(next.counts).toEqual({ active: 1, dismissed: 1, by_kind: { still_listed: 1 } });
+    expect(next.counts).toEqual({ active: 1, dismissed: 1, resolved: 0, by_kind: { still_listed: 1 } });
     expect(next.dismissed[0]?.reappears_in_days).toBe(7);
   });
 
@@ -61,6 +61,25 @@ describe("patchHomeAfterDismiss / restore", () => {
     expect(restored.dismissed).toEqual([]);
     expect(restored.counts.active).toBe(2);
     expect(restored.needs_attention.find((item) => item.key === "a")?.reappears_in_days).toBeUndefined();
+  });
+});
+
+describe("patchHomeAfterResolve", () => {
+  it("moves an alert into resolved, out of snoozed, and back on restore", () => {
+    const snoozed = patchHomeAfterDismiss(sample, sample.needs_attention[0]!);
+    const resolved = patchHomeAfterResolve(snoozed, snoozed.dismissed[0]!, {
+      resolved_at: "2026-11-24T12:00:00Z",
+    });
+    expect(resolved.dismissed).toEqual([]);
+    expect(resolved.resolved.map((item) => item.key)).toEqual(["a"]);
+    expect(resolved.resolved[0]?.resolved_at).toBe("2026-11-24T12:00:00Z");
+    expect(resolved.resolved[0]?.expires_at).toBeUndefined();
+    expect(resolved.counts).toEqual({ active: 1, dismissed: 0, resolved: 1, by_kind: { still_listed: 1 } });
+
+    const restored = patchHomeAfterRestore(resolved, "a");
+    expect(restored.resolved).toEqual([]);
+    expect(restored.needs_attention.find((item) => item.key === "a")?.resolved_at).toBeUndefined();
+    expect(restored.counts.active).toBe(2);
   });
 });
 
@@ -102,26 +121,5 @@ describe("applyGoalHomeSnapshot", () => {
     const merged = applyGoalHomeSnapshot(sample, sample);
     expect(merged.needs_attention.map((item) => item.key)).toEqual(["a", "b"]);
     expect(merged.dismissed).toEqual([]);
-  });
-});
-
-describe("not a duplicate", () => {
-  it("reads the two items from a duplicate alert's key", () => {
-    expect(duplicatePair(baseItem("duplicate:c1:c2", "duplicate_listing"))).toEqual(["c1", "c2"]);
-    expect(duplicatePair(baseItem("failed-job:c1:j1"))).toBeNull();
-    expect(duplicatePair(baseItem("duplicate:c1", "duplicate_listing"))).toBeNull();
-  });
-
-  it("drops the alert from Active and Dismissed for good", () => {
-    const home: HomeSummaryResponse = {
-      ...sample,
-      needs_attention: [...sample.needs_attention, baseItem("duplicate:c1:c2", "duplicate_listing")],
-      counts: { active: 3, dismissed: 0, by_kind: { failed_job: 1, still_listed: 1, duplicate_listing: 1 } },
-    };
-    const next = patchHomeAfterNotDuplicate(home, "duplicate:c1:c2");
-    expect(next.needs_attention.map((item) => item.key)).toEqual(["a", "b"]);
-    expect(next.counts).toEqual({ active: 2, dismissed: 0, by_kind: { failed_job: 1, still_listed: 1 } });
-    const dismissed = patchHomeAfterDismiss(home, home.needs_attention[2]!);
-    expect(patchHomeAfterNotDuplicate(dismissed, "duplicate:c1:c2").dismissed).toEqual([]);
   });
 });

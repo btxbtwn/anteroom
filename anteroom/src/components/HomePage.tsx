@@ -1,8 +1,10 @@
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AlarmClockIcon,
   ArrowRightIcon,
   CheckCircle2Icon,
+  CheckIcon,
   PencilIcon,
   PlusIcon,
   RefreshCwIcon,
@@ -15,10 +17,10 @@ import { api } from "../api/client";
 import {
   applyGoalHomeSnapshot,
   browserTimeZone,
-  duplicatePair,
   patchHomeAfterDismiss,
-  patchHomeAfterNotDuplicate,
+  patchHomeAfterResolve,
   patchHomeAfterRestore,
+  resolveLabel,
   type AttentionItem,
   type AttentionKind,
   type AttentionTarget,
@@ -63,6 +65,9 @@ const METRIC_OPTIONS: readonly { value: GoalMetric; label: string; placeholder: 
   { value: "listings", label: "Listings created", placeholder: "100" },
   { value: "sell_through_rate", label: "Sell-through rate (%)", placeholder: "35" },
 ];
+
+const ATTENTION_TABS = ["Active", "Snoozed", "Resolved"] as const;
+type AttentionTab = (typeof ATTENTION_TABS)[number];
 
 const KIND_LABELS: Record<AttentionKind, string> = {
   still_listed: "Still listed",
@@ -114,7 +119,7 @@ function formatHeaderDate(isoDate: string): string {
   });
 }
 
-function formatRelativeTime(iso: string | null): string | null {
+function formatRelativeTime(iso: string | null | undefined): string | null {
   if (!iso) return null;
   const parsed = new Date(iso);
   if (Number.isNaN(parsed.getTime())) return null;
@@ -144,7 +149,7 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
 
   const { data, isPending, isFetching, error, refetch } = useQuery<HomeSummaryResponse>(queryDef);
 
-  const [attentionTab, setAttentionTab] = useState<"Active" | "Dismissed">("Active");
+  const [attentionTab, setAttentionTab] = useState<AttentionTab>("Active");
   const [goalFormOpen, setGoalFormOpen] = useState(false);
   const goalFormVersion = useRef(0);
   const [editingGoalId, setEditingGoalId] = useState<string | null>(null);
@@ -244,6 +249,25 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
     },
   });
 
+  const resolveItem = useMutation({
+    mutationFn: (item: AttentionItem) =>
+      runAttentionOp(item.key, () => api.home.resolveAttention(item)),
+    onMutate: async (item) => {
+      await queryClient.cancelQueries({ queryKey: queryDef.queryKey, exact: true });
+      const epoch = bumpAttentionEpoch(item.key);
+      patchHomeCache((current) => patchHomeAfterResolve(current, item));
+      return { key: item.key, epoch };
+    },
+    onSuccess: (res, item, ctx) => {
+      if (!attentionOpIsCurrent(item.key, ctx?.epoch)) return;
+      patchHomeCache((current) => patchHomeAfterResolve(current, item, res.resolution));
+    },
+    onError: async (_err, item, ctx) => {
+      if (!attentionOpIsCurrent(item.key, ctx?.epoch)) return;
+      await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
+    },
+  });
+
   const restoreItem = useMutation({
     mutationFn: (itemKey: string) =>
       runAttentionOp(itemKey, () => api.home.restoreAttention(itemKey, timezone)),
@@ -259,25 +283,6 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
     },
     onError: async (_err, itemKey, ctx) => {
       if (!attentionOpIsCurrent(itemKey, ctx?.epoch)) return;
-      await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
-    },
-  });
-
-  // Permanent, like "Not duplicates" in Similar items: the pair is never suggested again.
-  const notDuplicate = useMutation({
-    mutationFn: ({ item, pair }: { item: AttentionItem; pair: [string, string] }) =>
-      runAttentionOp(item.key, () => api.similarItems.dismiss(pair[0], pair[1])),
-    onMutate: async ({ item }) => {
-      await queryClient.cancelQueries({ queryKey: queryDef.queryKey, exact: true });
-      const epoch = bumpAttentionEpoch(item.key);
-      patchHomeCache((current) => patchHomeAfterNotDuplicate(current, item.key));
-      return { epoch };
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["similar-items"] });
-    },
-    onError: async (_err, { item }, ctx) => {
-      if (!attentionOpIsCurrent(item.key, ctx?.epoch)) return;
       await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
     },
   });
@@ -355,6 +360,7 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
   const goals = data?.goals ?? [];
   const activeAttention = data?.needs_attention ?? [];
   const dismissedAttention = data?.dismissed ?? [];
+  const resolvedAttention = data?.resolved ?? [];
 
   const profitHint =
     today && today.units_sold > 0
@@ -619,9 +625,9 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
       >
         <WorkspaceTabs
           label="Needs attention views"
-          items={["Active", "Dismissed"]}
+          items={ATTENTION_TABS}
           value={attentionTab}
-          onChange={(next) => setAttentionTab(next as "Active" | "Dismissed")}
+          onChange={(next) => setAttentionTab(next as AttentionTab)}
         >
           {attentionTab === "Active" ? (
             activeAttention.length === 0 ? (
@@ -649,7 +655,7 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
                       </div>
                       <p className="text-xs text-muted-foreground">{item.detail}</p>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <Button
                         type="button"
                         variant="outline"
@@ -659,25 +665,68 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
                         {item.action_label}
                         <ArrowRightIcon />
                       </Button>
-                      {duplicatePair(item) ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="xs"
-                          onClick={() => notDuplicate.mutate({ item, pair: duplicatePair(item)! })}
-                          aria-label={`${item.title} is not a duplicate`}
-                        >
-                          Not a duplicate
-                        </Button>
-                      ) : null}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => resolveItem.mutate(item)}
+                        aria-label={`${resolveLabel(item.kind)}: ${item.title}`}
+                        title={item.kind === "duplicate_listing"
+                          ? "Never flag this pair again"
+                          : "Hide until something changes"}
+                      >
+                        <CheckIcon />
+                        {resolveLabel(item.kind)}
+                      </Button>
                       <Button
                         type="button"
                         variant="ghost"
                         size="xs"
                         onClick={() => dismissItem.mutate(item)}
-                        aria-label={`Dismiss ${item.title} for 7 days`}
+                        aria-label={`Snooze ${item.title} for 7 days`}
+                        title="Hide for 7 days"
                       >
-                        Dismiss
+                        <AlarmClockIcon />
+                        Snooze 7 days
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </RowList>
+            )
+          ) : attentionTab === "Resolved" ? (
+            resolvedAttention.length === 0 ? (
+              <EmptyRow>
+                No resolved items. A resolved alert stays here until its situation changes, like another sale or a new error. Pairs marked not duplicates stay here for good.
+              </EmptyRow>
+            ) : (
+              <RowList>
+                {resolvedAttention.map((item) => (
+                  <li key={item.key} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" size="sm">
+                          {KIND_LABELS[item.kind]}
+                        </Badge>
+                        <span className="truncate font-medium text-foreground">{item.title}</span>
+                        {formatRelativeTime(item.resolved_at) ? (
+                          <span className="text-xs text-muted-foreground tabular-nums">
+                            {item.kind === "duplicate_listing" ? "Not duplicates" : "Resolved"} {formatRelativeTime(item.resolved_at)}
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="text-xs text-muted-foreground">{item.detail}</p>
+                    </div>
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => restoreItem.mutate(item.key)}
+                        aria-label={`Restore ${item.title}`}
+                      >
+                        <RotateCcwIcon />
+                        Restore
                       </Button>
                     </div>
                   </li>
@@ -686,7 +735,7 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
             )
           ) : dismissedAttention.length === 0 ? (
             <EmptyRow>
-              No dismissed items. Dismissed alerts stay tucked away here for 7 days before reappearing if still unresolved.
+              No snoozed items. Snoozed alerts stay here for 7 days, then come back if they still apply.
             </EmptyRow>
           ) : (
             <RowList>
@@ -706,7 +755,7 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
                     </div>
                     <p className="text-xs text-muted-foreground">{item.detail}</p>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <Button
                       type="button"
                       variant="outline"

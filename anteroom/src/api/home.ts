@@ -1,3 +1,5 @@
+import type { AttentionInbox, AttentionItem, AttentionResolution, AttentionSnooze } from "./contract.gen";
+
 export type GoalPeriod = "weekly" | "monthly" | "quarterly" | "yearly";
 export type GoalMetric = "profit" | "sales" | "listings" | "sell_through_rate";
 export type GoalPace = "achieved" | "ahead" | "on_track" | "behind";
@@ -37,149 +39,103 @@ export interface SellerGoalProgress {
   note: string | null;
 }
 
-export type AttentionKind =
-  | "still_listed"
-  | "expired_session"
-  | "failed_job"
-  | "unsent_edits"
-  | "pending_approval"
-  | "relist_gap"
-  | "duplicate_listing";
+export type { AttentionItem, AttentionTarget } from "./contract.gen";
+export type AttentionKind = AttentionItem["kind"];
 
-export interface AttentionTarget {
-  view: "listings" | "settings" | "automations";
-  conversation_id?: string | null;
-  settings_section?: "connections" | "listings";
-  target_id?: string | null;
-}
-
-export interface AttentionItem {
-  key: string;
-  kind: AttentionKind;
-  priority: "high" | "medium" | "low";
-  title: string;
-  detail: string;
-  action_label: string;
-  target: AttentionTarget;
-  occurred_at: string | null;
-  dismissed_at?: string | null;
-  expires_at?: string | null;
-  reappears_in_days?: number;
-}
-
-export interface HomeSummaryResponse {
+export interface HomeSummaryResponse extends AttentionInbox {
   today: HomeTodaySummary;
   goals: SellerGoalProgress[];
-  needs_attention: AttentionItem[];
-  dismissed: AttentionItem[];
-  counts: {
-    active: number;
-    dismissed: number;
-    by_kind: Record<string, number>;
-  };
-}
-
-export interface AttentionDismissalResult {
-  item_key: string;
-  dismissed_at: string;
-  expires_at: string;
-  reappears_in_days: number;
 }
 
 export interface HomeMutationResponse {
   ok: boolean;
   goal_id?: string;
   home?: HomeSummaryResponse;
-  dismissal?: AttentionDismissalResult;
-  restored?: boolean;
-  item_key?: string;
 }
 
 const ATTENTION_DISMISS_DAYS = 7;
 
-function recountAttention(home: Pick<HomeSummaryResponse, "needs_attention" | "dismissed">): HomeSummaryResponse["counts"] {
+type AttentionLists = Pick<HomeSummaryResponse, "needs_attention" | "dismissed" | "resolved">;
+
+function withLists(home: HomeSummaryResponse, lists: AttentionLists): HomeSummaryResponse {
   const by_kind: Record<string, number> = {};
-  for (const item of home.needs_attention) {
+  for (const item of lists.needs_attention) {
     by_kind[item.kind] = (by_kind[item.kind] ?? 0) + 1;
   }
   return {
-    active: home.needs_attention.length,
-    dismissed: home.dismissed.length,
-    by_kind,
+    ...home,
+    ...lists,
+    counts: {
+      active: lists.needs_attention.length,
+      dismissed: lists.dismissed.length,
+      resolved: lists.resolved.length,
+      by_kind,
+    },
   };
 }
 
-/** Move one alert into Dismissed without waiting for a full Today rebuild. */
+function withoutKey(items: AttentionItem[] | undefined, key: string): AttentionItem[] {
+  return (items ?? []).filter((entry) => entry.key !== key);
+}
+
+/** Move one alert into Snoozed without waiting for a full Today rebuild. */
 export function patchHomeAfterDismiss(
   home: HomeSummaryResponse,
   item: AttentionItem,
-  dismissal?: Partial<AttentionDismissalResult> | null,
+  dismissal?: Partial<AttentionSnooze> | null,
 ): HomeSummaryResponse {
   const dismissed_at = dismissal?.dismissed_at ?? new Date().toISOString();
   const expires_at =
     dismissal?.expires_at
     ?? new Date(Date.now() + ATTENTION_DISMISS_DAYS * 86_400_000).toISOString();
   const reappears_in_days = dismissal?.reappears_in_days ?? ATTENTION_DISMISS_DAYS;
-  const needs_attention = home.needs_attention.filter((entry) => entry.key !== item.key);
-  const dismissedItem: AttentionItem = {
-    ...item,
-    dismissed_at,
-    expires_at,
-    reappears_in_days,
-  };
-  const dismissed = [
-    dismissedItem,
-    ...home.dismissed.filter((entry) => entry.key !== item.key),
-  ];
-  return {
-    ...home,
-    needs_attention,
-    dismissed,
-    counts: recountAttention({ needs_attention, dismissed }),
-  };
+  const { resolved_at: _resolvedAt, ...shown } = item;
+  return withLists(home, {
+    needs_attention: withoutKey(home.needs_attention, item.key),
+    dismissed: [{ ...shown, dismissed_at, expires_at, reappears_in_days }, ...withoutKey(home.dismissed, item.key)],
+    resolved: withoutKey(home.resolved, item.key),
+  });
 }
 
-/** Move one alert back to Active after Restore. */
+/** Move one alert into Resolved without waiting for a full Today rebuild. */
+export function patchHomeAfterResolve(
+  home: HomeSummaryResponse,
+  item: AttentionItem,
+  resolution?: Partial<AttentionResolution> | null,
+): HomeSummaryResponse {
+  const resolved_at = resolution?.resolved_at ?? new Date().toISOString();
+  const { dismissed_at: _dismissedAt, expires_at: _expiresAt, reappears_in_days: _reappears, ...shown } = item;
+  return withLists(home, {
+    needs_attention: withoutKey(home.needs_attention, item.key),
+    dismissed: withoutKey(home.dismissed, item.key),
+    resolved: [{ ...shown, resolved_at }, ...withoutKey(home.resolved, item.key)],
+  });
+}
+
+/** Move one snoozed or resolved alert back to Active after Restore. */
 export function patchHomeAfterRestore(
   home: HomeSummaryResponse,
   itemKey: string,
 ): HomeSummaryResponse {
-  const item = home.dismissed.find((entry) => entry.key === itemKey);
+  const item = [...(home.dismissed ?? []), ...(home.resolved ?? [])].find((entry) => entry.key === itemKey);
   if (!item) return home;
   const {
     dismissed_at: _dismissedAt,
     expires_at: _expiresAt,
     reappears_in_days: _reappears,
+    resolved_at: _resolvedAt,
     ...activeItem
   } = item;
-  const needs_attention = [
-    activeItem,
-    ...home.needs_attention.filter((entry) => entry.key !== itemKey),
-  ];
-  const dismissed = home.dismissed.filter((entry) => entry.key !== itemKey);
-  return {
-    ...home,
-    needs_attention,
-    dismissed,
-    counts: recountAttention({ needs_attention, dismissed }),
-  };
+  return withLists(home, {
+    needs_attention: [activeItem, ...withoutKey(home.needs_attention, itemKey)],
+    dismissed: withoutKey(home.dismissed, itemKey),
+    resolved: withoutKey(home.resolved, itemKey),
+  });
 }
 
-/** The two items a "Possible duplicate" alert is about, from its `duplicate:<first>:<second>` key. */
-export function duplicatePair(item: AttentionItem): [string, string] | null {
-  if (item.kind !== "duplicate_listing") return null;
-  const [prefix, first, second, ...rest] = item.key.split(":");
-  return prefix === "duplicate" && first && second && rest.length === 0 ? [first, second] : null;
-}
-
-/** Remove a pair the seller marked as different: it is never suggested again, so it leaves both tabs. */
-export function patchHomeAfterNotDuplicate(
-  home: HomeSummaryResponse,
-  itemKey: string,
-): HomeSummaryResponse {
-  const needs_attention = home.needs_attention.filter((entry) => entry.key !== itemKey);
-  const dismissed = home.dismissed.filter((entry) => entry.key !== itemKey);
-  return { ...home, needs_attention, dismissed, counts: recountAttention({ needs_attention, dismissed }) };
+/** The button that resolves an item: a duplicate pair is "Not duplicates". */
+export function resolveLabel(kind: AttentionKind): string {
+  return kind === "duplicate_listing" ? "Not duplicates" : "Resolve";
 }
 
 /**
