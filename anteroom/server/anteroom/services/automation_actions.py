@@ -207,8 +207,13 @@ async def _native_one(conv_id: str, name: str, revision_id: str, kind: str) -> d
         if not await _wait_until_free(name):
             return stalled
         try:
+            from anteroom.services.draft_scheduling import scheduled_requester
+
+            # A publish an MCP agent scheduled names it on its jobs, as one it started would.
+            requester = {"requested_by": agent} if (agent := scheduled_requester()) else {}
             # This call follows the seller's consumed item-specific approval.
-            result = await start(conv_id, cast(Marketplace, name), ListRequest(revision_id=revision_id, confirm=True))
+            result = await start(conv_id, cast(Marketplace, name), ListRequest(revision_id=revision_id, confirm=True),
+                                 **requester)
         except NativeMarketplaceError as exc:
             return {"ok": False, "marketplace": name, "error": str(exc)}
         if result.get("job_id") and not await _wait_for_job(result["job_id"]):

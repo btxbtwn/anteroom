@@ -403,6 +403,57 @@ def test_the_schedule_log_names_the_agent():
         db.commit()
 
 
+def test_a_publish_an_agent_scheduled_names_it_on_the_jobs_that_publish_it(monkeypatch):
+    from contextlib import asynccontextmanager
+
+    from anteroom.services import automation_actions
+
+    conv_id, revision_id = _listing()
+    past = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=1)
+    with SessionLocal() as db:
+        listing = db.query(Listing).filter_by(conversation_id=conv_id).one()
+        digest, _rules = draft_scheduling._schedule_content_digest(db, conv_id, ["ebay"])
+        listing.ready_to_list = True
+        listing.scheduled_publish_at = past
+        listing.scheduled_marketplaces = ["ebay"]
+        listing.scheduled_revision_id = revision_id
+        listing.scheduled_confirmed_at = past - timedelta(hours=1)
+        listing.scheduled_status = "scheduled"
+        listing.scheduled_content_digest = digest
+        listing.scheduled_requested_by = "mcp:Claude"
+        db.commit()
+
+    @asynccontextmanager
+    async def turn(_name):
+        yield
+
+    async def free(_name):
+        return True
+
+    started = Recorder({"state": "published"})
+    monkeypatch.setattr(automation_actions, "_turn", turn)
+    monkeypatch.setattr(automation_actions, "_wait_until_free", free)
+    monkeypatch.setattr(native_marketplaces, "list_now", started)
+    seen = []
+
+    async def publisher(conv, markets, revision):
+        seen.append(draft_scheduling.scheduled_requester())
+        return await automation_actions._native_one(conv, markets[0], revision, "list")
+
+    outcomes = asyncio.run(draft_scheduling.run_due_scheduled_publishes(publisher=publisher))
+    assert seen == ["mcp:Claude"]
+    assert outcomes[0]["status"] == "published", outcomes
+    (args, kwargs), = started.calls
+    assert args[:2] == (conv_id, "ebay") and kwargs["requested_by"] == "mcp:Claude"
+    # Outside a scheduled publish, nobody is named.
+    assert draft_scheduling.scheduled_requester() is None
+    with SessionLocal() as db:
+        listing = db.query(Listing).filter_by(conversation_id=conv_id).one()
+        draft_scheduling.unschedule_draft(db, conv_id)
+        db.refresh(listing)
+        assert listing.scheduled_requested_by is None
+
+
 def test_sandbox_refuses_publish_update_and_delist(monkeypatch, services):
     from anteroom import sandbox
 
