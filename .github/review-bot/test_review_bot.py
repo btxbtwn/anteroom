@@ -819,5 +819,29 @@ class AutofixTests(unittest.TestCase):
             self.assertEqual(posts, [])
 
 
+class ConflictListTests(unittest.TestCase):
+    def test_lists_dirty_ready_same_repo_prs_but_leaves_dependabot_to_rebase_its_own(self):
+        def pr(number, login="btxbtwn", draft=False, head_repo="o/r"):
+            return {"number": number, "draft": draft, "user": {"login": login}, "head": {"repo": {"full_name": head_repo}}}
+
+        pulls = [
+            pr(1),
+            pr(2, login="dependabot[bot]"),
+            pr(3, draft=True),
+            pr(4, head_repo="fork/r"),
+            pr(5),
+        ]
+        outputs = {}
+        with (
+            patch.object(bot, "api_list", return_value=pulls),
+            patch.object(bot, "pull_mergeable_state", side_effect=lambda n: "clean" if n == 5 else "dirty"),
+            patch.object(bot, "repo", return_value="o/r"),
+            patch.object(bot, "set_output", side_effect=outputs.update),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            bot.list_conflict_prs(SimpleNamespace())
+        self.assertEqual(json.loads(outputs["prs"]), [1])
+
+
 if __name__ == "__main__":
     unittest.main()

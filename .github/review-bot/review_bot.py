@@ -1128,10 +1128,14 @@ def post_autofix(args) -> None:
 
 
 def list_conflict_prs(_args) -> None:
-    """Open, non-draft, same-repo PRs with mergeable_state dirty (real conflicts)."""
+    """Open, non-draft, same-repo PRs with mergeable_state dirty (real conflicts).
+
+    Dependabot PRs are left out: Dependabot rebases its own PRs on request
+    (`@dependabot rebase`), and it stops updating a PR once someone else pushes
+    to it."""
     numbers = []
     for pr in api_list(f"repos/{repo()}/pulls?state=open&per_page=100"):
-        if pr.get("draft"):
+        if pr.get("draft") or (pr.get("user") or {}).get("login") == "dependabot[bot]":
             continue
         head_repo = (pr.get("head") or {}).get("repo") or {}
         if head_repo.get("full_name") != repo():
