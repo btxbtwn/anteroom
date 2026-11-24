@@ -1,1 +1,0 @@
-- When a marketplace blocks, limits or signs you out while Anteroom reviews offers for several items, the review stops at that item and marks the rest "Not checked" instead of asking the marketplace about each one.

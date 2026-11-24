@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1228 — 2026-11-24
+
+- When a marketplace blocks, limits or signs you out while Anteroom reviews offers for several items, the review stops at that item and marks the rest "Not checked" instead of asking the marketplace about each one.
+
 ## 0.1.1227 — 2026-11-24
 
 - Retrying a draft after an error no longer reads the photos, picks the category or fills marketplace fields again when the photos and Item Details haven't changed, so a retry costs less.
