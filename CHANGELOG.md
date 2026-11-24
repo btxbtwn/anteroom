@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1221 — 2026-11-24
+
+- Fix Anteroom updates failing to start after two more changes each added a database step at the same time.
+
 ## 0.1.1220 — 2026-11-24
 
 - Filling marketplace fields after a new draft costs less AI time: it now reads only the listing rules that apply to those fields, not the title, description and pricing formulas.
