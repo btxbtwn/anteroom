@@ -5,8 +5,8 @@
 const MARKETPLACE_LABELS = { poshmark: 'Poshmark', mercari: 'Mercari', depop: 'Depop' };
 const MARKETPLACE_RETRY_DELAYS_MS = [400, 1200, 3000];
 const MARKETPLACE_MAX_RETRY_AFTER_S = 20;
-// Cloudflare, PerimeterX, DataDome and similar bot checks.
-const MARKETPLACE_CHALLENGE = /challenge-platform|challenge-error-text|Just a moment\.\.\.|cf-chl-|cf_chl_|captcha|datadome|px-captcha|perimeterx|_pxhd|verify (?:that )?you(?: are|'re) (?:a )?human/i;
+// Group names are safe to report. A marker alone does not prove an interactive challenge.
+const MARKETPLACE_CHALLENGE = /(?<cloudflare>challenge-platform|challenge-error-text|cf-chl-|cf_chl_)|(?<perimeterx>px-captcha|perimeterx|_pxhd)|(?<datadome>datadome)|(?<captcha>captcha)|(?<human_verification>Just a moment\.\.\.|verify (?:that )?you(?: are|'re) (?:a )?human)/i;
 const MARKETPLACE_LOGIN_PAGE = /type=["']?password|\/(?:login|signin|sign-in|sign_in)\b/i;
 
 async function marketplaceSleep(ms) {
@@ -177,20 +177,27 @@ async function marketplaceFetch(url, { marketplace, step, method = 'GET', header
       if (expect !== 'none' || !response.ok) {
         try { text = await response.text(); } catch { text = ''; }
       }
-      const json = /json/i.test(response.headers?.get?.('content-type') || '');
+      const contentType = response.headers?.get?.('content-type') || '';
+      const json = /json/i.test(contentType);
       let data = null;
       if (json && text) { try { data = JSON.parse(text); } catch { data = null; } }
+      const html = !data && /<html|<!doctype/i.test(text);
       const status = response.status;
       const statusLine = `HTTP ${status}${response.statusText ? ` ${response.statusText}` : ''}`;
-      const plain = !data && text && !/<html|<!doctype/i.test(text) ? marketplaceScrub(text).slice(0, 180) : '';
+      const plain = !data && text && !html ? marketplaceScrub(text).slice(0, 180) : '';
       const ownWords = data ? marketplaceBodyMessage(data) || statusLine : (plain || statusLine);
       // Normal pages carry bot-check scripts too, so only a blocked or
       // unexpected answer is read for challenge markers.
       const unexpected = status < 300 && status !== 204 && expect === 'json' && !data;
-      const challenged = ([401, 403, 429, 503].includes(status) || unexpected) && MARKETPLACE_CHALLENGE.test(json ? ownWords : text);
-      if (challenged) {
+      const challenge = ([401, 403, 429, 503].includes(status) || unexpected) && MARKETPLACE_CHALLENGE.exec(json ? ownWords : text);
+      if (challenge) {
         failure = marketplaceError(`${label} asked for a browser check. Open ${label} in Chrome, finish the check, then try again.`,
           { code: 'challenge', status, marketplace_message: ownWords });
+        const format = html || /text\/html/i.test(contentType) ? 'html' : json ? 'json' : 'other';
+        failure.challenge_response = {
+          status, format, marker: Object.keys(challenge.groups).find(name => challenge.groups[name]),
+          cloudflare_challenge_header: response.headers?.get?.('cf-mitigated') === 'challenge',
+        };
       } else if (status === 401 || status === 403) {
         failure = marketplaceError(`${label} asked to sign in again. Reconnect ${label} in Anteroom.`,
           { code: 'signed_out', status, marketplace_message: ownWords });
@@ -221,7 +228,7 @@ async function marketplaceFetch(url, { marketplace, step, method = 'GET', header
         failure.response_body = marketplaceScrub(JSON.stringify(data));
         // The parsed body, for a caller that hides more than tokens. Never exported as is.
         Object.defineProperty(failure, 'response_data', { value: data, enumerable: false });
-      } else if (failure && text && !/<html|<!doctype/i.test(text)) {
+      } else if (failure && text && !html) {
         failure.response_body = marketplaceScrub(text);
       }
       marketplaceLog(marketplace, step, { method, status, attempt: attempt || null, error_code: failure?.code, ms });

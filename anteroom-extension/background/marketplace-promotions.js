@@ -551,6 +551,7 @@ async function checkMarketplacePromotion(payload) {
   try { return await entry.check(payload, Date.now() + PROMOTION_DEADLINE_MS); }
   catch (error) { return marketplaceFailure(error, true, { ...(Number.isInteger(error?.like_count) ? { like_count: error.like_count } : {}),
     ...(error?.preview_step ? { preview_step: error.preview_step } : {}),
+    ...(payload.marketplace === 'mercari' && error?.challenge_response ? { challenge_response: error.challenge_response } : {}),
     ...(Number.isSafeInteger(error?.price_cents) ? { price_cents: error.price_cents } : {}) }); }
 }
 
