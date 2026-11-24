@@ -190,8 +190,11 @@ def follow_general_quantity(before: dict, listing: dict) -> dict:
     old, new = before.get("quantity"), listing.get("quantity")
     if not (isinstance(rows, list) and len(rows) == 1 and isinstance(rows[0], dict)) or old is None or new is None:
         return listing
+    row_quantity = rows[0].get("quantity")
+    if row_quantity is None:
+        return listing
     try:
-        follows = float(rows[0].get("quantity")) == float(old) and float(new) != float(old)
+        follows = float(row_quantity) == float(old) and float(new) != float(old)
     except (TypeError, ValueError):
         return listing
     if not follows:

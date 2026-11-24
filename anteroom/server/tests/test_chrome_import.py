@@ -185,6 +185,25 @@ def test_poshmark_import_keeps_a_single_size_row_with_its_own_sku(chrome):
         {"sizeSetId": STANDARD, "sizeId": "M", "quantity": 1, "sku": "JKT-1-M"}]
 
 
+def test_a_lone_poshmark_row_follows_general_quantity_once_the_form_is_captured(chrome):
+    from anteroom.services import listing_persistence, native_contract
+
+    poshmark_everything(chrome, [{"size_id": "M", "size_set_tags": ["standard"], "size_system": "us", "quantity": 2, "sku": "JKT-1-M"}])
+    assert post(chrome, "poshmark", POST).status_code == 200
+    revision = chrome.db.query(ListingRevision).one()
+    contract = {"poshmark": {"fields": [{"path": "poshmark_specifics.inventoryRows", "label": "Size"}]}}
+    captured = listing_persistence.save_revision(
+        chrome.db, revision.conversation_id, {**revision.listing_json, native_contract.KEY: contract},
+        source="native_schema", parent_revision_id=revision.id, expected_revision_id=revision.id)
+    assert native_contract.KEY in captured.listing_json
+    # A sale elsewhere lowers General's quantity; restoring locked rows must not put the old count back.
+    saved = listing_persistence.save_revision(
+        chrome.db, revision.conversation_id, {**captured.listing_json, "quantity": 1},
+        source="sale_quantity_sync", parent_revision_id=captured.id, expected_revision_id=captured.id)
+    assert saved.listing_json["poshmark_specifics"]["inventoryRows"] == [
+        {"sizeSetId": STANDARD, "sizeId": "M", "quantity": 1, "sku": "JKT-1-M"}]
+
+
 def test_poshmark_import_brings_a_listing_with_several_sizes(chrome):
     poshmark_everything(chrome, [
         {"size_id": "S", "size_set_tags": ["standard"], "size_system": "us", "quantity": 1, "sku": ""},
