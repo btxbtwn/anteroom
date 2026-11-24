@@ -76,3 +76,21 @@ def test_depop_non_general_size_override_keeps_its_coded_aspect():
     assert saved['depop_specifics']['size'] == '00'
     assert 'depop_specifics.size' in saved['seller_fields']
     assert saved['form']['aspects']['womenswear_tshirts_size'] == '81'
+
+
+def test_label_only_edit_keeps_the_title_as_written():
+    # Imported titles often name the size at the end. Changing only labels
+    # must not rewrite the title into the Brand Size formula (#1966).
+    previous = {'title': 'Balenciaga Paris Vintage Checked Knit Top - Size 42', 'brand': 'Balenciaga',
+                'size': '42', 'labels': ['goodwill', 'A1']}
+    submitted = copy.deepcopy(previous)
+    submitted['labels'] = ['A1', 'GoodWill/SalvationArmy']
+    saved = prepared_listing(previous, submitted)
+    assert saved['title'] == previous['title']
+    assert saved['labels'] == ['A1', 'GoodWill/SalvationArmy']
+
+
+def test_size_edit_still_puts_the_new_size_in_the_title():
+    previous = {'title': 'Acme Wool Sweater Gray', 'brand': 'Acme', 'size': 'M'}
+    resized = prepared_listing(previous, {**previous, 'size': 'L'})
+    assert resized['title'] == 'Acme L Wool Sweater Gray'

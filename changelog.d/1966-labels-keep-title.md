@@ -1,0 +1,1 @@
+- Changing only a listing's labels, notes or cost no longer rewrites its title to add the size.
