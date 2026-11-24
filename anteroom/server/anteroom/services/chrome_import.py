@@ -109,6 +109,14 @@ def _price(value) -> float | None:
     return number if math.isfinite(number) and 0 < number < 1_000_000 else None
 
 
+def _shipping_price(value) -> float | None:
+    """A shipping price, where 0 is free shipping and a missing one is not offered."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = round(float(value), 2)
+    return number if math.isfinite(number) and 0 <= number < 1_000_000 else None
+
+
 def _quantity(value) -> int | None:
     return value if type(value) is int and 0 <= value <= 100_000 else None
 
@@ -355,12 +363,12 @@ def _depop_fields(listing: dict, out: dict) -> None:
     if attributes:
         specifics["attributes"] = attributes
     parcel = _text(listing.get("parcel_size"), 60)
-    domestic = _price(listing.get("domestic_shipping"))
+    domestic = _shipping_price(listing.get("domestic_shipping"))
     if parcel:
         specifics["parcelSize"] = parcel
     elif domestic is not None:
         specifics["domesticShippingPrice"] = domestic
-    worldwide = _price(listing.get("worldwide_shipping"))
+    worldwide = _shipping_price(listing.get("worldwide_shipping"))
     specifics["worldwideShipping"] = {"enabled": True, "price": worldwide} if worldwide is not None else {"enabled": False}
     if isinstance(listing.get("boost"), bool):
         specifics["boost"] = listing["boost"]

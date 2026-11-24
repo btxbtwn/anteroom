@@ -74,6 +74,13 @@ function importMoney(value) {
   return Number.isFinite(number) && number > 0 ? Math.round(number * 100) / 100 : null;
 }
 
+// A shipping price, where 0 is free shipping and null or blank is not offered.
+function importShippingCost(value) {
+  if (value == null || (typeof value === 'string' && !value.trim()) || typeof value === 'boolean') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.round(number * 100) / 100 : null;
+}
+
 function importCount(value) {
   const number = Number(value);
   return Number.isInteger(number) && number >= 0 ? number : null;
@@ -440,8 +447,8 @@ async function depopImportShipping(product, category, deadline) {
       parcel = importText(depopParcelRows(providers).find(row => row.id === parcelId)?.title, 60) || parcelId;
     } catch { /* The id stays; Depop's List matches a package size by id too. */ }
   }
-  const national = importMoney(product.national_shipping_cost ?? product.nationalShippingCost);
-  const worldwide = importMoney(product.international_shipping_cost ?? product.internationalShippingCost);
+  const national = importShippingCost(product.national_shipping_cost ?? product.nationalShippingCost);
+  const worldwide = importShippingCost(product.international_shipping_cost ?? product.internationalShippingCost);
   return { parcel_size: parcel, domestic_shipping: parcel ? null : national, worldwide_shipping: worldwide };
 }
 

@@ -293,6 +293,15 @@ def test_depop_import_keeps_a_seller_paid_domestic_price(chrome):
     assert "parcelSize" not in specifics and "boost" not in specifics
 
 
+def test_depop_import_keeps_free_worldwide_and_domestic_shipping(chrome):
+    chrome.remote.listings["depop"] = {**copy.deepcopy(DEPOP_FULL), "parcel_size": None, "domestic_shipping": 0,
+                                       "worldwide_shipping": 0}
+    assert post(chrome, "depop", DEPOP_FULL["id"]).status_code == 200
+    specifics = chrome.db.query(ListingRevision).one().listing_json["depop_specifics"]
+    assert specifics["domesticShippingPrice"] == 0.0
+    assert specifics["worldwideShipping"] == {"enabled": True, "price": 0.0}
+
+
 def test_repeat_import_keeps_local_edits_without_reading_chrome(chrome):
     first = post(chrome, "depop", "shop-denim-jacket-136d").json()
     listing_persistence.save_revision(chrome.db, first["conversation_id"], {"title": "Edited", "price": 99}, "user")
