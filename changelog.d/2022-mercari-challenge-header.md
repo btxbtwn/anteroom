@@ -1,1 +1,0 @@
-- When Mercari or another marketplace asks for a browser check, Anteroom says so instead of reporting you signed out, keeps your saved sign-in and offer rules on, and stops instead of sending the same request into the check again.
