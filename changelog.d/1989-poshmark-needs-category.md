@@ -1,1 +1,0 @@
-- Listing on Poshmark an item that has no Poshmark category now stops before anything is sent and asks you to choose one, instead of failing with "needs more details".

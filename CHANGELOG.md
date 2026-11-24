@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1201 — 2026-11-24
+
+- Listing on Poshmark an item that has no Poshmark category now stops before anything is sent and asks you to choose one, instead of failing with "needs more details".
+
 ## 0.1.1200 — 2026-11-24
 
 - Explain when Mercari blocks a hosted offer check and record which request was refused.
