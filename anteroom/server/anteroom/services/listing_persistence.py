@@ -158,6 +158,10 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
         ):
             # Reconcile accepted General changes after native answers have been restored.
             sync_depop_measurements(listing_json, depop_notes, clear_empty=True)
+    from anteroom.services.poshmark_form import follow_general_quantity
+
+    # After native normalization, which restores locked rows from `before`.
+    listing_json = follow_general_quantity(before, listing_json)
     from anteroom.services.pricing_rules import SNAPSHOT_RULES
     from anteroom.services.unsent_edits import normalized_listing_hash
 

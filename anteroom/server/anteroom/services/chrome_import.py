@@ -249,8 +249,8 @@ def snapshot(marketplace: str, listing: dict) -> tuple[dict, list[str]]:
     if condition:
         out["condition"] = condition
     colors = [_text(color, 40) for color in listing.get("colors") or [] if _text(color, 40)]
-    if colors:
-        out["primaryColor"] = colors[0]
+    for key, color in zip(("primaryColor", "secondaryColor"), colors, strict=False):
+        out[key] = color
     if category:
         out["category_path"] = category
         out["marketplace_categories"] = {marketplace: category}
@@ -259,8 +259,61 @@ def snapshot(marketplace: str, listing: dict) -> tuple[dict, list[str]]:
         # The marketplace's own category is the one its tab shows.
         if marketplace in {"poshmark", "depop", "mercari"}:
             out["direct_category_ids"] = {marketplace: category_id}
+    if marketplace == "poshmark" and isinstance(listing.get("poshmark"), dict):
+        _poshmark_fields(out, listing["poshmark"], category_id)
     photos = [url for url in listing.get("photos") or [] if isinstance(url, str) and url.startswith("https://")]
     return out, photos
+
+
+def _poshmark_fields(out: dict, post: dict, category_id: str) -> None:
+    """The rest of Poshmark's form, under the keys its tab and List read, so an update sends the same values back.
+
+    Each one is the seller's own Poshmark answer, kept as a seller field.
+    """
+    from anteroom.services.poshmark_form import CONDITIONS, imported_inventory
+
+    specifics: dict = {}
+    if post.get("availability") in {"available", "not_for_sale", "coming_soon"}:
+        specifics["availability"] = post["availability"]
+    if post.get("condition") in CONDITIONS:
+        specifics["condition"] = post["condition"]
+    colors = [_text(color, 40) for color in post.get("colors") or [] if _text(color, 40)]
+    specifics["colors"] = colors[:2]
+    specifics["styleTags"] = [_text(tag, 25) for tag in post.get("style_tags") or [] if _text(tag, 25)][:3]
+    original = _price(post.get("original_price"))
+    specifics["originalPrice"] = original or 0
+    discount = post.get("shipping_discount_id")
+    specifics["shippingDiscountId"] = discount if isinstance(discount, str) and re.fullmatch(r"[a-f0-9]{24}", discount) else ""
+    specifics["poshmarkSku"] = _text(post.get("sku"), 80)
+    specifics["sellerNotes"] = _text(post.get("other_info"), 2000)
+    smart = post.get("smart_sell")
+    if not isinstance(smart, dict):
+        smart = {}
+    minimum = _price(smart.get("minimum_price"))
+    specifics["smartSell"] = {"enabled": smart.get("enabled") is True and minimum is not None,
+                              **({"minimumPrice": minimum} if minimum is not None else {})}
+    sizes = [size for size in post.get("sizes") or [] if isinstance(size, dict)]
+    rows = imported_inventory(category_id, [
+        {"size_id": _text(size.get("size_id"), 80), "size_set_tags": [_text(tag, 40) for tag in size.get("size_set_tags") or []],
+         "size_system": _text(size.get("size_system"), 10) or "us", "quantity": _quantity(size.get("quantity")) or 0,
+         "sku": _text(size.get("sku"), 80)} for size in sizes])
+    if len(rows) == 1 and rows[0]["sizeSetId"] not in {"", "custom"} and not rows[0]["sku"]:
+        # One size keeps only the size, so its quantity follows General's (a sale elsewhere lowers it).
+        specifics["sizeSetId"], specifics["nativeSizeId"] = rows[0]["sizeSetId"], rows[0]["sizeId"]
+    elif rows:
+        specifics["inventoryRows"] = rows
+    if rows:
+        systems = {_text(size.get("size_system"), 10).lower() for size in sizes} - {""}
+        if len(systems) == 1 and systems != {"us"}:
+            specifics["sizeSystem"] = systems.pop()
+    multi = post.get("multi_item")
+    if isinstance(multi, bool):
+        specifics["multiItem"] = "true" if multi else "false"
+    cost = _price(post.get("cost"))
+    if cost is not None:
+        out["cost"] = cost
+    out["poshmark_specifics"] = specifics
+    out["seller_fields"] = sorted(f"poshmark_specifics.{key}" for key in specifics)
 
 
 async def _read(marketplace: str, listing_id: str) -> dict:

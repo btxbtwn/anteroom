@@ -1,0 +1,1 @@
+- Importing a listing from Poshmark now brings over everything Poshmark has for it: its category, both colors, style tags, original price, sizes and size group (including listings with several sizes), quantity type, shipping discount, availability, Smart Sell, cost, SKU and other info, so its Poshmark tab matches Poshmark and an update sends the same values back.

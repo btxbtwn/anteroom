@@ -153,6 +153,56 @@ def _initial_inventory(listing: dict, groups: list) -> list:
     return [{"sizeSetId": selected[0], "sizeId": selected[1], "quantity": listing.get("quantity", 1), "sku": ""}]
 
 
+def _key(value) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+
+
+def imported_inventory(category_id: str, sizes: list[dict]) -> list[dict]:
+    """The Size rows for sizes read from a Poshmark post.
+
+    A post names each size's group by its tags (``standard``, ``petite``...);
+    the Size picker stores the group's id. A size no group holds, on a row with
+    no tags, is the seller's custom size. A size that cannot be placed keeps its
+    id with no group, for the seller to choose.
+    """
+    groups = catalog()["inventory_groups"].get("/".join(str(category_id).split("/")[:2]), [])
+    rows = []
+    for size in sizes:
+        size_id, system = str(size.get("size_id") or ""), str(size.get("size_system") or "us").lower()
+        tags = {_key(tag) for tag in size.get("size_set_tags") or []}
+        holding = [group for group in groups if any(
+            str(entry["id"]) == size_id for entry in (group.get("systems") or {}).get(system, group.get("sizes") or []))]
+        named = [group for group in holding if _key(group["label"]) in tags]
+        found = named or (holding if len(holding) == 1 and not tags else [])
+        group_id = found[0]["id"] if found else "custom" if size_id and not tags and any(
+            group["id"] == "custom" for group in groups) else ""
+        rows.append({"sizeSetId": group_id, "sizeId": size_id, "quantity": size.get("quantity", 1), "sku": size.get("sku") or ""})
+    return rows
+
+
+def follow_general_quantity(before: dict, listing: dict) -> dict:
+    """A lone Size row that offered General's quantity keeps offering it when General's changes.
+
+    A one-size listing kept as a row (it has its own SKU) would otherwise send
+    Poshmark its old quantity after a sale elsewhere lowered General's.
+    """
+    rows = (listing.get("poshmark_specifics") or {}).get("inventoryRows")
+    old, new = before.get("quantity"), listing.get("quantity")
+    if not (isinstance(rows, list) and len(rows) == 1 and isinstance(rows[0], dict)) or old is None or new is None:
+        return listing
+    row_quantity = rows[0].get("quantity")
+    if row_quantity is None:
+        return listing
+    try:
+        follows = float(row_quantity) == float(old) and float(new) != float(old)
+    except (TypeError, ValueError):
+        return listing
+    if not follows:
+        return listing
+    listing = {**listing, "poshmark_specifics": {**listing["poshmark_specifics"], "inventoryRows": [{**rows[0], "quantity": new}]}}
+    return listing
+
+
 def form(listing: dict) -> dict:
     data = catalog()
     rows = [dict(row) for row in data["fields"]]
