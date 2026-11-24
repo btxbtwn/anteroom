@@ -706,7 +706,7 @@ def score_lots(
             if own_rate is not None:
                 row["theme_sell_through"] = own_rate
             # Historical underperformance can reduce forecasts; it cannot lift
-            # them above current comparable-sale/asking-price evidence.
+            # them above current comparable-sale evidence.
             factor = min(1.0, resale_factor.get(store, 1.0))
             per_piece = resale.get(lot["theme"])
             row["resale_factor"] = factor

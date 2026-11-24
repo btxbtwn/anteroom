@@ -4,7 +4,8 @@ Every few hours Studio crawls Raghouse, Thrift Vintage Fashion and PaperCrane,
 picks qualifying boxes within the seller's budget and keeps each supplier's five
 best boxes. Once a week it refreshes the trending
 words with the listing model's web search, and the comparable sales from the
-seller's own sales first, then eBay's and Poshmark's sold listings. The crawl, scoring and buy list live in the box-scout
+seller's own sales first, then eBay's sold listings. Poshmark's sales are not
+checked: its robots.txt and terms forbid reading its search from an app. The crawl, scoring and buy list live in the box-scout
 skill's script, loaded from the skills directory, so Studio and the skill agree.
 
 Nothing here buys anything. The Sourcing page links to each store's cart with the
@@ -24,7 +25,6 @@ import statistics
 import sys
 import contextvars
 import threading
-import time
 import urllib.error
 from datetime import UTC, date, datetime, timedelta
 from functools import lru_cache
@@ -45,7 +45,6 @@ TREND_MAX_AGE = timedelta(days=7)
 RESALE_MAX_AGE = timedelta(days=7)
 RESEARCH_RETRY = timedelta(days=1)  # before searching again for a theme the marketplaces could not price
 RESEARCH_THEMES = 60  # themes searched per refresh at most
-RESEARCH_PAUSE_SEC = 1  # between Poshmark searches
 MODEL_TIMEOUT_SEC = 240
 ZONE_CHART_MAX_AGE = timedelta(days=30)
 RECENT_ZIPS = 4
@@ -59,7 +58,7 @@ HAIRCUT_RANGE = (0.25, 1.0)
 # Bump when the snapshot's shape changes: a snapshot written by another build is
 # a stale cache, dropped and rebuilt rather than served to a page that cannot
 # read it.
-SNAPSHOT_FORMAT = 5
+SNAPSHOT_FORMAT = 6
 TOP_PICKS = 5  # boxes shown per supplier on every check, however few qualify
 
 DEFAULT_PREFS = {
@@ -362,9 +361,8 @@ async def _research_trends(context: dict) -> tuple[list[str], str | None]:
 def price_evidence(web: dict, own: list[dict], *, now: datetime | None = None) -> dict | None:
     """One theme's price from sold listings, taking the sources in order until there
     are MIN_CONFIDENT_COMPS distinct sales within 30 days: the seller's own sales,
-    then eBay's sold listings, then any other marketplace's. The price is the median
-    of those, capped by the asking-price median when enough current listings were
-    found. Older sales within 90 days stay as context."""
+    then eBay's sold listings. The price is the median of those. Older sales within
+    90 days stay as context."""
     today = (now or _now()).date()
 
     def age(comp: dict) -> int:
@@ -374,7 +372,6 @@ def price_evidence(web: dict, own: list[dict], *, now: datetime | None = None) -
     tiers = (
         [c for c in own if 0 <= age(c) <= 90 and 1 <= c["price"] <= 500],
         [c for c in found if c.get("marketplace") == "eBay"],
-        [c for c in found if c.get("marketplace") != "eBay"],
     )
     comps: list[dict] = []
     recent: list[dict] = []
@@ -391,24 +388,20 @@ def price_evidence(web: dict, own: list[dict], *, now: datetime | None = None) -
         return None
     comps = [*recent, *(c for c in comps if age(c) > 30)][:16]
     values = [comp["price"] for comp in recent]
-    active = web.get("active") or []
     sold_median = statistics.median(values)
-    active_median = statistics.median(trim_outliers([c["price"] for c in active])) if len(active) >= MIN_CONFIDENT_COMPS else None
-    # Named in the order they were taken: the seller's sales, eBay, then the rest.
+    # Named in the order they were taken: the seller's sales, then eBay.
     sources = sorted({OWN_SOURCE if c.get("conversation_id") else c["marketplace"] for c in recent},
-                     key=lambda name: (name != OWN_SOURCE, name != "eBay", name))
+                     key=lambda name: name != OWN_SOURCE)
     return {
-        "per_piece": round(min(sold_median, active_median) if active_median is not None else sold_median, 2),
-        "sold_median": round(sold_median, 2), "active_median": active_median, "active": active,
+        "per_piece": round(sold_median, 2), "sold_median": round(sold_median, 2),
         "low": min(values), "high": max(values), "comps": comps, "source": " + ".join(sources),
     }
 
 
-def _research_prices(themes: list[str], own: dict[str, list[dict]], now: datetime) -> dict[str, dict]:
+def _research_prices(themes: list[str], now: datetime) -> dict[str, dict]:
     """Sold listings for themes the seller's own sales cannot price: eBay's, read
-    through Chrome, then Poshmark's for a theme still short of evidence. Poshmark
-    also supplies the current asking prices. A listing counts only when its title
-    fits the theme (the skill's `sale_mismatch`)."""
+    through Chrome. A listing counts only when its title fits the theme (the
+    skill's `sale_mismatch`)."""
     today = now.date()
 
     def fitting(theme: str, listings: list[dict]) -> list[dict]:
@@ -416,19 +409,8 @@ def _research_prices(themes: list[str], own: dict[str, list[dict]], now: datetim
 
     queries = {theme: query for theme in themes if (query := sold_listings.search_query(theme))}
     ebay = sold_listings.ebay_sold(list(dict.fromkeys(queries.values())), today)
-    found = {}
-    for theme, query in queries.items():
-        entry = {"comps": fitting(theme, ebay.get(query, [])), "active": [], "ebay": query in ebay}
-        try:
-            if price_evidence(entry, own.get(theme, []), now=now) is None:
-                entry["comps"] += fitting(theme, sold_listings.parse_poshmark_sold(sold_listings.poshmark_listings(query, sold=True), today))
-                time.sleep(RESEARCH_PAUSE_SEC)
-            entry["active"] = fitting(theme, sold_listings.parse_poshmark_active(sold_listings.poshmark_listings(query, sold=False)))[:8]
-            time.sleep(RESEARCH_PAUSE_SEC)
-        except FETCH_ERRORS as exc:
-            log.warning("Poshmark sold listings for %s were not read: %s", theme, exc)
-        found[theme] = entry
-    return found
+    return {theme: {"comps": fitting(theme, ebay.get(query, [])), "ebay": query in ebay}
+            for theme, query in queries.items()}
 
 
 # --- Refresh --------------------------------------------------------------------------------
@@ -457,7 +439,7 @@ def _wants_research(state: dict, theme: str, now: datetime, fresh: dict[str, dic
     """Whether to search the marketplaces for `theme` in this refresh."""
     if sold_listings.search_query(theme) is None:
         return False
-    # Searched while Chrome was away, so eBay, which goes before Poshmark, was never read.
+    # Searched while Chrome was away, so eBay was never read.
     if ebay_ready and (state["resale"].get(theme) or {}).get("ebay") is False:
         return True
     return theme not in fresh and _cached_research(state, theme, now, RESEARCH_RETRY) is None
@@ -661,8 +643,8 @@ def theme_capacity(rows: list[AnalyticsItem], inventory: dict[str, dict[str, int
 
 def _fitting(name: str, entry: dict) -> dict:
     """A cached theme entry with the listings that do not fit the theme dropped."""
-    return {**entry, **{key: [c for c in entry.get(key) or [] if isinstance(c, dict) and not scout().sale_mismatch(
-        name, str(c.get("title") or ""), str(c.get("snippet") or ""))] for key in ("comps", "active")}}
+    return {**entry, "comps": [c for c in entry.get("comps") or [] if isinstance(c, dict) and not scout().sale_mismatch(
+        name, str(c.get("title") or ""), str(c.get("snippet") or ""))]}
 
 
 def market_haircut(state: dict, now: datetime, own: dict[str, list[dict]]) -> dict | None:
@@ -700,7 +682,7 @@ def all_sales_price(sales: list[AnalyticsItem], now: datetime) -> dict | None:
         ((item.sold_at, item) for item in recent if item.sold_at is not None),
         key=lambda entry: entry[0], reverse=True)[:16]]
     return {
-        "per_piece": round(median, 2), "sold_median": round(median, 2), "active_median": None, "active": [],
+        "per_piece": round(median, 2), "sold_median": round(median, 2),
         "low": round(low, 2), "high": prices[-1], "source": f"{OWN_SOURCE} (all items)",
         "updated_at": now.isoformat(),
         "comps": [{
@@ -748,7 +730,7 @@ def evidence(theme: str) -> dict | None:
     if entry is None:
         return None
     return {"theme": theme, **{key: entry.get(key) for key in (
-        "per_piece", "sold_median", "active_median", "low", "high", "comps", "active", "updated_at", "source")}}
+        "per_piece", "sold_median", "low", "high", "comps", "updated_at", "source")}}
 
 
 def _calibration() -> dict[str, dict]:
@@ -884,7 +866,7 @@ def _rebuild(*, recrawl: bool, research: bool) -> dict:
         missing = s.research_themes([r for r in all_rows if r["price"] <= prefs["budget"]
                                      and _wants_research(state, r["theme"], now, fresh, ebay_ready)],
                                     limit=RESEARCH_THEMES)
-        for name, entry in _research_prices(missing, own, now).items():
+        for name, entry in _research_prices(missing, now).items():
             # A theme nothing was found for is kept too, so it waits RESEARCH_RETRY before the next search.
             state["resale"][name] = {**entry, "updated_at": now.isoformat()}
         fresh, baselines, all_rows = price_boxes()
@@ -914,7 +896,6 @@ def _rebuild(*, recrawl: bool, research: bool) -> dict:
         # The examples themselves are served by `evidence` when the seller opens them.
         entry = fresh.get(lot["theme"], {})
         lot["comps_count"] = len(entry.get("comps", []))
-        lot["active_median"] = entry.get("active_median")
         lot["research_at"] = entry.get("updated_at")
         lot["research_source"] = entry.get("source")
     _announce_new_picks(state["snapshot"], plan, prefs)

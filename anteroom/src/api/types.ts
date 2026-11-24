@@ -765,11 +765,9 @@ export interface SourcingEvidence {
   theme: string;
   per_piece: number;
   sold_median: number;
-  active_median: number | null;
   low: number;
   high: number;
   comps: SourcingComp[];
-  active: Omit<SourcingComp, "sold_at">[];
   updated_at: string | null;
   source: string | null;
 }
@@ -815,7 +813,6 @@ export interface SourcingLot {
   comps_count: number;
   research_at: string | null;
   research_source: string | null;
-  active_median: number | null;
   resale_low: number | null;
   operating_cost: number;
   break_even_pcs: number | null;
