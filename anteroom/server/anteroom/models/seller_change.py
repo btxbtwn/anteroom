@@ -45,6 +45,7 @@ TOPIC_BY_TABLE: dict[str, str | None] = {
     "cloud_marketplace_sessions": "settings",
     "mcp_access_tokens": "settings",
     "mcp_oauth_connections": "settings",
+    "mcp_feedback": None,
     "seller_goals": "settings",
     "attention_dismissals": "settings",
     "listing_templates": "settings",

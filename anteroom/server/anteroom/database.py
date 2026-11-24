@@ -269,6 +269,7 @@ def load_models() -> None:
         CloudSessionAudit,
     )
     from anteroom.models.mcp_token import McpAccessToken, McpOAuthConnection  # noqa: F401
+    from anteroom.models.mcp_feedback import McpFeedback  # noqa: F401
     from anteroom.models.home import AttentionDismissal, SellerGoal  # noqa: F401
     from anteroom.models.catalog import (  # noqa: F401
         CategoryFieldSchema,

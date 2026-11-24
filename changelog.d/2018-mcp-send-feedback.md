@@ -1,0 +1,1 @@
+- Your AI assistant can send feedback to the Anteroom team for you: a bug, a feature request, a question or something confusing. It shows you the message first. On myanteroom.com it is emailed to the team; on the Mac app it is saved and the assistant gives you an email link to send it yourself.

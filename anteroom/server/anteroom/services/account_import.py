@@ -21,11 +21,12 @@ from anteroom.models.job import ACTIVE_JOB_STATUSES
 
 # Not copied: the server's own task queue, secret references (secrets move to
 # Vault separately), videos (the web app has none), and photo fingerprints,
-# which are rebuilt from the converted photos.
+# which are rebuilt from the converted photos. Feedback an assistant sent from
+# the Mac stays there with whatever delivery note it already has.
 SKIPPED_TABLES = frozenset({
     'background_tasks', 'background_task_events', 'user_secret_references',
     'cloud_marketplace_sessions', 'cloud_session_audit', 'cloud_operation_journals',
-    'mcp_access_tokens', 'mcp_oauth_connections',
+    'mcp_access_tokens', 'mcp_oauth_connections', 'mcp_feedback',
     'listing_videos', 'photo_fingerprints',
     'plaid_connections', 'plaid_transactions',
 })
