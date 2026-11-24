@@ -1,1 +1,0 @@
-- Pull request checks run the long backend and browser tests once, when a change is queued to merge, instead of on every push.

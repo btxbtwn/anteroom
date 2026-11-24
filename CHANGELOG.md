@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1239 — 2026-11-24
+
+- Pull request checks run the long backend and browser tests once, when a change is queued to merge, instead of on every push.
+
 ## 0.1.1238 — 2026-11-24
 
 - Give Chrome and Cloud their own sign-in buttons in Connections, and show the result as soon as a cloud test finishes.
