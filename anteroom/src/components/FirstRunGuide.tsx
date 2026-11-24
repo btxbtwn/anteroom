@@ -298,10 +298,10 @@ export function FirstRunGuide({
               <>
                 <h2 id="setup-guide-title" className="setup-guide-title">{"Turn photos into listings"}</h2>
                 <p className="setup-guide-copy">
-                  {"Anteroom stays on this Mac. You add product photos, chat writes the listing, then you list it on the marketplace. Anteroom never publishes until you confirm."}
+                  {"Anteroom stays on this Mac. You add product photos, Ant drafts the listing, then you list it on the marketplace. Anteroom never publishes until you confirm."}
                 </p>
                 <ul className="setup-guide-points">
-                  <li>Choose ChatGPT, a Xiaomi MiMo key, or a Cursor API key so chat can read photos.</li>
+                  <li>Choose ChatGPT, a Xiaomi MiMo key, or a Cursor API key so Ant can read photos.</li>
                   <li>Optionally add Brave Search for sold-price comps.</li>
                   <li>Create a listing now; connect Chrome when you need browser-based marketplace actions.</li>
                 </ul>
@@ -646,10 +646,10 @@ export function FirstRunGuide({
                     <strong>Photos</strong> — drag product pictures into the tray. Order matters; the first photo is the hero.
                   </li>
                   <li>
-                    <strong>Item details</strong> — cost, flaws, and measurements you already know. Chat uses these.
+                    <strong>Item details</strong> — cost, flaws, and measurements you already know. Ant uses these.
                   </li>
                   <li>
-                    <strong>Chat</strong> — ask it to write the listing from the photos. Edit in conversation instead of starting over.
+                    <strong>Ant</strong> is the AI listing assistant. Ask Ant to write a draft from your photos or edit an existing draft.
                   </li>
                   <li>
                     <strong>Listing panel</strong> — {"the draft fields for eBay, Poshmark, Mercari, Depop, and Etsy. Review here before you list."}
@@ -668,7 +668,7 @@ export function FirstRunGuide({
               <>
                 <h2 id="setup-guide-title" className="setup-guide-title">Create your first listing</h2>
                 <p className="setup-guide-copy">
-                  Drop in photos, add any notes, then ask chat to generate. Replay this guide anytime from Settings → General.
+                  Drop in photos, add any notes, then ask Ant to draft the listing. Replay this guide anytime from Settings → General.
                 </p>
                 <button
                   type="button"

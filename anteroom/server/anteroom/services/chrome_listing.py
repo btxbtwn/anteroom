@@ -268,7 +268,7 @@ def depop_requirements(snapshot: dict, context: Context) -> list[dict]:
             fields = ((snapshot.get("_native_forms") or {}).get("depop") or {}).get("fields") or []
             path = next((row["path"] for row in fields if row.get("path") in {
                 "depop_specifics.size", "depop_specifics.nativeSizeId"}), "depop_specifics.size")
-            found.append(gap(path, "Depop needs a clothing size. Reload Depop fields, then choose Size for this category."))
+            found.append(gap(path, "Choose a clothing size for this Depop category."))
     worldwide = specifics.get("worldwideShipping") or {}
     if worldwide.get("enabled") is True:
         amount = _money(worldwide.get("price"))

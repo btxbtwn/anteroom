@@ -8,7 +8,10 @@ import type { PreflightGap } from "../api/nativeMarketplaces";
  * marketplace's ``photos`` answer is about its own photo area.
  */
 const ROW_ALIASES: Record<string, Record<string, string>> = Object.fromEntries(
-  ["ebay", "etsy", "poshmark", "mercari", "depop"].map((marketplace) => [marketplace, { photos: `marketplace_photos.${marketplace}` }]),
+  ["ebay", "etsy", "poshmark", "mercari", "depop"].map((marketplace) => [marketplace, {
+    photos: `marketplace_photos.${marketplace}`,
+    [`marketplace_category_ids.${marketplace}`]: `direct_category_ids.${marketplace}`,
+  }]),
 ) as Record<string, Record<string, string>>;
 
 Object.assign(ROW_ALIASES.ebay, {
@@ -31,10 +34,7 @@ Object.assign(ROW_ALIASES.mercari, {
 });
 
 /**
- * The messages a direct List would say about the fields on this form, under the
- * field each one is about. A gap whose field has no row here (a category the
- * form does not show, or the listing as a whole) stays beside List, where List
- * is.
+ * The validation messages to show under each field as well as in the summary.
  */
 export function gapsByField(
   marketplace: string,

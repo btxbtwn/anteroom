@@ -4,7 +4,7 @@ import type { MarketplaceListings } from "../api/marketplaceListings";
 import type { ListingData } from "../api/types";
 import type { MissingField, NativeDraft, NativeDrafts, PreflightGap } from "../api/nativeMarketplaces";
 import { ApiRequestError } from "../api/transport";
-import { MarketplacesLayout, MarketplacesSection, askChatPrompt, listChoice, markListedPrefill, relinkAfterDeletedRefusal, reconnectText, rowStatus, saidBesideList } from "./MarketplacesSection";
+import { MarketplacesLayout, MarketplacesSection, askChatPrompt, listChoice, markListedPrefill, relinkAfterDeletedRefusal, reconnectText, rowStatus } from "./MarketplacesSection";
 import { deletable } from "./marketplaceDelist";
 import { readyMarketplaces } from "./ListEverywhereDialog";
 import { waitlist } from "./MarketplaceActivity";
@@ -55,7 +55,7 @@ function row(html: string, name: string) {
   return html.slice(start, html.indexOf("</li>", start));
 }
 const disabledButton = (html: string, label: string) => new RegExp(`<button[^>]*disabled=""[^>]*>${label}</button>`).test(html);
-const enabledButton = (html: string, label: string) => new RegExp(`<button(?![^>]*disabled="")[^>]*>${label}</button>`).test(html);
+const enabledButton = (html: string, label: string) => new RegExp(`<button(?![^>]*disabled="")[^>]*>(?:<svg\\b[^>]*>.*?</svg>)?${label}</button>`).test(html);
 
 describe("marketplaces section", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -134,7 +134,7 @@ describe("marketplaces section", () => {
     })).not.toContain(message);
   });
 
-  it("shows a repeated category error once across preflight gaps and form notes, keeping each repair action", () => {
+  it("deduplicates repeated category errors in the summary and form notes", () => {
     const message = "That Mercari category has subcategories. Choose the most specific one.";
     const html = render({}, {}, { selected: "mercari", notes: [message, `  ${message}  `, "A separate form note."],
       onEditField: vi.fn(), preflight: { marketplaces: { mercari: { ready: false, gaps: [
@@ -146,13 +146,13 @@ describe("marketplaces section", () => {
     expect(html.split(message)).toHaveLength(2);
     expect(html).toContain("Mercari needs a title.");
     expect(html).toContain("A separate form note.");
-    expect(html).toContain("Edit Title");
+    expect(html).not.toContain("Fix Title");
     expect(enabledButton(html, "List…")).toBe(true);
     const standalone = render({}, {}, { selected: "mercari", notes: [message, message] });
     expect(standalone.split(message)).toHaveLength(2);
   });
 
-  it("offers Ask chat once for a category error reported by checks and form notes", () => {
+  it("offers Fix with Ant once for a category error reported by checks and form notes", () => {
     const message = "That Mercari category has subcategories. Choose the most specific one.";
     const options = { selected: "mercari", notes: [message, message], onAskChat: vi.fn() };
     for (const preflight of [
@@ -161,16 +161,16 @@ describe("marketplaces section", () => {
     ]) {
       const html = render({}, {}, { ...options, preflight });
       expect(html.split(message)).toHaveLength(2);
-      expect(enabledButton(html, "Ask chat")).toBe(true);
-      expect(html.match(/>Ask chat<\/button>/g)).toHaveLength(1);
+      expect(enabledButton(html, "Fix with Ant")).toBe(true);
+      expect(html.match(/>Fix with Ant<\/button>/g)).toHaveLength(1);
     }
   });
 
-  it("offers Ask chat for category refusals without an error code and changed form schemas", () => {
+  it("offers Fix with Ant for category refusals without an error code and changed form schemas", () => {
     for (const error_code of [undefined, "schema_drift"] as const) {
       const html = render({ mercari: { state: "draft", error: "Choose a more specific category.", error_code } }, {},
         { selected: "mercari", onAskChat: vi.fn() });
-      expect(enabledButton(html, "Ask chat")).toBe(true);
+      expect(enabledButton(html, "Fix with Ant")).toBe(true);
     }
   });
 
@@ -318,7 +318,7 @@ describe("marketplaces section", () => {
       error_fields: [{ field: "depop_specifics.parcelSize", message: "Depop needs shipping" }] } },
       {}, { selected: "depop", onEditField: vi.fn() });
     expect(enabledButton(shipping, "Edit Package size")).toBe(true);
-    expect(enabledButton(missing, "Ask chat")).toBe(true);
+    expect(enabledButton(missing, "Fix with Ant")).toBe(true);
     const signedOut = render({ etsy: { state: "not_saved", error: "Reconnect Etsy.", error_code: "signed_out" } }, {}, { selected: "etsy", etsyReady: true });
     expect(enabledButton(signedOut, "Reconnect Etsy")).toBe(true);
     const challenge = render({ mercari: { state: "draft", draft_url: "https://www.mercari.com/sell/draft/x/", error: "Finish Mercari's check.",
@@ -334,7 +334,7 @@ describe("marketplaces section", () => {
     const html = render({ depop: { state: "draft", error: message, error_code: "rejected" } },
       {}, { selected: "depop", onAskChat: vi.fn(), onEditField: vi.fn() });
     expect(html).toContain("shipping address in Depop");
-    expect(enabledButton(html, "Ask chat")).toBe(false);
+    expect(enabledButton(html, "Fix with Ant")).toBe(false);
     expect(html).not.toContain("Edit Package size");
   });
 
@@ -375,11 +375,11 @@ describe("marketplaces section", () => {
     expect(refused).toMatch(/<details open=""[^>]*>.*<summary[^>]*>.*Details.*<\/summary>.*Etsy said: Invalid value/s);
     expect(refused.indexOf("<details")).toBeLessThan(refused.indexOf("Etsy said:"));
     expect(refused.match(/Etsy said:/g)).toHaveLength(1);
-    expect(enabledButton(refused, "Ask chat")).toBe(true);
+    expect(enabledButton(refused, "Fix with Ant")).toBe(true);
     for (const error_code of ["network", "signed_out", "rate_limited", "uncertain"] as const) {
       const html = render({ etsy: { state: "not_saved", error: "Etsy is having trouble right now.", error_code } }, {},
         { selected: "etsy", etsyReady: true, onAskChat: vi.fn() });
-      expect(html, String(error_code)).not.toContain(">Ask chat</button>");
+      expect(html, String(error_code)).not.toContain(">Fix with Ant</button>");
     }
     const prompt = askChatPrompt("etsy", { state: "not_saved", error: "Etsy needs to know who made this item.", error_code: "missing_fields" });
     expect(prompt).toContain("plain words");
@@ -449,20 +449,20 @@ describe("marketplaces section", () => {
       preflight: { marketplaces: { ebay: { ready: false, gaps } } },
     });
     expect(html).toContain("eBay needs Color.");
-    expect(enabledButton(html, "Edit Color")).toBe(true);
-    expect(enabledButton(html, "Ask chat")).toBe(true);
+    expect(html).not.toContain("Fix Color");
+    expect(enabledButton(html, "Fix with Ant")).toBe(true);
     expect(enabledButton(html, "List…")).toBe(true);
   });
 
-  it("offers Edit and Ask chat for a value the marketplace will leave empty, without stopping List", () => {
+  it("shows a warning and offers Fix with Ant for a value the marketplace will leave empty", () => {
     const gaps = [{ field: "ebay_specifics.category_specifics.Size", message: "Size “Huge” is not one of eBay's choices, so it is left empty.", blocking: false }];
     const html = render({}, {}, {
       selected: "ebay", onAskChat: vi.fn(), onEditField: vi.fn(),
       preflight: { marketplaces: { ebay: { ready: true, gaps } } },
     });
     expect(html).toContain("is not one of eBay");
-    expect(enabledButton(html, "Edit Size")).toBe(true);
-    expect(enabledButton(html, "Ask chat")).toBe(true);
+    expect(html).not.toContain("Fix Size");
+    expect(enabledButton(html, "Fix with Ant")).toBe(true);
     expect(enabledButton(html, "List…")).toBe(true);
   });
 
@@ -613,26 +613,19 @@ describe("marketplaces section", () => {
   });
 });
 
-describe("an answer is said once", () => {
+describe("validation summary", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("leaves a gap to the form row it is about, and says only the rest beside List", () => {
+  it("includes both required fields and advisory gaps before the editor has loaded", () => {
     const gaps = [
       { field: "photos", message: "Depop keeps 8 photos. The first 8 of 9 are sent.", blocking: false },
       { field: "depop_specifics.parcelSize", message: "Depop needs a parcel size.", blocking: true },
     ];
     const html = render({}, {}, { selected: "depop", onAskChat: vi.fn(), onEditField: vi.fn(),
       preflight: { marketplaces: { depop: { ready: false, gaps } } } });
-    // Nothing known about the form yet: both are said here, once each.
+    expect(html).toContain('aria-label="Depop validation"');
     expect(html.match(/Depop keeps 8 photos/g)).toHaveLength(1);
     expect(html.match(/Depop needs a parcel size/g)).toHaveLength(1);
-  });
-  it("leaves every gap out of this pane once the form says it draws those rows", () => {
-    const gaps = [{ field: "photos", message: "Depop keeps 8 photos. The first 8 of 9 are sent.", blocking: false },
-      { field: "depop_specifics.parcelSize", message: "Depop needs a parcel size.", blocking: true }];
-    expect(saidBesideList(gaps, []).map((gap) => gap.message)).toEqual(gaps.map((gap) => gap.message));
-    expect(saidBesideList(gaps, ["photos"]).map((gap) => gap.message)).toEqual(["Depop needs a parcel size."]);
-    expect(saidBesideList(gaps, ["photos", "depop_specifics.parcelSize"])).toEqual([]);
   });
 });
 
@@ -643,7 +636,7 @@ it("disables only the agent's target row and labels it while other fields stay e
   expect(html).toContain('fieldset disabled="" data-listing-row="ebay_specifics.Size"');
   expect(html).toContain('fieldset data-listing-row="ebay_specifics.Color"');
   expect(html.match(/Agent editing/g)).toHaveLength(1);
-  expect(html).toContain('Ask chat');
+  expect(html).toContain("Fill Color with Ant");
 });
 
 

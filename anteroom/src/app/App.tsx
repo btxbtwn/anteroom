@@ -8,6 +8,7 @@ import { refreshInventory } from "../api/inventoryRefresh";
 import { BUSY_POLL_MS, IDLE_POLL_MS, hasOpenJob, inventoryPollMs, pollMs } from "../api/polling";
 import { useReloadStaleFrontend } from "../components/BuildVersion";
 import { isChatToggleShortcut } from "../components/ListingChatPopup";
+import { AntAvatar } from "../components/AntAvatar";
 import { ListingSession } from "../components/listingSession";
 import { HostedSetupChecklist, SetupChecklist } from "../components/SetupChecklist";
 import { ListingSidebar } from "../components/ListingSidebar";
@@ -926,10 +927,11 @@ export function App() {
                   type="button"
                   role="tab"
                   aria-selected={mobilePane === "workspace"}
+                  title="Ant, the AI listing assistant"
                   className={mobilePane === "workspace" ? "selected" : ""}
                   onClick={() => { paneChoice.current++; setMobilePane("workspace"); }}
                 >
-                  Chat
+                  <span className="inline-flex items-center gap-1.5 align-middle"><AntAvatar convId={selectedConvId} />Ant</span>
                 </button></>}
                 <button
                   type="button"

@@ -34,7 +34,7 @@ import { Radio, RadioGroup } from "./ui/radio-group";
 import { Toggle } from "./ui/toggle";
 import { RegenerateListingButton } from "./ClearListingButton";
 import { MarketplaceMessagesContext, uniqueMarketplaceMessages } from "./marketplaceMessages";
-import { MarketplacesLayout, useReportFieldsShown } from "./MarketplacesSection";
+import { MarketplacesLayout, useReportFixTargets } from "./MarketplacesSection";
 import { confirmDialog } from "../ui/confirmDialog";
 import { useChatBusy } from "./chat/liveChatStore";
 import { ListingActionsMenu } from "./ListingReviewActions";
@@ -42,7 +42,7 @@ import { FavoriteToggle } from "./favorites";
 import { type ListingReviewTab } from "./ListingReviewTabs";
 import type { BulkListingUploadResult } from "../bulkPhotoUpload";
 import { GenerationFeedback } from "./GenerationFeedback";
-import { BookmarkCheckIcon, BookmarkPlusIcon, CircleAlertIcon, HistoryIcon, MessageCircleIcon } from "lucide-react";
+import { BookmarkCheckIcon, BookmarkPlusIcon, CircleAlertIcon, HistoryIcon, SparklesIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { cn } from "../lib/utils";
 import { pathCategoryChoices } from "./categoryTree";
@@ -235,7 +235,7 @@ export function ListingEditor({
   // listing is still being written, so those prompts would chase half-done values.
   const chatBusy = useChatBusy(convId);
   // Same query ChatPanel polls: background field fills keep writing after the
-  // stream ends, and "Ask chat" beside "Filling discovered fields…" contradicts it.
+  // stream ends, so the editor can show when those fills are still running.
   const { data: activity } = useQuery({
     queryKey: ["activity", convId],
     queryFn: ({ signal }) => api.conversations.activity(convId, { signal }),
@@ -244,7 +244,7 @@ export function ListingEditor({
   const generating = chatBusy || Boolean(activity?.busy);
   // A List running on one marketplace locks only that marketplace's row, not the others.
   const writing = chatBusy || Boolean(activity?.writing);
-  // While chat is busy an Ask chat joins its queue and runs next.
+  // While Ant is busy, a requested fix joins its queue and runs next.
   const askChat = runtime.features.has("generation") ? onAskChat : undefined;
 
   const listing = editState.draft ?? data?.listing ?? {};
@@ -369,13 +369,13 @@ function fieldName(label: string): string {
 }
 
 /**
- * A field's secondary tools: where its choices come from and Ask chat. They stay
+ * A field's secondary tools: where its choices come from and an Ant fill. They stay
  * out of sight until the pointer is over the field or focus is in it, so the
  * form reads as fields first. The button stays in the tab order and shows on
  * focus; on touch it shows once the seller taps into the field.
  */
 function FieldTools({ label, source, onAsk }: { label: string; source: string | null; onAsk?: () => void }) {
-  const name = fieldName(label);
+  const action = `Fill ${fieldName(label)} with Ant`;
   return (
     <span className={cn("ms-auto flex shrink-0 items-center gap-1.5 opacity-0 transition-opacity",
       "pointer-events-none group-hover/field:pointer-events-auto group-hover/field:opacity-100",
@@ -387,18 +387,18 @@ function FieldTools({ label, source, onAsk }: { label: string; source: string | 
             render={
               <Button
                 type="button"
-                size="icon-micro"
+                size="icon-xs"
                 variant="ghost-muted"
                 className="-my-1 shrink-0"
-                aria-label={`Ask chat to fill ${name}`}
+                aria-label={action}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={onAsk}
               />
             }
           >
-            <MessageCircleIcon className="size-3.5" />
+            <SparklesIcon aria-hidden />
           </TooltipTrigger>
-          <TooltipPopup side="top" sideOffset={6}>Ask chat to fill this field</TooltipPopup>
+          <TooltipPopup side="top" sideOffset={6}>{action}</TooltipPopup>
         </Tooltip>
       )}
     </span>
@@ -462,6 +462,8 @@ function FieldDefaultControl({
   );
 }
 
+const NO_AGENT_LOCKS: string[] = [];
+
 export function StructuredEditor({
   convId,
   listing,
@@ -473,7 +475,7 @@ export function StructuredEditor({
   disabled,
   saving = false,
   onAskChat,
-  agentLocks = [],
+  agentLocks = NO_AGENT_LOCKS,
   generalSections,
 }: {
   convId: string;
@@ -662,7 +664,7 @@ export function StructuredEditor({
     }
     return open;
   }, [fields, listing, tab, revealOverride]);
-  // Go to an "Edit …" target once. The rows rebuild on every save, and
+  // Go to a repair target once. The rows rebuild on every save, and
   // following the target again then pulled the seller back from whatever they were editing.
   const reachedTarget = React.useRef<number | null>(null);
   // General's More details starts folded. An "Edit …" target inside it opens it
@@ -676,23 +678,6 @@ export function StructuredEditor({
   }, [target, tab, fields]);
   const moreOpen = targetFolded && moreToggle.sequence !== target?.sequence ? true : moreToggle.open;
   const setMoreOpen = (open: boolean) => setMoreToggle({ open, sequence: target?.sequence });
-  React.useEffect(() => {
-    if (!target || reachedTarget.current === target.sequence) return;
-    // A marketplace's answer can name the listing field its form row comes from.
-    const key = matchingEditorField(fields, target.field) ?? rowForField(tab, target.field, fields);
-    if (!key) return;
-    const row = [...(formRef.current?.querySelectorAll<HTMLElement>("[data-listing-row]") || [])].find((element) => element.dataset.listingRow === key);
-    if (!row) return;
-    // The label row puts "Save as default" and "Ask chat" before the control, so
-    // look for the field's own control first.
-    const focusable = 'input:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex="0"]';
-    const control = row.querySelector<HTMLElement>("[data-listing-field]");
-    const input = (control?.matches(focusable) ? control : control?.querySelector<HTMLElement>(focusable))
-      ?? row.querySelector<HTMLElement>(focusable);
-    reachedTarget.current = target.sequence;
-    row.scrollIntoView({ block: "center" });
-    (input ?? row).focus({ preventScroll: true });
-  }, [target, fields, tab, moreOpen]);
 
   // Derive saved values during render: a cached form is filled on its first frame.
   const local = React.useMemo(() => {
@@ -930,10 +915,12 @@ export function StructuredEditor({
   const fieldWarnings = gapsByField(tab, gaps, renderedFields);
   // List's photo answer belongs with the photos, on the control that sends them.
   const photoWarnings = gapsByField(tab, gaps, [{ key: `marketplace_photos.${tab}` }]).get(`marketplace_photos.${tab}`) ?? [];
-  // The answers read here are not read again beside List. A gap counts when this
-  // form resolved it to a row, which is the same test that put it under that row.
-  useReportFieldsShown(tab, gaps.filter((gap) => fieldWarnings.has(rowForField(tab, String(gap.field || ""), renderedFields))
-    || (photoWarnings.length > 0 && String(gap.field || "") === "photos")).map((gap) => String(gap.field || "")));
+  const fixTargets = React.useMemo(() => !nativeTab || disabled ? [] : renderedFields
+    .filter((field) => !field.locked && !agentFieldLocked(field.key, agentLocks)
+      && field.type !== "badge" && field.type !== "note"
+      && (!field.selectionOnly || Boolean(field.options?.length)))
+    .map((field) => ({ key: field.key, label: fieldName(field.label) })), [nativeTab, disabled, renderedFields, agentLocks]);
+  useReportFixTargets(tab, fixTargets);
   const formNotes = nativeTab
     ? uniqueMarketplaceMessages([...(nativeQuery.data?.notes ?? []), ...nativeFormNotes(tab, listing)], [...shownMessages, ...gaps.map((gap) => gap.message)])
     : [];
@@ -944,6 +931,30 @@ export function StructuredEditor({
   );
   const sections = React.useMemo(() => pageLayout ? nativeFormSections(renderedFields)
     : tab === "general" ? generalFormSections(renderedFields) : groupFieldsIntoSections(renderedFields), [pageLayout, tab, renderedFields]);
+  const targetKey = target && (matchingEditorField(renderedFields, target.field) ?? rowForField(tab, target.field, renderedFields));
+  const targetReveal = targetKey && renderedFields.find((field) => field.key === targetKey)?.reveal;
+  const targetSection = targetReveal
+    ? sections.find((section) => section.fields.some((field) => field.key === targetKey)) : undefined;
+  const [lastRevealedTarget, setLastRevealedTarget] = React.useState<number>();
+  if (target && targetSection && targetReveal && lastRevealedTarget !== target.sequence) {
+    const revealId = `${tab}|${targetSection.title}|${targetReveal}`;
+    setLastRevealedTarget(target.sequence);
+    if (!revealed.has(revealId)) setRevealOverride((current) => new Map(current).set(revealId, true));
+  }
+  React.useEffect(() => {
+    if (!target || !targetKey || reachedTarget.current === target.sequence) return;
+    const row = [...(formRef.current?.querySelectorAll<HTMLElement>("[data-listing-row]") || [])]
+      .find((element) => element.dataset.listingRow === targetKey);
+    if (!row) return;
+    const focusable = ':is(input:not([type="hidden"]), textarea, button, [tabindex="0"]):not(:disabled, [aria-disabled="true"], [tabindex="-1"])';
+    const control = row.querySelector<HTMLElement>("[data-listing-control]");
+    const field = control?.querySelector<HTMLElement>("[data-listing-field]");
+    const input = (field?.matches(focusable) ? field : field?.querySelector<HTMLElement>(focusable))
+      ?? control?.querySelector<HTMLElement>(focusable);
+    reachedTarget.current = target.sequence;
+    row.scrollIntoView({ block: "center" });
+    (input ?? row).focus({ preventScroll: true });
+  }, [target, targetKey, revealed, tab, moreOpen]);
   // Only loading, errors and gaps get a line; a form that loaded fine needs none.
   const retryingThisTab = reloadFields.isPending && reloadFields.variables?.market === tab;
   const reloadingThisTab = nativeTab && (retryingThisTab || autoReloadingMarket === tab);
@@ -1194,13 +1205,13 @@ export function StructuredEditor({
       </div>}
       {formNotes.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}
       {formNotes.length > 0 && onAskChat && <div className="pb-2">
-        <Button size="xs" variant="outline" disabled={disabled}
-          title="Chat fixes the fields in this listing. It does not list the item."
+        <Button size="xs" variant="outline" className="max-[900px]:min-h-11" disabled={disabled}
+          title="Ant uses AI to correct the flagged fields in this draft."
           onClick={() => onAskChat([
             `Review these ${marketplaceName(tab)} form messages and fix the affected fields in this listing:`,
             ...formNotes,
             "Save the corrections in this listing. Do not list or publish it; I will press List after reviewing the changes.",
-          ].join("\n"))}>Ask chat</Button>
+          ].join("\n"))}><SparklesIcon aria-hidden />Fix with Ant</Button>
       </div>}
 
       {sections.map((section, sectionIndex) => {
@@ -1280,7 +1291,7 @@ export function StructuredEditor({
                       {tools}
                     </div>
                   ))}
-                  <div className={cn(f.controlWidth === "half" && "@xl:w-1/2")}>{control(f, tools)}</div>
+                  <div data-listing-control className={cn(f.controlWidth === "half" && "@xl:w-1/2")}>{control(f, tools)}</div>
                   {suggestedCategory(listing, tab, f.key) && <p role="status" className="mt-1 flex flex-wrap items-baseline gap-x-2 text-xs text-warning-foreground">
                     <span>Suggested: check it. No exact {marketplaceName(tab)} match.</span>
                     {!disabled && !f.locked && <InlineButton type="button" className="text-xs" onClick={() => {

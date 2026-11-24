@@ -31,11 +31,11 @@ test("the General form keeps its category-first order and quiet field tools", as
     await expect(measurements.getByRole("radio", { name: "Pants" })).toHaveAttribute("aria-checked", "true");
     for (const input of await measurements.getByRole("spinbutton").all()) await expect(input).not.toHaveAttribute("placeholder", /\d/);
 
-    // Ask chat waits behind the field until the seller is in it, and stays one Tab away.
-    const ask = form.getByRole("button", { name: "Ask chat to fill Title" });
+    // The Ant action appears on field focus and stays in the tab order.
+    const ask = form.getByRole("button", { name: "Fill Title with Ant" });
     const tools = ask.locator("..");
     await expect(tools).toHaveCSS("opacity", "0");
-    await expect(form.getByText("Ask chat", { exact: true })).toHaveCount(0);
+    await expect(form.getByText("Fill Title with Ant", { exact: true })).toHaveCount(0);
     await titleInput.focus();
     await expect(tools).toHaveCSS("opacity", "1");
     await page.screenshot({ path: info.outputPath("general-title-focused.png") });
