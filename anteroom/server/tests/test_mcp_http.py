@@ -687,13 +687,13 @@ def test_hosted_today_concurrent_mutations_stay_seller_scoped(cloud, signing_key
 
 READ_TOOLS = {
     "search_inventory", "get_listing", "get_listing_photos", "get_sales_analytics", "get_offer_activity",
-    "get_sourcing_roi", "run_etsy_audit", "get_needs_attention", "get_action_status",
+    "get_sourcing_roi", "run_etsy_audit", "get_needs_attention", "get_import_matches", "get_action_status",
     "search_orders", "get_profit_and_loss", "search_expenses", "get_inventory_summary",
 }
 READ_TOOLS |= set(mcp_catalog_tools.PERMISSIONS)
 LISTING_WRITE_TOOLS = {
     "create_draft_listing", "edit_listing", "manage_listing_photos",
-    "manage_labels_and_notes", "delete_draft_listing",
+    "manage_labels_and_notes", "delete_draft_listing", "confirm_import_match", "reject_import_match",
 }
 ATTENTION_WRITE_TOOLS = {"dismiss_attention_items", "resolve_attention_items", "restore_attention_items"}
 # Inventory tidying tools (services/mcp_organize_tools.py).

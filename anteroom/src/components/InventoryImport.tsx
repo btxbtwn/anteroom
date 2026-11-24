@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ImportMarketplace, MarketplaceImportResult } from "../api/inventoryImport";
-import { clearImportAll, importerFor, resolveImportAllReview, startImportAll, stopImportAll, useImportAll, type ImportAllRun } from "../importAll";
+import { api } from "../api/client";
+import type { ImportMarketplace, ImportReview, MarketplaceImportResult } from "../api/inventoryImport";
+import { clearImportAll, importerFor, startImportAll, stopImportAll, useImportAll, type ImportAllRun } from "../importAll";
 import { marketplaceName } from "./marketplaceNames";
 import { PageError, PageNote, PageSection } from "./WorkspacePage";
 import { Button } from "./ui/button";
@@ -40,6 +41,9 @@ export function InventoryImport({ marketplace, accountKey, onOpenListing }: { ma
   const [errors, setErrors] = useState<Record<string, string>>({});
   const stop = useRef(false);
   const [stopping, setStopping] = useState(false);
+  // Listings an import held because they look like an item already here. The server keeps them,
+  // so they are still listed after a reload, on another device, and for the seller's assistant.
+  const reviews = useQuery({ queryKey: ["import-reviews", marketplace], queryFn: () => api.importReviews.list(marketplace) });
   const candidates = useQuery({
     queryKey: direct ? ["inventory-import", marketplace, accountKey, page] : ["inventory-import", marketplace, accountKey, page, cursor],
     queryFn: () => importer.candidates(page, cursor), retry: false,
@@ -47,8 +51,18 @@ export function InventoryImport({ marketplace, accountKey, onOpenListing }: { ma
   const refreshInventory = () => {
     void queryClient.invalidateQueries({ queryKey: ["conversations"] });
     void queryClient.invalidateQueries({ queryKey: ["inventory-import", marketplace] });
+    void queryClient.invalidateQueries({ queryKey: ["import-reviews", marketplace] });
     void queryClient.invalidateQueries({ queryKey: ["marketplace-sales"] });
   };
+  const held = all?.held ?? 0;
+  useEffect(() => {
+    if (held) void queryClient.invalidateQueries({ queryKey: ["import-reviews", marketplace] });
+  }, [held, marketplace, queryClient]);
+  const notAMatch = useMutation({
+    mutationFn: (id: string) => api.importReviews.notAMatch(id),
+    retry: false,
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: ["import-reviews", marketplace] }),
+  });
   const run = useMutation({
     mutationFn: async (requests: ImportRequest[]) => {
       stop.current = false;
@@ -59,7 +73,6 @@ export function InventoryImport({ marketplace, accountKey, onOpenListing }: { ma
         try {
           const result = link ? await importer.importListing(id, link) : await importer.importListing(id);
           setResults((previous) => ({ ...previous, [id]: result }));
-          resolveImportAllReview(allKey, id);
           setSelected((previous) => previous.filter((value) => value !== id));
         } catch (error) {
           setErrors((previous) => ({ ...previous, [id]: error instanceof Error ? error.message : "This listing could not be imported." }));
@@ -95,8 +108,9 @@ export function InventoryImport({ marketplace, accountKey, onOpenListing }: { ma
     <PageNote>{SUPPORT[marketplace]} Existing Anteroom items are opened again without replacing their edits or photos. Linking a match only records that the item is live on {name}; check the suggested matches before linking them.</PageNote>
     <ImportAll name={name} run={all} busy={allBusy} disabled={run.isPending}
       onStart={() => startImportAll(allKey, marketplace, importer, refreshInventory, direct ? accountKey : undefined)} onStop={() => stopImportAll(allKey)}
-      reviewing={run.isPending} results={results} onOpenListing={onOpenListing}
-      onImport={(id, link) => run.mutate([link ? { id, link } : { id }])} />
+      reviews={reviews.data?.reviews ?? []} reviewing={run.isPending || notAMatch.isPending} results={results} onOpenListing={onOpenListing}
+      onImport={(id, link) => run.mutate([link ? { id, link } : { id }])} onNotAMatch={(id) => notAMatch.mutate(id)} />
+    {notAMatch.error ? <PageError message={notAMatch.error.message} /> : null}
     <form className="ebay-search-form" onSubmit={(event) => { event.preventDefault(); if (!run.isPending) run.mutate([{ id: itemId.trim() }]); }}>
       <label className="min-w-48 flex-1 space-y-1 text-xs">{direct ? `${name} listing ID` : `${name} listing link or ID`}
         {direct ? <Input required inputMode="numeric" pattern={idPattern} maxLength={marketplace === "ebay" ? 15 : 20} value={itemId} disabled={run.isPending}
@@ -155,7 +169,7 @@ const plural = (count: number, one: string, many = `${one}s`) => `${count} ${cou
 
 function summary(run: ImportAllRun) {
   return [`${run.imported} imported`, `${run.alreadyIn} already in Anteroom`,
-    run.review.length ? `${run.review.length} to review` : "", run.skipped ? `${run.skipped} not supported` : "",
+    run.held ? `${run.held} to review` : "", run.skipped ? `${run.skipped} not supported` : "",
     run.failures.length ? `${run.failures.length} failed` : ""].filter(Boolean).join(" · ");
 }
 
@@ -168,10 +182,10 @@ function grouped(entries: ImportAllRun["failures"], skip?: string | null) {
 }
 
 /** Import every active listing at once; listings that look like existing items wait for the seller. */
-function ImportAll({ name, run, busy, disabled, reviewing, results, onStart, onStop, onImport, onOpenListing }: {
-  name: string; run: ImportAllRun | undefined; busy: boolean; disabled: boolean; reviewing: boolean;
+function ImportAll({ name, run, busy, disabled, reviews, reviewing, results, onStart, onStop, onImport, onNotAMatch, onOpenListing }: {
+  name: string; run: ImportAllRun | undefined; busy: boolean; disabled: boolean; reviews: ImportReview[]; reviewing: boolean;
   results: Record<string, MarketplaceImportResult>; onStart: () => void; onStop: () => void;
-  onImport: (id: string, link?: string) => void; onOpenListing: (id: string) => void;
+  onImport: (id: string, link?: string) => void; onNotAMatch: (id: string) => void; onOpenListing: (id: string) => void;
 }) {
   const status = !run ? null
     : run.status === "running" ? `Importing page ${run.page}… ${summary(run)}`
@@ -179,7 +193,7 @@ function ImportAll({ name, run, busy, disabled, reviewing, results, onStart, onS
     : run.status === "stopped" ? `Stopped. ${summary(run)}`
     : run.status === "failed" ? `Stopped on page ${run.page}. ${summary(run)}`
     : `Finished ${plural(run.page, "page")}. ${summary(run)}`;
-  const review = run?.review.filter((row) => !results[row.id]) ?? [];
+  const review = reviews.filter((row) => !results[row.listing_id]);
   return <div className="space-y-2">
     <div className="flex flex-wrap items-center gap-2 text-xs">
       {busy ? <Button size="xs" variant="outline" disabled={run?.status === "stopping"} onClick={onStop}>Stop after this listing</Button>
@@ -199,8 +213,9 @@ function ImportAll({ name, run, busy, disabled, reviewing, results, onStart, onS
             <p className="text-xs text-muted-foreground">Looks like “{row.match.title}”{row.match.price_differs && row.match.price != null ? ` (priced $${row.match.price} in Anteroom)` : ""}{row.price != null ? ` · $${row.price} on ${name}` : ""}</p>
           </div>
           <Button size="xs" variant="ghost" onClick={() => onOpenListing(row.match.conversation_id)}>Compare</Button>
-          <Button size="xs" variant="ghost" disabled={reviewing || busy} onClick={() => onImport(row.id)}>Import as new</Button>
-          <Button size="xs" variant="outline" disabled={reviewing || busy} onClick={() => onImport(row.id, row.match.conversation_id)}>Link to this item</Button>
+          <Button size="xs" variant="ghost" disabled={reviewing || busy} onClick={() => onNotAMatch(row.id)}>Not the same item</Button>
+          <Button size="xs" variant="ghost" disabled={reviewing || busy} onClick={() => onImport(row.listing_id)}>Import as new</Button>
+          <Button size="xs" variant="outline" disabled={reviewing || busy} onClick={() => onImport(row.listing_id, row.match.conversation_id)}>Link to this item</Button>
         </li>)}
       </ul>
     </div> : null}

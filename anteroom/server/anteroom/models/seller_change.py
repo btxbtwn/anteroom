@@ -35,6 +35,7 @@ TOPIC_BY_TABLE: dict[str, str | None] = {
     "marketplace_listings": "listings",
     "messages": "listings",
     "similar_item_reviews": "listings",
+    "import_reviews": "listings",
     "background_tasks": "listings",
     "photos": "photos",
     "jobs": "jobs",
