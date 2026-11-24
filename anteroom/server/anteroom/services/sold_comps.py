@@ -63,13 +63,13 @@ _SOLD_EVIDENCE_RE = re.compile(
     r"\b(?:sold(?:\s+(?:for|at|on))?|item has sold|purchased)\b",
     re.I,
 )
-# Seller feedback ("6.3K items sold") and "sold by {seller}" appear on active
-# listings. They are not evidence that this listing sold. Brave elides the count
-# from the seller card, leaving "... sold · Joined Sep 2020".
+# Active listings can show seller feedback ("6.3K items sold", "2700+ Sold
+# Listings") or "sold by {seller}". Brave elides the count from some seller
+# cards, leaving "... sold · Joined Sep 2020".
 # A multi-quantity listing still for sale counts its sales ("Last one1 sold",
 # "2 have already sold"); that says nothing about whether it is still listed.
 _SELLER_SOLD_COUNT_RE = re.compile(
-    r"\b(?:[\d,.]+[kmb]\+?\s+)?items\s+sold\b|\bsold\s+by\b|"
+    r"\b(?:[\d,.]+[kmb]\+?\s+)?items\s+sold\b|\bsold\s+(?:by|listings)\b|"
     r"(?:\.\.\.|…)\s*sold\b|\bsold\s*[·•|]\s*joined\b|"
     r"(?<![\d,.$])\d[\d,]*(?-i:\s+sold)\b(?!\s+(?:for|at|on)\b)|"
     r"\b(?:has|have)\s+already\s+sold\b",
@@ -283,7 +283,7 @@ def extract_sold_price(text: str | None, ignore: set[float] | None = None) -> fl
     ignored = _non_sale_prices(blob) | (ignore or set())
     if _BEST_OFFER_RE.search(blob) and not re.search(r"\bsold\s+(?:for|at)\b", blob, re.I):
         return None
-    sold = _SOLD_FOR_RE.search(blob) or _PRICE_BEFORE_SOLD_RE.search(blob)
+    sold = _SOLD_FOR_RE.search(evidence) or _PRICE_BEFORE_SOLD_RE.search(evidence)
     if sold:
         price = _usable_price(sold.group(1), ignored)
         if price is not None:
