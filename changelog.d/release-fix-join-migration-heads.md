@@ -1,0 +1,1 @@
+- Anteroom starts and updates its database again after two changes that each added a database update landed at the same time.
