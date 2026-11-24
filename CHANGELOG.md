@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1211 — 2026-11-24
+
+- Needs attention alerts can now be resolved, not only snoozed. **Resolve** hides an alert until something changes, like another sale or a new error, so a sold item still listed elsewhere always comes back when it sells again.
+- A possible duplicate can be marked **Not duplicates**: that pair is never flagged again, and either listing can still be flagged against a different one. Settings → Similar items stops suggesting the pair too.
+- **Dismiss** is now **Snooze 7 days**, and resolved alerts have their own **Resolved** list with **Restore**.
+- The iPhone app has Needs attention under More, with the same Resolve, Snooze and Restore.
+- Assistants connected over MCP can resolve alerts and restore resolved ones.
+
 ## 0.1.1210 — 2026-11-24
 
 - Your AI agent can now look up each marketplace's categories, the fields a category asks for and the values they accept, read the form a listing shows for one marketplace, check your region, currency and connected marketplaces, and read your listing rules before it writes or edits a draft. These lookups only read: nothing is published or changed.
