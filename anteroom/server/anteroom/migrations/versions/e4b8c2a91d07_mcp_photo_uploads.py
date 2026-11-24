@@ -1,7 +1,7 @@
 """Add single-use photo upload links for MCP clients
 
 Revision ID: e4b8c2a91d07
-Revises: e3b71c5a90d4
+Revises: e4f6c0a40d63
 Create Date: 2026-11-24 12:00:00.000000
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = "e4b8c2a91d07"
-down_revision = "e3b71c5a90d4"
+down_revision = "e4f6c0a40d63"
 branch_labels = None
 depends_on = None
 
