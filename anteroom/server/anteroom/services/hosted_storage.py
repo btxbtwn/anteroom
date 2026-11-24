@@ -38,12 +38,12 @@ def photo_call(method: str, key: str, data: bytes | None = None, *, timeout: flo
     if method != 'DELETE':
         url += '/' + key
     try:
-        response = hosted_photos._storage.request(method, url, headers={
+        response = hosted_photos._request(method, url, headers={
             'apikey': secret, 'Cache-Control': 'no-store',
             'Content-Type': 'application/json' if method == 'DELETE' else 'image/jpeg',
             **({'x-upsert': 'true'} if method == 'POST' else {}),
-        }, json={'prefixes': with_renditions(key)} if method == 'DELETE' else None,
-                                 content=None if method == 'DELETE' else data, timeout=timeout, follow_redirects=False)
+        }, timeout=timeout, json={'prefixes': with_renditions(key)} if method == 'DELETE' else None,
+                                          content=None if method == 'DELETE' else data)
     except httpx.HTTPError:
         raise HTTPException(503, 'Background photo storage is temporarily unavailable') from None
     if response.status_code == 404:
