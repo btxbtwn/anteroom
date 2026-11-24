@@ -1,0 +1,1 @@
+- Mercari no longer connects in Cloud. Mercari's site blocks requests from Anteroom's servers, so Mercari sales checks, delists and offers sent from the cloud were failing. Every Mercari action now runs in your connected Chrome, and saved Mercari cloud sign-ins are removed.

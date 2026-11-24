@@ -368,14 +368,14 @@ def test_verify_persists_live_sign_out(cloud, signing_keys, monkeypatch):  # noq
     assert client.get("/api/cloud-sessions", headers=alice).json()["sessions"]["poshmark"]["state"] == "expired"
 
 
-@pytest.mark.parametrize(("market", "cookie_name"), [("mercari", "session"), ("depop", "access_token")])
+@pytest.mark.parametrize(("market", "cookie_name"), [("depop", "access_token")])
 def test_marketplace_cloud_verification_and_resume(cloud, signing_keys, monkeypatch, market, cookie_name):  # noqa: F811
     from anteroom.models.promotion_automation import PromotionAutomation
     from anteroom.services import promotion_automations
 
     client, engine = cloud
     vault = _patch_vault(monkeypatch)
-    monkeypatch.setenv("ANTEROOM_CLOUD_MARKETPLACES", "mercari,depop")
+    monkeypatch.setenv("ANTEROOM_CLOUD_MARKETPLACES", "depop")
     monkeypatch.setenv("ANTEROOM_PROCESS_ROLE", "worker")
     alice = headers(signing_keys)
     cookies = [
@@ -452,6 +452,33 @@ def test_marketplace_cloud_verification_and_resume(cloud, signing_keys, monkeypa
 
     assert client.delete(f"/api/cloud-sessions/{market}", headers=alice).json()["ok"]
     assert (USER_ID, f"cloud-session-{market}") not in vault.data
+
+
+def test_mercari_is_not_a_cloud_marketplace(cloud, signing_keys, monkeypatch):  # noqa: F811
+    """Mercari answers server requests with a Cloudflare challenge, so it runs only in Chrome,
+    even when the deploy still lists it in ANTEROOM_CLOUD_MARKETPLACES."""
+    client, _engine = cloud
+    _patch_vault(monkeypatch)
+    monkeypatch.setenv("ANTEROOM_CLOUD_MARKETPLACES", "poshmark,mercari,depop")
+    monkeypatch.setenv("ANTEROOM_PROCESS_ROLE", "worker")
+    alice = headers(signing_keys)
+
+    async def runner(*_args, **_kwargs):
+        raise AssertionError("Mercari must never reach the cloud runner")
+
+    monkeypatch.setattr(cloud_marketplace, "_run_subprocess", runner)
+    listed = client.get("/api/cloud-sessions", headers=alice).json()
+    assert "mercari" not in listed["enabled"] and {"poshmark", "depop"} <= set(listed["enabled"])
+    assert client.post("/api/cloud-sessions/mercari/connect-token", headers=alice).status_code == 404
+    with use(for_seller(USER_ID)):
+        assert cloud_sessions.enabled_marketplaces() == frozenset({"poshmark", "depop"})
+        from anteroom.database import SessionLocal
+
+        with SessionLocal() as db:
+            assert cloud_sessions.has_active_session("mercari", db) is False
+            with pytest.raises(cloud_sessions.CloudSessionError):
+                cloud_sessions.save_uploaded_session(
+                    db, "mercari", [{"name": "_mwus", "value": "secret", "domain": "www.mercari.com"}], verified=True)
 
 
 @pytest.mark.parametrize("pause_all", [False, True])
@@ -994,7 +1021,7 @@ def test_upload_check_gives_up_on_a_busy_runner_before_the_web_side_does(monkeyp
     async def run():
         with pytest.raises(cloud_marketplace.CloudExecutionUnavailable):
             await asyncio.wait_for(cloud_marketplace.verify_upload_local(
-                "mercari", [{"name": "session", "value": "x"}], "UA", "proxy-1"), timeout=5)
+                "depop", [{"name": "access_token", "value": "x"}], "UA", "proxy-1"), timeout=5)
 
     asyncio.run(run())
     assert started == []

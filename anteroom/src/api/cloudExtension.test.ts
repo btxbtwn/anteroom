@@ -83,7 +83,7 @@ describe("Poshmark form capability", () => {
 });
 
 describe("Marketplace cloud session connect capability", () => {
-  it.each(["poshmark", "mercari", "depop"] as const)("posts %s upload tokens without access_token", async (marketplace) => {
+  it.each(["poshmark", "depop"] as const)("posts %s upload tokens without access_token", async (marketplace) => {
     const c = channel();
     const bridge = cloudExtension(ACCOUNT, c.target);
     const token = `${ACCOUNT.id}.${"b".repeat(32)}`;

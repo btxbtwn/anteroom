@@ -14,12 +14,12 @@ const DEFAULT_USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const DURABLE_STORAGE_KEYS = new Set(['poshmark_last_share_at', 'orderHistoryFullWalks']);
 const MAX_REDIRECTS = 5;
+const CLOUD_MARKETPLACES = ['poshmark', 'depop'];
 
 const EXTENSION_SCRIPTS = [
   'marketplace-fetch.js',
   'marketplace-catalog.js',
   'poshmark-native.js',
-  'mercari-native.js',
   'depop-native.js',
   'native-marketplaces.js',
   'marketplace-delete.js',
@@ -220,10 +220,6 @@ function createMarketplaceFetch({ jar, userAgent, httpFetch, marketplace = 'posh
         }
       }
 
-      if (marketplace === 'mercari' && currentUrl.hostname === 'www.mercari.com' && /^\/v1\/(api|initialize)$/.test(currentUrl.pathname)) {
-        headerMap.set('origin', ['Origin', 'https://www.mercari.com']);
-        headerMap.set('referer', ['Referer', 'https://www.mercari.com/sell/']);
-      }
       if (marketplace === 'depop' && currentUrl.hostname === 'webapi.depop.com') {
         headerMap.set('origin', ['Origin', 'https://www.depop.com']);
         const page = currentUrl.pathname.includes('/receipts/') ? 'sellinghub/' : 'sellinghub/drafts/';
@@ -446,6 +442,11 @@ async function executeMarketplaceOperation({
   onContextReady = null,
 }) {
   const type = command?.type;
+  // Not Mercari: its edge answers server requests with a Cloudflare challenge, so it runs only in Chrome.
+  if (!CLOUD_MARKETPLACES.includes(marketplace)) {
+    return { result: { ok: false, safe_to_retry: true, error_code: 'rejected', error: 'Unsupported cloud marketplace.' },
+      cookies_changed: false, cookies };
+  }
   const allowed = ['marketplace.execute', 'marketplace.result', 'marketplace.delete',
     'marketplace.promote', 'marketplace.promotion_check', 'marketplace.promotion_result',
     'marketplace.sessions', 'marketplace.verify_session', 'marketplace.sales', 'marketplace.sales_history',
@@ -500,7 +501,7 @@ async function executeMarketplaceOperation({
     onJournalRemove,
   });
 
-  const logRequests = marketplace === 'poshmark' || (marketplace === 'mercari' && type === 'marketplace.verify_session');
+  const logRequests = marketplace === 'poshmark';
   const stderrConsole = logRequests ? {
     log: (...args) => process.stderr.write(`[cloud-${marketplace}] ${args.join(' ')}\n`),
     info: (...args) => process.stderr.write(`[cloud-${marketplace}] ${args.join(' ')}\n`),
@@ -549,11 +550,9 @@ async function executeMarketplaceOperation({
     vm.runInContext(code, context, { filename: scriptName });
   }
 
-  if (marketplace !== 'poshmark') {
+  if (marketplace === 'depop') {
     // Photos are decoded, resized and encoded by the worker from approved bytes.
-    const preparedPhoto = photo => new Blob([Buffer.from(photo.base64, 'base64')], { type: 'image/jpeg' });
-    if (marketplace === 'mercari') context.mercariPhotoBlob = preparedPhoto;
-    if (marketplace === 'depop') context.depopPhotoBlob = preparedPhoto;
+    context.depopPhotoBlob = photo => new Blob([Buffer.from(photo.base64, 'base64')], { type: 'image/jpeg' });
   }
 
   if (typeof onContextReady === 'function') {
@@ -570,14 +569,7 @@ async function executeMarketplaceOperation({
   } else if (cmdType === 'marketplace.verify_session') {
     let summary;
     try {
-      if (marketplace === 'mercari') {
-        // The browser's status read hides initialize errors. Cloud sign-in needs the reason.
-        const { accessToken, user } = await context.mercariInitialize(Date.now() + 10000, 'session');
-        summary = context.publicExtensionSession(true, context.soonestExpiry(null, accessToken), { name: user.name });
-        context.marketplaceLog(marketplace, 'verify_session', { state: summary.state });
-      } else {
-        summary = await context.readExtensionSession(marketplace, undefined, command.payload?.seller_region);
-      }
+      summary = await context.readExtensionSession(marketplace, undefined, command.payload?.seller_region);
       if (summary.state === 'signed_in') {
         if (marketplace === 'poshmark') await context.poshmarkCsrf(Date.now() + 15000, context.poshmarkOrigin(command.payload?.seller_region));
         if (marketplace === 'depop') {
@@ -593,12 +585,7 @@ async function executeMarketplaceOperation({
       if (summary && err?.code === 'signed_out') {
         result = { ok: true, session: { ...summary, state: 'expired', expiring: false } };
       } else {
-        const errorCode = err?.code || 'network';
-        if (marketplace === 'mercari') context.marketplaceLog(marketplace, 'verify_session', { error_code: errorCode });
-        const error = marketplace === 'mercari' && err?.code === 'challenge'
-          ? 'Mercari asked for a browser check during cloud sign-in. Complete any check Mercari shows in Chrome, then retry Connect in Cloud.'
-          : String(err?.message || err);
-        result = { ok: false, error_code: errorCode, error };
+        result = { ok: false, error_code: err?.code || 'network', error: String(err?.message || err) };
       }
     }
   } else if (cmdType === 'marketplace.form' && marketplace === 'poshmark') {
@@ -606,19 +593,6 @@ async function executeMarketplaceOperation({
     result = { ok: true, form };
   } else {
     result = await context.runCloudMarketplaceCommand(command, Array.isArray(photos) ? photos : []);
-  }
-
-  if (marketplace === 'mercari' && cmdType === 'marketplace.promotion_check' && result?.error_code === 'challenge') {
-    const step = {
-      'mercari-account': 'the account check',
-      'mercari-item': 'listing details',
-      'mercari-eligibility': 'offer eligibility',
-      'mercari-bounds': 'the allowed offer price',
-    }[result.preview_step] || 'the offer review';
-    result.error = `Mercari blocked Anteroom's cloud request for ${step}. The offer check stopped.`;
-    // Only the fixed response signals belong in the hosted activity and alerts.
-    delete result.marketplace_message;
-    if (result.challenge_response) result.marketplace_message = `HTTP ${result.challenge_response.status}`;
   }
 
   const exported = exportCookies(jar, marketplace);

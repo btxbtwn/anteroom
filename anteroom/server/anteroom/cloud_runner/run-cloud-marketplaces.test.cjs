@@ -10,7 +10,7 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), {
   status, headers: { 'content-type': 'application/json' },
 });
 
-for (const marketplace of ['mercari', 'depop']) {
+for (const marketplace of ['depop']) {
   test(`${marketplace} writes require explicit confirmation and a matching marketplace`, async () => {
     const httpFetch = () => assert.fail('Unexpected request');
     for (const [type, action] of [
@@ -30,97 +30,16 @@ for (const marketplace of ['mercari', 'depop']) {
   });
 }
 
-test('Mercari verifies through initialize and imports a page with its own session', async () => {
-  const calls = [];
-  const httpFetch = async (url, options) => {
-    assert.equal(options.headers.Cookie, url.endsWith('/initialize') ? 'session=test-session' : 'session=rotated');
-    assert.equal(options.headers.Origin, 'https://www.mercari.com');
-    calls.push(url);
-    if (url.endsWith('/initialize')) {
-      return new Response(JSON.stringify({ csrf: 'csrf', user: { userId: 42, name: 'Seller' } }), {
-        headers: { 'content-type': 'application/json', 'set-cookie': 'session=rotated; Path=/; Secure' },
-      });
-    }
-    const body = JSON.parse(options.body);
-    assert.equal(body.operationName, 'publicProfileSearchQuery');
-    assert.equal(body.variables.criteria.offset, 24);
-    assert.deepEqual(body.variables.criteria.sellerIds, [42]);
-    return json({ data: { search: { itemsList: [{ id: 'm123456', status: 'on_sale', name: 'Coat', price: 5000 }] } } });
-  };
-  const execute = (type, payload) => executeMarketplaceOperation({
-    marketplace: 'mercari', cookies: [mercariCookie, depopCookie], command: { type, payload: { marketplace: 'mercari', ...payload } }, httpFetch,
-  });
-  const verified = await execute('marketplace.verify_session');
-  assert.equal(verified.result.session.state, 'signed_in');
-  assert.equal(verified.result.session.label, 'Seller');
-  assert.equal(verified.cookies_changed, true);
-  assert.deepEqual(verified.cookies.map(({ name, value }) => [name, value]), [['session', 'rotated']]);
-  const imported = await execute('marketplace.import.page', { cursor: '24' });
-  assert.equal(imported.result.ok, true);
-  assert.equal(imported.result.account, '42');
-  assert.equal(imported.result.rows[0].id, 'm123456');
-  assert.equal(calls.length, 3);
-});
-
-test('Mercari cloud verification reports a browser check without exposing the response body', async () => {
-  const { result } = await executeMarketplaceOperation({
-    marketplace: 'mercari', cookies: [mercariCookie],
-    command: { type: 'marketplace.verify_session', payload: { marketplace: 'mercari' } },
-    httpFetch: async () => new Response('<html>captcha private-response</html>', {
-      status: 403, headers: { 'content-type': 'text/html' },
-    }),
-  });
-  assert.deepEqual(result, {
-    ok: false, error_code: 'challenge',
-    error: 'Mercari asked for a browser check during cloud sign-in. Complete any check Mercari shows in Chrome, then retry Connect in Cloud.',
-  });
-});
-
-test('Mercari cloud verification reports when initialize returns no signed-in user', async () => {
-  const { result } = await executeMarketplaceOperation({
-    marketplace: 'mercari', cookies: [mercariCookie],
-    command: { type: 'marketplace.verify_session', payload: { marketplace: 'mercari' } },
-    httpFetch: async () => json({ csrf: 'csrf' }),
-  });
-  assert.equal(result.ok, false);
-  assert.equal(result.error_code, 'signed_out');
-  assert.match(result.error, /Sign in to Mercari in Chrome/);
-});
-
-for (const [body, format, marker, header] of [
-  ['<!doctype html><html>challenge-platform private-response</html>', 'html', 'cloudflare', 'challenge'],
-  ['<!doctype html><html>captcha private-response</html>', 'html', 'captcha', 'private-header'],
-  ['{"message":"captcha private-response"}', 'json', 'captcha', 'private-header'],
-]) {
-  test(`Mercari cloud offer review reports a blocked listing read with a ${format} ${marker} response`, async () => {
-    const calls = [];
-    const { result } = await executeMarketplaceOperation({
+// Mercari answers server requests with a Cloudflare challenge, so it runs only in Chrome.
+for (const type of ['marketplace.verify_session', 'marketplace.sales_history', 'marketplace.delete', 'marketplace.promotion_check']) {
+  test(`the cloud runner refuses Mercari ${type} before any request`, async () => {
+    const { result, cookies_changed: cookiesChanged } = await executeMarketplaceOperation({
       marketplace: 'mercari', cookies: [mercariCookie],
-      command: { type: 'marketplace.promotion_check', payload: {
-        marketplace: 'mercari', action: 'offer', listing_id: 'm123456', discount_percent: 15,
-      } },
-      httpFetch: async (url, options) => {
-        calls.push([url, options.method]);
-        if (url.endsWith('/initialize')) return json({ csrf: 'csrf', user: { userId: 42, name: 'Seller' } });
-        assert.equal(JSON.parse(options.body).operationName, 'sellFetchItemsDetails');
-        return new Response(body, {
-          status: 403, headers: {
-            'content-type': format === 'html' ? 'text/html' : 'application/json',
-            'cf-mitigated': header, 'cf-ray': 'private-id',
-          },
-        });
-      },
+      command: { type, payload: { marketplace: 'mercari', listing_id: 'm123456', confirm: true } },
+      httpFetch: () => assert.fail('Unexpected request'),
     });
-    assert.deepEqual(calls, [
-      ['https://www.mercari.com/v1/initialize', 'GET'],
-      ['https://www.mercari.com/v1/api', 'POST'],
-    ]);
-    assert.deepEqual(structuredClone(result), {
-      ok: false, safe_to_retry: true, error_code: 'challenge', preview_step: 'mercari-item',
-      error: "Mercari blocked Anteroom's cloud request for listing details. The offer check stopped.",
-      marketplace_message: 'HTTP 403',
-      challenge_response: { status: 403, format, marker, cloudflare_challenge_header: header === 'challenge' },
-    });
+    assert.deepEqual(result, { ok: false, safe_to_retry: true, error_code: 'rejected', error: 'Unsupported cloud marketplace.' });
+    assert.equal(cookiesChanged, false);
   });
 }
 

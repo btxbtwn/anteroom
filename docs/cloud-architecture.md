@@ -133,14 +133,20 @@ The design does not assume a Mac.
 
 | Seller has | What works |
 |---|---|
-| iPhone or web only | Everything that runs on the server: generation, editing, photos, history, analytics. eBay and Etsy list through their official APIs. Once Poshmark, Mercari, or Depop is connected in Cloud, listing actions, sales checks, imports, and promotions for that marketplace run server-side while Chrome is closed. |
+| iPhone or web only | Everything that runs on the server: generation, editing, photos, history, analytics. eBay and Etsy list through their official APIs. Once Poshmark or Depop is connected in Cloud, listing actions, sales checks, imports, and promotions for that marketplace run server-side while Chrome is closed. Mercari always runs in Chrome. |
 | Any computer with desktop Chrome | The above, plus Poshmark, Mercari, Depop actions through the Bridge extension, and one-time Cloud session connect or reconnect. |
 | The Mac app | The above, plus Mac-only work: Apple Vision background removal and local SDK sign-ins. |
 
 ### Opt-in marketplace Cloud sessions
 
-Hosted accounts can run Poshmark, Mercari, and Depop actions server-side.
-`ANTEROOM_CLOUD_MARKETPLACES=poshmark,mercari,depop` makes all three available for sellers to connect.
+Hosted accounts can run Poshmark and Depop actions server-side.
+`ANTEROOM_CLOUD_MARKETPLACES=poshmark,depop` makes both available for sellers to connect.
+Mercari is not a cloud marketplace (removed 2026-11-24, #2029): Mercari's Cloudflare edge
+answers every server request to `www.mercari.com/v1/api` with a challenge (`403`,
+`cf-mitigated: challenge`), while the same requests from the Bridge in a real Chrome go
+through, and Mercari has no server API for sellers. Every Mercari action runs in the
+seller's Chrome. Do not work around the challenge (proxies, clearance cookies, disguised
+browsers); add Mercari back only through an authorized Mercari API.
 Local desktop mode is unchanged and stays strictly on local Chrome.
 
 - **One-time direct capture:** When the seller chooses **Connect in Cloud** in
@@ -176,10 +182,9 @@ Local desktop mode is unchanged and stays strictly on local Chrome.
   before each delist; approved photos are loaded directly from `photo_store()` with
   SHA-256 verification.
 
-Mercari and Depop uploads are verified by the worker before replacing Vault
-credentials. A verified reconnect resumes rules paused by a cloud disconnect.
-Depop uses its recent-like feed, while Mercari checks eligibility during its
-scheduled listing scans and honors the existing offer cooldown.
+Depop uploads are verified by the worker before replacing Vault credentials.
+A verified reconnect resumes rules paused by a cloud disconnect. Depop uses its
+recent-like feed.
 
 ## Next steps (2026-10-31)
 
