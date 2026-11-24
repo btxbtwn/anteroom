@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { withFavorite } from "./favorites";
+import { queueFavoriteWrite, withFavorite } from "./favorites";
 import { DEFAULT_LISTING_FILTERS, activeFilterCount, favoriteCount, filterListings } from "./inventoryFilters";
 import { inventoryRows } from "./inventoryTable";
 import { tableFilterCount, NO_TABLE_FILTERS } from "./InventoryTableFilters";
@@ -32,5 +32,29 @@ describe("favorites", () => {
     expect(next?.map((row) => row.favorite)).toEqual([true, true, undefined]);
     expect(next?.[0]).toBe(rows[0]);
     expect(withFavorite(undefined, { id: "coat", favorite: true })).toBeUndefined();
+  });
+
+  it("sends an item's star writes in order so the last choice is saved", async () => {
+    const saved: boolean[] = [];
+    let finishStar!: () => void;
+    const star = queueFavoriteWrite("coat", () => new Promise<void>((resolve) => {
+      finishStar = () => { saved.push(true); resolve(); };
+    }));
+    const unstar = queueFavoriteWrite("coat", async () => { saved.push(false); });
+    const other = queueFavoriteWrite("jeans", async () => { saved.push(true); });
+    await expect(other).resolves.toBe(true);
+    expect(saved).toEqual([true]);
+    finishStar();
+    await expect(star).resolves.toBe(false);
+    await expect(unstar).resolves.toBe(true);
+    expect(saved).toEqual([true, true, false]);
+  });
+
+  it("reports only the latest write's failure", async () => {
+    const older = queueFavoriteWrite("bag", () => Promise.reject(new Error("offline")));
+    const newer = queueFavoriteWrite("bag", () => Promise.reject(new Error("still offline")));
+    await expect(older).resolves.toBe(false);
+    await expect(newer).rejects.toThrow("still offline");
+    await expect(queueFavoriteWrite("bag", async () => {})).resolves.toBe(true);
   });
 });

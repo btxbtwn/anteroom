@@ -20,6 +20,33 @@ function applyFavorite(client: QueryClient, change: Change) {
   client.setQueryData<Conversation>(["conversation", change.id], (row) => (row ? { ...row, favorite: change.favorite } : row));
 }
 
+const writes = new Map<string, { tail: Promise<unknown>; pending: number }>();
+
+/**
+ * Sends one item's star writes one after another, so the server keeps the
+ * seller's last choice. Resolves `true` when this was the item's latest write,
+ * `false` when a newer one is still waiting and decides the star; only the
+ * latest write's failure is thrown.
+ */
+export async function queueFavoriteWrite(id: string, write: () => Promise<unknown>): Promise<boolean> {
+  const entry = writes.get(id) ?? { tail: Promise.resolve(), pending: 0 };
+  writes.set(id, entry);
+  const sent = entry.tail.catch(() => undefined).then(write);
+  entry.tail = sent;
+  entry.pending += 1;
+  let failure: { error: unknown } | undefined;
+  try {
+    await sent;
+  } catch (error) {
+    failure = { error };
+  }
+  entry.pending -= 1;
+  if (entry.pending > 0) return false;
+  writes.delete(id);
+  if (failure) throw failure.error;
+  return true;
+}
+
 /**
  * Stars or unstars an item. The star changes on screen at once and goes back
  * if the server refuses it; starring is not an edit, so nothing else moves.
@@ -27,7 +54,7 @@ function applyFavorite(client: QueryClient, change: Change) {
 export function useSetFavorite() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, favorite }: Change) => api.conversations.setFavorite(id, favorite),
+    mutationFn: ({ id, favorite }: Change) => queueFavoriteWrite(id, () => api.conversations.setFavorite(id, favorite)),
     onMutate: async (change: Change) => {
       // A read already on its way would land with the old star; the star wins, then the list rereads.
       await Promise.all([
@@ -36,7 +63,13 @@ export function useSetFavorite() {
       ]);
       applyFavorite(client, change);
     },
-    onSettled: () => refreshInventory(client),
+    onSettled: (latest: boolean | undefined, _error, change: Change) => {
+      // A newer star for this item is still on its way; its own reread follows it.
+      if (latest === false) return;
+      refreshInventory(client);
+      // Starring may have cancelled the item's first read; read it again so the editor is not left empty.
+      void client.invalidateQueries({ queryKey: ["conversation", change.id], exact: true });
+    },
     onError: (error: Error, change: Change) => {
       applyFavorite(client, { id: change.id, favorite: !change.favorite });
       toastManager.add({

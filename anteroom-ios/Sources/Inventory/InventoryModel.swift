@@ -44,6 +44,8 @@ final class InventoryModel {
     @ObservationIgnored private var sheetFailedListings: [String: [ConversationSummary]] = [:]
     /// The markdown review for the stale listings, read ahead so Mark down opens filled.
     @ObservationIgnored private var markdownPreview: MarkdownPreview?
+    /// The latest star write for each item; the next one waits for it.
+    @ObservationIgnored private var favoriteWrites: [String: Task<Void, Error>] = [:]
     /// Counts changes to `listings`; the cached queries recompute when it moves.
     private var revision = 0
     @ObservationIgnored private var rowsMemo = QueryMemo<RowsKey, [ConversationSummary]>()
@@ -437,7 +439,8 @@ final class InventoryModel {
         }
     }
 
-    /// The star changes at once and goes back if the server refuses it.
+    /// The star changes at once and goes back if the server refuses it. Each
+    /// item's writes go out one after another, so the last tap is what is saved.
     func setFavorite(_ listing: ConversationSummary, _ favorite: Bool) async {
         func mark(_ on: Bool) {
             changeListings { rows in
@@ -445,9 +448,19 @@ final class InventoryModel {
             }
         }
         mark(favorite)
-        do {
+        let previous = favoriteWrites[listing.id]
+        let write = Task {
+            _ = try? await previous?.value
             _ = try await api.setFavorite(listing.id, favorite: favorite)
+        }
+        favoriteWrites[listing.id] = write
+        do {
+            try await write.value
+            if favoriteWrites[listing.id] == write { favoriteWrites[listing.id] = nil }
         } catch {
+            // A newer tap is on its way and decides the star.
+            guard favoriteWrites[listing.id] == write else { return }
+            favoriteWrites[listing.id] = nil
             mark(!favorite)
             self.error = (favorite ? "Could not add to favorites. " : "Could not remove from favorites. ")
                 + error.localizedDescription
