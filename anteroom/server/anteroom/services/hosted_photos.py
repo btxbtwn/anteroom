@@ -129,7 +129,7 @@ def thumbnail(key: str, version: str | None, size: int, token: str) -> bytes:
     stored = size in KEPT_THUMB_SIZES
     made = _stored_thumbnail(rendition_key(key, size), token) if stored else None
     if made is None:
-        made = _make_thumbnail(storage_call('GET', key, token), size)
+        made = make_thumbnail(storage_call('GET', key, token), size)
         if stored:
             _store_thumbnail(rendition_key(key, size), made, token)
     _keep(entry, made)
@@ -152,7 +152,7 @@ def _store_thumbnail(name: str, data: bytes, token: str) -> None:
         pass
 
 
-def _make_thumbnail(data: bytes, size: int) -> bytes:
+def make_thumbnail(data: bytes, size: int) -> bytes:
     with _thumb_slot, Image.open(io.BytesIO(data)) as image:
         # Decode the JPEG at a fraction of its size; the cover is 96px.
         image.draft('RGB', (size, size))

@@ -21,6 +21,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from anteroom.config import MAX_PHOTO_COUNT
 from anteroom.models.background_task import BackgroundTask
 from anteroom.models.conversation import Conversation, Photo
 from anteroom.models.job import ACTIVE_JOB_STATUSES, Job
@@ -87,6 +88,7 @@ _DELETE_ANNOTATIONS = {
 TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
     "search_inventory": ("listings", "read"),
     "get_listing": ("listings", "read"),
+    "get_listing_photos": ("listings", "read"),
     "create_draft_listing": ("listings", "write"),
     "edit_listing": ("listings", "write"),
     "manage_listing_photos": ("listings", "write"),
@@ -102,6 +104,14 @@ TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
 }
 
 MAX_ATTENTION_KEYS = 100
+
+# Photos an agent views are downscaled: big enough to read a care tag, small
+# enough that a listing's photos fit in one response.
+MIN_PHOTO_SIDE = 256
+DEFAULT_PHOTO_SIDE = 1024
+MAX_PHOTO_SIDE = 1600
+# Marks an image item whose bytes are read after the call's database session closes.
+_PHOTO_PLACEHOLDER = "_anteroom_photo"
 
 _AREA_NAMES = {"listings": "Listings", "analytics": "Analytics", "attention": "Needs Attention"}
 _LEVEL_NAMES = {"read": "Read", "write": "Read and write"}
@@ -161,6 +171,33 @@ def tool_definitions() -> list[dict[str, Any]]:
                 "type": "object",
                 "properties": {
                     "conversation_id": {"type": "string", "description": "Listing / conversation ID."},
+                },
+                "required": ["conversation_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "get_listing_photos",
+            "title": "View listing photos",
+            "description": (
+                "View a listing's photos as images, in display order, to check its fields "
+                "against them (brand and size tags, fabric content, flaws, measurements). "
+                "Pass photo_ids to view only some. Read-only."
+            ),
+            "annotations": _READ_ANNOTATIONS,
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "conversation_id": {"type": "string", "description": "Listing / conversation ID."},
+                    "photo_ids": {
+                        "type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": MAX_PHOTO_COUNT,
+                        "description": "Only these photos (IDs from get_listing). Default: every photo.",
+                    },
+                    "max_side": {
+                        "type": "integer", "minimum": MIN_PHOTO_SIDE, "maximum": MAX_PHOTO_SIDE,
+                        "default": DEFAULT_PHOTO_SIDE,
+                        "description": "Longest side of each returned image in pixels. Raise it to read small tag text.",
+                    },
                 },
                 "required": ["conversation_id"],
                 "additionalProperties": False,
@@ -633,8 +670,9 @@ def _rpc_error(msg_id: Any, code: int, message: str) -> dict[str, Any]:
 
 
 def _tool_success_result(data: dict[str, Any]) -> dict[str, Any]:
+    images = data.pop("_images", [])
     return {
-        "content": [{"type": "text", "text": json.dumps(data, indent=2, default=str)}],
+        "content": [{"type": "text", "text": json.dumps(data, indent=2, default=str)}, *images],
         "isError": False,
     }
 
@@ -657,6 +695,7 @@ def _dispatch_tool(
     handlers = {
         "search_inventory": _tool_search_inventory,
         "get_listing": _tool_get_listing,
+        "get_listing_photos": _tool_get_listing_photos,
         "get_sales_analytics": _tool_get_sales_analytics,
         "get_offer_activity": _tool_get_offer_activity,
         "get_sourcing_roi": _tool_get_sourcing_roi,
@@ -849,6 +888,100 @@ def _tool_get_listing(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str
         "marketplaces": direct,
         "photos": photo_payload,
     }
+
+
+def _tool_get_listing_photos(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str, Any]:
+    conv_id = _require_str(args, "conversation_id")
+    if ConversationRepo(db).get(conv_id) is None:
+        raise McpToolError("Listing not found.")
+    max_side = _bounded_int(
+        args.get("max_side"), default=DEFAULT_PHOTO_SIDE, minimum=MIN_PHOTO_SIDE, maximum=MAX_PHOTO_SIDE,
+    )
+    photos = db.scalars(
+        select(Photo)
+        .where(Photo.conversation_id == conv_id)
+        .order_by(Photo.display_order, Photo.created_at, Photo.id)
+    ).all()
+    wanted = args.get("photo_ids")
+    if wanted is not None:
+        if (not isinstance(wanted, list) or not wanted or len(wanted) > MAX_PHOTO_COUNT
+                or not all(isinstance(i, str) for i in wanted)):
+            raise McpToolError(f"photo_ids must be a list of 1 to {MAX_PHOTO_COUNT} photo IDs.")
+        unknown = sorted(set(wanted) - {p.id for p in photos})
+        if unknown:
+            raise McpToolError(f"Photo not found on this listing: {', '.join(unknown)}.")
+        photos = [p for p in photos if p.id in set(wanted)]
+    return {
+        "conversation_id": conv_id,
+        "photos": [
+            {"id": p.id, "display_order": p.display_order, "marketplace": p.marketplace}
+            for p in photos
+        ],
+        "pushed_to_marketplaces": False,
+        "_images": [_photo_placeholder(p.id, p.stored_filename, max_side) for p in photos],
+    }
+
+
+def _photo_placeholder(photo_id: str, key: str, max_side: int) -> dict[str, Any]:
+    return {"type": "image", "mimeType": "image/jpeg", "data": "",
+            _PHOTO_PLACEHOLDER: {"id": photo_id, "key": key, "max_side": max_side}}
+
+
+def pending_photos(body: Any) -> list[tuple[list[Any], int]]:
+    """Where a response still holds photo placeholders, as (content list, index) pairs."""
+    responses = body if isinstance(body, list) else [body]
+    found = []
+    for response in responses:
+        result = response.get("result") if isinstance(response, dict) else None
+        content = result.get("content") if isinstance(result, dict) else None
+        if isinstance(content, list):
+            found.extend(
+                (content, index) for index, item in enumerate(content)
+                if isinstance(item, dict) and _PHOTO_PLACEHOLDER in item
+            )
+    return found
+
+
+def load_pending_photos(pending: list[tuple[list[Any], int]], *, deadline: float) -> None:
+    """Replace each placeholder with its downscaled JPEG, or a line naming a photo that failed.
+
+    Runs after the call's database session is closed: photo bytes may come from
+    Storage over the network. ``deadline`` is a ``time.monotonic()`` value.
+    """
+    import base64
+    import time
+
+    from anteroom.services.hosted_photos import make_thumbnail
+
+    for content, index in pending:
+        photo = content[index][_PHOTO_PLACEHOLDER]
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            content[index] = {"type": "text", "text": f"Photo {photo['id']} was not loaded in time. Ask for it again."}
+            continue
+        try:
+            jpeg = make_thumbnail(_read_photo(photo["key"], timeout=remaining), photo["max_side"])
+        except Exception:  # noqa: BLE001 - one unreadable photo must not fail the others
+            content[index] = {"type": "text", "text": f"Photo {photo['id']} could not be loaded."}
+            continue
+        content[index] = {"type": "image", "mimeType": "image/jpeg", "data": base64.b64encode(jpeg).decode("ascii")}
+
+
+def _read_photo(key: str, *, timeout: float) -> bytes:
+    from anteroom.services.hosted_context import HostedPhotoStore
+    from anteroom.services.photo_store import photo_store
+
+    store = photo_store()
+    if not isinstance(store, HostedPhotoStore):
+        return store.read(key)
+    from anteroom.services import hosted_photos, hosted_storage
+
+    token = store.storage_token()
+    # A token Storage refuses (an MCP access token or a connected app's) reads
+    # on the server key, which checks the key belongs to this seller.
+    if token is None:
+        return hosted_storage.photo_call("GET", key, timeout=min(timeout, 30.0))
+    return hosted_photos.storage_call("GET", key, token, timeout=min(timeout, 20.0))
 
 
 def _tool_get_sales_analytics(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str, Any]:

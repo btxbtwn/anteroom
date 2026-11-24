@@ -186,6 +186,11 @@ async def mcp_post(request: Request):
                     expired=expired,
                 )
             )
+            pending = mcp_http.pending_photos(outcome[0])
+            if pending:
+                # Photo bytes come from Storage: read them after the session is closed,
+                # leaving a moment to send the reply before the call's deadline.
+                await asyncio.to_thread(mcp_http.load_pending_photos, pending, deadline=deadline - 1.0)
             if not result.done():
                 result.set_result(outcome)
         except Exception as exc:
