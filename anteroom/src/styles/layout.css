@@ -680,6 +680,31 @@
   pointer-events: auto;
 }
 
+.ant-avatar {
+  image-rendering: pixelated;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ant-avatar {
+    animation: ant-avatar-dance 900ms ease-in-out;
+  }
+
+  .ant-avatar[data-working] {
+    animation: ant-avatar-hop 1.15s ease-in-out 3;
+  }
+}
+
+@keyframes ant-avatar-dance {
+  0%, 52%, 100% { transform: translate(0, 0) rotate(0); }
+  25% { transform: translate(-2px, -1px) rotate(-9deg); }
+  77% { transform: translate(2px, -2px) rotate(9deg); }
+}
+
+@keyframes ant-avatar-hop {
+  0%, 65%, 100% { transform: translateY(0); }
+  82% { transform: translateY(-1px); }
+}
+
 .listing-chat[data-layout="float"] .listing-chat-window {
   width: min(22rem, calc(100vw - 2rem));
   height: 100%;

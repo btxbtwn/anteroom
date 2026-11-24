@@ -62,9 +62,21 @@ test("the pinned validation summary takes a delisted Depop draft to Size", async
     ]);
     expect(reply.ok()).toBe(true);
     expect(reply.request().postDataJSON().text).toContain("Depop needs a parcel size.");
-    if (phone) await expect(page.getByRole("tab", { name: "Ant", exact: true })).toHaveAttribute("aria-selected", "true");
-    else await expect(page.getByRole("region", { name: "Listing chat" })).toBeVisible();
+    const assistant = phone ? page.getByRole("tab", { name: "Ant", exact: true })
+      : page.getByRole("region", { name: "Listing chat" });
+    if (phone) await expect(assistant).toHaveAttribute("aria-selected", "true");
+    const avatar = assistant.locator(".ant-avatar");
+    await expect(avatar).toBeVisible();
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await expect(avatar).toHaveCSS("animation-name", /^ant-avatar-(dance|hop)$/);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await expect(avatar).toHaveCSS("animation-name", "none");
+    await page.screenshot({ path: info.outputPath("ant-avatar.png") });
   } finally {
+    await expect.poll(async () => {
+      const activity = await request.get(`/api/conversations/${id}/activity`);
+      return (await activity.json()).busy;
+    }, { message: "Wait for Ant to finish using the sandbox draft" }).toBe(false);
     await request.delete(`/api/conversations/${id}`);
   }
 });

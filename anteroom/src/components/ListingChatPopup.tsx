@@ -1,10 +1,10 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { Maximize2Icon, Minimize2Icon, MinusIcon, SparklesIcon } from "lucide-react";
+import { Maximize2Icon, Minimize2Icon, MinusIcon } from "lucide-react";
+import { AntAvatar } from "./AntAvatar";
 import { isMacPlatform } from "./chat/ModelPickerContent";
 import { PanelResizeHandle, usePanelCollapsed, usePanelWidth, type PanelWidthLimits } from "./PanelResizeHandle";
 import { Button } from "./ui/button";
 import { Kbd } from "./ui/kbd";
-import { Spinner } from "./ui/spinner";
 import { cn } from "../lib/utils";
 
 /** What the listing's chat reports up, so the minimized pill can show it. */
@@ -113,7 +113,7 @@ export function ListingChatPopup({
       >
         <header className="flex shrink-0 items-center gap-2 border-b py-1.5 ps-3 pe-1.5">
           <span className="flex shrink-0 items-center gap-1.5 font-medium text-foreground text-sm">
-            <SparklesIcon aria-hidden className="size-4" />Ant
+            <AntAvatar convId={convId} working={busy} />Ant
           </span>
           <span className="min-w-0 truncate text-muted-foreground text-xs">{busy ? label || "Working…" : "AI listing assistant"}</span>
           {layout === "float" ? (
@@ -155,7 +155,7 @@ export function ListingChatPopup({
           title={`Open Ant, the AI listing assistant (${shortcut})`}
           onClick={() => onOpenChange(true)}
         >
-          {busy ? <Spinner size="md" className="shrink-0" /> : <SparklesIcon aria-hidden className="size-4 shrink-0" />}
+          <AntAvatar convId={convId} working={busy} />
           <span className="min-w-0 truncate">{busy ? label || "Working…" : "Ask Ant"}</span>
           {unread ? <span aria-label="New reply" className="size-2 shrink-0 rounded-full bg-primary" /> : null}
           <Kbd className="bg-background/15 text-background/70">{shortcut}</Kbd>

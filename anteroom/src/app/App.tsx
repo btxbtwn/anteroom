@@ -8,12 +8,13 @@ import { refreshInventory } from "../api/inventoryRefresh";
 import { BUSY_POLL_MS, IDLE_POLL_MS, hasOpenJob, inventoryPollMs, pollMs } from "../api/polling";
 import { useReloadStaleFrontend } from "../components/BuildVersion";
 import { isChatToggleShortcut } from "../components/ListingChatPopup";
+import { AntAvatar } from "../components/AntAvatar";
 import { ListingSession } from "../components/listingSession";
 import { HostedSetupChecklist, SetupChecklist } from "../components/SetupChecklist";
 import { ListingSidebar } from "../components/ListingSidebar";
 import { AssistantThreadPanel } from "../components/sidebar/AssistantThreadPanel";
 import { NavRail } from "../components/sidebar/NavRail";
-import { ArrowLeftIcon, HistoryIcon, PlusIcon, SearchIcon, SparklesIcon, SquarePenIcon } from "lucide-react";
+import { ArrowLeftIcon, HistoryIcon, PlusIcon, SearchIcon, SquarePenIcon } from "lucide-react";
 import {
   DEFAULT_SETTINGS_SECTION,
   SETTINGS_SECTION_LABELS,
@@ -934,7 +935,7 @@ export function App() {
                   className={mobilePane === "workspace" ? "selected" : ""}
                   onClick={() => { paneChoice.current++; setMobilePane("workspace"); }}
                 >
-                  <span className="inline-flex items-center gap-1.5 align-middle"><SparklesIcon aria-hidden className="size-4" />Ant</span>
+                  <span className="inline-flex items-center gap-1.5 align-middle"><AntAvatar convId={selectedConvId} />Ant</span>
                 </button></>}
                 <button
                   type="button"
