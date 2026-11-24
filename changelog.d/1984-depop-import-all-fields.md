@@ -1,0 +1,1 @@
+- Importing a listing from Depop now brings over its category, department, both colors, style, age, source, material and other details, package size or shipping price, worldwide shipping, boost and hashtags, so its Depop tab matches the listing on Depop.
