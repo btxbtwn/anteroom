@@ -4,7 +4,7 @@
  * Every marketplace rule defaults to OFF and requires explicit seller confirmation
  * to turn on. Respects the 30-day minimum on Poshmark/Mercari/Depop, eBay GTC
  * recreate window (~30m before renewal), daily cap (<= 100), optional price drop
- * with floor, filters, active-offer skipping, and atomic listing ID swapping.
+ * with floor, filters, and atomic listing ID swapping.
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -93,7 +93,6 @@ function bodyFromRuleForm(
     price_adjust_value: form.priceMode === "none" ? null : Number(form.priceValue) || null,
     price_floor: form.priceFloor.trim() ? Number(form.priceFloor) : null,
     filters,
-    skip_active_offers: true,
   };
 }
 
@@ -165,7 +164,7 @@ export function AutoRelistSection() {
         ? `recreate eligible eBay listings ~${rule.ebay_recreate_before_gtc_minutes ?? 30} minutes before their 30-day GTC renewal`
         : `delist and relist stale ${marketplaceName(rule.marketplace)} listings at least ${rule.min_age_days} days old`;
       const ok = await confirmDialog(
-        `Enable unattended auto-relist on ${marketplaceName(rule.marketplace)}? Anteroom will ${modeText}, up to ${rule.daily_cap}/day, skipping listings with active buyer offers and atomically updating tracked listing IDs so post-sale auto-delisting stays pinned.`,
+        `Enable unattended auto-relist on ${marketplaceName(rule.marketplace)}? Anteroom will ${modeText}, up to ${rule.daily_cap}/day, and atomically update tracked listing IDs so post-sale auto-delisting stays pinned. Any open buyer offer on a relisted listing ends with the old listing.`,
         { confirmLabel: "Enable auto-relist" },
       );
       if (!ok) return;
@@ -195,7 +194,7 @@ export function AutoRelistSection() {
   return (
     <PageSection
       title="Auto-relist and eBay auto-recreate"
-      description="Opt-in per-marketplace relisting (off by default). Atomically swaps tracked listing IDs so sale auto-delisting never loses track, and skips listings with active buyer offers."
+      description="Opt-in per-marketplace relisting (off by default). Atomically swaps tracked listing IDs so sale auto-delisting never loses track."
       actions={anyEnabled ? (
         <Button size="xs" variant="outline" disabled={busy} onClick={() => runNow.mutate()}>
           {runNow.isPending ? <Spinner size="sm" /> : <RefreshCwIcon className="size-3.5" />}
@@ -356,7 +355,7 @@ export function AutoRelistSection() {
                     </label>
                   </div>
 
-                  <p>Listings with active or unverified buyer offers are skipped.</p>
+                  <p>Relisting ends any open buyer offer on the old listing.</p>
 
                   <div className="flex gap-2">
                     <Button size="xs" disabled={busy} onClick={() => void saveEdited(rule)}>

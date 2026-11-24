@@ -124,10 +124,12 @@ def test_web_run_due_relists_uses_the_signed_in_sellers_opt_in_rules(cloud, sign
     assert response.status_code == 200, response.text
     (outcome,) = response.json()['outcomes']
     assert outcome['conversation_id'] == coat
-    assert outcome['status'] == 'skipped_active_offer'
+    # A buyer offer no longer holds the relist back; with no marketplace
+    # connected in the test, the delete itself is what fails.
+    assert outcome['status'] == 'failed'
     (log,) = client.get('/api/automations/auto-relist/logs', headers=alice).json()['logs']
     assert log['conversation_id'] == coat
-    assert log['status'] == 'skipped_active_offer'
+    assert log['status'] == 'failed'
 
     other_seller = client.post(run_path, headers=bob)
     assert other_seller.status_code == 200, other_seller.text

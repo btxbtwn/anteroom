@@ -54,10 +54,10 @@ test('hosted follow commands require confirmed account writes with a bounded rol
   }
 });
 
-test('hosted protocol validates active_offers, bundle_offer, community shares, and party share modes', () => {
+test('hosted protocol refuses active_offers and validates bundle_offer, community shares, and party share modes', () => {
   const other = 'd'.repeat(24);
-  assert.ok(protocol.command(command('marketplace.active_offers', { marketplace: 'poshmark', listing_id: post })));
-  assert.equal(protocol.command(command('marketplace.active_offers', { marketplace: 'ebay', listing_id: '123' })), null);
+  // Auto-relist no longer checks buyer offers, so the Bridge refuses the old command.
+  assert.equal(protocol.command(command('marketplace.active_offers', { marketplace: 'poshmark', listing_id: post })), null);
 
   assert.ok(protocol.command(command('marketplace.promote', {
     marketplace: 'poshmark',
