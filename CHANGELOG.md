@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1193 — 2026-11-24
+
+- AI Studio Apply no longer fails when photo storage briefly drops a connection
+
 ## 0.1.1192 — 2026-11-24
 
 - Changing only a listing's labels, notes or cost no longer rewrites its title to add the size.
