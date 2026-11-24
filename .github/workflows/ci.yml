@@ -2,6 +2,8 @@ name: CI
 
 on:
   pull_request:
+    # auto_merge_enabled: queuing a PR runs its full stage (see the changes job).
+    types: [opened, synchronize, reopened, auto_merge_enabled]
   push:
     branches: [main]
   workflow_dispatch:
@@ -30,6 +32,14 @@ jobs:
   # in Changelog and Repo checks and skip the rest; their code was tested on
   # the pull request. Code merges still run affected suites on main to catch
   # interactions between independently tested PRs.
+  #
+  # A pull request runs in two stages. Until it is queued to merge, each push
+  # runs the quick stage: everything but the backend and browser suites, which
+  # take most of CI's time and which agents already run with ./check.sh. That
+  # run's gate reports as "Quick checks", never as the required CI check, so the
+  # PR cannot merge from it. Queuing the PR (auto-merge), or pushing to a queued
+  # PR, runs the full stage, whose gate reports as CI. Pushes to main and manual
+  # runs always run the full stage.
   changes:
     name: Changed components
     runs-on: ubuntu-latest
@@ -38,6 +48,7 @@ jobs:
       backend: ${{ steps.changes.outputs.backend }}
       browser: ${{ steps.changes.outputs.browser }}
       browser_suites: ${{ steps.changes.outputs.browser_suites }}
+      stage: ${{ steps.changes.outputs.stage }}
       health: ${{ steps.changes.outputs.health }}
       audit: ${{ steps.changes.outputs.audit }}
       extension: ${{ steps.changes.outputs.extension }}
@@ -51,6 +62,8 @@ jobs:
         env:
           BEFORE: ${{ github.event.before }}
           FULL_VERIFICATION: ${{ inputs.full_verification }}
+          # Set on the auto_merge_enabled event and on pushes to a queued PR.
+          QUEUED: ${{ github.event.pull_request.auto_merge != null }}
         run: |
           workflow=workflow_dispatch
           case "$GITHUB_EVENT_NAME" in
@@ -60,7 +73,9 @@ jobs:
             *) base="" ;;
           esac
           if [ "$FULL_VERIFICATION" = "true" ]; then base=""; fi
-          python3 .github/scripts/changed-components.py --base "$base" --workflow "$workflow" >> "$GITHUB_OUTPUT"
+          queued=false
+          if [ "$QUEUED" = "true" ]; then queued=true; fi
+          python3 .github/scripts/changed-components.py --base "$base" --workflow "$workflow" --queued "$queued" >> "$GITHUB_OUTPUT"
 
   changelog:
     name: Changelog
@@ -580,7 +595,9 @@ jobs:
         working-directory: webhook-relay
 
   ci:
-    name: CI
+    # Main's ruleset requires a check named CI. Only a full-stage run reports
+    # one; a quick-stage run's gate is "Quick checks" (see the changes job).
+    name: ${{ needs.changes.outputs.stage == 'quick' && 'Quick checks' || 'CI' }}
     if: always()
     needs:
       - changes

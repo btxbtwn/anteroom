@@ -158,6 +158,48 @@ def test_pushes_to_main_never_cancel_each_others_ci() -> None:
     assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
 
 
+def test_queuing_a_pull_request_starts_its_full_ci() -> None:
+    triggers = workflow("ci.yml")["on"]["pull_request"]["types"]
+    assert set(triggers) == {"opened", "synchronize", "reopened", "auto_merge_enabled"}
+
+
+@pytest.mark.parametrize(
+    ("event", "queued", "stage", "check"),
+    [
+        ("pull_request", "false", "quick", "Quick checks"),
+        ("pull_request", "true", "full", "CI"),
+        ("push", "false", "full", "CI"),
+        ("workflow_dispatch", "false", "full", "CI"),
+    ],
+)
+def test_only_a_full_run_reports_the_required_check(
+    tmp_path: Path, event: str, queued: str, stage: str, check: str
+) -> None:
+    """Main's ruleset requires a check named CI: an unqueued PR never reports one, so it cannot merge."""
+    jobs = workflow("ci.yml")["jobs"]
+    changes = jobs["changes"]
+    step = next(step for step in changes["steps"] if step.get("id") == "changes")
+    assert step["env"]["QUEUED"] == "${{ github.event.pull_request.auto_merge != null }}"
+    assert changes["outputs"]["stage"] == "${{ steps.changes.outputs.stage }}"
+    scripts = tmp_path / ".github" / "scripts"
+    scripts.mkdir(parents=True)
+    shutil.copy(ROOT / ".github" / "scripts" / "changed-components.py", scripts)
+    output = tmp_path / "output"
+    subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        cwd=tmp_path,
+        env={**os.environ, "GITHUB_EVENT_NAME": event, "GITHUB_OUTPUT": str(output), "QUEUED": queued,
+             "BEFORE": "", "FULL_VERIFICATION": ""},
+        check=True,
+        capture_output=True,
+    )
+    outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    assert outputs["stage"] == stage
+    name = jobs["ci"]["name"]
+    assert name == "${{ needs.changes.outputs.stage == 'quick' && 'Quick checks' || 'CI' }}"
+    assert ("Quick checks" if outputs["stage"] == "quick" else "CI") == check
+
+
 def test_deploy_builds_and_waits_for_tested_code_before_migrating() -> None:
     steps = [step.get("name", step.get("uses", "")) for step in workflow("deploy-hosted.yml")["jobs"]["deploy"]["steps"]]
     wait = steps.index("Wait for CI on the code being shipped")

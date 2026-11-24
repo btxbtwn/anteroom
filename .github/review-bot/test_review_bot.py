@@ -605,6 +605,8 @@ class AutofixTests(unittest.TestCase):
             {"name": "CI", "conclusion": "failure", "id": 2, "html_url": "https://example/2"},
             {"name": "Extension", "conclusion": "success", "id": 3, "html_url": "https://example/3"},
             {"name": "", "conclusion": "failure", "id": 4},
+            # An unqueued PR's gate (ci.yml names it by stage).
+            {"name": "Quick checks", "conclusion": "failure", "id": 5, "html_url": "https://example/5"},
         ]
         self.assertEqual(
             bot.failed_ci_jobs(jobs),

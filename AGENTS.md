@@ -304,7 +304,7 @@ description or push a commit to refresh the check. A sidebar change alone
 does not trigger the workflow. An issue found while working on another one
 gets its own issue and PR, not a line in this one.
 
-**Pull requests:** Open every PR ready for review, never as a draft: run `gh pr create` without `--draft`, so reviewers and review bots see it from the start (the Codex and Claude reviews skip drafts). Leave drafts that already exist as they are; mark one ready only when its own work is done. Ready for review is not ready to merge. After creating or updating a PR, always check CI (`gh pr checks`) and fix failures before considering the work done. Do not stop while required checks are pending or red. PRs never bump the version or edit `CHANGELOG.md`; do not run `bump-version.sh` in a PR. A PR that changes `anteroom/` adds one note file, `changelog.d/<branch-slug>.md`, holding `- ` bullets in the seller's words (`<slug>.minor.md` or `<slug>.major.md` only when the seller asks for that bump; see `changelog.d/README.md`). After merge, the **Version** workflow turns each merged PR's notes into one patch bump and a `## <version> — <YYYY-MM-DD>` section at the top of `CHANGELOG.md`, which the app shows under Settings → General → About → What's new, and then starts the macOS release build. The UI reads the version from the API; never hardcode it. CI's **Changelog** job (`anteroom/scripts/check-changelog.py`) fails when a PR changes `VERSION` or `CHANGELOG.md`, or when a note is malformed; run it locally with `python anteroom/scripts/check-changelog.py`.
+**Pull requests:** Open every PR ready for review, never as a draft: run `gh pr create` without `--draft`, so reviewers and review bots see it from the start (the Codex and Claude reviews skip drafts). Leave drafts that already exist as they are; mark one ready only when its own work is done. Ready for review is not ready to merge. After creating or updating a PR, always check CI (`gh pr checks`) and fix failures before considering the work done. Do not stop while checks are pending or red. The required `CI` check appears only once the PR is queued; before that, the **Quick checks** gate stands for it. PRs never bump the version or edit `CHANGELOG.md`; do not run `bump-version.sh` in a PR. A PR that changes `anteroom/` adds one note file, `changelog.d/<branch-slug>.md`, holding `- ` bullets in the seller's words (`<slug>.minor.md` or `<slug>.major.md` only when the seller asks for that bump; see `changelog.d/README.md`). After merge, the **Version** workflow turns each merged PR's notes into one patch bump and a `## <version> — <YYYY-MM-DD>` section at the top of `CHANGELOG.md`, which the app shows under Settings → General → About → What's new, and then starts the macOS release build. The UI reads the version from the API; never hardcode it. CI's **Changelog** job (`anteroom/scripts/check-changelog.py`) fails when a PR changes `VERSION` or `CHANGELOG.md`, or when a note is malformed; run it locally with `python anteroom/scripts/check-changelog.py`.
 
 When a check fails, read its log (`gh run view <run-id> --log-failed`), reproduce the failure locally with the same command or `./check.sh`, and fix the cause before pushing again. Do not push guesses at CI. Several Anteroom PRs are often open at once. Because none of them touch `VERSION` or `CHANGELOG.md`, they do not conflict over versions.
 
@@ -314,12 +314,16 @@ for real conflicts, failed checks or a needed dependency.
 
 Queue a PR with `gh pr merge <n> --auto --merge` only when all of these hold
 for its current head commit: `./check.sh` passed for the components it
-changes (and the native checks for Mac or iPhone changes), CI is green, an
-independent review found no blocker, and every review finding, human or bot,
-is fixed or answered on the PR. Before pushing to a queued PR, disable
-auto-merge (`gh pr merge <n> --disable-auto`). After the push, queue again only
-when the new head meets the same bar. GitHub merges a queued PR as soon as the
-required `CI` check passes and checks nothing else.
+changes (and the native checks for Mac or iPhone changes), the **Quick checks**
+are green, an independent review found no blocker, and every review finding,
+human or bot, is fixed or answered on the PR. Until a PR is queued, CI runs only
+its quick stage and leaves the backend and browser suites for later; queuing it
+runs the full stage, which reports the required `CI` check (see
+[docs/ci.md](docs/ci.md)). Stay with it: if `CI` fails, disable auto-merge
+(`gh pr merge <n> --disable-auto`), fix it and queue again. Before pushing to a
+queued PR, disable auto-merge. After the push, queue again only when the new
+head meets the same bar. GitHub merges a queued PR as soon as the required `CI`
+check passes and checks nothing else.
 
 Do not automatically update other open PRs. Keep merge
 commits: release notes are grouped by them. CI on `main` checks the merged

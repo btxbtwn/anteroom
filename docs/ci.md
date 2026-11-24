@@ -13,6 +13,31 @@ or deployment. Build/runtime logs and source/image identifiers are retained as
 the `hosted-image-validation` artifact. Its check is reviewed alongside `CI`;
 it is not included in the existing aggregate or production deploy triggers.
 
+## Quick and full stages
+
+A pull request runs CI in two stages. Until it is queued to merge, each push
+runs the **quick stage**: changelog, repo checks, frontend, code health,
+extension, relay and dependency audit, for the components the change touches.
+The backend suites (SQLite and Postgres) and the browser suites wait. They take
+most of CI's time, and agents run them with `./check.sh` before pushing. The
+quick stage's gate reports as **Quick checks**, never as the required `CI`
+check, so a PR cannot merge from it.
+
+Queuing the PR (`gh pr merge <n> --auto --merge`, the `auto_merge_enabled`
+event) runs the **full stage**: every selected suite, with the gate reported as
+`CI`. A push to a PR that is still queued runs the full stage too. GitHub
+merges the PR when that `CI` check passes. If it fails, disable auto-merge, fix
+the PR and queue it again. Pushes to `main`, manual runs and Descendant
+verification always run the full stage.
+
+Before this split, 46% of PR CI runs (172 of 371 from November 22 to 24) were
+cancelled by a newer push after a median of nine minutes, and a PR got about
+2.7 runs. Choosing backend tests from the changed files would not help:
+`server/tests/conftest.py` imports the whole app, so every test file depends on
+every backend module.
+
+## Job selection
+
 `.github/scripts/changed-components.py` selects jobs from the actual merge's
 first parent on PRs and from the push's previous commit on `main`. `check.sh`
 uses the same selector for committed and local changes. Renames count both
