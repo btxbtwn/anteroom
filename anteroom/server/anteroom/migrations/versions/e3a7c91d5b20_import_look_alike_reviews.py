@@ -1,7 +1,7 @@
 """Keep the look-alike listings an import leaves for the seller to review
 
 Revision ID: e3a7c91d5b20
-Revises: e3b7a1c9d402, e4b7c2a9d6f1
+Revises: 1c42be3d1f71
 Create Date: 2026-11-24 12:00:00.000000
 """
 from __future__ import annotations
@@ -11,8 +11,7 @@ import sqlalchemy as sa
 
 
 revision = "e3a7c91d5b20"
-# Also joins the two revisions main added on d7e2a9c4b815 into one head.
-down_revision = ("e3b7a1c9d402", "e4b7c2a9d6f1")
+down_revision = "1c42be3d1f71"
 branch_labels = None
 depends_on = None
 
