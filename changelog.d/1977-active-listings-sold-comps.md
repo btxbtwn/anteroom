@@ -1,0 +1,1 @@
+- Keep active Poshmark listings from showing up as sold comps when a search result includes the seller’s Sold Listings count.

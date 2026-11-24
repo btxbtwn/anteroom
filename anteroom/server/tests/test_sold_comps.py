@@ -260,6 +260,40 @@ class WebResultFilterTest(unittest.TestCase):
         self.assertEqual(comps, [])
 
 class CompEvidenceTest(unittest.TestCase):
+    def test_poshmark_seller_sidebar_does_not_turn_asking_price_into_sale(self):
+        for seller_history in ("2700+ Sold Listings", "-- Sold Listings", "Sold Listings"):
+            with self.subTest(seller_history=seller_history):
+                result = {
+                    "title": "J.Crew Slim Fit Oxford Shirt",
+                    "url": "https://poshmark.com/listing/oxford-shirt-1",
+                    "description": f"J.Crew $44 ... {seller_history} ... Yes, this item is still for sale.",
+                }
+                _market, sold, live = comps_from_model_answer(
+                    '{"comps":[],"live":[]}', [result], expected_names=("J.Crew",),
+                )
+                self.assertEqual(sold, [])
+                self.assertEqual([comp.price for comp in live], [44])
+
+    def test_poshmark_sold_badge_still_counts_with_seller_sidebar(self):
+        sold, live = listings_from_web_results([{
+            "title": "J.Crew Slim Fit Oxford Shirt",
+            "url": "https://poshmark.com/listing/oxford-shirt-1",
+            "description": (
+                "SORRY, THIS ITEM IS SOLD! J.Crew $24. This item is sold. "
+                "2700+ Sold Listings ... Yes, this item is still for sale."
+            ),
+        }])
+        self.assertEqual([comp.price for comp in sold], [24])
+        self.assertEqual(live, [])
+
+    def test_price_next_to_sold_listings_heading_is_not_a_sold_price(self):
+        sold = sold_from_web_results([{
+            "title": "J.Crew Slim Fit Oxford Shirt",
+            "url": "https://poshmark.com/listing/oxford-shirt-1",
+            "description": "This item is sold. J.Crew $24. Similar items $60 Sold Listings.",
+        }])
+        self.assertEqual(sold, [])
+
     def test_ended_and_unavailable_items_are_neither_sold_nor_active(self):
         for status in ("Completed listing", "Listing ended", "Sold out", "No longer available"):
             with self.subTest(status=status):
