@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1202 — 2026-11-24
+
+- Saving a listing no longer rewrites its title: a title that already names the size (Large, Men's L, 11/30, S (6-7)) stays as written, and a title you type is kept exactly as you typed it. Changing the size still updates it in the title.
+
 ## 0.1.1201 — 2026-11-24
 
 - Listing on Poshmark an item that has no Poshmark category now stops before anything is sent and asks you to choose one, instead of failing with "needs more details".

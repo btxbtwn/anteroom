@@ -1,1 +1,0 @@
-- Saving a listing no longer rewrites its title: a title that already names the size (Large, Men's L, 11/30, S (6-7)) stays as written, and a title you type is kept exactly as you typed it. Changing the size still updates it in the title.
