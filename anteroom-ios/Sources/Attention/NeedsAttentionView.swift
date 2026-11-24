@@ -12,6 +12,9 @@ struct NeedsAttentionView: View {
     /// Alerts with a save in flight. Their actions are disabled until it
     /// finishes, so a Restore can never race the Resolve or Snooze before it.
     @State private var saving: Set<String> = []
+    /// Counts Snooze, Resolve and Restore taps. A load that started before
+    /// the latest one is dropped, so a slow refresh never undoes an action.
+    @State private var actions = 0
 
     var body: some View {
         List {
@@ -128,9 +131,11 @@ struct NeedsAttentionView: View {
     }
 
     private func load() async {
+        let started = actions
         do {
             let result = try await api.attentionInbox()
             try Task.checkCancellation()
+            guard actions == started else { return }
             inbox = result
             error = nil
         } catch is CancellationError {
@@ -147,6 +152,7 @@ struct NeedsAttentionView: View {
         guard !saving.contains(key), var next = inbox else { return }
         saving.insert(key)
         defer { saving.remove(key) }
+        actions += 1
         move(&next)
         inbox = next
         actionError = nil
