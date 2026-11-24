@@ -745,7 +745,7 @@ class AutofixTests(unittest.TestCase):
         git(work, "commit", "-qam", "pr")
         return work, (lambda *a: git(work, *a))
 
-    def _prepare(self, work, out, states=()):
+    def _prepare(self, work, out, states=(), author="btxbtwn"):
         outputs, posts = {}, []
         old = os.getcwd()
         os.chdir(work)
@@ -755,6 +755,7 @@ class AutofixTests(unittest.TestCase):
                 patch.object(bot, "open_autofix_findings", return_value=[]),
                 patch.object(bot, "bot_issue_comments", return_value=[({}, s) for s in states]),
                 patch.object(bot, "pull_mergeable_state", return_value="dirty"),
+                patch.object(bot, "pull_author", return_value=author),
                 patch.object(bot, "collect_ci_failures", return_value=([], "")),
                 patch.object(bot, "api", side_effect=lambda *a, **k: posts.append(a)),
                 patch.object(bot, "repo", return_value="o/r"),
@@ -783,6 +784,18 @@ class AutofixTests(unittest.TestCase):
             self.assertFalse(ctx["dependencies_installed"])
             # The merge is left in progress for Claude to finish.
             self.assertTrue(Path(work, ".git", "MERGE_HEAD").exists())
+
+    def test_prepare_never_merges_main_into_a_conflicted_dependabot_pr(self):
+        # Failed-CI and review rounds reach this too, not only the conflict scan.
+        with tempfile.TemporaryDirectory() as root:
+            work, git = self._conflict_fixture(root, {"anteroom/package.json": "pr\n"}, {"anteroom/package.json": "main\n"})
+            head = git("rev-parse", "HEAD")
+            with contextlib.redirect_stdout(io.StringIO()):
+                outputs, posts = self._prepare(work, os.path.join(root, "ctx"), author="dependabot[bot]")
+            self.assertEqual(outputs, {"skip": "true"})
+            self.assertEqual(posts, [])
+            self.assertFalse(Path(work, ".git", "MERGE_HEAD").exists())
+            self.assertEqual(git("rev-parse", "HEAD"), head)
 
     def test_prepare_leaves_protected_only_conflicts_and_notes_them_once(self):
         with tempfile.TemporaryDirectory() as root:

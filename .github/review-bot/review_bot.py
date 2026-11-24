@@ -35,6 +35,10 @@ from pathlib import Path
 # Comments this script posts are authored by the workflow token.
 BOT_LOGINS = {"github-actions[bot]"}
 CODEX_LOGIN = "chatgpt-codex-connector[bot]"
+# Dependabot rebases its own PRs on request (`@dependabot rebase`) and stops
+# updating a PR once someone else pushes to it, so auto-fix never merges main
+# into one.
+DEPENDABOT_LOGIN = "dependabot[bot]"
 REVIEW_STATE = "claude-review-state:v1"
 AUTOFIX_STATE = "claude-autofix:v1"
 AUTOFIX_REPLY = "claude-autofix-reply:v1"
@@ -562,6 +566,10 @@ def pull_mergeable_state(pr: int, *, attempts: int = 6, delay_s: float = 2.0) ->
     return state
 
 
+def pull_author(pr: int) -> str:
+    return ((api(f"repos/{repo()}/pulls/{pr}") or {}).get("user") or {}).get("login") or ""
+
+
 def unmerged_paths() -> list[str]:
     return [p for p in git("diff", "--name-only", "--diff-filter=U").splitlines() if p]
 
@@ -935,6 +943,10 @@ def prepare_autofix(args) -> None:
     merge_clean = False
     main_sha: str | None = None
     # Only merge main when GitHub reports real conflicts — never for "behind".
+    if merge_state == "dirty" and pull_author(args.pr) == DEPENDABOT_LOGIN:
+        print(f"#{args.pr} is a conflicted Dependabot PR; comment `@dependabot rebase` on it instead.")
+        set_output(skip="true")
+        return
     if merge_state == "dirty":
         merge_clean, conflict_files, main_sha = begin_main_merge(args.pr)
         if protected_changes(conflict_files):
@@ -1128,14 +1140,10 @@ def post_autofix(args) -> None:
 
 
 def list_conflict_prs(_args) -> None:
-    """Open, non-draft, same-repo PRs with mergeable_state dirty (real conflicts).
-
-    Dependabot PRs are left out: Dependabot rebases its own PRs on request
-    (`@dependabot rebase`), and it stops updating a PR once someone else pushes
-    to it."""
+    """Open, non-draft, same-repo, non-Dependabot PRs with mergeable_state dirty (real conflicts)."""
     numbers = []
     for pr in api_list(f"repos/{repo()}/pulls?state=open&per_page=100"):
-        if pr.get("draft") or (pr.get("user") or {}).get("login") == "dependabot[bot]":
+        if pr.get("draft") or (pr.get("user") or {}).get("login") == DEPENDABOT_LOGIN:
             continue
         head_repo = (pr.get("head") or {}).get("repo") or {}
         if head_repo.get("full_name") != repo():
