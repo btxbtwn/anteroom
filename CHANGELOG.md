@@ -6,6 +6,22 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1186 — 2026-11-23
+
+- Behind the scenes: two assistant chat checks that sometimes failed for no real reason no longer hold up updates.
+
+## 0.1.1185 — 2026-11-23
+
+- Auto-Relist no longer raises a listing's price when pricing rules are on. A relist now changes only that marketplace's price, and a relist that couldn't delist leaves your saved prices as they were.
+
+## 0.1.1184 — 2026-11-23
+
+- Behind the scenes: an iPhone Safari check that sometimes failed for no real reason no longer holds up updates.
+
+## 0.1.1183 — 2026-11-23
+
+- Drawing a mark on a photo no longer highlights text beside it, so a quick second mark is no longer dragged away and lost.
+
 ## 0.1.1182 — 2026-11-23
 
 - Checking sales on a listing that was just deleted now says it wasn't found, instead of showing a server error.

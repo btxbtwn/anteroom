@@ -118,3 +118,46 @@ test("AI Studio edits several photos at once offline, markup and filters save, a
   expect(photos[0].edits).toBeNull();
   expect([photos[0].width, photos[0].height]).toEqual([320, 400]);
 });
+
+test("drawing on a photo never selects page text, so a quick second mark is not dragged away", async ({ page, phone, request, createConversation }) => {
+  test.skip(phone, "A mouse drag; phones draw with touch.");
+  const title = `Markup selection ${Date.now()}`;
+  const id = (await (await createConversation({ title, notes: "" })).json()).id as string;
+  const upload = await request.post(`/api/conversations/${id}/photos`, {
+    multipart: { files: { name: "photo.png", mimeType: "image/png", buffer: png(30, 60, 160) } },
+  });
+  expect(upload.ok()).toBe(true);
+  expect((await request.put(`/api/conversations/${id}/listing`, { data: { expected_revision_id: "", listing: {
+    title, description: "Markup", price: 20,
+  } } })).ok()).toBe(true);
+  await page.route("**/api/settings/marketplaces", async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({ response, json: { ...await response.json(), selected: ["depop"] } });
+  });
+  await openListing(page, phone, title);
+  await openForm(page, phone, "Depop");
+  const strip = page.locator('[data-marketplace-media="depop"]');
+  await expect(strip.locator("[data-sortable-photo]")).toHaveCount(1, { timeout: 30_000 });
+  await strip.locator("[data-sortable-photo]").first().click();
+  await page.getByRole("dialog").getByRole("button", { name: "Edit photo" }).click();
+  const editor = page.getByRole("dialog", { name: /^Edit photo/ });
+  await editor.getByRole("button", { name: "Markup" }).click();
+  await expect(editor.getByText(/^(Updating|Loading photo)…$/)).toHaveCount(0);
+  const box = (await editor.locator("[data-markup-frame]").boundingBox())!;
+  const selected = () => page.evaluate(() => document.getSelection()?.isCollapsed === false);
+  const drag = async (x1: number, y1: number, x2: number, y2: number) => {
+    await page.mouse.move(box.x + box.width * x1, box.y + box.height * y1);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * x2, box.y + box.height * y2, { steps: 6 });
+    await page.mouse.up();
+  };
+  // Text selected by one drag is what the browser drags away (pointercancel) on the next one.
+  await editor.getByRole("button", { name: "Pixelate", exact: true }).click();
+  await drag(0.55, 0.1, 0.9, 0.2);
+  await expect(editor.getByText("Pixelate 1")).toBeVisible();
+  expect(await selected()).toBe(false);
+  await editor.getByRole("button", { name: "Arrow", exact: true }).click();
+  await drag(0.2, 0.8, 0.45, 0.55);
+  await expect(editor.getByText("Arrow 1")).toBeVisible();
+  expect(await selected()).toBe(false);
+});

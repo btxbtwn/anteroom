@@ -63,6 +63,16 @@ test("a follow-up sent while an answer streams cuts it off and goes next", async
   await expect(answers.last()).toContainText("Sandbox Levi's M Blue Cotton Crew Neck T-Shirt");
 });
 
+/**
+ * Answers that have run to their last word. The queued question's answer can
+ * start a moment after the queue empties, with nothing streaming in between,
+ * and the sandbox answers one question at a time: a test that ends in that
+ * moment leaves the answer running and the next test's question is refused.
+ */
+function finishedAnswers(page: import("@playwright/test").Page) {
+  return page.locator('[data-message-role="assistant"]:not([aria-busy="true"])', { hasText: "The end." });
+}
+
 /** Mod+Enter queues instead; a queued follow-up can be edited, then sends when the answer ends. */
 test("a queued follow-up can be edited and sends once the answer finishes", async ({ page, phone }) => {
   const composer = await openAssistant(page, phone);
@@ -90,7 +100,8 @@ test("a queued follow-up can be edited and sends once the answer finishes", asyn
   await expect(queued).toHaveCount(0, { timeout: 30_000 });
   await expect(page.locator('[data-message-role="user"]').last()).toContainText("And the week before?");
   await expect(page.locator('[data-message-role="assistant"]').first()).toContainText("The end.");
-  await expect(streaming).toHaveCount(0, { timeout: 30_000 });
+  await expect(finishedAnswers(page)).toHaveCount(2, { timeout: 45_000 });
+  await expect(streaming).toHaveCount(0);
 });
 
 /** A queued follow-up survives a reload and still goes once the answer it waited for ends. */
@@ -119,6 +130,7 @@ test("a queued follow-up is still sent after the page reloads", async ({ page, p
   // It waits for the answer still being written, then goes by itself.
   await expect(queued).toHaveCount(0, { timeout: 45_000 });
   await expect(page.locator('[data-message-role="user"]').last()).toContainText("And the week before?");
-  await expect(streaming).toHaveCount(0, { timeout: 30_000 });
+  await expect(finishedAnswers(page)).toHaveCount(2, { timeout: 45_000 });
+  await expect(streaming).toHaveCount(0);
   await expect(page.locator('[data-message-role="assistant"]')).toHaveCount(2);
 });
