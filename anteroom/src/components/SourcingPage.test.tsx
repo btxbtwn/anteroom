@@ -1,8 +1,10 @@
 // @vitest-environment happy-dom
 import { act } from "react";
 import { createRoot } from "react-dom/client";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SourcingPage } from "./SourcingPage";
+import type { SourcingSnapshot } from "../api/types";
+import { ResearchCoverage, SourcingPage } from "./SourcingPage";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -54,5 +56,13 @@ describe("SourcingPage storage guard", () => {
       await act(() => root.unmount());
       container.remove();
     }
+  });
+});
+
+describe("Box Scout research coverage", () => {
+  it("names its sources and says Poshmark sales aren't checked", () => {
+    const html = renderToStaticMarkup(<ResearchCoverage snapshot={{ lots: [] } as unknown as SourcingSnapshot} ebayConnected />);
+    expect(html).toContain("from your own sales, then eBay, checked weekly");
+    expect(html).toContain("Poshmark sales aren’t checked");
   });
 });

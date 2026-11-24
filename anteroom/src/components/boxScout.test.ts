@@ -71,7 +71,6 @@ function lot(overrides: Partial<SourcingLot> = {}): SourcingLot {
     comps_count: 0,
     research_at: null,
     research_source: null,
-    active_median: null,
     resale_low: 12,
     operating_cost: 124.2,
     break_even_pcs: 23,

@@ -20,14 +20,6 @@ class SourcingComp(BaseModel):
     conversation_id: str | None = None
 
 
-class SourcingActiveComp(BaseModel):
-    url: str
-    title: str
-    price: float
-    marketplace: str
-    snippet: str
-
-
 class SourcingLot(BaseModel):
     store: str
     variant_id: int | str  # Shopify variant number, or a marketplace lot id
@@ -68,7 +60,6 @@ class SourcingLot(BaseModel):
     comps_count: int
     research_at: str | None
     research_source: str | None
-    active_median: float | None
     resale_low: float | None
     operating_cost: float
     break_even_pcs: int | None
@@ -84,11 +75,9 @@ class SourcingEvidence(BaseModel):
     theme: str
     per_piece: float
     sold_median: float
-    active_median: float | None
     low: float
     high: float
     comps: list[SourcingComp]
-    active: list[SourcingActiveComp]
     updated_at: str | None
     source: str | None
 

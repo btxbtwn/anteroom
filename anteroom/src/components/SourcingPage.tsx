@@ -749,23 +749,16 @@ function ResearchEvidence({ lot, onOpenListing }: { lot: SourcingLot; onOpenList
           {comp.conversation_id ? null : <q className="text-muted-foreground italic">{comp.snippet}</q>}
         </li>)}
       </ul>
-      {allItems ? null : data.active_median != null ? <PageNote>Current asking-price median {formatMoney(data.active_median)}; the resale estimate is capped at this price.</PageNote>
-        : <PageNote>Current competition sample is too small to cap the price. Market sell-through and time to sell are unknown.</PageNote>}
-      {data.active.length ? <ul className="divide-y divide-border/50">
-        {data.active.map((comp) => <li key={comp.url} className={compRow}>
-          <a className="text-foreground hover:underline" href={comp.url} target="_blank" rel="noopener noreferrer">{comp.title}</a>
-          <span className="text-muted-foreground">{comp.marketplace} · asking {formatMoney(comp.price)}</span>
-        </li>)}
-      </ul> : null}
+      {allItems ? null : <PageNote>Market sell-through and time to sell are unknown.</PageNote>}
     </> : null}
   </SourcingDetails>;
 }
 
-function ResearchCoverage({ snapshot, ebayConnected }: { snapshot: SourcingSnapshot; ebayConnected: boolean }) {
+export function ResearchCoverage({ snapshot, ebayConnected }: { snapshot: SourcingSnapshot; ebayConnected: boolean }) {
   const priced = snapshot.lots.filter((lot) => lot.resale_per_pc != null).length;
   return <div className="flex flex-col gap-1 text-xs text-muted-foreground" role="status">
     <strong className="text-sm font-medium text-foreground">{boxCount(snapshot.lots.length)} in this check · {priced} with enough recent sold evidence.</strong>
-    <span>Enough evidence means 3 distinct sales in 30 days, from your own sales, then eBay, then Poshmark, checked weekly.</span>
+    <span>Enough evidence means 3 distinct sales in 30 days, from your own sales, then eBay, checked weekly. Poshmark sales aren’t checked: Poshmark doesn’t allow apps to read its search.</span>
     {ebayConnected ? null : <span className="text-warning-foreground">Chrome isn’t connected, so eBay sold listings can’t be read. Connect Chrome and update to add them.</span>}
   </div>;
 }
@@ -807,7 +800,7 @@ function HowItWorks({ snapshot }: { snapshot: SourcingSnapshot }) {
         <li>Every {REFRESH_HOURS} hours it reads every box Raghouse, Thrift Vintage Fashion and PaperCrane list. Raghouse Recycle boxes, Thrift Vintage Fashion A/B, B, B/C and C grades and PaperCrane Mixed/As-Is (C) lots are never considered; PaperCrane Cream (A) and Standard (B) lots are covered by its Buyer Protection beyond a 5% or 10% tolerance for unsellable pieces.</li>
         <li>
           It groups boxes by the kind of piece inside (“vintage graphic t-shirts”, “hawaiian shirts”) and prices each kind from your own recorded sales of that kind,
-          then eBay sold listings read through your Chrome, then Poshmark’s, rechecked weekly. A mixed box is priced from all your recent sales. It requires dated sold examples and computes their median, capped by comparable asking prices when enough are available.
+          then eBay sold listings read through your Chrome, rechecked weekly. A mixed box is priced from all your recent sales. It requires dated sold examples and computes their median.
         </li>
         <li>
           Profit uses your {Math.round(a.sell_through * 100)}% sales assumption, {Math.round(a.fees * 100)}% effective fees,
