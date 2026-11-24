@@ -951,7 +951,7 @@ def load_pending_photos(pending: list[tuple[list[Any], int]], *, deadline: float
     import base64
     import time
 
-    from anteroom.services.hosted_photos import make_thumbnail
+    from anteroom.services import image_decode
 
     for content, index in pending:
         photo = content[index][_PHOTO_PLACEHOLDER]
@@ -960,7 +960,9 @@ def load_pending_photos(pending: list[tuple[list[Any], int]], *, deadline: float
             content[index] = {"type": "text", "text": f"Photo {photo['id']} was not loaded in time. Ask for it again."}
             continue
         try:
-            jpeg = make_thumbnail(_read_photo(photo["key"], timeout=remaining), photo["max_side"])
+            # Mac uploads keep the camera's bytes, EXIF orientation included.
+            jpeg = image_decode.jpeg(_read_photo(photo["key"], timeout=remaining),
+                                     max_side=photo["max_side"], quality=82)
         except Exception:  # noqa: BLE001 - one unreadable photo must not fail the others
             content[index] = {"type": "text", "text": f"Photo {photo['id']} could not be loaded."}
             continue

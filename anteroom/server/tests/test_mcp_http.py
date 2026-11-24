@@ -1357,6 +1357,23 @@ def test_mcp_listing_photos_load_after_db_session_closes(monkeypatch):
     assert _image_sides(resp.json()["result"]["content"][1]) == (512, 256)
 
 
+def test_mcp_listing_photos_apply_exif_orientation(monkeypatch):
+    import io
+
+    from PIL import Image
+
+    # Stored 1000x500 with EXIF "rotate 90", as a phone camera saves a portrait shot.
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    buf = io.BytesIO()
+    Image.new("RGB", (1000, 500), "white").save(buf, "JPEG", exif=exif)
+    monkeypatch.setattr(mcp_http, "_read_photo", lambda _key, *, timeout: buf.getvalue())
+
+    content = [mcp_http._photo_placeholder("p1", "conv/key.jpg", 400)]
+    mcp_http.load_pending_photos([(content, 0)], deadline=float("inf"))
+    assert _image_sides(content[0]) == (200, 400)
+
+
 def test_hosted_mcp_listing_photos_are_seller_scoped(cloud, signing_keys, monkeypatch):  # noqa: F811
     import httpx
 
