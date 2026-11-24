@@ -43,6 +43,31 @@ for (const type of ['marketplace.verify_session', 'marketplace.sales_history', '
   });
 }
 
+// Cloudflare can mark a challenge only in its header. That is a browser check,
+// not a refused session: the marketplace is asked once, and the saved cookies stay as they were.
+for (const type of ['marketplace.like_events', 'marketplace.verify_session']) {
+  for (const status of [401, 403]) {
+    test(`Depop cloud ${type} stops on a header-only Cloudflare challenge (HTTP ${status})`, async () => {
+      const calls = [];
+      const { result, cookies_changed: cookiesChanged, cookies } = await executeMarketplaceOperation({
+        marketplace: 'depop', cookies: [depopCookie],
+        command: { type, payload: { marketplace: 'depop' } },
+        httpFetch: async url => {
+          calls.push(new URL(url).pathname);
+          return new Response('<!doctype html><html><body>private-response</body></html>', {
+            status, headers: { 'content-type': 'text/html', 'cf-mitigated': 'challenge' },
+          });
+        },
+      });
+      assert.equal(calls.length, 1, calls.join(', '));
+      assert.equal(result.ok, false);
+      assert.equal(result.error_code, 'challenge');
+      assert.equal(cookiesChanged, false);
+      assert.deepEqual(cookies.map(({ name, value }) => [name, value]), [['access_token', 'test-token']]);
+    });
+  }
+}
+
 test('Depop verifies the account and polls likes with its bearer', async () => {
   const execute = (type, httpFetch) => executeMarketplaceOperation({
     marketplace: 'depop', cookies: [depopCookie, mercariCookie],

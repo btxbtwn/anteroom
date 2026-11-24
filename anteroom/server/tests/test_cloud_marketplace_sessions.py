@@ -669,6 +669,75 @@ def test_execute_local_uses_fresh_vault_rotates_cookies_and_marks_expired_on_sig
             assert cloud_sessions.has_active_session("poshmark", db) is False
 
 
+_HEADER_ONLY_CHALLENGE_RUNNER = r"""
+const { executeMarketplaceOperation } = require(process.argv[1]);
+const run = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+const requests = [];
+executeMarketplaceOperation({
+  marketplace: 'depop', command: run.command, cookies: run.cookies, userAgent: run.user_agent,
+  httpFetch: async url => {
+    requests.push(new URL(url).pathname);
+    return new Response('<!doctype html><html><body>private-response</body></html>',
+      { status: 403, headers: { 'content-type': 'text/html', 'cf-mitigated': 'challenge' } });
+  },
+}).then(outcome => process.stdout.write(JSON.stringify({ ...outcome, requests })));
+"""
+
+
+@pytest.mark.parametrize("command_type", ["marketplace.like_events", "marketplace.verify_session"])
+def test_header_only_challenge_keeps_the_cloud_session(cloud, monkeypatch, command_type):  # noqa: F811
+    """A Cloudflare challenge marked only in its header is a browser check: the saved session,
+    its Vault credentials and the seller's offer rules stay as they were, and the marketplace is asked once."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    from anteroom.database import SessionLocal
+    from anteroom.models.promotion_automation import PromotionAutomation
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    _, engine = cloud
+    vault = _patch_vault(monkeypatch)
+    monkeypatch.setenv("ANTEROOM_CLOUD_MARKETPLACES", "depop")
+    monkeypatch.setenv("ANTEROOM_PROCESS_ROLE", "worker")
+    runner = Path(cloud_marketplace.__file__).resolve().parent.parent / "cloud_runner" / "marketplace-runner.cjs"
+    requests: list[str] = []
+
+    async def real_runner(marketplace, seller_id, job_id, run_payload, timeout):
+        done = subprocess.run([node, "-e", _HEADER_ONLY_CHALLENGE_RUNNER, str(runner)], input=json.dumps(run_payload),
+                              capture_output=True, text=True, timeout=30, check=True)
+        outcome = json.loads(done.stdout)
+        requests.extend(outcome.pop("requests"))
+        return outcome
+
+    monkeypatch.setattr(cloud_marketplace, "_run_subprocess", real_runner)
+    with use(for_seller(USER_ID)):
+        with SessionLocal() as db:
+            cloud_sessions.save_uploaded_session(
+                db, "depop", [{"name": "access_token", "value": "session-secret", "domain": "www.depop.com"}],
+                "UA/1.0", verified=True)
+        with Session(engine) as db:
+            db.add(PromotionAutomation(user_id=USER_ID, name="offers", marketplace="depop", action="offer", enabled=True))
+            db.commit()
+        saved = vault.data[(USER_ID, "cloud-session-depop")]
+        result = asyncio.run(cloud_marketplace.execute_local(
+            "depop", {"type": command_type, "job_id": "check-1", "payload": {"marketplace": "depop"}}))
+
+        assert result["ok"] is False
+        assert result["error_code"] == "challenge"
+        assert len(requests) == 1, requests
+        assert vault.data[(USER_ID, "cloud-session-depop")] == saved
+        assert vault.delete_calls == []
+        with SessionLocal() as db:
+            assert cloud_sessions.public_session("depop", db)["state"] == "signed_in"
+            assert cloud_sessions.has_active_session("depop", db) is True
+        with Session(engine) as db:
+            rule = db.scalar(select(PromotionAutomation).where(PromotionAutomation.name == "offers"))
+            assert rule is not None and rule.enabled and rule.paused_reason is None
+
+
 def test_real_node_runner_enforces_confirm_true_for_writes(cloud, monkeypatch):  # noqa: F811
     """Even if a caller omits confirm=True, the isolated Node runner rejects writes before touching Poshmark."""
     _, _engine = cloud

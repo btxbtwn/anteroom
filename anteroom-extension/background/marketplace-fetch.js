@@ -189,14 +189,19 @@ async function marketplaceFetch(url, { marketplace, step, method = 'GET', header
       // Normal pages carry bot-check scripts too, so only a blocked or
       // unexpected answer is read for challenge markers.
       const unexpected = status < 300 && status !== 204 && expect === 'json' && !data;
-      const challenge = ([401, 403, 429, 503].includes(status) || unexpected) && MARKETPLACE_CHALLENGE.exec(json ? ownWords : text);
-      if (challenge) {
+      const blocked = [401, 403, 429, 503].includes(status);
+      const challenge = (blocked || unexpected) && MARKETPLACE_CHALLENGE.exec(json ? ownWords : text);
+      // Cloudflare marks a challenge in this header even when its page carries none of the markers above.
+      // It is a browser check, never a refused session.
+      const cloudflareChallenge = response.headers?.get?.('cf-mitigated') === 'challenge';
+      if (challenge || (blocked && cloudflareChallenge)) {
         failure = marketplaceError(`${label} asked for a browser check. Open ${label} in Chrome, finish the check, then try again.`,
           { code: 'challenge', status, marketplace_message: ownWords });
         const format = html || /text\/html/i.test(contentType) ? 'html' : json ? 'json' : 'other';
         failure.challenge_response = {
-          status, format, marker: Object.keys(challenge.groups).find(name => challenge.groups[name]),
-          cloudflare_challenge_header: response.headers?.get?.('cf-mitigated') === 'challenge',
+          status, format,
+          marker: challenge ? Object.keys(challenge.groups).find(name => challenge.groups[name]) : 'cloudflare',
+          cloudflare_challenge_header: cloudflareChallenge,
         };
       } else if (status === 401 || status === 403) {
         failure = marketplaceError(`${label} asked to sign in again. Reconnect ${label} in Anteroom.`,
