@@ -1458,3 +1458,31 @@ def test_mcp_resolve_hides_an_alert_until_it_changes_and_restore_brings_it_back(
     assert not is_error, restored
     assert restored == {"restored": [key], "not_hidden": []}
     assert key in _attention_keys(client, bearer)
+
+
+def test_mcp_category_edit_sticks_on_a_listing_with_saved_marketplace_forms():
+    """An agent's category change is the one saved, not the previous revision's (#2076)."""
+    client = TestClient(app)
+    with SessionLocal() as db:
+        db.add(Conversation(id="conv-forms", title="Graphic Tee", status="draft"))
+        db.flush()
+        db.add(ListingRevision(id="rev-forms-1", conversation_id="conv-forms", source="test", listing_json={
+            "title": "Graphic Tee", "price": 20.0,
+            "category_path": "Clothing, Shoes & Accessories > Women > Women's Clothing > Tops",
+            "direct_category_ids": {"ebay": "53159", "etsy": "11119"},
+            "_native_forms": {},
+        }))
+        db.flush()
+        db.add(Listing(conversation_id="conv-forms", current_revision_id="rev-forms-1"))
+        db.commit()
+
+    edited, err = _call_tool(client, "edit_listing", {
+        "conversation_id": "conv-forms",
+        "fields": {"direct_category_ids": {"ebay": "53159", "etsy": "559"}},
+    })
+    assert not err, edited
+    assert edited["listing"]["direct_category_ids"]["etsy"] == "559"
+    stored, err = _call_tool(client, "get_listing", {"conversation_id": "conv-forms"})
+    assert not err
+    assert stored["listing"]["direct_category_ids"]["etsy"] == "559"
+    assert stored["listing"]["direct_category_ids"]["ebay"] == "53159"
