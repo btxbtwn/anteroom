@@ -85,8 +85,14 @@ AREA_LEVELS: dict[str, tuple[str, ...]] = {
     "listings": ("none", "read", "write"),
     "analytics": ("none", "read"),
     "attention": ("none", "read", "write"),
+    # Acting on marketplaces (services/mcp_marketplace_tools.py): save drafts
+    # there, or also publish, update live listings and delist. Off unless the
+    # seller grants it; a token or app stored before it existed reads as none.
+    "marketplaces": ("none", "draft", "publish"),
 }
-DEFAULT_PERMISSIONS: dict[str, str] = {"listings": "read", "analytics": "read", "attention": "read"}
+DEFAULT_PERMISSIONS: dict[str, str] = {
+    "listings": "read", "analytics": "read", "attention": "read", "marketplaces": "none",
+}
 
 
 class McpTokenError(ValueError):

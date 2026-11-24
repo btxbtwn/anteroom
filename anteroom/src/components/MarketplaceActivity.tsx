@@ -4,6 +4,7 @@ import { type ReactNode, useEffect } from "react";
 import { api } from "../api/client";
 import { isOpenJobStatus } from "../api/polling";
 import type { Job } from "../api/types";
+import { fromAgent } from "../lib/agentAttribution";
 import { busyFromJobs, MarketplaceWaitlist, useWaitlist, type WaitingAction } from "../lib/marketplaceWaitlist";
 import { MarketplaceLogo } from "./MarketplaceLogo";
 import { marketplaceName } from "./marketplaceNames";
@@ -115,7 +116,8 @@ export function MarketplaceActivity({ jobs, checkedAt, onOpen }: {
         </div>
         <ul className="flex max-h-96 flex-col divide-y overflow-y-auto">
           {running.map(({ job, marketplace, label }) => (
-            <ActivityRow key={job.id} title={job.listing_title} label={`${label}…`} onOpen={() => onOpen(job.conversation_id)}
+            <ActivityRow key={job.id} title={job.listing_title} onOpen={() => onOpen(job.conversation_id)}
+              label={[`${label}…`, fromAgent(job.requested_by)].filter(Boolean).join(" · ")}
               icon={marketplace ? <MarketplaceLogo id={marketplace} label={marketplaceName(marketplace)} size={16} /> : <Spinner size="sm" tone="muted" />} />
           ))}
           {queued.map((action) => {

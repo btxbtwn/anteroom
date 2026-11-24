@@ -21,6 +21,8 @@ export interface NativeDraft {
   /** True while a List, Update or Check job is running in this Studio. */
   running?: boolean;
   progress?: { step: string; label: string; index: number; total: number } | null;
+  /** The agent that started the running action ("mcp:<name>"); absent for the seller's own. */
+  requested_by?: string | null;
 }
 export type NativeDrafts = Partial<Record<NativeMarketplace, NativeDraft>>;
 export interface PreflightGap { field: string; message: string; blocking: boolean; required?: boolean; label?: string }

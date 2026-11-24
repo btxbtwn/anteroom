@@ -38,3 +38,30 @@ test("Agents copies the setup prompt for every HTTP and local MCP client", async
     expect(copied).toBe(client.prompt);
   }
 });
+
+test("a new MCP token cannot act on marketplaces until the seller chooses it", async ({ page, request, phone }, info) => {
+  await page.route(/\/api\/updates(?:\/progress)?$/, route => route.fulfill({ json: { available: false, status: "idle" } }));
+  const name = `Marketplace agent ${info.project.name}`;
+  const created = await request.post("/api/settings/mcp-tokens", { data: { name } });
+  expect(created.ok()).toBe(true);
+  const token = await created.json();
+  expect(token.permissions.marketplaces).toBe("none");
+
+  await page.goto("/");
+  if (phone) await page.getByRole("button", { name: "Open navigation" }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Agents" }).click();
+  await expect(page.getByRole("combobox", { name: "New token Marketplaces access" })).toHaveText(/No access/);
+  const select = page.getByRole("combobox", { name: `${name} Marketplaces access` });
+  await expect(select).toHaveText(/No access/);
+  await select.click();
+  await page.getByRole("option", { name: "Publish, update and delist" }).click();
+  await expect(select).toHaveText(/Publish, update and delist/);
+  await select.scrollIntoViewIfNeeded();
+  await info.attach("agent-marketplaces-permission.png", { body: await page.screenshot({ scale: "css" }), contentType: "image/png" });
+
+  const listed = await (await request.get("/api/settings/mcp-tokens")).json();
+  const saved = listed.tokens.find((row: { id: string }) => row.id === token.id);
+  expect(saved.permissions.marketplaces).toBe("publish");
+  await request.delete(`/api/settings/mcp-tokens/${token.id}`);
+});

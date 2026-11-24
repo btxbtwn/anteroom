@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import event
 
 from anteroom.database import in_worker_session
-from anteroom.services import mcp_http, mcp_import_match_tools, mcp_oauth, mcp_tokens
+from anteroom.services import mcp_http, mcp_import_match_tools, mcp_marketplace_tools, mcp_oauth, mcp_tokens
 from anteroom.services.hosted_limits import read_bounded_body
 from anteroom.services.local_requests import came_through_tailnet
 
@@ -31,6 +31,8 @@ router = APIRouter(prefix="/api/mcp", tags=["mcp"])
 _MAX_MCP_BODY_BYTES = 2 * 1024 * 1024
 _MCP_RPC_TIMEOUT_SECONDS = 30.0
 _MCP_STORAGE_CLEANUP_TIMEOUT_SECONDS = 15.0
+# Time kept at the end of a call to send its reply after marketplace work stops waiting.
+_MCP_REPLY_MARGIN_SECONDS = 2.0
 _active_calls: set[asyncio.Task] = set()
 
 
@@ -109,6 +111,7 @@ def _run_mcp_call(
             raise HTTPException(403, "This app was disconnected in Anteroom Settings. Connect it again to use it.")
     else:
         permissions = mcp_tokens.permissions_for(db, token_id) if token_id is not None else None
+    agent = mcp_marketplace_tools.agent_label(db, token_id=token_id, oauth_client_id=oauth_client_id)
     return mcp_http.handle_rpc_payload(
         db,
         payload,
@@ -118,6 +121,7 @@ def _run_mcp_call(
         permissions=permissions,
         deferred_deletes=deferred_deletes,
         expired=expired,
+        agent=agent,
     )
 
 
@@ -194,7 +198,12 @@ async def mcp_post(request: Request):
             links = mcp_import_match_tools.pending_links(outcome[0])
             if links:
                 # Confirming an import match reads the marketplace: only once the session is closed.
-                await mcp_import_match_tools.finish_pending_links(links, deadline=deadline - 1.0)
+                await mcp_import_match_tools.finish_pending_links(links, deadline=deadline - _MCP_REPLY_MARGIN_SECONDS)
+            actions = mcp_marketplace_tools.pending_actions(outcome[0])
+            if actions:
+                # Marketplace work waits on Chrome, a cloud session, eBay or Etsy: only now that
+                # the session is closed. Work still running at the deadline keeps going.
+                await mcp_marketplace_tools.run_pending(actions, deadline=deadline - _MCP_REPLY_MARGIN_SECONDS)
             if not result.done():
                 result.set_result(outcome)
         except Exception as exc:

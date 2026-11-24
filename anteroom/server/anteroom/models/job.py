@@ -58,6 +58,9 @@ class Job(SellerOwned, Base):
     leased_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # The seller pressed Cancel. The job stops at its next safe point, wherever it runs.
     cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
+    # Who started the job when it was not the seller in Anteroom: an agent's
+    # access token or connected app, e.g. "Claude". Null for the seller's own actions.
+    requested_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=True)
 

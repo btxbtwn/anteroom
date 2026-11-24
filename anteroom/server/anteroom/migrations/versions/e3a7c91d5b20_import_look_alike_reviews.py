@@ -1,7 +1,7 @@
 """Keep the look-alike listings an import leaves for the seller to review
 
 Revision ID: e3a7c91d5b20
-Revises: d7e2a9c4b815
+Revises: e3b7a1c9d402, e4b7c2a9d6f1
 Create Date: 2026-11-24 12:00:00.000000
 """
 from __future__ import annotations
@@ -11,7 +11,8 @@ import sqlalchemy as sa
 
 
 revision = "e3a7c91d5b20"
-down_revision = "d7e2a9c4b815"
+# Also joins the two revisions main added on d7e2a9c4b815 into one head.
+down_revision = ("e3b7a1c9d402", "e4b7c2a9d6f1")
 branch_labels = None
 depends_on = None
 
@@ -28,7 +29,7 @@ def upgrade() -> None:
     # Legacy Mac adoption creates missing model tables before replaying migrations.
     if TABLE not in set(sa.inspect(bind).get_table_names()):
         op.create_table(
-            TABLE,
+            "import_reviews",
             sa.Column("id", sa.String(), nullable=False),
             sa.Column("user_id", sa.String(36), nullable=False, server_default=LOCAL_OWNER),
             sa.Column("marketplace", sa.String(16), nullable=False),
@@ -47,9 +48,9 @@ def upgrade() -> None:
             sa.PrimaryKeyConstraint("id"),
             sa.UniqueConstraint("user_id", "marketplace", "listing_id", "conversation_id", name="uq_import_reviews_listing_item"),
         )
-        op.create_index("ix_import_reviews_user_id", TABLE, ["user_id"])
-        op.create_index("ix_import_reviews_conversation_id", TABLE, ["conversation_id"])
-        op.create_index("ix_import_reviews_owner_decision", TABLE, ["user_id", "decision", "created_at"])
+        op.create_index("ix_import_reviews_user_id", "import_reviews", ["user_id"])
+        op.create_index("ix_import_reviews_conversation_id", "import_reviews", ["conversation_id"])
+        op.create_index("ix_import_reviews_owner_decision", "import_reviews", ["user_id", "decision", "created_at"])
 
     if bind.dialect.name != "postgresql":
         return

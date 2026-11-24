@@ -81,7 +81,9 @@
   <p><strong>When you ask</strong>, it:</p>
   <ul>
     <li>fills a marketplace's listing form to save a draft, list, or update a listing,
-      and delists a listing, only after you confirm that action in Anteroom;</li>
+      and delists a listing, only after you confirm that action in Anteroom, or when an
+      AI assistant you connected asks for it on the marketplaces it names and you have
+      allowed that assistant to act on marketplaces (see below);</li>
     <li>imports your existing listings and your sales history;</li>
     <li>creates and reads drafts in your Vendoo account;</li>
     <li>checks which marketplaces you are signed in to, opens a sign-in page, or (when
@@ -121,9 +123,14 @@
       figures; and your Needs Attention items.</li>
     <li><strong>What it can change:</strong> only where you allow it to write. It can create
       and edit drafts, stage edits to a listing, manage photos, labels and notes, delete a
-      draft that was never listed, and dismiss or restore Needs Attention items. It cannot
-      publish, update a live listing, or delist anything: those still happen only when you
-      confirm them in Anteroom.</li>
+      draft that was never listed, and dismiss or restore Needs Attention items.</li>
+    <li><strong>What it can do on your marketplaces:</strong> nothing, unless you turn on
+      <strong>Marketplaces</strong> for that app or token. <strong>Save drafts</strong> lets
+      it save private drafts on the marketplaces it names. <strong>Publish, update and
+      delist</strong> also lets it list (now, or at a time you schedule), send your saved
+      edits to live listings and delist, on the marketplaces it names and only with your
+      confirmation in that request. Anteroom runs each one as if you pressed the button,
+      through your own marketplace connections, and shows which app started it.</li>
     <li><strong>What Anteroom keeps about the connection:</strong> the app's name and ID,
       the access you chose, and when it was connected and last used. Access tokens are
       stored only as a hash, and an app's sign-in tokens are issued by Supabase and are not

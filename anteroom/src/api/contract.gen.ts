@@ -19,6 +19,97 @@ export interface Annotation {
   text?: string | null;
 }
 
+export interface AttentionCounts {
+  active: number;
+  dismissed: number;
+  resolved: number;
+  by_kind?: Record<string, number>;
+}
+
+/** Needs Attention: what shows, what is snoozed, and what is resolved. */
+export interface AttentionInbox {
+  needs_attention: AttentionItem[];
+  /** Snoozed items, back after 7 days if they still apply. */
+  dismissed: AttentionItem[];
+  /** Resolved items. A duplicate pair stays resolved; anything else shows again when its state changes. */
+  resolved: AttentionItem[];
+  counts: AttentionCounts;
+}
+
+/** One Needs Attention alert. Snoozing or resolving it only hides it in Anteroom. */
+export interface AttentionItem {
+  key: string;
+  kind: "still_listed" | "expired_session" | "failed_job" | "unsent_edits" | "pending_approval" | "relist_gap" | "duplicate_listing";
+  priority: "high" | "medium" | "low";
+  title: string;
+  detail: string;
+  action_label: string;
+  target: AttentionTarget;
+  occurred_at?: string | null;
+  /** The state the alert reports. Resolve keeps it hidden only while this stays the same. */
+  fingerprint?: string;
+  /** Set on a snoozed item. */
+  dismissed_at?: string | null;
+  /** When a snoozed item shows again if it still applies. */
+  expires_at?: string | null;
+  reappears_in_days?: number | null;
+  /** Set on a resolved item. */
+  resolved_at?: string | null;
+}
+
+export interface AttentionResolution {
+  item_key: string;
+  kind: string;
+  resolved_at: string;
+}
+
+export interface AttentionResolveInput {
+  item_key: string;
+  kind?: string;
+  /** The item's fingerprint as shown; required for every kind but a duplicate pair. */
+  fingerprint?: string;
+}
+
+export interface AttentionResolveResult {
+  ok: boolean;
+  resolution: AttentionResolution;
+}
+
+export interface AttentionRestoreInput {
+  item_key: string;
+}
+
+export interface AttentionRestoreResult {
+  ok: boolean;
+  restored: boolean;
+  item_key: string;
+}
+
+export interface AttentionSnooze {
+  item_key: string;
+  dismissed_at: string;
+  expires_at: string;
+  reappears_in_days: number;
+}
+
+export interface AttentionSnoozeInput {
+  item_key: string;
+  kind?: string;
+}
+
+export interface AttentionSnoozeResult {
+  ok: boolean;
+  dismissal: AttentionSnooze;
+}
+
+/** Where the item's action opens. */
+export interface AttentionTarget {
+  view: "listings" | "settings" | "automations";
+  conversation_id?: string | null;
+  settings_section?: "connections" | "listings" | null;
+  target_id?: string | null;
+}
+
 export interface Border {
   width: number;
   color?: string;
