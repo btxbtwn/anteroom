@@ -1,2 +1,0 @@
-- Importing a listing from eBay now brings over its color, department, size type, package weight and dimensions, shipping, payment and return policies, item location, offer settings, format and duration, subtitle, second category, lot size, private listing, charity and UPC, so the eBay tab matches the listing on eBay. Updating an imported listing keeps the video it already has on eBay.
-- When eBay doesn't say which category an imported listing is in, Anteroom takes it from the listing's inventory offer, or tells you to choose one, instead of saving an empty category.
