@@ -8,7 +8,7 @@
 import { PhotoLoadFailure, StudioImage } from "./StudioImage";
 import { FlipHorizontal2Icon, FlipVertical2Icon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { Annotation, CropBox, ListingPhoto, PhotoEdits, Redaction, StudioOptions, VirtualModel } from "../api/types";
 import { cn } from "../lib/utils";
@@ -41,6 +41,7 @@ import { Checkbox } from "./ui/checkbox";
 import { Dialog, DialogPopup, DialogTitle } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Spinner } from "./ui/spinner";
+import { toastManager } from "./ui/toast";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
 import { SettingsSelect, type SettingsSelectOption } from "./settings/SettingsLayout";
 
@@ -64,9 +65,17 @@ interface Props {
   /** The photos AI Studio may change along with this one: this listing's, or this form's. */
   photos?: ListingPhoto[];
   onSaved: (photo: ListingPhoto) => void;
-  onClose: () => void;
+  onClose: (background?: boolean) => void;
   /** The tab to open on; the lightbox's Edit opens on Crop. */
   initialTab?: Tab;
+}
+
+function studioMutation(convId: string) {
+  return { mutationKey: ["photo-studio", convId], exact: true };
+}
+
+export function usePhotoStudioPending(convId: string) {
+  return useIsMutating(studioMutation(convId)) > 0;
 }
 
 /** The recipe as the server would store it, so comparing two tells whether anything changed. */
@@ -112,7 +121,7 @@ export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClo
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [pen, setPen] = useState<MarkPen>({ tool: "arrow", color: DEFAULT_MARK_COLOR, text: "" });
-  // AI Studio keeps the editor open (and on its tab) until Photoroom answers.
+  // Keep the controls on the Studio tab until Photoroom answers.
   const [studioRunning, setStudioRunning] = useState(false);
 
   // The crop is drawn on the whole frame; marks are drawn live over the finished frame without them.
@@ -186,8 +195,9 @@ export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClo
   };
 
   const busy = saving || studioRunning;
+  const close = () => onClose(studioRunning);
   return (
-    <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
+    <Dialog open onOpenChange={(open) => { if (!open && !saving) close(); }}>
       <DialogPopup
         showCloseButton={false}
         bottomStickOnMobile={false}
@@ -196,7 +206,7 @@ export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClo
       >
         <div className="flex items-center gap-3 border-b px-4 py-3">
           <DialogTitle className="text-base">Edit photo {index + 1}</DialogTitle>
-          <Button className="ms-auto" size="icon-sm" variant="ghost" aria-label="Close" onClick={onClose} disabled={busy}>
+          <Button className="ms-auto" size="icon-sm" variant="ghost" aria-label="Close" onClick={close} disabled={saving}>
             <XIcon />
           </Button>
         </div>
@@ -299,8 +309,8 @@ export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClo
               Discard changes
             </Button>
           ) : null}
-          <Button className="ms-auto" variant="outline" size="sm" onClick={onClose} disabled={busy}>
-            Cancel
+          <Button className="ms-auto" variant="outline" size="sm" onClick={close} disabled={saving}>
+            {studioRunning ? "Continue in background" : "Cancel"}
           </Button>
           <Button size="sm" onClick={() => void save()}
             disabled={busy || !changed || loading || Boolean(previewError) || unreadable || (cropping && !frameAspect)}>
@@ -714,11 +724,30 @@ function StudioTools({ convId, photo, photos, unsaved, onSaved, onRunning, onReb
   onDone: () => void;
 }) {
   const mounted = useRef(true);
-  useEffect(() => {
+  const showBackgroundProgress = useRef<(() => void) | null>(null);
+  useLayoutEffect(() => {
     // Set on every mount: StrictMode mounts, unmounts and mounts again in development.
     mounted.current = true;
-    return () => { mounted.current = false; };
+    return () => {
+      mounted.current = false;
+      showBackgroundProgress.current?.();
+    };
   }, []);
+  const queryClient = useQueryClient();
+  const studio = useMutation({
+    mutationKey: studioMutation(convId).mutationKey,
+    retry: false,
+    networkMode: "always",
+    mutationFn: async ({ photoIds, options }: { photoIds: string[]; options: StudioOptions }) => {
+      const result = await api.conversations.photoStudio(convId, photoIds, options);
+      // Always update the original draft's cache, even if another draft is open.
+      if (result.photos.length) {
+        await queryClient.cancelQueries({ queryKey: ["photos", convId] });
+        for (const changed of result.photos) onSaved(changed);
+      }
+      return result;
+    },
+  });
   const { data: key } = useQuery({ queryKey: ["settings-photoroom"], queryFn: api.settings.photoroom, staleTime: 60_000 });
   const [choice, setChoice] = useState<StudioChoice>({
     removeBackground: true, background: DEFAULT_BACKDROP, effect: "none", shadow: false,
@@ -738,15 +767,28 @@ function StudioTools({ convId, photo, photos, unsaved, onSaved, onRunning, onReb
   const ids = photos.filter((item) => selected.has(item.id)).map((item) => item.id);
 
   const apply = async () => {
+    if (queryClient.isMutating(studioMutation(convId))) return;
     setRunning(true);
     onRunning(true);
     setError(null);
     setFailures([]);
+    let progress: string | undefined;
+    // The Apply button already reports progress while the editor is open.
+    showBackgroundProgress.current = () => {
+      progress = toastManager.add({ type: "loading", title: "AI Studio is editing photos", timeout: 0 });
+    };
     try {
-      const result = await api.conversations.photoStudio(convId, ids, options);
-      // The listing's photos update even if this editor has gone.
-      result.photos.forEach(onSaved);
-      if (!mounted.current) return;
+      const result = await studio.mutateAsync({ photoIds: ids, options });
+      if (!mounted.current) {
+        const savedCount = result.photos.length;
+        const error = result.errors[0]?.detail;
+        toastManager.add({
+          type: result.errors.length ? "error" : "success",
+          title: result.errors.length ? `AI Studio saved ${savedCount} of ${ids.length} photos` : "AI Studio edits saved",
+          description: error,
+        });
+        return;
+      }
       const open = result.photos.find((item) => item.id === photo.id);
       if (open) onRebase(open.edits);
       if (result.errors.length) {
@@ -755,10 +797,16 @@ function StudioTools({ convId, photo, photos, unsaved, onSaved, onRunning, onReb
         setSelected(new Set(result.errors.map((failure) => failure.photo_id)));
       } else onDone();
     } catch (err) {
-      if (mounted.current) setError(err instanceof Error ? err.message : "AI Studio failed");
+      const detail = err instanceof Error ? err.message : "AI Studio failed";
+      if (mounted.current) setError(detail);
+      else toastManager.add({ type: "error", title: "AI Studio could not save the edits", description: detail });
     } finally {
-      if (mounted.current) setRunning(false);
-      onRunning(false);
+      showBackgroundProgress.current = null;
+      if (progress) toastManager.close(progress);
+      if (mounted.current) {
+        setRunning(false);
+        onRunning(false);
+      }
     }
   };
 
