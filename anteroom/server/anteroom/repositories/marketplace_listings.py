@@ -22,6 +22,13 @@ def _read_state(marketplace: str, state: str, listing_url: str | None) -> str:
 
 # A verified read's states for a listing still on the marketplace but not for sale:
 # Etsy's deactivated (inactive), expired and being-edited listings, and Poshmark's Not For Sale.
+# Live, less Depop listings published without the product reference needed to reach them.
+_LIVE = (
+    MarketplaceListing.state.in_(LIVE_STATES),
+    (MarketplaceListing.marketplace != "depop") | (MarketplaceListing.state != "published") | (
+        MarketplaceListing.listing_url.isnot(None) & (MarketplaceListing.listing_url != "")),
+)
+
 INACTIVE_STATES = frozenset({"inactive", "expired", "edit", "not_for_sale"})
 
 
@@ -120,10 +127,7 @@ class MarketplaceListingRepo:
 
         An item live on a marketplace has a key even when no revision is known.
         """
-        query = self.db.query(MarketplaceListing.conversation_id, MarketplaceListing.revision_id).filter(
-            MarketplaceListing.state.in_(LIVE_STATES),
-            (MarketplaceListing.marketplace != "depop") | (MarketplaceListing.state != "published") | (
-                MarketplaceListing.listing_url.isnot(None) & (MarketplaceListing.listing_url != "")))
+        query = self.db.query(MarketplaceListing.conversation_id, MarketplaceListing.revision_id).filter(*_LIVE)
         if conv_id:
             query = query.filter(MarketplaceListing.conversation_id == conv_id)
         grouped: dict[str, set[str]] = {}
@@ -132,6 +136,13 @@ class MarketplaceListingRepo:
             if revision_id:
                 revisions.add(revision_id)
         return grouped
+
+    def live_records(self, conv_id: str | None = None) -> list[MarketplaceListing]:
+        """The live direct listings ``live_revisions`` reads, one row per item and marketplace."""
+        query = select(MarketplaceListing).where(*_LIVE)
+        if conv_id:
+            query = query.where(MarketplaceListing.conversation_id == conv_id)
+        return list(self.db.scalars(query).all())
 
     def listing_urls(self, conv_id: str | None = None) -> dict[str, dict[str, str]]:
         """Each item's direct listing links by marketplace, for every item or one."""

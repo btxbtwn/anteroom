@@ -696,6 +696,10 @@ LISTING_WRITE_TOOLS = {
     "manage_labels_and_notes", "delete_draft_listing", "confirm_import_match", "reject_import_match",
 }
 ATTENTION_WRITE_TOOLS = {"dismiss_attention_items", "resolve_attention_items", "restore_attention_items"}
+# Inventory tidying tools (services/mcp_organize_tools.py).
+READ_TOOLS |= {"get_pending_edits", "get_labels"}
+LISTING_WRITE_TOOLS |= {"discard_pending_edits", "rename_label", "delete_label"}
+ATTENTION_WRITE_TOOLS |= {"mark_not_duplicate"}
 # Reaches any token or app with some access to at least one area.
 FEEDBACK_TOOLS = {"send_feedback"}
 ALL_TOOLS = READ_TOOLS | LISTING_WRITE_TOOLS | ATTENTION_WRITE_TOOLS | FEEDBACK_TOOLS

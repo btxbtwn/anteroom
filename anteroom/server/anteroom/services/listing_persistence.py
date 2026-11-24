@@ -107,8 +107,12 @@ def _drop_fixed_marketplace_errors(db: Session, conv_id: str, before: dict, afte
             row.error = row.error_code = row.error_fields = row.marketplace_message = None
 
 
-def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None, *, expected_revision_id: str | None = None, commit: bool = True, use_saved_defaults: bool = False, depop_notes: dict | None = None) -> ListingRevision:
-    """Save atomically; an empty expected id means no listing may exist yet."""
+def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None, *, expected_revision_id: str | None = None, commit: bool = True, use_saved_defaults: bool = False, depop_notes: dict | None = None, verbatim: bool = False) -> ListingRevision:
+    """Save atomically; an empty expected id means no listing may exist yet.
+
+    ``verbatim`` keeps ``listing_json`` as given (an earlier revision coming
+    back), skipping the native-form and quantity rewrites against the current one.
+    """
     repo = ListingRepo(db)
     from anteroom.services.native_field_fill import (
         FILL_ON_SOURCES,
@@ -134,7 +138,7 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
     # Auto-relist saves the previous revision with one marketplace price changed
     # and locked. Normalizing it as generated content would restore the old
     # locks and drop that price, so it is kept as written, like a schema refresh.
-    if source not in {"native_schema", "auto_relist"} and (native_contract.KEY in before or use_saved_defaults):
+    if not verbatim and source not in {"native_schema", "auto_relist"} and (native_contract.KEY in before or use_saved_defaults):
         listing_json = native_contract.copy_listing(listing_json)
         if source in FILL_ON_SOURCES and native_contract.KEY in before:
             listing_json[native_contract.KEY] = choice_lists.compact_contracts(before[native_contract.KEY])
@@ -166,7 +170,8 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
     from anteroom.services.poshmark_form import follow_general_quantity
 
     # After native normalization, which restores locked rows from `before`.
-    listing_json = follow_general_quantity(before, listing_json)
+    if not verbatim:
+        listing_json = follow_general_quantity(before, listing_json)
     from anteroom.services.pricing_rules import SNAPSHOT_RULES
     from anteroom.services.unsent_edits import normalized_listing_hash
 

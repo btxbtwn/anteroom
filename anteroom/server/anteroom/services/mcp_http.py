@@ -36,12 +36,14 @@ from anteroom.repositories.queries import ConversationRepo, ListingRepo, Revisio
 from anteroom.services import (
     boxes,
     home_dashboard,
+    inventory_labels,
     listing_editor,
     mcp_catalog_tools,
     mcp_feedback_tools,
     mcp_finance_tools,
     mcp_import_match_tools,
     mcp_marketplace_tools,
+    mcp_organize_tools,
     mcp_tokens,
 )
 from anteroom.services.background_tasks import ACTIVE as ACTIVE_TASK_STATUSES
@@ -60,7 +62,7 @@ from anteroom.services.offer_analytics import offer_analytics, offer_log
 from anteroom.services.photos import cover_thumb_url
 from anteroom.services.unsent_edits import unsent_edits
 from anteroom.services.validation import validate_listing
-from anteroom.services.vendoo_import import merge_notes, parse_notes, split_vendoo_labels
+from anteroom.services.vendoo_import import merge_notes, parse_notes
 from anteroom.version import app_version
 
 SUPPORTED_PROTOCOL_VERSIONS = ("2024-11-05", "2025-03-26", "2025-06-18")
@@ -124,6 +126,7 @@ TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
     **mcp_catalog_tools.PERMISSIONS,
     **mcp_import_match_tools.PERMISSIONS,
     **mcp_marketplace_tools.PERMISSIONS,
+    **mcp_organize_tools.PERMISSIONS,
     **mcp_finance_tools.PERMISSIONS,
     **mcp_feedback_tools.PERMISSIONS,
 }
@@ -556,6 +559,7 @@ def tool_definitions() -> list[dict[str, Any]]:
     tools.extend(mcp_catalog_tools.TOOLS)
     tools.extend(mcp_import_match_tools.TOOLS)
     tools.extend(mcp_marketplace_tools.TOOLS)
+    tools.extend(mcp_organize_tools.TOOLS)
     tools.extend(mcp_finance_tools.TOOLS)
     tools.extend(mcp_feedback_tools.TOOLS)
     return [{**tool, "annotations": {**tool["annotations"], "title": tool["title"]}} for tool in tools]
@@ -803,6 +807,7 @@ def _dispatch_tool(
         "manage_labels_and_notes": _tool_manage_labels_and_notes,
         "delete_draft_listing": _tool_delete_draft_listing,
         **mcp_catalog_tools.HANDLERS,
+        **mcp_organize_tools.HANDLERS,
         **mcp_import_match_tools.HANDLERS,
         **mcp_finance_tools.HANDLERS,
     }
@@ -862,7 +867,7 @@ def _tool_search_inventory(db: Session, args: dict[str, Any], **_kw: Any) -> dic
     for conv in convs:
         doc = fields_by_conv.get(conv.id) or {}
         notes = parse_notes(conv.notes)
-        labels = list(doc.get("labels") or []) if isinstance(doc.get("labels"), list) else split_vendoo_labels(notes.get("vendooLabels"))
+        labels = inventory_labels.item_labels(notes, doc)
         direct = direct_summaries.get(conv.id) or {}
         sold = {m for m, rec in direct.items() if rec.get("state") == "sold"} | {
             str(m).lower()
@@ -959,7 +964,7 @@ def _tool_get_listing(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str
 
     validation = validate_listing(copy.deepcopy(editable), len(photos), require_photos=True)
     notes = parse_notes(conv.notes)
-    labels = editable.get("labels") or split_vendoo_labels(notes.get("vendooLabels"))
+    labels = inventory_labels.item_labels(notes, editable)
     direct = MarketplaceListingRepo(db).summaries().get(conv_id, {})
     revisions_map = {conv_id: revision.id} if revision else {}
     has_unsent = conv_id in unsent_edits(db, [conv], revisions_map, commit_backfill=False)
@@ -1422,11 +1427,7 @@ def _tool_manage_labels_and_notes(db: Session, args: dict[str, Any], **_kw: Any)
     revision = listing_repo.get_revision(current.current_revision_id) if current and current.current_revision_id else None
     doc = copy.deepcopy(revision.listing_json) if revision and isinstance(revision.listing_json, dict) else {}
 
-    existing_labels = (
-        [str(x).strip() for x in doc["labels"] if str(x).strip()]
-        if isinstance(doc.get("labels"), list)
-        else split_vendoo_labels(notes.get("vendooLabels"))
-    )
+    existing_labels = inventory_labels.item_labels(notes, doc)
     updated_labels = list(existing_labels)
     labels_changed = False
 

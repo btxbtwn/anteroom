@@ -78,7 +78,13 @@ def prepared_listing(previous: dict, listing: dict, *, notes: dict | None = None
     return updated
 
 
-def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: str = "user_form", expected_revision_id: str | None = None, commit: bool = True, depop_notes: dict | None = None):
+def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: str = "user_form", expected_revision_id: str | None = None, commit: bool = True, depop_notes: dict | None = None, verbatim: bool = False):
+    """Save the seller's edit as the listing's new current revision.
+
+    ``verbatim`` stores ``listing_data`` exactly as given, for an earlier
+    revision coming back: it was prepared when first saved, and preparing it
+    again would make it differ from the version a marketplace was sent.
+    """
 
     conv_repo = ConversationRepo(db)
     conv = conv_repo.get(conv_id)
@@ -112,16 +118,20 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
 
     # Chat applies accepted changes to inherited measurements after native edits are locked.
     notes = parse_notes(conv.notes) if depop_notes is None else None
-    listing_data = prepared_listing(previous_json, listing_data, notes=notes)
-    from anteroom.services.agent_categories import map_general_category
+    if verbatim:
+        listing_data = copy.deepcopy(listing_data)
+        validation = validate_listing(copy.deepcopy(listing_data), photo_count, require_photos=True)
+    else:
+        listing_data = prepared_listing(previous_json, listing_data, notes=notes)
+        from anteroom.services.agent_categories import map_general_category
 
-    map_general_category(db, previous_json, listing_data)
-    from anteroom.services.seller_overrides import capture_locked, restore_locked
+        map_general_category(db, previous_json, listing_data)
+        from anteroom.services.seller_overrides import capture_locked, restore_locked
 
-    # Validation rewrites dropdown keys. A value the seller owns is put back.
-    locked = capture_locked(listing_data)
-    validation = validate_listing(listing_data, photo_count, require_photos=True)
-    restore_locked(listing_data, locked)
+        # Validation rewrites dropdown keys. A value the seller owns is put back.
+        locked = capture_locked(listing_data)
+        validation = validate_listing(listing_data, photo_count, require_photos=True)
+        restore_locked(listing_data, locked)
     from anteroom.services.vendoo_marketplace_fields import best_offer_error
 
     offer_problem = best_offer_error(listing_data)
@@ -142,6 +152,7 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
         expected_revision_id=expected_revision_id,
         commit=commit,
         depop_notes=depop_notes,
+        verbatim=verbatim,
     )
 
     from anteroom.services.seller_overrides import notes_for_listing_edits
