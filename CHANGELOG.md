@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1207 — 2026-11-24
+
+- Set the Depop category from listing chat, even when the draft's old category is no longer recognized.
+
 ## 0.1.1206 — 2026-11-24
 
 - Importing a listing from Poshmark now brings over everything Poshmark has for it: its category, both colors, style tags, original price, sizes and size group (including listings with several sizes), quantity type, shipping discount, availability, Smart Sell, cost, SKU and other info, so its Poshmark tab matches Poshmark and an update sends the same values back.
