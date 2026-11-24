@@ -1,0 +1,1 @@
+- Filling marketplace fields after a new draft costs less AI time: it now reads only the listing rules that apply to those fields, not the title, description and pricing formulas.

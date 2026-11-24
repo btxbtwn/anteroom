@@ -45,6 +45,24 @@ EBAY = {"marketplace": "ebay", "native": True, "known": True, "category_id": "11
 ]}
 
 
+class FieldFillRulesTest(unittest.TestCase):
+    def test_keeps_listing_policy_and_drops_copy_formulas(self):
+        from anteroom.services.catalog_index import FIELD_FILL_SECTION_CHARS, field_fill_rules
+        from anteroom.services.skill_formulas import core_listing_rules, etsy_when_made_rules
+
+        query = "depop_specifics.size depop_specifics.attributes.body-fit Women > Skirts"
+        rules = field_fill_rules(None, query)
+        self.assertTrue(rules.startswith(core_listing_rules()))
+        self.assertIn("Petite Size Normalization", rules)
+        self.assertIn("Men's Bottoms Sizing", rules)
+        self.assertNotIn("TITLE Formula", rules)
+        self.assertNotIn(etsy_when_made_rules(), rules)
+        retrieved = rules.partition("--- Additional listing rules ---")[2].strip()
+        self.assertTrue(retrieved)
+        self.assertLessEqual(len(retrieved), FIELD_FILL_SECTION_CHARS)
+        self.assertIn(etsy_when_made_rules(), field_fill_rules(None, query, etsy=True))
+
+
 class FillableRowsTest(unittest.TestCase):
     def test_category_pass_uses_leaves_and_respects_saved_and_locked_choices(self):
         category = row("direct_category_ids.mercari", "Category", ["Women > Pants", "Women > Pants > Dress pants"],
@@ -599,6 +617,11 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Rules (VIOLATION = INCORRECT LISTING)", initial_messages[0]["content"])
             self.assertIn("sizeType = Regular", initial_messages[0]["content"])
             system_prompt = initial_messages[0]["content"]
+            # Field filling never writes a title, description or price, so those
+            # formulas stay out of every field-fill call.
+            self.assertNotIn("TITLE Formula", system_prompt)
+            self.assertNotIn("DESCRIPTION Formula", system_prompt)
+            self.assertNotIn("Etsy When Made Estimation", system_prompt)
             shape = '{"fields":{"<field path>":{"value":"<choice>","evidence":"<exact quote>"}}}'
             self.assertIn(shape, system_prompt)
             self.assertIn(shape, retry_messages[-1]["content"])
@@ -1171,7 +1194,7 @@ class CategoryFillLocksTest(unittest.IsolatedAsyncioTestCase):
 
         reply = json.dumps({"fields": {"depop_specifics.age": ["90s"]}})
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"depop": DEPOP})), \
-                patch("anteroom.services.catalog_index.relevant_skill_rules", side_effect=fake_rules), \
+                patch("anteroom.services.catalog_index.field_fill_rules", side_effect=fake_rules), \
                 patch("anteroom.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)):
             await fill_native_fields(conv.id, object(), evidence="90s", markets={"depop"})
         self.assertEqual(seen_dbs, [None])

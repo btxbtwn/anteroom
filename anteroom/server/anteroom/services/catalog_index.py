@@ -1285,11 +1285,38 @@ def search_catalog(
 def relevant_skill_rules(db: Session | None, query: str, *, max_chars: int = 20000, top_k: int = 8) -> str:
     """Pack complete canonical sections after always-on policies and formulas."""
     from anteroom.services.skill_formulas import with_pinned_formulas
+
+    budget = max_chars - (len(with_pinned_formulas("x", max_chars=max_chars)) - 1)
+    return with_pinned_formulas(_ranked_sections(query, budget=budget, top_k=top_k), max_chars=max_chars)
+
+
+# Retrieved sections a marketplace field fill gets after the listing policy.
+FIELD_FILL_SECTION_CHARS = 8000
+
+
+def field_fill_rules(db: Session | None, query: str, *, etsy: bool = False) -> str:
+    """Listing policy and the sections ranked for these form fields, without the copy formulas.
+
+    A field fill never writes a title, description or price, so the title,
+    description and pricing formulas stay out. The size rules are always in,
+    since every form has size fields; the Etsy "when made" policy is included
+    only when an Etsy field is being filled.
+    """
+    from anteroom.services.skill_formulas import core_listing_rules, etsy_when_made_rules, size_rules
+
+    policy = "\n\n".join([*([etsy_when_made_rules()] if etsy else []), core_listing_rules(), size_rules()])
+    sections = _ranked_sections(query, budget=FIELD_FILL_SECTION_CHARS)
+    return policy + (f"\n\n--- Additional listing rules ---\n\n{sections}" if sections else "")
+
+
+def _ranked_sections(query: str, *, budget: int, top_k: int = 8) -> str:
+    """Complete canonical sections ranked for ``query``, at most ``budget`` characters, pinned ones excluded."""
+    from anteroom.services.skill_formulas import with_pinned_formulas
     from anteroom.services.text_retrieval import rank_texts
 
     documents = []
     seen = set()
-    pinned = with_pinned_formulas("", max_chars=max_chars)
+    pinned = with_pinned_formulas("", max_chars=10**9)
     for path in _skill_files():
         for title, body in _chunk_markdown(path.read_text(encoding="utf-8")):
             if body in seen or body in pinned:
@@ -1306,15 +1333,15 @@ def relevant_skill_rules(db: Session | None, query: str, *, max_chars: int = 200
             documents.append((title, body))
     ranked = rank_texts(query, [f"{title}\n{body}" for title, body in documents])
     chosen = []
-    used = len(with_pinned_formulas("x", max_chars=max_chars)) - 1
+    used = 0
     for index, _score in ranked:
         body = documents[index][1]
-        if used + len(body) + 4 <= max_chars:
+        if used + len(body) + 4 <= budget:
             chosen.append(body)
             used += len(body) + 4
         if len(chosen) >= top_k:
             break
-    return with_pinned_formulas("\n\n".join(chosen), max_chars=max_chars)
+    return "\n\n".join(chosen)
 
 
 

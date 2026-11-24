@@ -409,6 +409,15 @@ def core_listing_rules() -> str:
     return "\n\n".join(sections)
 
 
+@lru_cache(maxsize=1)
+def size_rules() -> str:
+    """Men's bottoms, petite and measurement-derived size rules, read from the canonical skill."""
+    text = (skills_dir() / "list-this" / "SKILL.md").read_text(encoding="utf-8")
+    start = text.index("**Men's Bottoms Sizing (MANDATORY):**")
+    end = text.index("**Valid Depop Values", start)
+    return text[start:end].strip()
+
+
 def with_pinned_formulas(skill_rules: str, *, max_chars: int = 20000) -> str:
     """Keep mandatory formulas and evidence policy ahead of complete retrieved sections."""
     pinned = f"{listing_formula_rules()}\n\n{etsy_when_made_rules()}\n\n{core_listing_rules()}"
