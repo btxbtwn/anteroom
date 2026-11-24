@@ -238,9 +238,9 @@ export const ListingRow = memo(function ListingRow({
                 "block w-full cursor-pointer truncate text-left text-base font-medium leading-snug text-inherit no-underline outline-none",
                 // Stretch the link over the row so right-click anywhere offers "Open in new tab".
                 !selecting && "after:absolute after:inset-0 after:content-['']",
-                // The five hover actions (5 x 24px, 8px from the edge) sit over the
+                // The four hover actions (4 x 24px, 8px from the edge) sit over the
                 // title's end; make room so it ends in an ellipsis before them.
-                !selecting && "min-[901px]:pointer-fine:group-hover/row:pr-32 min-[901px]:pointer-fine:group-focus-within/row:pr-32",
+                !selecting && "min-[901px]:pointer-fine:group-hover/row:pr-24 min-[901px]:pointer-fine:group-focus-within/row:pr-24",
               )}
               title={name === title ? title : `${name} · ${title}`}
               onClick={(e) => {
@@ -260,8 +260,30 @@ export const ListingRow = memo(function ListingRow({
             </a>
           )}
           <div className="mt-1 flex items-center gap-2">
+            {/* With a mouse the star has its own slot, as in Gmail: filled once starred, outlined
+                on hover. It sits apart from the hover actions so the title stays clickable. */}
+            {!selecting ? (
+              <button
+                type="button"
+                aria-pressed={favorite}
+                aria-label={`${favoriteLabel}: ${title}`}
+                title={favoriteLabel}
+                className={cn(
+                  "relative z-[1] -my-1 -ml-1 hidden size-6 shrink-0 cursor-pointer items-center justify-center rounded-md outline-none hover:bg-sidebar-row-hover focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring min-[901px]:pointer-fine:inline-flex",
+                  favorite ? "text-sidebar-foreground/80" : "text-sidebar-muted-foreground opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100",
+                )}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleFavorite();
+                }}
+              >
+                <FavoriteStar on={favorite} className="size-3.5" />
+              </button>
+            ) : null}
+            {/* Touch screens star from the row's menu; the row only shows the mark. */}
             {favorite ? (
-              <span role="img" aria-label="Favorite" title="Favorite" className="inline-flex shrink-0 text-sidebar-foreground/80">
+              <span role="img" aria-label="Favorite" title="Favorite"
+                className={cn("inline-flex shrink-0 text-sidebar-foreground/80", !selecting && "min-[901px]:pointer-fine:hidden")}>
                 <FavoriteStar on className="size-3.5" />
               </span>
             ) : null}
@@ -298,19 +320,6 @@ export const ListingRow = memo(function ListingRow({
       </div>
       {!renaming && !selecting && (
         <div className="pointer-events-none absolute top-2 right-2 flex items-center opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 max-[900px]:hidden pointer-coarse:hidden">
-          <button
-            type="button"
-            className={actionClass}
-            title={favoriteLabel}
-            aria-label={`${favoriteLabel}: ${title}`}
-            aria-pressed={favorite}
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleFavorite();
-            }}
-          >
-            <FavoriteStar on={favorite} className="size-3.5" />
-          </button>
           <button
             type="button"
             className={actionClass}

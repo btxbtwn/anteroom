@@ -27,7 +27,9 @@ test("a seller stars an item, filters to favorites, and unstars it from the edit
     await starredLink.hover();
     await page.getByRole("button", { name: `Add to favorites: ${starred}` }).click();
   }
-  await expect(listings.getByRole("img", { name: "Favorite" })).toHaveCount(1);
+  // A touch screen marks the row; with a mouse the star itself stays, pressed.
+  if (phone) await expect(listings.getByRole("img", { name: "Favorite" })).toHaveCount(1);
+  else await expect(listings.getByRole("button", { name: `Remove from favorites: ${starred}` })).toHaveAttribute("aria-pressed", "true");
   await page.screenshot({ path: info.outputPath("favorites-row.png") });
   await expect.poll(async () => (await (await request.get(`/api/conversations/${ids[starred]}`)).json()).favorite).toBe(true);
 
@@ -49,10 +51,12 @@ test("a seller stars an item, filters to favorites, and unstars it from the edit
   await listings.getByRole("link", { name: starred, exact: true }).click();
   // A phone opens the item on its chat; the star sits with the listing's actions.
   if (phone) await page.getByRole("tab", { name: "Listing" }).click();
-  const editorStar = page.getByRole("button", { name: `Remove from favorites: ${starred}` });
+  // The sidebar row carries a star of the same name; this one sits with the listing's actions.
+  const editor = page.getByRole("navigation", { name: "Marketplaces" });
+  const editorStar = editor.getByRole("button", { name: `Remove from favorites: ${starred}` });
   await expect(editorStar).toHaveAttribute("aria-pressed", "true");
   await page.screenshot({ path: info.outputPath("favorites-editor.png") });
   await editorStar.click();
-  await expect(page.getByRole("button", { name: `Add to favorites: ${starred}` })).toHaveAttribute("aria-pressed", "false");
+  await expect(editor.getByRole("button", { name: `Add to favorites: ${starred}` })).toHaveAttribute("aria-pressed", "false");
   await expect.poll(async () => (await (await request.get(`/api/conversations/${ids[starred]}`)).json()).favorite).toBe(false);
 });
