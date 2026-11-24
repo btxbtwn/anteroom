@@ -190,6 +190,28 @@ const depopRead = `GET webapi.depop.com/presentation/api/v1/products/by-slug/${D
 const runDepop = c => c.runMarketplaceDelete({ marketplace: 'depop', listing_id: DEPOP_SLUG, confirm: true });
 const timeout = () => { throw Object.assign(new Error('The operation timed out.'), { name: 'TimeoutError' }); };
 
+test('Depop auto-relist checks access to drafts before deleting the live listing', async () => {
+  const drafts = 'GET webapi.depop.com/presentation/api/v1/drafts/';
+  const remove = 'DELETE webapi.depop.com/presentation/api/v1/products/123456789/';
+  for (const status of [401, 200]) {
+    const { c, requests } = worker({
+      [drafts]: [status, { objects: [] }],
+      [depopRead]: n => [n === 1 ? 200 : 404, { id: 123456789, status: 'ONSALE' }],
+      [remove]: [204, {}],
+    });
+    const result = await c.runMarketplaceDelete({
+      marketplace: 'depop', listing_id: DEPOP_SLUG, confirm: true, action: 'relist',
+    });
+    if (status === 401) {
+      assert.equal(result.error_code, 'signed_out');
+      assert.deepEqual(requests, [drafts]);
+    } else {
+      assert.equal(result.state, 'deleted');
+      assert.deepEqual(requests, [drafts, depopRead, remove, depopRead]);
+    }
+  }
+});
+
 test('Depop reports a listing already gone on the first read as deleted, without a delete, every time', async () => {
   for (const answer of [[404, {}], [200, { id: 123456789, status: 'DELETED' }]]) {
     const { c, requests } = worker({ [depopRead]: answer });

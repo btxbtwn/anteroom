@@ -234,7 +234,8 @@ def known_listings(notes: dict, native: dict, sold: dict) -> dict:
             record = {}
         result[marketplace] = {"url": url or record.get("url"), "listing_id": item_id, "source": source,
                                "sold_here": sold_here, "state": record.get("state") or "live",
-                               "error": record.get("error"), "marketplace_message": record.get("marketplace_message"),
+                               "error": record.get("error"), "error_code": record.get("error_code"),
+                               "marketplace_message": record.get("marketplace_message"),
                                "at": record.get("at"), "attempts": record.get("attempts"),
                                "already_gone": record.get("already") is True}
     return result
@@ -519,6 +520,8 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
                 skipped = names[index:]
                 break
             payload = {"marketplace": name, "listing_id": entry["listing_id"], "confirm": True}
+            if relist_rule_id is not None and name == "depop":
+                payload["action"] = "relist"
             # A saved listing keeps its original site when the seller moves.
             if name == "poshmark" and urlsplit(entry["url"]).hostname in {"poshmark.ca", "www.poshmark.ca"}:
                 payload["seller_region"] = "CA"
@@ -555,11 +558,13 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
                     await in_worker_session(_record, conv_id, name, {
                         **base, "state": "failed", "at": _now(),
                         "error": str(result.get("error") or "The marketplace did not confirm the delete.")[:300],
+                        "error_code": scrub(result.get("error_code")),
                         "marketplace_message": scrub(result.get("marketplace_message"))})
             except Exception as exc:  # noqa: BLE001 - recorded per marketplace for the seller
                 failed = True
                 await in_worker_session(_record, conv_id, name, {
                     **base, "state": "failed", "at": _now(), "error": _failure_text(name, exc)[:300],
+                    "error_code": "chrome_unavailable" if isinstance(exc, browser_bridge.BrowserBridgeError) else None,
                     "marketplace_message": _marketplace_message(name, exc)})
         await in_worker_session(lambda db: JobRepo(db).update_status(
             job_id, "failed" if failed else "completed", "native_delist",
@@ -627,7 +632,7 @@ def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
         }
         chrome_needed = (BROWSER_MARKETPLACES & set(names)) - cloud_names
         if chrome_needed and not current_extension().connected:
-            raise DelistError(409, "Connect Chrome first.")
+            raise DelistError(409, "Connect Chrome first.", reason="chrome_unavailable")
         repo = JobRepo(db)
         listing = ListingRepo(db).get_current(conv_id)
         if sale_id is not None:
