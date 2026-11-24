@@ -20,7 +20,7 @@ export const TOPIC_QUERY_KEYS: Record<string, readonly string[]> = {
   listings: [
     "status", "conversations", "conversation", "listing", "listing-fields", "messages", "revisions", "revision",
     "published-versions", "marketplace-listings", "marketplace-statuses", "native-marketplaces", "native-editor-form",
-    "native-preflight", "listing-videos", "similar-items", "suggestions", "activity", "analytics", "sales-ledger",
+    "native-preflight", "listing-videos", "similar-items", "import-reviews", "suggestions", "activity", "analytics", "sales-ledger",
     "profit-and-loss", "home",
   ],
   photos: ["photos", "conversations", "conversation", "listing", "marketplace-media"],

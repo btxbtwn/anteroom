@@ -1,8 +1,10 @@
 """Keep feedback a seller's AI assistant sends to the Anteroom team
 
 Revision ID: e4b8c2f17a93
-Revises: f2a8d5c3e917
+Revises: f2a8d5c3e917, e3a7c91d5b20
 Create Date: 2026-11-24 12:00:00.000000
+
+Also joins the two heads main gained from #2050 and #2041.
 """
 from __future__ import annotations
 
@@ -11,7 +13,7 @@ import sqlalchemy as sa
 
 
 revision = "e4b8c2f17a93"
-down_revision = "f2a8d5c3e917"
+down_revision = ("f2a8d5c3e917", "e3a7c91d5b20")
 branch_labels = None
 depends_on = None
 
@@ -26,7 +28,7 @@ def upgrade() -> None:
     bind = op.get_bind()
     if TABLE not in set(sa.inspect(bind).get_table_names()):
         op.create_table(
-            TABLE,
+            "mcp_feedback",
             sa.Column("id", sa.String(), nullable=False),
             sa.Column(
                 "user_id",
@@ -43,8 +45,8 @@ def upgrade() -> None:
             sa.Column("delivered_at", sa.DateTime(timezone=True), nullable=True),
             sa.PrimaryKeyConstraint("id"),
         )
-        op.create_index("ix_mcp_feedback_user_id", TABLE, ["user_id"])
-        op.create_index("ix_mcp_feedback_owner_created", TABLE, ["user_id", "created_at"])
+        op.create_index("ix_mcp_feedback_user_id", "mcp_feedback", ["user_id"])
+        op.create_index("ix_mcp_feedback_owner_created", "mcp_feedback", ["user_id", "created_at"])
 
     if bind.dialect.name != "postgresql":
         return

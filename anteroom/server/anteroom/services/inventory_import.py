@@ -5,6 +5,7 @@ import asyncio
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 import threading
+import time
 from typing import NamedTuple
 from weakref import WeakValueDictionary
 
@@ -16,7 +17,7 @@ from anteroom.config import MAX_PHOTO_COUNT
 from anteroom.database import in_worker_session
 from anteroom.repositories import inventory_imports
 from anteroom.repositories.queries import ConversationRepo
-from anteroom.services import photos
+from anteroom.services import import_reviews, photos
 from anteroom.services.photo_store import photo_store
 from anteroom.services.api_job_lock import start_gate
 from anteroom.services.relay_sales import matching_listings, reconcile_unmatched
@@ -70,7 +71,8 @@ class _Compared(NamedTuple):
     close: frozenset[str]
 
 
-def _match(db: Session, marketplace: str, snapshot: dict, compared: _Compared | None = None) -> tuple[dict | None, _Compared]:
+def _match(db: Session, marketplace: str, listing_id: str, snapshot: dict,
+           compared: _Compared | None = None) -> tuple[dict | None, _Compared]:
     """An item that looks like this listing, which import all leaves for the seller instead of duplicating it.
 
     The full comparison runs before the seller's import lock. Given what it saw, the one inside the lock scores only
@@ -87,8 +89,11 @@ def _match(db: Session, marketplace: str, snapshot: dict, compared: _Compared | 
     items = [(conv_id, local, title_tokens(local)) for conv_id, local in changed if local and local.strip()]
     value = snapshot.get("price")
     price = float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
-    match = suggested_match(db, marketplace, title, price, items) if items else None
+    match = suggested_match(db, marketplace, listing_id, title, price, items) if items else None
     close = frozenset(conv_id for _, conv_id, _ in close_titles(title, items)) if compared is None else compared.close
+    if match:
+        # Kept for the seller to review on any device, and for their assistant.
+        import_reviews.hold(db, marketplace, listing_id, title, price, match)
     return match, _Compared(titles, close)
 
 
@@ -139,7 +144,7 @@ def _create(db: Session, marketplace: str, listing_id: str, snapshot: dict, urls
         if reused := _reused(db, marketplace, listing_id):
             return reused
         # Checked again: another import may have saved a matching item, or one may have left this marketplace.
-        if match := _match(db, marketplace, snapshot, compared)[0]:
+        if match := _match(db, marketplace, listing_id, snapshot, compared)[0]:
             return _held(listing_id, match)
         return _save(db, marketplace, listing_id, snapshot, urls, downloaded, binding, target_id, kept)
 
@@ -156,6 +161,9 @@ def _save(db: Session, marketplace: str, listing_id: str, snapshot: dict, urls: 
             identity=target_id, normalized_hash=normalized_listing_hash(snapshot),
         )
         kept["photos"] = True
+    # Imported as its own item: nothing about this listing is left to review.
+    import_reviews.resolve(db, marketplace, listing_id)
+    db.commit()
     warnings = []
     if len(downloaded) < len(urls):
         warnings.append(f"Imported {len(downloaded)} of {len(urls)} photos. Add the missing photos before crosslisting.")
@@ -179,7 +187,7 @@ async def save_owned_listing(marketplace: str, listing_id: str, snapshot: dict, 
         return reused
     compared = None
     if unless_matched:
-        match, compared = await in_worker_session(_match, marketplace, snapshot)
+        match, compared = await in_worker_session(_match, marketplace, listing_id, snapshot)
         if match:
             return _held(listing_id, match)
     urls = list(dict.fromkeys(url for url in urls if isinstance(url, str) and url))
@@ -202,17 +210,28 @@ _NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Me
 
 
 async def link_owned_listing(marketplace: str, listing_id: str, conversation_id: str,
-                             verify: Callable[[], Awaitable[None]]) -> dict:
+                             verify: Callable[[], Awaitable[None]], *, deadline: float | None = None) -> dict:
     """Record that an existing item is live on this marketplace listing.
 
     Only the link is written: the item's edits and photos stay as they are, and
     the marketplace is only read. ``verify`` checks the listing is still the
     seller's and still for sale, and raises when it is not. No session is open
     while it runs.
+
+    With ``deadline`` (a ``time.monotonic()`` value), ``verify`` is cut off then
+    with ``TimeoutError`` and nothing is written. Once it has passed, the link
+    is a local database step: it runs to its end (it writes in several commits
+    and cannot be stopped halfway), so the result returned is what was saved.
     """
     existing = await in_worker_session(_link_target, marketplace, listing_id, conversation_id)
     if not existing:
-        await verify()
+        if deadline is None:
+            await verify()
+        else:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            await asyncio.wait_for(verify(), timeout=remaining)
     return await in_worker_session(_link, marketplace, listing_id, conversation_id, existing)
 
 
@@ -245,6 +264,8 @@ def _link(db: Session, marketplace: str, listing_id: str, conversation_id: str, 
             mark(db, conversation_id, marketplace, "listed", public_listing_url(marketplace, listing_id))
         except DelistError as exc:
             raise LinkError(exc.status_code, str(exc)) from exc
+    import_reviews.resolve(db, marketplace, listing_id)
+    db.commit()
     return {"conversation_id": conversation_id, "listing_id": listing_id, "reused": True, "linked": True,
             "photo_count": len(ConversationRepo(db).get_photos(conversation_id)),
             "warnings": [] if existing else ["Linked to the existing item. Its edits and photos were kept."]}
