@@ -2208,5 +2208,23 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(revisions, [])
 
 
+def test_sync_title_size_leaves_a_title_that_already_names_the_size():
+    from anteroom.services.listing_generate import sync_title_size
+
+    for title, brand, size in (
+        ("Marvel Mad Engine Chibi Venom Tee White Men’s L", "Marvel", "L"),
+        ("RAGS Large Casual Pocket Tee Gray Relaxed", "RAGS", "L"),
+        ("PacSun PAC Cares Graphic Tee Sage Green XS Y2K", "Pac Sun", "XS"),
+        ("Disney Youth XL (15-17) Classic Mickey Tee Red", "Disney", "XL"),
+        ("REWASH 11/30 Distressed Denim Shorts Blue Raw Hem", "Rewash", "11"),
+        ("dip S (6-7) Cozy Cardigan Pink Knit", "dip", "6-7"),
+        ("Torrid 2X Floral Wrap Dress Black", "Torrid", "2XL"),
+        ("Gap Extra Large Hoodie Navy Cozy", "Gap", "XL"),
+    ):
+        listing = {"title": title, "brand": brand, "size": size}
+        assert sync_title_size(listing) is False, title
+        assert listing["title"] == title
+
+
 if __name__ == "__main__":
     unittest.main()

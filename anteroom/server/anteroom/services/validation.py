@@ -51,6 +51,7 @@ from anteroom.services.etsy_fields import (
     etsy_when_unclear_note,
 )
 from anteroom.models.mercari_shipping import DEFAULT_SHIPPING_LABEL
+from anteroom.models.sizes import title_names_size
 from anteroom.models.listing_values import (
     DNA_VALUE,
     ValidationResult,
@@ -125,7 +126,7 @@ def _title_follows_formula(title: str, brand: str, size: str) -> bool:
         rest = tokens
     if size:
         size_tokens = [part.lower() for part in _title_tokens(size)]
-        if rest[:len(size_tokens)] != size_tokens:
+        if rest[:len(size_tokens)] != size_tokens and not title_names_size(title, size):
             return False
     meaningful = [token for token in tokens if token not in TITLE_STOPWORDS]
     return len(meaningful) >= 4

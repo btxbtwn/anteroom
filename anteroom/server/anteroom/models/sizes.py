@@ -65,6 +65,29 @@ def size_choice(size: Any, choices: Iterable[Any]) -> str | None:
     return None
 
 
+def title_names_size(title: Any, size: Any) -> bool:
+    """Whether ``title`` already names ``size`` somewhere, as written or another way.
+
+    ``Men's L``, ``Large`` and ``2X`` name L and 2XL; ``11/30`` is a more
+    specific 11, and ``(6-7)`` names 6-7. A waist-by-inseam ``34x32`` does not
+    name 34: a men's bottoms size is the waist alone.
+    """
+    words = [word.strip(",.;:!()[]") for word in str(title or "").split()]
+    words = [word.casefold() for word in words if word]
+    wanted = [part.casefold() for part in (part.strip("()") for part in str(size or "").split()) if part]
+    if not words or not wanted:
+        return False
+    if any(words[i:i + len(wanted)] == wanted for i in range(len(words) - len(wanted) + 1)):
+        return True
+    if len(wanted) == 1 and any(word.startswith(wanted[0] + "/") for word in words):
+        return True
+    key = size_key(size)
+    if not key:
+        return False
+    pairs = (a + b for a, b in zip(words, words[1:], strict=False))
+    return any(size_key(word) == key for word in (*words, *pairs))
+
+
 def _squashed(text: str) -> str:
     return re.sub(r"[\s.\-]+", "", text).casefold()
 
