@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1232 — 2026-11-24
+
+- Claude, ChatGPT and other assistants connected to Anteroom can now add photos to a listing: send a few photos in the chat, or, for assistants that can run commands, upload them straight from your computer with a single-use link that expires after 15 minutes.
+- Assistants can also make any photo the cover photo. Nothing is published; you still review and send the listing in Anteroom.
+
 ## 0.1.1231 — 2026-11-24
 
 - On iPhone, a Needs attention refresh that was still loading no longer undoes a Resolve, Snooze or Restore you just tapped.

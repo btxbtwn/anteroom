@@ -1,2 +1,0 @@
-- Claude, ChatGPT and other assistants connected to Anteroom can now add photos to a listing: send a few photos in the chat, or, for assistants that can run commands, upload them straight from your computer with a single-use link that expires after 15 minutes.
-- Assistants can also make any photo the cover photo. Nothing is published; you still review and send the listing in Anteroom.
