@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1216 — 2026-11-24
+
+- Connected AI agents (Claude, ChatGPT and others) can now look up your orders, your profit and loss for a period, your business expenses and a snapshot of your inventory, with the same numbers Anteroom shows. They only read; buyer details are never shared.
+
 ## 0.1.1215 — 2026-11-24
 
 - Importing a listing from Depop now brings over its category, department, both colors, style, age, source, material and other details, package size or shipping price, worldwide shipping, boost and hashtags, so its Depop tab matches the listing on Depop.

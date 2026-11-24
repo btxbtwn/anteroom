@@ -1,1 +1,0 @@
-- Connected AI agents (Claude, ChatGPT and others) can now look up your orders, your profit and loss for a period, your business expenses and a snapshot of your inventory, with the same numbers Anteroom shows. They only read; buyer details are never shared.
