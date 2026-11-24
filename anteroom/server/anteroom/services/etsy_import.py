@@ -82,7 +82,7 @@ def _candidate_page(db: Session, page: dict, page_number: int) -> dict:
         except inventory_import.ImportConflict as exc:
             existing, reason = None, str(exc)
         usd = price["amount"] if price and price["currency"] == "USD" else None
-        match = None if existing or "more than one" in (reason or "") else suggested_match(db, "etsy", item["title"], _float(usd), items)
+        match = None if existing or "more than one" in (reason or "") else suggested_match(db, "etsy", str(item["id"]), item["title"], _float(usd), items)
         rows.append({"id": item["id"], "title": item["title"], "price": usd,
                      "quantity": item["quantity"], "reason": reason, "conversation_id": existing.id if existing else None,
                      "match": match})

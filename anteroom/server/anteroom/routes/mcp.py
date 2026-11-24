@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import event
 
 from anteroom.database import in_worker_session
-from anteroom.services import mcp_http, mcp_oauth, mcp_tokens
+from anteroom.services import mcp_http, mcp_import_match_tools, mcp_oauth, mcp_tokens
 from anteroom.services.hosted_limits import read_bounded_body
 from anteroom.services.local_requests import came_through_tailnet
 
@@ -191,6 +191,10 @@ async def mcp_post(request: Request):
                 # Photo bytes come from Storage: read them after the session is closed,
                 # leaving a moment to send the reply before the call's deadline.
                 await asyncio.to_thread(mcp_http.load_pending_photos, pending, deadline=deadline - 1.0)
+            links = mcp_import_match_tools.pending_links(outcome[0])
+            if links:
+                # Confirming an import match reads the marketplace: only once the session is closed.
+                await mcp_import_match_tools.finish_pending_links(links, deadline=deadline - 1.0)
             if not result.done():
                 result.set_result(outcome)
         except Exception as exc:

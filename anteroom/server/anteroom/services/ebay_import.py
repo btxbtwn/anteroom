@@ -60,7 +60,7 @@ def _candidate_page(db: Session, active: ET.Element, page_number: int) -> dict:
         title = item.findtext("e:Title", namespaces=NS) or identifier
         usd = price.text if price is not None and price.get("currencyID") == "USD" else None
         # An existing item can be linked to even a listing this import cannot copy.
-        match = None if existing or "more than one" in (reason or "") else suggested_match(db, "ebay", title, _float(usd), items)
+        match = None if existing or "more than one" in (reason or "") else suggested_match(db, "ebay", identifier, title, _float(usd), items)
         rows.append({"id": identifier, "title": title, "price": usd,
                      "quantity": max(0, total - sold) if total is not None and sold is not None else None,
                      "reason": reason, "conversation_id": existing.id if existing else None, "match": match})

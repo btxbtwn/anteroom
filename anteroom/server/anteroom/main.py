@@ -22,7 +22,7 @@ from anteroom.routes import listing_readiness as listing_readiness_route
 from anteroom.routes import listing_sheet as listing_sheet_route
 from anteroom.routes import ebay_offers, listing_promotions, promotion_automations
 from anteroom.routes import account_move, ebay
-from anteroom.routes import chrome_import, similar_items
+from anteroom.routes import chrome_import, import_reviews, similar_items
 from anteroom.routes import plaid
 from anteroom.routes import ai_keys, business_expenses, sales_ledger, bulk_delete, bulk_edit, bulk_marketplace, listing_copies, listing_templates
 from anteroom.routes import automations as automations_route
@@ -282,6 +282,7 @@ app.include_router(listing_copies.router)
 app.include_router(listing_templates.router)
 app.include_router(etsy.router)
 app.include_router(chrome_import.router)
+app.include_router(import_reviews.router)
 app.include_router(similar_items.router)
 app.include_router(sourcing.router)
 app.include_router(boxes.router)

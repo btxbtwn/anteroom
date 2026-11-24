@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MarketplaceImportHeld, MarketplaceImportPage, MarketplaceImportResult } from "./api/inventoryImport";
-import { clearImportAll, importAllRun, resolveImportAllReview, startImportAll, stopImportAll, type Importer } from "./importAll";
+import { clearImportAll, importAllRun, startImportAll, stopImportAll, type Importer } from "./importAll";
 
 type Row = MarketplaceImportPage["rows"][number];
 const row = (id: string, extra: Partial<Row> = {}): Row =>
@@ -31,33 +31,28 @@ async function finished(key: string) {
 afterEach(() => clearImportAll());
 
 describe("import all active listings", () => {
-  it("walks every page, imports new listings and leaves suggested matches for the seller", async () => {
+  it("walks every page, imports new listings and lets the server hold suggested matches for the seller", async () => {
     const { importer, candidates, importNew, importListing } = fakeImporter([
       { total: null, has_more: true, next_cursor: "c2", rows: [row("a"), row("b", { conversation_id: "local-b" })] },
       { total: null, has_more: false, next_cursor: null, rows: [row("c", { match }), row("d", { reason: "Not USD." }), row("e")] },
     ]);
+    importNew.mockImplementation(async (id: string) => id === "c" ? { conversation_id: null, listing_id: "c", match } : result(id));
     const onFinish = vi.fn();
     startImportAll("poshmark:me", "poshmark", importer, onFinish);
     const run = await finished("poshmark:me");
 
     expect(candidates.mock.calls).toEqual([[1, null], [2, "c2"]]);
-    // Only listings with no local item and no suggested match are imported; nothing is linked on its own.
-    expect(importNew.mock.calls).toEqual([["a", "me"], ["e", "me"]]);
+    // A suggested match goes to the server too, which keeps it for review instead of importing it; nothing is linked on its own.
+    expect(importNew.mock.calls).toEqual([["a", "me"], ["c", "me"], ["e", "me"]]);
     expect(importListing).not.toHaveBeenCalled();
-    expect(run).toMatchObject({ status: "done", page: 2, imported: 2, alreadyIn: 1, skipped: 1, failures: [] });
-    expect(run.review).toEqual([{ id: "c", title: "Item c", price: "10.00", match }]);
+    expect(run).toMatchObject({ status: "done", page: 2, imported: 2, alreadyIn: 1, skipped: 1, held: 1, failures: [] });
     expect(onFinish).toHaveBeenCalledOnce();
-    // Once the seller links or imports it, it leaves the list for good.
-    resolveImportAllReview("poshmark:me", "c");
-    expect(importAllRun("poshmark:me")?.review).toEqual([]);
   });
 
-  it("leaves a listing for review when the server finds a match as it saves", async () => {
-    const { importer, importNew } = fakeImporter([{ total: 1, has_more: false, rows: [row("a")] }]);
-    importNew.mockResolvedValueOnce({ conversation_id: null, listing_id: "a", match });
+  it("imports a listing the page matched when the server no longer finds a match", async () => {
+    const { importer } = fakeImporter([{ total: 1, has_more: false, rows: [row("a", { match })] }]);
     startImportAll("mercari:me", "mercari", importer, vi.fn());
-    const run = await finished("mercari:me");
-    expect(run).toMatchObject({ imported: 0, review: [{ id: "a", match }] });
+    expect(await finished("mercari:me")).toMatchObject({ imported: 1, held: 0 });
   });
 
   it("keeps going past a listing that fails and reports it", async () => {

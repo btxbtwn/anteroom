@@ -46,3 +46,19 @@ export interface MarketplaceImportHeld {
   listing_id: string;
   match: MarketplaceImportMatch;
 }
+
+/**
+ * A listing an import left for the seller: it looks like an item already in Anteroom.
+ * Kept by the server, so every device and the seller's assistant see the same list.
+ */
+export interface ImportReview {
+  id: string;
+  marketplace: ImportMarketplace;
+  listing_id: string;
+  title: string;
+  price: string | null;
+  url: string | null;
+  held_at: string | null;
+  match: MarketplaceImportMatch & { photo_count: number };
+  reason: string;
+}

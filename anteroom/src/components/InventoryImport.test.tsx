@@ -158,19 +158,36 @@ describe("import all active listings", () => {
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Import selected/);
   });
 
-  it("lists suggested matches for the seller to link, import as new, or compare", async () => {
+  it("lists the look-alikes the server holds for the seller to link, import as new, reject, or compare", async () => {
     const match = { conversation_id: "local-coat", title: "Wool coat", score: 0.9, price: 40, price_differs: true };
     startImportAll("mercari:me", "mercari", {
       candidates: async () => ({ total: 1, has_more: false, account: "me", rows: [{ id: "m1", title: "Grey wool coat", price: "45.00", quantity: 1,
         reason: null, conversation_id: null, match }] }),
-      importListing: vi.fn(), importNew: vi.fn(),
+      importListing: vi.fn(), importNew: vi.fn(async () => ({ conversation_id: null, listing_id: "m1", match })),
     }, vi.fn());
     await vi.waitFor(() => expect(importAllRun("mercari:me")?.status).toBe("done"));
+    const page = useQuery.getMockImplementation();
+    useQuery.mockImplementation((options: { queryKey: string[] }) => options.queryKey[0] === "import-reviews"
+      ? { isSuccess: true, data: { reviews: [{ id: "r1", marketplace: "mercari", listing_id: "m1", title: "Grey wool coat", price: "45.00",
+        url: null, held_at: null, reason: "The titles read 90% alike.", match: { ...match, photo_count: 3 } }] } }
+      : { isSuccess: true, data: { total: 0, has_more: false, rows: [] } });
     const html = renderToStaticMarkup(<InventoryImport marketplace="mercari" accountKey="me" onOpenListing={vi.fn()} />);
+    useQuery.mockImplementation(page ?? (() => undefined));
     expect(html).toContain("Finished 1 page. 0 imported · 0 already in Anteroom · 1 to review");
     expect(html).toContain("1 listing looks like an item already in Anteroom");
     expect(html).toContain("Looks like “Wool coat” (priced $40 in Anteroom) · $45.00 on Mercari");
-    for (const label of ["Compare", "Import as new", "Link to this item", "Import all again"]) expect(html).toContain(label);
+    for (const label of ["Compare", "Not the same item", "Import as new", "Link to this item", "Import all again"]) expect(html).toContain(label);
+  });
+
+  it("shows look-alikes held earlier without a run in this tab", () => {
+    useQuery.mockImplementation((options: { queryKey: string[] }) => options.queryKey[0] === "import-reviews"
+      ? { isSuccess: true, data: { reviews: [{ id: "r1", marketplace: "poshmark", listing_id: "p1", title: "Coat", price: "40.00", url: null,
+        held_at: null, reason: "The titles read 90% alike.", match: { conversation_id: "local-coat", title: "Wool coat", score: 0.9, price: 40,
+          price_differs: false, photo_count: 2 } }] } }
+      : { isSuccess: true, data: { total: 0, has_more: false, rows: [] } });
+    const html = renderToStaticMarkup(<InventoryImport marketplace="poshmark" accountKey="me" onOpenListing={vi.fn()} />);
+    expect(html).toContain("1 listing looks like an item already in Anteroom");
+    expect(html).toContain("Not the same item");
   });
 
   it("shows one error per message instead of one per listing", async () => {

@@ -1,0 +1,2 @@
+- Listings that Import all holds because they look like an item you already have now stay on the import screen after a reload and on your other devices, until you link them, import them as new, or mark them **Not the same item**.
+- Your AI assistant can list those look-alikes and confirm or reject each one through Anteroom's MCP connector. Confirming links the listing to your existing item exactly like **Link to this item**; nothing is listed, changed or delisted on any marketplace.

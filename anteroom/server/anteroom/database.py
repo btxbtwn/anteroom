@@ -249,6 +249,7 @@ def load_models() -> None:
     from anteroom.models.promotion_automation import PromotionAutomation, PromotionRun  # noqa: F401
     from anteroom.models.ad_spend import AdSpend  # noqa: F401
     from anteroom.models.similar_item import PhotoFingerprint, SimilarItemReview  # noqa: F401
+    from anteroom.models.import_review import ImportReview  # noqa: F401
     from anteroom.models.assistant import AssistantMemory, AssistantMessage, AssistantThread  # noqa: F401
     from anteroom.models.automation import (  # noqa: F401
         Automation,
