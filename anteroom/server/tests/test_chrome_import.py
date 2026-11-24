@@ -94,6 +94,7 @@ def test_poshmark_import_saves_listing_photos_and_link(chrome):
     assert snapshot["primaryColor"] == "Blue"
     assert snapshot["marketplace_categories"] == {"poshmark": "Women > Jackets & Coats > Jean Jackets"}
     assert snapshot["marketplace_category_ids"] == {"poshmark": "d1/c1/f1"}
+    assert snapshot["direct_category_ids"] == {"poshmark": "d1/c1/f1"}
     binding = chrome.db.query(MarketplaceListing).one()
     assert (binding.marketplace, binding.listing_id, binding.state) == ("poshmark", POST, "published")
     assert binding.listing_url == f"https://poshmark.com/listing/{POST}"
@@ -102,6 +103,75 @@ def test_poshmark_import_saves_listing_photos_and_link(chrome):
     # The listing is live in Anteroom's own record, so sale detection watches it.
     assert listings(chrome.db, body["conversation_id"])["poshmark"]["state"] == "live"
     assert [call[0] for call in chrome.remote.calls] == ["marketplace.import.listing"]
+
+
+JEAN_JACKETS = "000e8975d97b4e80ef00a955/00148975d97b4e80ef00a955/00649287d97b4e80ef00a955"
+STANDARD, PETITE = "0500579fd97b4e26a60056e3", "2300579fd97b4e26a60056e3"
+DISCOUNT = "c" * 24
+
+
+def poshmark_everything(chrome, sizes):
+    chrome.remote.listings["poshmark"].update({
+        "category_path": "Women > Jackets & Coats > Jean Jackets", "category_id": JEAN_JACKETS, "colors": ["Blue", "White"],
+        "poshmark": {"availability": "available", "multi_item": len(sizes) > 1 or sizes[0]["quantity"] > 1, "condition": "ug",
+                     "colors": ["Blue", "White"], "style_tags": ["Denim", "Vintage"], "original_price": 98,
+                     "shipping_discount_id": DISCOUNT, "sku": "JKT-1", "cost": 12.5, "other_info": "Bin 4",
+                     "smart_sell": {"enabled": True, "minimum_price": 30}, "sizes": sizes}})
+
+
+def poshmark_tab(snapshot):
+    from anteroom.services import poshmark_form
+
+    return {row["path"]: row["value"] for row in poshmark_form.form(snapshot)["fields"]}
+
+
+def test_poshmark_import_fills_every_field_of_its_poshmark_tab(chrome):
+    from anteroom.services.listing_editor import prepared_listing
+
+    poshmark_everything(chrome, [{"size_id": "M", "size_set_tags": ["standard"], "size_system": "us", "quantity": 2, "sku": "JKT-1-M"}])
+    assert post(chrome, "poshmark", POST).status_code == 200
+    snapshot = chrome.db.query(ListingRevision).one().listing_json
+    assert snapshot["direct_category_ids"] == {"poshmark": JEAN_JACKETS}
+    assert (snapshot["primaryColor"], snapshot["secondaryColor"], snapshot["cost"]) == ("Blue", "White", 12.5)
+    expected = {
+        "poshmark_specifics.title": "Levi's denim jacket", "poshmark_specifics.description": "Classic fit",
+        "direct_category_ids.poshmark": JEAN_JACKETS, "poshmark_specifics.multiItem": "true",
+        "poshmark_specifics.inventoryRows": [{"sizeSetId": STANDARD, "sizeId": "M", "quantity": 2, "sku": "JKT-1-M"}],
+        "poshmark_specifics.condition": "ug", "poshmark_specifics.brand": "Levi's", "poshmark_specifics.colors": ["Blue", "White"],
+        "poshmark_specifics.styleTags": ["Denim", "Vintage"], "price": 45, "poshmark_specifics.smartSell.enabled": True,
+        "poshmark_specifics.smartSell.minimumPrice": 30, "poshmark_specifics.shippingDiscountId": DISCOUNT,
+        "poshmark_specifics.availability": "available", "poshmark_specifics.poshmarkSku": "JKT-1", "cost": 12.5,
+        "poshmark_specifics.sellerNotes": "Bin 4",
+    }
+    tab = poshmark_tab(snapshot)
+    assert {path: tab[path] for path in expected} == expected
+    # Poshmark's original price goes back to Poshmark unchanged when the listing is updated.
+    assert snapshot["poshmark_specifics"]["originalPrice"] == 98
+    assert "poshmark_specifics.originalPrice" in snapshot["seller_fields"]
+    # A later save from the editor keeps what came from Poshmark.
+    saved = prepared_listing(snapshot, {**snapshot, "title": "Levi's trucker jacket"})
+    assert saved["poshmark_specifics"]["originalPrice"] == 98
+    assert {path: value for path, value in poshmark_tab(saved).items() if path in expected and path != "poshmark_specifics.title"} == {
+        path: value for path, value in expected.items() if path != "poshmark_specifics.title"}
+
+
+def test_poshmark_import_brings_a_listing_with_several_sizes(chrome):
+    poshmark_everything(chrome, [
+        {"size_id": "S", "size_set_tags": ["standard"], "size_system": "us", "quantity": 1, "sku": ""},
+        {"size_id": "4P", "size_set_tags": ["petite"], "size_system": "us", "quantity": 3, "sku": "P-4"},
+        {"size_id": "Tall 30", "size_set_tags": [], "size_system": "us", "quantity": 1, "sku": ""},
+    ])
+    chrome.remote.listings["poshmark"].update({"quantity": 5, "size": None})
+    assert post(chrome, "poshmark", POST).status_code == 200
+    snapshot = chrome.db.query(ListingRevision).one().listing_json
+    tab = poshmark_tab(snapshot)
+    assert tab["poshmark_specifics.inventoryRows"] == [
+        {"sizeSetId": STANDARD, "sizeId": "S", "quantity": 1, "sku": ""},
+        {"sizeSetId": PETITE, "sizeId": "4P", "quantity": 3, "sku": "P-4"},
+        {"sizeSetId": "custom", "sizeId": "Tall 30", "quantity": 1, "sku": ""},
+    ]
+    assert (tab["poshmark_specifics.multiItem"], snapshot["quantity"]) == ("true", 5)
+    assert "size" not in snapshot
 
 
 @pytest.mark.parametrize(("marketplace", "condition", "url"), [

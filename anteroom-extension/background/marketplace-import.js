@@ -148,11 +148,10 @@ async function poshmarkImportListing(id, deadline) {
   if (post.inventory?.status !== 'available') throw importError('This Poshmark listing is not available for sale.');
   if (post.price_amount?.currency_code && post.price_amount.currency_code !== 'USD') throw importError('This import supports listings priced in USD.');
   const sizes = Array.isArray(post.inventory?.size_quantities) ? post.inventory.size_quantities : [];
-  if (sizes.length > 1) throw importError('Listings with several sizes are not supported by this import yet.');
   let catalog = null;
   try { catalog = await poshmarkCatalogData(deadline); } catch { /* Names come from the post when the catalog cannot be read. */ }
   const category = poshmarkCategoryNames(post, catalog);
-  const size = sizes[0] || {};
+  const size = sizes.length === 1 ? sizes[0] : {};
   return {
     account: String(account),
     id, url: poshmarkListingUrl(id), title: importText(post.title, 200), description: importText(post.description),
@@ -161,10 +160,44 @@ async function poshmarkImportListing(id, deadline) {
     size: importText(size.size_obj?.display ?? size.size_obj?.display_with_size_set ?? size.size_id, 80) || null,
     condition: importText(post.condition, 40) || null,
     category_path: category.path || null, category_id: category.id || null,
-    sku: importText(size.seller_inventory_private_info?.sku ?? post.seller_private_info?.sku, 80) || null,
-    colors: (Array.isArray(post.colors) ? post.colors : []).map(color => importText(color?.name ?? color, 40)).filter(Boolean),
+    sku: importText(post.seller_private_info?.sku ?? size.seller_inventory_private_info?.sku, 80) || null,
+    colors: poshmarkImportColors(post),
     photos: importPhotos([post.cover_shot, ...(Array.isArray(post.pictures) ? post.pictures : [])]
       .map(picture => picture?.url_large || picture?.url || picture?.url_small)),
+    poshmark: poshmarkImportFields(post, sizes),
+  };
+}
+
+function poshmarkImportColors(post) {
+  return (Array.isArray(post.colors) ? post.colors : []).map(color => importText(color?.name ?? color, 40)).filter(Boolean);
+}
+
+// The rest of Poshmark's form, in the post's own shape, so the Poshmark tab
+// shows the listing as Poshmark does and an update sends the same values back.
+function poshmarkImportFields(post, sizes) {
+  const condition = String(post.condition || '');
+  const discount = String(post.seller_shipping_discount?.id ?? '');
+  const own = post.seller_private_info || {};
+  return {
+    availability: importText(post.inventory?.status, 40) || null,
+    multi_item: typeof post.inventory?.multi_item === 'boolean' ? post.inventory.multi_item : null,
+    condition: POSHMARK_CONDITIONS.has(condition) ? condition : null,
+    colors: poshmarkImportColors(post).slice(0, 2),
+    style_tags: (Array.isArray(post.style_tags) ? post.style_tags : []).map(tag => importText(tag?.name ?? tag, 25)).filter(Boolean).slice(0, 3),
+    original_price: importMoney(post.original_price_amount?.val),
+    shipping_discount_id: /^[a-f0-9]{24}$/.test(discount) ? discount : null,
+    sku: importText(own.sku, 80) || null,
+    cost: importMoney(own.cost_price_amount?.val),
+    other_info: importText(own.other_info, 2000) || null,
+    smart_sell: { enabled: post.offer_auto_actions_v2_enabled === true,
+      minimum_price: importMoney(post.offer_auto_actions_min_price_amount?.val) },
+    sizes: sizes.map(row => ({
+      size_id: importText(String(row?.size_id ?? row?.size_obj?.id ?? ''), 80),
+      size_set_tags: (Array.isArray(row?.size_set_tags) ? row.size_set_tags : []).map(tag => importText(String(tag), 40)).filter(Boolean),
+      size_system: importText(row?.size_system ?? row?.size_obj?.size_system, 10) || 'us',
+      quantity: importCount(row?.quantity_available),
+      sku: importText(row?.seller_inventory_private_info?.sku, 80),
+    })),
   };
 }
 
