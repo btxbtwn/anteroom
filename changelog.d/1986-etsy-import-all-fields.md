@@ -1,0 +1,1 @@
+- Importing a listing from Etsy now also brings over its category path, primary and secondary colors, condition (when Etsy has one), and package weight and size, so the Etsy tab matches the listing on Etsy.

@@ -35,7 +35,9 @@ def imported(tmp_path, monkeypatch):
     item = {"listing_id": 555, "shop_id": 42, "state": "active", "listing_type": "physical", "has_variations": False,
             "title": "Wool &amp; silk coat", "description": "Vintage coat", "quantity": 99, "price": money(100),
             "taxonomy_id": 111, "tags": ["vintage"], "materials": ["wool", "silk"], "style": ["classic"],
-            "who_made": "someone_else", "when_made": "1990_1999", "is_supply": False, "should_auto_renew": True, "shipping_profile_id": 88,
+            "who_made": "someone_else", "when_made": "1990s", "is_supply": False, "should_auto_renew": True, "shipping_profile_id": 88,
+            "return_policy_id": 66, "item_weight": 2.5, "item_weight_unit": "lb", "item_length": 14, "item_width": 10.5,
+            "item_height": 3, "item_dimensions_unit": "in",
             "images": [{"rank": 2, "url_fullxfull": "https://i.etsystatic.com/second.jpg"},
                        {"rank": 1, "url_fullxfull": "https://i.etsystatic.com/first.jpg"}], "private": "never-store"}
     offering = {"quantity": 3, "price": money(), "is_enabled": True, "is_deleted": False, "readiness_state_id": 77}
@@ -49,7 +51,10 @@ def imported(tmp_path, monkeypatch):
         assert method == "GET", "Import must never write to Etsy"
         state.calls.append((path, params))
         payloads = {"listings/555": item, "listings/batch/inventory": inventory,
-                    "shops/42/listings/555/properties": {"results": [{"property_name": "Brand", "values": ["Pendleton"]}]},
+                    "shops/42/listings/555/properties": {"results": [
+                        {"property_name": "Brand", "values": ["Pendleton"]},
+                        {"property_name": "Primary color", "values": ["Blue"]},
+                        {"property_name": "Secondary color", "values": ["Gray"]}]},
                     "shops/42/listings": {"count": 26, "results": [item]}}
         result = copy.deepcopy(payloads[path])
         if state.after_read:
@@ -102,6 +107,79 @@ def test_import_uses_exact_offering_and_saves_only_public_inventory(imported):
     assert imported.db.query(Photo).count() == 2
     assert imported.remote.downloads[0].endswith("first.jpg")
     assert imported.remote.calls[:2] == [("listings/555", {"includes": "Images"}), ("listings/batch/inventory", {"listing_ids": "555"})]
+
+
+def test_import_brings_every_field_etsy_has_into_the_keys_the_etsy_tab_reads(imported):
+    from anteroom.services.etsy_form import _package, category_choices
+    from anteroom.services.etsy_listings import draft_fields, list_fields, property_values
+
+    path = next(path for path, value in category_choices()["option_values"].items() if value == "1873")
+    imported.remote.item["taxonomy_id"] = 1873
+    assert run(imported).status_code == 200
+    snapshot = imported.db.query(ListingRevision).one().listing_json
+    # Category: the Etsy tab's own category, and its path for General and the other tabs.
+    assert snapshot["direct_category_ids"] == {"etsy": "1873"}
+    assert snapshot["marketplace_category_ids"] == {"etsy": "1873"}
+    assert snapshot["category_path"] == path
+    assert snapshot["marketplace_categories"] == {"etsy": path}
+    # Colors: General's fields as well as Etsy's own attributes.
+    assert (snapshot["primaryColor"], snapshot["secondaryColor"]) == ("Blue", "Gray")
+    assert snapshot["etsy_specifics"]["category_specifics"]["Primary color"] == ["Blue"]
+    # Package: 2.5 lb and 14 × 10.5 × 3 in, as the tab's Item weight and Item size show them.
+    assert (snapshot["weight_lb"], snapshot["weight_oz"], snapshot["package_dimensions_in"]) == (2, 8, "14x10.5x3")
+    assert _package(snapshot) == ("40 oz", "14 × 10.5 × 3 in")
+    details = snapshot["etsy_specifics"]
+    assert (details["who_made"], details["when_made"], details["what_is"], details["renewalOption"]) == (
+        "someone_else", "1990s", "0", "Automatic")
+    assert (details["shipping_profile_id"], details["return_policy_id"], details["readiness_state_id"]) == (88, 66, 77)
+    assert list_fields(snapshot) == {"tags": ["vintage"], "materials": ["wool", "silk"], "styles": ["classic"]}
+    # Update sends back what Etsy has.
+    fields = draft_fields(snapshot, creating=True)
+    assert (fields["title"], fields["price"], fields["quantity"], fields["taxonomy_id"]) == ("Wool & silk coat", "45.50", "3", "1873")
+    assert (fields["who_made"], fields["when_made"], fields["is_supply"], fields["should_auto_renew"]) == (
+        "someone_else", "1990s", "false", "true")
+    colors = [{"id": 200, "name": "Primary color", "multi": False, "values": [{"id": 1, "label": "Blue"}, {"id": 2, "label": "Gray"}]},
+              {"id": 52047899002, "name": "Secondary color", "multi": False, "values": [{"id": 1, "label": "Blue"}, {"id": 2, "label": "Gray"}]}]
+    assert [row["values"] for row in property_values(snapshot, colors)] == [["Blue"], ["Gray"]]
+
+
+@pytest.mark.parametrize(("weight", "unit", "dims", "dims_unit", "expected"), [
+    (12, "oz", (10, 8, 2), "in", (0, 12, "10x8x2")),
+    (1, "kg", (30, 20, 10), "cm", (2, 3, "11.81x7.87x3.94")),
+    (500, "g", (1, 0.5, 0.25), "ft", (1, 2, "12x6x3")),
+])
+def test_import_converts_etsy_package_units_to_pounds_ounces_and_inches(imported, weight, unit, dims, dims_unit, expected):
+    item = imported.remote.item
+    item.update(item_weight=weight, item_weight_unit=unit, item_length=dims[0], item_width=dims[1], item_height=dims[2],
+                item_dimensions_unit=dims_unit)
+    assert run(imported).status_code == 200
+    snapshot = imported.db.query(ListingRevision).one().listing_json
+    assert (snapshot["weight_lb"], snapshot["weight_oz"], snapshot["package_dimensions_in"]) == expected
+
+
+def test_import_without_package_or_colors_leaves_them_empty(imported):
+    for key in ("item_weight", "item_weight_unit", "item_length", "item_width", "item_height", "item_dimensions_unit"):
+        imported.remote.item[key] = None
+    imported.remote.item["taxonomy_id"] = 99999999
+    assert run(imported).status_code == 200
+    snapshot = imported.db.query(ListingRevision).one().listing_json
+    for key in ("weight_lb", "weight_oz", "package_dimensions_in", "category_path", "marketplace_categories"):
+        assert key not in snapshot
+    assert snapshot["direct_category_ids"] == {"etsy": "99999999"}
+
+
+def test_import_reads_condition_from_etsy_condition_attribute(imported, monkeypatch):
+    payload = {"results": [{"property_name": "Condition", "values": ["Used - Like new"]}]}
+    original = marketplace_accounts.etsy_api
+
+    async def read(method, path, *, params=None):
+        if path.endswith("/properties"):
+            return copy.deepcopy(payload)
+        return await original(method, path, params=params)
+
+    monkeypatch.setattr(marketplace_accounts, "etsy_api", read)
+    assert run(imported).status_code == 200
+    assert imported.db.query(ListingRevision).one().listing_json["condition"] == "Pre-Owned - Excellent"
 
 
 def test_repeat_keeps_local_edits_and_photos(imported):
