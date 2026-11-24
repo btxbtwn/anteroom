@@ -38,6 +38,7 @@ from anteroom.services import (
     home_dashboard,
     listing_editor,
     mcp_catalog_tools,
+    mcp_feedback_tools,
     mcp_finance_tools,
     mcp_import_match_tools,
     mcp_marketplace_tools,
@@ -124,6 +125,7 @@ TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
     **mcp_import_match_tools.PERMISSIONS,
     **mcp_marketplace_tools.PERMISSIONS,
     **mcp_finance_tools.PERMISSIONS,
+    **mcp_feedback_tools.PERMISSIONS,
 }
 
 MAX_ATTENTION_KEYS = 100
@@ -137,7 +139,7 @@ MAX_PHOTO_SIDE = 1600
 _PHOTO_PLACEHOLDER = "_anteroom_photo"
 
 _AREA_NAMES = {"listings": "Listings", "analytics": "Analytics", "attention": "Needs Attention",
-               "marketplaces": "Marketplaces"}
+               "marketplaces": "Marketplaces", mcp_tokens.ANY_AREA: "at least one area"}
 _LEVEL_NAMES = {"read": "Read", "write": "Read and write", "draft": "Save drafts on marketplaces",
                 "publish": "Publish, update and delist"}
 
@@ -555,6 +557,7 @@ def tool_definitions() -> list[dict[str, Any]]:
     tools.extend(mcp_import_match_tools.TOOLS)
     tools.extend(mcp_marketplace_tools.TOOLS)
     tools.extend(mcp_finance_tools.TOOLS)
+    tools.extend(mcp_feedback_tools.TOOLS)
     return [{**tool, "annotations": {**tool["annotations"], "title": tool["title"]}} for tool in tools]
 
 
@@ -750,10 +753,12 @@ def _tool_success_result(data: dict[str, Any]) -> dict[str, Any]:
     if pending is not None:
         # Marketplace work runs once the call's session has closed (routes/mcp.py).
         return mcp_marketplace_tools.pending_result(pending)
-    # Content filled in once the session is closed: photos, and import links to check.
-    images = [*data.pop("_images", []), *data.pop("_after", [])]
+    # Items after the JSON: photos, import links to check, or a feedback email
+    # the route fills in once the session is closed (mcp_import_match_tools,
+    # mcp_feedback_tools).
+    extra = [*data.pop("_images", []), *data.pop("_after", []), *data.pop("_content", [])]
     return {
-        "content": [{"type": "text", "text": json.dumps(data, indent=2, default=str)}, *images],
+        "content": [{"type": "text", "text": json.dumps(data, indent=2, default=str)}, *extra],
         "isError": False,
     }
 
@@ -777,6 +782,9 @@ def _dispatch_tool(
     marketplace_handler = mcp_marketplace_tools.HANDLERS.get(name)
     if marketplace_handler is not None:
         return marketplace_handler(db, args, agent=agent)
+    feedback_handler = mcp_feedback_tools.HANDLERS.get(name)
+    if feedback_handler is not None:
+        return feedback_handler(db, args, agent=agent)
     handlers = {
         "search_inventory": _tool_search_inventory,
         "get_listing": _tool_get_listing,
