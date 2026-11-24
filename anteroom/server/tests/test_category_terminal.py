@@ -32,6 +32,24 @@ def test_a_category_with_subcategories_is_rejected(path):
     assert [issue["message"] for issue in _category_issues(path)] == [MESSAGE]
 
 
+def test_a_final_category_typed_in_another_case_passes():
+    assert _category_issues("jewelry & watches > fashion jewelry > rings") == []
+
+
+def test_a_category_with_subcategories_typed_in_another_case_is_rejected():
+    assert [issue["message"] for issue in _category_issues("jewelry & watches > fashion jewelry")] == [MESSAGE]
+
+
+@pytest.mark.parametrize("path", [
+    "Jewelry & Watches > Necklaces",
+    "Rings",
+    "Not a category",
+    " > > ",
+])
+def test_a_category_outside_the_category_list_is_rejected(path):
+    assert [issue["message"] for issue in _category_issues(path)] == ["Choose a category from the category list"]
+
+
 def test_the_hosted_image_carries_the_category_tree_seed():
     root = Path(__file__).resolve().parents[3]
     dockerfile = (root / "deploy/fly/Dockerfile").read_text(encoding="utf-8")

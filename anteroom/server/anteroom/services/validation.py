@@ -158,12 +158,20 @@ def _description_follows_formula(description: str) -> bool:
     return all(marker in lower for marker in description_formula_markers())
 
 
-def _category_is_terminal(path: str) -> bool:
-    """A final category has no subcategories, however deep it sits (#2075)."""
-    from anteroom.services.category_tree_seed import general_parent_paths
+def _category_issue(path: str) -> str | None:
+    """Why a General category path cannot be used, or None when it is a known final category (#2075).
+
+    A final category has no subcategories, however deep it sits.
+    """
+    from anteroom.services.category_tree_seed import general_category_paths
 
     parts = [part.strip() for part in re.split(r"\s*>\s*", path) if part.strip()]
-    return " > ".join(parts) not in general_parent_paths()
+    final = general_category_paths().get(" > ".join(parts).casefold())
+    if final is None:
+        return "Choose a category from the category list"
+    if not final:
+        return "Choose a category with no subcategories"
+    return None
 
 
 def _department_matches_category(department: str, category_path: str) -> bool:
@@ -656,8 +664,8 @@ def validate_listing(
     category_path = text_value(payload.get("category_path"))
     if not category_path:
         add_issue(result, "category_path", "Category is required")
-    elif not _category_is_terminal(category_path):
-        add_issue(result, "category_path", "Choose a category with no subcategories")
+    elif category_issue := _category_issue(category_path):
+        add_issue(result, "category_path", category_issue)
     department = text_value(payload.get("department"))
     if department and category_path and not _department_matches_category(department, category_path):
         add_issue(result, "department", "Department does not match the selected category")

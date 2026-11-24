@@ -33,11 +33,17 @@ def default_seed_path() -> Path:
 
 
 @lru_cache(maxsize=1)
-def general_parent_paths() -> frozenset[str]:
-    """General categories that have subcategories, read once from the seed the trees are loaded from."""
+def general_category_paths() -> dict[str, bool]:
+    """Every General category path, case-folded, mapped to whether it is final (no subcategories).
+
+    Read once from the seed the trees are loaded from.
+    """
     payload = _read_seed(default_seed_path())
-    return frozenset(node["path"] for node in payload["category_tree_nodes"]
-                     if node["marketplace"] == "general" and node.get("has_children"))
+    return {
+        node["path"].casefold(): bool(node.get("is_leaf")) and not node.get("has_children")
+        for node in payload["category_tree_nodes"]
+        if node["marketplace"] == "general"
+    }
 
 
 def default_db_path() -> Path:
