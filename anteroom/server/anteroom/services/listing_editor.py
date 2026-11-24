@@ -60,16 +60,14 @@ def prepared_listing(previous: dict, listing: dict, *, notes: dict | None = None
         native_blocks[market] = reconciled
     sanitize_listing_sizes(updated)
     previous_size = None if previous.get("size") is None else str(previous.get("size"))
-    # A save that leaves the title, size and brand alone (labels, notes, cost)
-    # never adds the size to a title the seller wrote, such as an imported
-    # "Brand Item - Size 42". It may still collapse a size repeated by older saves.
-    title_untouched = all(listing.get(key) == previous.get(key) for key in ("title", "size", "brand"))
+    # The title is the seller's as written: only a size change, in a save that
+    # leaves the title alone, may put the new size in it (#1966, #1990).
+    keep_title = listing.get("title") != previous.get("title") or listing.get("size") == previous.get("size")
 
     def _normalize(current: dict) -> None:
         title = current.get("title")
         align_size_fields(current, previous_size=previous_size)
-        if (title_untouched and isinstance(title, str)
-                and len(str(current.get("title") or "").split()) > len(title.split())):
+        if keep_title and isinstance(title, str):
             current["title"] = title
         normalize_listing_dropdowns(current)
 

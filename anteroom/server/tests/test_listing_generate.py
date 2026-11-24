@@ -2208,5 +2208,48 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(revisions, [])
 
 
+def test_sync_title_size_leaves_a_title_that_already_names_the_size():
+    from anteroom.services.listing_generate import sync_title_size
+
+    for title, brand, size in (
+        ("Marvel Mad Engine Chibi Venom Tee White Men’s L", "Marvel", "L"),
+        ("RAGS Large Casual Pocket Tee Gray Relaxed", "RAGS", "L"),
+        ("PacSun PAC Cares Graphic Tee Sage Green XS Y2K", "Pac Sun", "XS"),
+        ("Disney Youth XL (15-17) Classic Mickey Tee Red", "Disney", "XL"),
+        ("REWASH 11/30 Distressed Denim Shorts Blue Raw Hem", "Rewash", "11"),
+        ("dip S (6-7) Cozy Cardigan Pink Knit", "dip", "6-7"),
+        ("Torrid 2X Floral Wrap Dress Black", "Torrid", "2XL"),
+        ("Gap Extra Large Hoodie Navy Cozy", "Gap", "XL"),
+    ):
+        listing = {"title": title, "brand": brand, "size": size}
+        assert sync_title_size(listing) is False, title
+        assert listing["title"] == title
+
+
+def test_sync_title_size_does_not_read_a_fraction_or_model_number_as_the_size():
+    from anteroom.services.listing_generate import sync_title_size
+
+    for title, brand, size, expected in (
+        ("Hollister 3/4 Sleeve Henley Top Blue", "Hollister", "3", "Hollister 3 3/4 Sleeve Henley Top Blue"),
+        ("Patagonia 1/2 Zip Pullover Fleece Gray", "Patagonia", "1", "Patagonia 1 1/2 Zip Pullover Fleece Gray"),
+        ("Nike Air Jordan 11 Retro Sneakers White", "Nike", "10", "Nike 10 Air Jordan 11 Retro Sneakers White"),
+        ("Nike Air Jordan 11 Retro Sneakers White", "Nike", "11", "Nike 11 Air Jordan 11 Retro Sneakers White"),
+    ):
+        listing = {"title": title, "brand": brand, "size": size}
+        assert sync_title_size(listing) is True, title
+        assert listing["title"] == expected
+    for title, size in (("Levi's 505 Jeans Blue Men's 32", "32"), ("Gap Denim Shorts Blue Size 11", "11")):
+        listing = {"title": title, "brand": title.split()[0], "size": size}
+        assert sync_title_size(listing) is False, title
+
+
+def test_sync_title_size_swaps_the_old_size_after_the_brand():
+    from anteroom.services.listing_generate import sync_title_size
+
+    listing = {"title": "M Missoni M Zigzag Knit Sweater Blue", "brand": "M Missoni", "size": "L"}
+    assert sync_title_size(listing, previous_size="M") is True
+    assert listing["title"] == "M Missoni L Zigzag Knit Sweater Blue"
+
+
 if __name__ == "__main__":
     unittest.main()
