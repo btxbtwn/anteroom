@@ -1,1 +1,0 @@
-- A category your AI agent changes on a listing now saves; before, Anteroom kept the old category on listings whose marketplace forms had been loaded.

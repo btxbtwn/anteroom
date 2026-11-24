@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1236 — 2026-11-24
+
+- A category your AI agent changes on a listing now saves; before, Anteroom kept the old category on listings whose marketplace forms had been loaded.
+
 ## 0.1.1235 — 2026-11-24
 
 - Jewelry and other items in a correct three-level category no longer show a category error; a category that still has subcategories is flagged instead.
