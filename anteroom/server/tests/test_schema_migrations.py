@@ -750,3 +750,11 @@ def test_category_tree_content_hash_upgrade_preserves_existing_trees(engine, sna
     assert inspect_database(engine.url.database).clean
 
 
+
+
+def test_revisions_keep_a_single_head():
+    """Two revisions from one parent leave `alembic upgrade head` unable to run on any database."""
+    from alembic.script import ScriptDirectory
+
+    heads = ScriptDirectory.from_config(schema_migrations.alembic_config("sqlite://")).get_heads()
+    assert len(heads) == 1, f"Join these heads with `alembic merge`: {sorted(heads)}"
