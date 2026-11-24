@@ -14,6 +14,7 @@ from decimal import Decimal, InvalidOperation
 import math
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from anteroom.models.conversation import Conversation, Photo
@@ -45,22 +46,35 @@ def hold(db: Session, marketplace: str, listing_id: str, title: str, price, matc
     """
     from anteroom.services.marketplace_identity import public_listing_url
 
+    conversation_id = match["conversation_id"]
+    score = match.get("score")
+    fields = {"title": (str(title or "").strip() or listing_id)[:255], "price": _price(price),
+              "url": public_listing_url(marketplace, listing_id),
+              "score": float(score) if isinstance(score, (int, float)) and math.isfinite(score) else 0.0}
     rows = db.scalars(select(ImportReview).where(
         ImportReview.marketplace == marketplace, ImportReview.listing_id == listing_id)).all()
-    review = next((row for row in rows if row.conversation_id == match["conversation_id"]), None)
+    review = next((row for row in rows if row.conversation_id == conversation_id), None)
     if review is not None and review.decision == NOT_MATCH:
         return
     for row in rows:
         if row.decision == PENDING and row is not review:
             db.delete(row)
     if review is None:
-        review = ImportReview(marketplace=marketplace, listing_id=listing_id, conversation_id=match["conversation_id"])
-        db.add(review)
-    review.title = (str(title or "").strip() or listing_id)[:255]
-    review.price = _price(price)
-    review.url = public_listing_url(marketplace, listing_id)
-    score = match.get("score")
-    review.score = float(score) if isinstance(score, (int, float)) and math.isfinite(score) else 0.0
+        try:
+            # Import all on another device may hold the same listing at the same moment.
+            with db.begin_nested():
+                db.add(ImportReview(marketplace=marketplace, listing_id=listing_id,
+                                    conversation_id=conversation_id, **fields))
+        except IntegrityError:
+            review = db.scalar(select(ImportReview).where(
+                ImportReview.marketplace == marketplace, ImportReview.listing_id == listing_id,
+                ImportReview.conversation_id == conversation_id))
+            if review is None or review.decision == NOT_MATCH:
+                db.commit()
+                return
+    if review is not None:
+        for name, value in fields.items():
+            setattr(review, name, value)
     db.commit()
 
 

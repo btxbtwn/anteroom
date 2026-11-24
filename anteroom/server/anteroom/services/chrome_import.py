@@ -364,7 +364,8 @@ async def import_listing(marketplace: str, listing: str, *, unless_matched: bool
     return {**result, "linked": False}
 
 
-async def link_listing(marketplace: str, listing: str, conversation_id: str) -> dict:
+async def link_listing(marketplace: str, listing: str, conversation_id: str, *,
+                       deadline: float | None = None) -> dict:
     """Link a listing to an item the seller chose. The item's own edits and photos stay as they are."""
     listing_id = listing_id_from(marketplace, listing)
 
@@ -373,6 +374,6 @@ async def link_listing(marketplace: str, listing: str, conversation_id: str) -> 
         await _read(marketplace, listing_id)
 
     try:
-        return await inventory_import.link_owned_listing(marketplace, listing_id, conversation_id, verify)
+        return await inventory_import.link_owned_listing(marketplace, listing_id, conversation_id, verify, deadline=deadline)
     except inventory_import.LinkError as exc:
         raise ChromeImportError(exc.status_code, str(exc)) from exc

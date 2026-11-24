@@ -146,21 +146,35 @@ def pending_links(body: Any) -> list[dict[str, Any]]:
     return found
 
 
-async def _link(marketplace: str, listing_id: str, conversation_id: str) -> dict:
-    """The import screen's Link to this item, for one marketplace."""
+def _remaining(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError
+    return remaining
+
+
+async def _link(marketplace: str, listing_id: str, conversation_id: str, deadline: float) -> dict:
+    """The import screen's Link to this item, for one marketplace.
+
+    Only the marketplace calls are cut off at ``deadline``. Once the check has
+    passed, the local link step is awaited to its end
+    (``inventory_import.link_owned_listing``), so the outcome reported is the one saved.
+    """
     if marketplace == "ebay":
         from anteroom.services import ebay_import
         from anteroom.services.ebay_client import EbayClient
 
-        return await ebay_import.link_listing(await EbayClient.connect(), listing_id, conversation_id)
+        client = await asyncio.wait_for(EbayClient.connect(), timeout=_remaining(deadline))
+        return await ebay_import.link_listing(client, listing_id, conversation_id, deadline=deadline)
     if marketplace == "etsy":
         from anteroom.services import etsy_import
         from anteroom.services.etsy_workspace import EtsyClient
 
-        return await etsy_import.link_listing(await EtsyClient.connect(), listing_id, conversation_id)
+        client = await asyncio.wait_for(EtsyClient.connect(), timeout=_remaining(deadline))
+        return await etsy_import.link_listing(client, listing_id, conversation_id, deadline=deadline)
     from anteroom.services import chrome_import
 
-    return await chrome_import.link_listing(marketplace, listing_id, conversation_id)
+    return await chrome_import.link_listing(marketplace, listing_id, conversation_id, deadline=deadline)
 
 
 def _failure(marketplace: str, exc: BaseException) -> str:
@@ -187,19 +201,17 @@ async def finish_pending_links(results: list[dict[str, Any]], *, deadline: float
     """Check each listing on its marketplace and link it, replacing the tool result with the outcome.
 
     Runs after the call's database session is closed. ``deadline`` is a
-    ``time.monotonic()`` value; a check still running then is abandoned before
-    anything is written.
+    ``time.monotonic()`` value; a marketplace check still running then is
+    abandoned before anything is written. A link whose check passed is saved and
+    reported as linked, even if saving it ends a moment after the deadline.
     """
     for result in results:
         link = next(item[_LINK_PLACEHOLDER] for item in result["content"]
                     if isinstance(item, dict) and _LINK_PLACEHOLDER in item)
         marketplace = link["marketplace"]
         try:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError
-            outcome = await asyncio.wait_for(
-                _link(marketplace, link["listing_id"], link["conversation_id"]), timeout=remaining)
+            _remaining(deadline)
+            outcome = await _link(marketplace, link["listing_id"], link["conversation_id"], deadline)
         except Exception as exc:  # noqa: BLE001 - each failure is reported to the assistant by name
             result["content"] = [{"type": "text", "text": _failure(marketplace, exc)}]
             result["isError"] = True

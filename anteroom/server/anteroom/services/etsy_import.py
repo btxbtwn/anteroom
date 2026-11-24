@@ -200,7 +200,8 @@ async def import_listing(client: EtsyClient, listing_id: str, *, unless_matched:
         raise EtsyFailure(str(exc), 409) from exc
 
 
-async def link_listing(client: EtsyClient, listing_id: str, conversation_id: str) -> dict:
+async def link_listing(client: EtsyClient, listing_id: str, conversation_id: str, *,
+                       deadline: float | None = None) -> dict:
     """Link an active Etsy listing to an item the seller chose. Reads Etsy only; the item is kept as it is."""
     async def verify() -> None:
         item = await client.listing(listing_id)
@@ -211,6 +212,6 @@ async def link_listing(client: EtsyClient, listing_id: str, conversation_id: str
         client.assert_current()
 
     try:
-        return await inventory_import.link_owned_listing("etsy", listing_id, conversation_id, verify)
+        return await inventory_import.link_owned_listing("etsy", listing_id, conversation_id, verify, deadline=deadline)
     except inventory_import.LinkError as exc:
         raise EtsyFailure(str(exc), exc.status_code) from exc

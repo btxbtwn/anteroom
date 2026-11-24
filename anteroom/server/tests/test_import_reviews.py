@@ -166,6 +166,56 @@ def test_mcp_confirm_that_runs_out_of_time_links_nothing(chrome, monkeypatch):  
     assert "poshmark" not in listings(chrome.db, item.id)
 
 
+def test_mcp_confirm_whose_link_step_ends_after_the_deadline_reports_what_was_saved(chrome, monkeypatch):  # noqa: F811
+    import time
+
+    from anteroom.services import inventory_import
+
+    item = _look_alike(chrome)
+    _held(chrome)
+    review_id = _queue(chrome)[0]["id"]
+    real_link = inventory_import._link
+
+    def late_link(*args):
+        # The marketplace check passed; saving the link ends after the tool's deadline (0.5 s here).
+        time.sleep(1.0)
+        return real_link(*args)
+
+    monkeypatch.setattr(inventory_import, "_link", late_link)
+    monkeypatch.setattr("anteroom.routes.mcp._MCP_RPC_TIMEOUT_SECONDS", 2.5)
+    body, error = _call(chrome, "confirm_import_match", {"review_id": review_id})
+    # What the assistant is told matches the database.
+    assert not error, body
+    assert body["linked"] is True and body["conversation_id"] == item.id
+    chrome.db.expire_all()
+    assert listings(chrome.db, item.id)["poshmark"]["listing_id"] == POST
+    assert _queue(chrome) == []
+
+
+def test_holding_the_same_listing_from_two_sessions_at_once_keeps_one_row(chrome):  # noqa: F811
+    from sqlalchemy import event
+
+    from anteroom.database import SessionLocal
+    from anteroom.services import import_reviews
+
+    item = _look_alike(chrome)
+    match = {"conversation_id": item.id, "score": 0.9}
+    with SessionLocal() as first, SessionLocal() as second:
+        held = []
+
+        def other_device_holds_first(*_args):
+            # The second hold has read no row; the first one lands before it inserts.
+            if not held:
+                held.append(True)
+                import_reviews.hold(first, "poshmark", POST, "Levi's denim jacket", 45, match)
+
+        event.listen(second, "before_flush", other_device_holds_first)
+        import_reviews.hold(second, "poshmark", POST, "Levi's denim jacket", 50, match)
+    chrome.db.expire_all()
+    rows = chrome.db.query(ImportReview).all()
+    assert len(rows) == 1 and rows[0].decision == "pending"
+
+
 def test_mcp_reject_marks_it_not_the_same_item(chrome):  # noqa: F811
     _look_alike(chrome)
     _held(chrome)

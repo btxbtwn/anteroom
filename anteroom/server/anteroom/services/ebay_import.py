@@ -252,7 +252,8 @@ async def import_listing(client: EbayClient, listing_id: str, *, unless_matched:
     return result
 
 
-async def link_listing(client: EbayClient, listing_id: str, conversation_id: str) -> dict:
+async def link_listing(client: EbayClient, listing_id: str, conversation_id: str, *,
+                       deadline: float | None = None) -> dict:
     """Link an active eBay listing to an item the seller chose. Reads eBay only; the item is kept as it is."""
     from anteroom.services.keychain import get_marketplace_accounts
 
@@ -266,6 +267,6 @@ async def link_listing(client: EbayClient, listing_id: str, conversation_id: str
         assert_identity(client.seller)
 
     try:
-        return await inventory_import.link_owned_listing("ebay", listing_id, conversation_id, verify)
+        return await inventory_import.link_owned_listing("ebay", listing_id, conversation_id, verify, deadline=deadline)
     except inventory_import.LinkError as exc:
         raise EbayFailure(str(exc), exc.status_code) from exc

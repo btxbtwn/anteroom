@@ -5,6 +5,7 @@ import asyncio
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 import threading
+import time
 from typing import NamedTuple
 from weakref import WeakValueDictionary
 
@@ -209,17 +210,28 @@ _NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Me
 
 
 async def link_owned_listing(marketplace: str, listing_id: str, conversation_id: str,
-                             verify: Callable[[], Awaitable[None]]) -> dict:
+                             verify: Callable[[], Awaitable[None]], *, deadline: float | None = None) -> dict:
     """Record that an existing item is live on this marketplace listing.
 
     Only the link is written: the item's edits and photos stay as they are, and
     the marketplace is only read. ``verify`` checks the listing is still the
     seller's and still for sale, and raises when it is not. No session is open
     while it runs.
+
+    With ``deadline`` (a ``time.monotonic()`` value), ``verify`` is cut off then
+    with ``TimeoutError`` and nothing is written. Once it has passed, the link
+    is a local database step: it runs to its end (it writes in several commits
+    and cannot be stopped halfway), so the result returned is what was saved.
     """
     existing = await in_worker_session(_link_target, marketplace, listing_id, conversation_id)
     if not existing:
-        await verify()
+        if deadline is None:
+            await verify()
+        else:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            await asyncio.wait_for(verify(), timeout=remaining)
     return await in_worker_session(_link, marketplace, listing_id, conversation_id, existing)
 
 
