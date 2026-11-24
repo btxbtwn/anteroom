@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1225 — 2026-11-24
+
+- Star the items you care about from the inventory list, the inventory table or the item editor, on the web and the iPhone app, and use the new Favorites filter to see only them. Starring never changes a marketplace and doesn't move the item in Recent activity.
+- AI agents connected to Anteroom can star or unstar items with the new set_favorite tool, and search_inventory can return only your favorites.
+
 ## 0.1.1224 — 2026-11-24
 
 - Your AI agent can now see which items have edits not yet sent to their live marketplaces and what changed field by field, and put an item back to the version that's live, keeping your labels and cost. It never contacts a marketplace.
