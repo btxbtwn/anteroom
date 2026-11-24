@@ -2,8 +2,8 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { NativeDrafts } from "../api/nativeMarketplaces";
-import { MarketplacesSection } from "./MarketplacesSection";
+import type { NativeDrafts, PreflightGap } from "../api/nativeMarketplaces";
+import { MarketplacesLayout, MarketplacesSection, useReportFixTargets } from "./MarketplacesSection";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -20,7 +20,7 @@ vi.mock("@tanstack/react-query", async (original) => ({
   useQueryClient: () => ({ invalidateQueries, setQueryData: vi.fn() }),
 }));
 
-function mockQueries(drafts: NativeDrafts) {
+function mockQueries(drafts: NativeDrafts, gaps: PreflightGap[] = []) {
   useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) =>
     queryKey[0] === "native-marketplaces"
       ? { data: drafts, error: null, isError: false, isPending: false }
@@ -29,7 +29,7 @@ function mockQueries(drafts: NativeDrafts) {
         : queryKey[0] === "etsy-listing-defaults"
           ? { data: {}, isSuccess: true, isPending: false }
           : queryKey[0] === "native-preflight"
-            ? { data: { marketplaces: {} }, isPending: false, isPlaceholderData: false, isFetching: false, isError: false }
+            ? { data: { marketplaces: { depop: { gaps, missing: [] } } }, isPending: false, isPlaceholderData: false, isFetching: false, isError: false }
             : { data: { shipping: [], processing: [] }, isPending: false, error: null },
   );
   useMutation.mockReturnValue({ mutate: vi.fn(), isPending: false, error: null, variables: undefined });
@@ -38,6 +38,48 @@ function mockQueries(drafts: NativeDrafts) {
 describe("MarketplacesSection lifecycle effects", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("groups category aliases under one reachable Fix button and removes it when the target unmounts", async () => {
+    const message = "Choose a Depop category.";
+    mockQueries({ depop: { state: "not_saved", error: message } }, [
+      { field: "direct_category_ids.depop", message, blocking: true },
+      { field: "marketplace_category_ids.depop", message, blocking: true },
+      { field: "listing", message: "Review the listing.", blocking: false },
+    ]);
+    const fields = [{ key: "direct_category_ids.depop", label: "Category" }];
+    function Form() {
+      useReportFixTargets("depop", fields);
+      return null;
+    }
+    const onEditField = vi.fn();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const render = (showForm: boolean) => root.render(
+      <MarketplacesLayout convId="item" revisionId="rev" title="Tee" disabled={false} etsyEligible selected="depop"
+        ids={["depop"]} onSelect={() => {}} onEditField={onEditField}>
+        {showForm && <Form />}
+      </MarketplacesLayout>,
+    );
+    const fixButtons = () => [...container.querySelectorAll("button")].filter((button) => button.textContent?.startsWith("Fix "));
+    try {
+      await act(() => render(true));
+      expect(fixButtons().map((button) => button.textContent)).toEqual(["Fix Category"]);
+      expect(container.textContent?.split(message)).toHaveLength(2);
+      const [button] = fixButtons();
+      expect(document.getElementById(button.getAttribute("aria-describedby")!)?.textContent).toBe(message);
+      await act(() => button.click());
+      expect(onEditField).toHaveBeenCalledWith("direct_category_ids.depop", "depop");
+
+      await act(() => render(false));
+      expect(fixButtons()).toHaveLength(0);
+      expect(container.textContent).toContain(message);
+      expect(container.textContent).toContain("Review the listing.");
+    } finally {
+      await act(() => root.unmount());
+      container.remove();
+    }
   });
 
   it("invalidates native status only when revisionId changes on the same listing, not on unrelated re-renders or item switches", async () => {

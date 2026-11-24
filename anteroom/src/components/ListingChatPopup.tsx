@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { Maximize2Icon, MessageSquareIcon, Minimize2Icon, MinusIcon } from "lucide-react";
+import { Maximize2Icon, Minimize2Icon, MinusIcon, SparklesIcon } from "lucide-react";
 import { isMacPlatform } from "./chat/ModelPickerContent";
 import { PanelResizeHandle, usePanelCollapsed, usePanelWidth, type PanelWidthLimits } from "./PanelResizeHandle";
 import { Button } from "./ui/button";
@@ -112,10 +112,10 @@ export function ListingChatPopup({
           layout === "float" && "rounded-2xl border shadow-xl")}
       >
         <header className="flex shrink-0 items-center gap-2 border-b py-1.5 ps-3 pe-1.5">
-          <span className="font-medium text-foreground text-sm">Chat</span>
-          {busy && label ? (
-            <span className="min-w-0 truncate text-muted-foreground text-xs">{label}</span>
-          ) : null}
+          <span className="flex shrink-0 items-center gap-1.5 font-medium text-foreground text-sm">
+            <SparklesIcon aria-hidden className="size-4" />Ant
+          </span>
+          <span className="min-w-0 truncate text-muted-foreground text-xs">{busy ? label || "Working…" : "AI listing assistant"}</span>
           {layout === "float" ? (
             <Button
               type="button"
@@ -152,11 +152,11 @@ export function ListingChatPopup({
           )}
           aria-controls="listing-chat"
           aria-expanded={false}
-          title={`Open chat (${shortcut})`}
+          title={`Open Ant, the AI listing assistant (${shortcut})`}
           onClick={() => onOpenChange(true)}
         >
-          {busy ? <Spinner size="md" className="shrink-0" /> : <MessageSquareIcon className="size-4 shrink-0" />}
-          <span className="min-w-0 truncate">{busy ? label || "Working…" : "Chat"}</span>
+          {busy ? <Spinner size="md" className="shrink-0" /> : <SparklesIcon aria-hidden className="size-4 shrink-0" />}
+          <span className="min-w-0 truncate">{busy ? label || "Working…" : "Ask Ant"}</span>
           {unread ? <span aria-label="New reply" className="size-2 shrink-0 rounded-full bg-primary" /> : null}
           <Kbd className="bg-background/15 text-background/70">{shortcut}</Kbd>
         </button>

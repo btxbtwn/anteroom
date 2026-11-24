@@ -1,7 +1,7 @@
 import { useWorkspaceRuntime } from "../app/runtime";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangleIcon, BadgeDollarSignIcon, CheckCircle2Icon, CheckIcon, ChevronDownIcon, ChevronRightIcon, CircleIcon, ClockIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, SendIcon, SquarePenIcon, Trash2Icon, XCircleIcon } from "lucide-react";
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { AlertTriangleIcon, BadgeDollarSignIcon, CheckCircle2Icon, CheckIcon, ChevronDownIcon, ChevronRightIcon, CircleIcon, ClockIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, SendIcon, SparklesIcon, SquarePenIcon, Trash2Icon, XCircleIcon } from "lucide-react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { ApiRequestError } from "../api/transport";
 import { pollMs } from "../api/polling";
@@ -21,11 +21,14 @@ import { deletable, delistPrompt, delistTargets } from "./marketplaceDelist";
 import { marketplaceName } from "./marketplaceNames";
 import { missingDetail, needsText } from "./readiness";
 import { Button } from "./ui/button";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsible";
 import { Input } from "./ui/input";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu";
 import { Spinner } from "./ui/spinner";
 import { DraftScheduleControl } from "./DraftScheduleControl";
+import { isEbayInventoryLocationEdit } from "./listingChanges";
 import { MarketplaceMessagesContext, uniqueMarketplaceMessages } from "./marketplaceMessages";
+import { rowForField } from "./nativeFieldWarnings";
 
 type Marketplace = DelistMarketplace;
 const ORDER: Marketplace[] = ["ebay", "etsy", "poshmark", "mercari", "depop"];
@@ -219,16 +222,6 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
 }
 
 
-/**
- * The answers this pane still says: every gap the open form does not read under a
- * row of its own. One the form shows is read there, where the seller fixes it.
- */
-export function saidBesideList(gaps: readonly PreflightGap[], shownOnForm: readonly string[]): PreflightGap[] {
-  const onForm = new Set(shownOnForm);
-  return gaps.filter((gap) => !onForm.has(gap.field));
-}
-
-
 /** A marketplace's card in List everywhere's picker. */
 export function listChoice(marketplace: NativeMarketplace, { status, canAct, listable, retryIn, soldSomewhere, check }: {
   status: Status; canAct: boolean; listable: boolean; retryIn: number; soldSomewhere: boolean;
@@ -279,19 +272,14 @@ type MarketplaceProps = {
   onEditField?: (field: string, marketplace?: string) => void;
 };
 
-/** Where the open form tells this pane which fields it draws a row for. */
-const FieldsShownContext = createContext<((marketplace: string, fields: ReadonlySet<string>) => void) | undefined>(undefined);
+type FixTarget = { key: string; label: string };
+const FixTargetsContext = createContext<((marketplace: string, fields: readonly FixTarget[]) => void) | undefined>(undefined);
 
-/**
- * Tell the marketplace pane which fields this form draws a row for, so an answer
- * about one of them is read under that row rather than a second time beside List.
- * Fields are compared by name, so the editor reports them unchanged across saves.
- */
-export function useReportFieldsShown(marketplace: string, fields: readonly string[]): void {
-  const report = useContext(FieldsShownContext);
-  // Sorted and joined, so the same answers on the next render report once.
-  const signature = [...fields].sort().join("\n");
-  useEffect(() => { report?.(marketplace, new Set(signature ? signature.split("\n") : [])); }, [report, marketplace, signature]);
+/** The open form supplies the editable rows and their visible labels. */
+export function useReportFixTargets(marketplace: string, fields: readonly FixTarget[]): void {
+  const report = useContext(FixTargetsContext);
+  useLayoutEffect(() => () => { report?.(marketplace, []); }, [report, marketplace]);
+  useLayoutEffect(() => { report?.(marketplace, fields); }, [report, marketplace, fields]);
 }
 
 export function MarketplacesLayout({
@@ -321,14 +309,14 @@ export function MarketplacesLayout({
   useLayoutEffect(() => {
     if (paneRef.current) paneRef.current.scrollTop = scrollPositions.current.get(selected) ?? 0;
   }, [selected]);
-  // Which fields the open form draws a row for, so an answer about one of them is
-  // read there and not twice.
-  const [fieldsShown, setFieldsShown] = useState<Partial<Record<string, ReadonlySet<string>>>>({});
-  const reportFields = useCallback((marketplace: string, fields: ReadonlySet<string>) => {
-    setFieldsShown((current) => {
+  const [fixTargets, setFixTargets] = useState<Partial<Record<string, readonly FixTarget[]>>>({});
+  const [collapsedSummaries, setCollapsedSummaries] = useState<Partial<Record<Marketplace, boolean>>>({});
+  const summaryId = useId();
+  const reportFields = useCallback((marketplace: string, fields: readonly FixTarget[]) => {
+    setFixTargets((current) => {
       const before = current[marketplace];
-      // The editor reports on every save; only a different set of rows redraws the pane.
-      if (before && before.size === fields.size && [...fields].every((field) => before.has(field))) return current;
+      if (before?.length === fields.length && fields.every((field, index) =>
+        before[index].key === field.key && before[index].label === field.label)) return current;
       return { ...current, [marketplace]: fields };
     });
   }, []);
@@ -677,41 +665,62 @@ export function MarketplacesLayout({
     );
   }
 
-  function preflightNotice(marketplace: Marketplace): ReactNode {
+  function preflightNotice(marketplace: Marketplace, gaps: readonly PreflightGap[]): ReactNode {
     const draft = drafts[marketplace];
-    if (draft?.error || isRunning(draft) || unconfirmed(marketplace)) return null;
-    const all = preflightGaps(marketplace);
-    if (!all.length) return null;
     const name = marketplaceName(marketplace);
-    // A gap is said once. One the editor draws a row for is said under that row,
-    // where the seller fixes it; the rest are said here, beside List.
-    const gaps = saidBesideList(all, [...(fieldsShown[marketplace] ?? [])]);
-    const blocking = all.some((gap) => gap.blocking);
-    const fields = [...new Set(gaps.map((gap) => gap.field))];
+    const targets = fixTargets[marketplace] ?? [];
+    const issues = new Map<string, { target?: FixTarget; messages: string[] }>();
+    for (const gap of gaps) {
+      const message = gap.message.trim();
+      if (!message) continue;
+      const row = rowForField(marketplace, gap.field, targets);
+      const target = isEbayInventoryLocationEdit(gap.field) ? { key: gap.field, label: fieldLabel(gap.field) }
+        : targets.find((field) => field.key === row);
+      const key = target?.key ?? `message:${message}`;
+      const issue = issues.get(key) ?? { target, messages: [] };
+      if (!issue.messages.includes(message)) issue.messages.push(message);
+      issues.set(key, issue);
+    }
+    if (!issues.size) return null;
+    const blocking = gaps.some((gap) => gap.blocking);
     const prompt = [
       blocking
         ? `Anteroom suggests reviewing these fields. You can still try listing on ${name}.`
         : `Anteroom may leave these fields empty. You can still try listing on ${name}.`,
-      ...all.map((gap) => `${gap.field}: ${gap.message}`),
+      ...gaps.map((gap) => `${gap.field}: ${gap.message}`),
       blocking
         ? "Fill those fields in this listing. Do not list it; I will press List again."
         : `Set each one to the closest of ${name}'s choices in this listing. Do not list it; I will press List again.`,
     ].join("\n");
     return (
-      <>
-        {uniqueMarketplaceMessages(gaps.map((gap) => gap.message), headerMessages).map((message) => <p key={message} className="text-muted-foreground">{message}</p>)}
-        <div className="flex flex-wrap items-center gap-1.5">
-          {onEditField && fields.map((field) => (
-            <Button key={field} size="xs" variant="ghost" onClick={() => onEditField(field, marketplace)}>
-              Edit {fieldLabel(field)}
-            </Button>
-          ))}
-          {onAskChat && (
-            <Button size="xs" variant="outline" title="Chat fills these fields. It does not list the item."
-              onClick={() => onAskChat(prompt)}>Ask chat</Button>
-          )}
-        </div>
-      </>
+      <section aria-label={`${name} validation`} className="mx-3 mt-3 max-w-3xl rounded-lg border border-warning/30 bg-warning/5 px-2.5 text-xs">
+        <Collapsible key={marketplace} open={!collapsedSummaries[marketplace]}
+          onOpenChange={(open) => setCollapsedSummaries((current) => ({ ...current, [marketplace]: !open }))}>
+          <div className="flex items-center gap-2">
+            <CollapsibleTrigger className="group flex min-h-8 min-w-0 flex-1 items-center gap-1.5 rounded-sm text-start font-medium text-warning-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-[900px]:min-h-11">
+              <ChevronRightIcon aria-hidden className="size-3.5 shrink-0 transition-transform group-aria-expanded:rotate-90" />
+              {issues.size} {issues.size === 1 ? "issue" : "issues"} to review
+            </CollapsibleTrigger>
+            {onAskChat && !draft?.error && !collapsedSummaries[marketplace] && (
+              <Button size="xs" variant="outline" className="my-1 max-[900px]:min-h-11" title="Ant uses AI to correct the flagged fields in this draft."
+                onClick={() => onAskChat(prompt)}><SparklesIcon aria-hidden />Fix with Ant</Button>
+            )}
+          </div>
+          <CollapsiblePanel animate={false} className="max-h-[min(12rem,24dvh)] overflow-y-auto px-0.5 pb-2">
+            <ul className="divide-y divide-border">
+              {[...issues].map(([key, { target, messages }], index) => (
+                <li key={key} className="flex items-center justify-between gap-2 py-1.5">
+                  <div id={`${summaryId}-${index}`} className="min-w-0 break-words text-foreground">
+                    {messages.map((message) => <p key={message}>{message}</p>)}
+                  </div>
+                  {target && onEditField && <Button size="xs" variant="outline" className="h-auto max-w-[45%] shrink-0 whitespace-normal max-[900px]:min-h-11"
+                    aria-describedby={`${summaryId}-${index}`} onClick={() => onEditField(target.key, marketplace)}>Fix {target.label}</Button>}
+                </li>
+              ))}
+            </ul>
+          </CollapsiblePanel>
+        </Collapsible>
+      </section>
     );
   }
 
@@ -738,9 +747,9 @@ export function MarketplacesLayout({
       }
     }
     if (chatCanFix(draft, marketplace) && onAskChat) {
-      buttons.push(<Button key="ask" size="xs" variant="outline"
-        title="Chat fixes the fields in this listing. It does not list it; press List again after."
-        onClick={() => onAskChat(askChatPrompt(marketplace, draft))}>Ask chat</Button>);
+      buttons.push(<Button key="ask" size="xs" variant="outline" className="max-[900px]:min-h-11"
+        title="Ant uses AI to correct the flagged fields in this draft."
+        onClick={() => onAskChat(askChatPrompt(marketplace, draft))}><SparklesIcon aria-hidden />Fix with Ant</Button>);
     }
     const shipping = shippingRecovery(marketplace, draft);
     return buttons.length || shipping ? <div className="space-y-2">
@@ -793,18 +802,15 @@ export function MarketplacesLayout({
   }));
   const selectedMarketplace = MANAGED.has(selected) ? selected as Marketplace : null;
   const selectedStatus = selectedMarketplace ? statusById.get(selectedMarketplace) : undefined;
-  const paneError = mark.error?.message || actionError || (delist.error || native.error || live.error)?.message;
-  const [detail] = uniqueMarketplaceMessages([selectedStatus?.detail], paneError ? [paneError] : []);
-  const [said] = uniqueMarketplaceMessages([selectedStatus?.said], [paneError, detail].filter((message): message is string => Boolean(message)));
-  const headerMessages = uniqueMarketplaceMessages([paneError, detail, said]);
-  function visiblePreflightGaps(marketplace: Marketplace): PreflightGap[] {
-    const draft = drafts[marketplace];
-    return draft?.error || isRunning(draft) || unconfirmed(marketplace) ? [] : saidBesideList(preflightGaps(marketplace), [...(fieldsShown[marketplace] ?? [])]);
-  }
-  const shownMessages = uniqueMarketplaceMessages([
-    ...headerMessages,
-    ...(selectedMarketplace ? visiblePreflightGaps(selectedMarketplace).map((gap) => gap.message) : []),
-  ]);
+  const selectedGaps = selectedMarketplace && !running(selectedMarketplace) && !unconfirmed(selectedMarketplace)
+    ? preflightGaps(selectedMarketplace) : [];
+  const summaryMessages = selectedGaps.map((gap) => gap.message);
+  const [paneError] = uniqueMarketplaceMessages([mark.error?.message || actionError || (delist.error || native.error || live.error)?.message], summaryMessages);
+  const [detail] = uniqueMarketplaceMessages([selectedStatus?.detail], [...summaryMessages, paneError ?? ""]);
+  const [said] = uniqueMarketplaceMessages([selectedStatus?.said], [...summaryMessages, paneError ?? "", detail ?? ""]);
+  // The validation summary repeats its messages at the controls. Other status
+  // messages only need to be shown above the form.
+  const shownMessages = uniqueMarketplaceMessages([paneError, detail, said]);
 
   // A form's one-line state, under its name on the rail and in the phone's picker.
   function formState(id: string): { status?: Status; check: PreflightCheck | null; line: ReactNode } {
@@ -850,10 +856,13 @@ export function MarketplacesLayout({
   const showListEverywhere = readyToList.length > 1;
   const showDelistEverywhere = removable.length > 1;
 
-  const pane = <>
+  const pane = <div className="flex min-h-0 min-w-0 flex-1 flex-col">
     {picking && <ListEverywhereDialog title={title} choices={choices} onClose={() => setPicking(false)}
       onConfirm={(marketplaces) => { for (const marketplace of marketplaces) action.mutate({ marketplace, kind: "list" }); }}
       onEditField={onEditField} />}
+    {selectedMarketplace && <HeldWhileChecking checking={rechecking} holdKey={selectedMarketplace}>
+      {preflightNotice(selectedMarketplace, selectedGaps)}
+    </HeldWhileChecking>}
     {/* Content stops at a readable line length; the pane still scrolls edge to edge. */}
     <div ref={paneRef} onScroll={event => scrollPositions.current.set(selected, event.currentTarget.scrollTop)}
       className="marketplace-pane flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3 *:w-full *:max-w-3xl">
@@ -906,9 +915,6 @@ export function MarketplacesLayout({
           )}
           {reconnectNotice(selectedMarketplace)}
           {errorActions(selectedMarketplace)}
-          <HeldWhileChecking checking={rechecking} holdKey={selectedMarketplace}>
-            {preflightNotice(selectedMarketplace)}
-          </HeldWhileChecking>
           {settings(selectedMarketplace)}
           {linkForm(selectedMarketplace)}
           {(() => {
@@ -932,11 +938,11 @@ export function MarketplacesLayout({
           <DraftScheduleControl convId={convId} />
         </div>
       ) : null}
-      <FieldsShownContext.Provider value={reportFields}>
+      <FixTargetsContext.Provider value={reportFields}>
         <MarketplaceMessagesContext value={shownMessages}>{children}</MarketplaceMessagesContext>
-      </FieldsShownContext.Provider>
+      </FixTargetsContext.Provider>
     </div>
-  </>;
+  </div>;
 
   if (phone) {
     // Like the iPhone app: one full-width form, chosen from a picker at the top,

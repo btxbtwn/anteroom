@@ -41,7 +41,7 @@ export const ListingChatPane = memo(function ListingChatPane({
   const { id } = listing;
   const consumed = useCallback(() => actions.dispatch({ type: "message", id, value: null }), [actions, id]);
   return (
-    <ErrorBoundary label="Chat" resetKey={id}>
+    <ErrorBoundary label="Ant" resetKey={id}>
       <Suspense fallback={pageLoading}>
         <ChatPanel
           convId={id}

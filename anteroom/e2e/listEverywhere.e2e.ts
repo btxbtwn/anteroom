@@ -147,7 +147,10 @@ test("the listing chat is a column beside a wide form and floats over a narrow o
     // Minimized, the chat is a pill and the form gets the whole width.
     await chat.getByRole("button", { name: "Minimize chat" }).click();
     await expect(chat).toBeHidden();
-    await expect(page.locator("main").getByRole("button", { name: /^Chat/ })).toBeVisible();
+    const askAnt = page.locator("main").getByRole("button", { name: /^Ask Ant/ });
+    await expect(askAnt).toBeVisible();
+    await askAnt.click();
+    await expect(chat).toBeVisible();
   } finally {
     await request.delete(`/api/conversations/${id}`);
   }

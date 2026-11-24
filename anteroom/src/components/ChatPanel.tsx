@@ -501,7 +501,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
           // invites questions and edits, and Regenerate asks before it rewrites.
           <Empty className="py-8">
             <EmptyHeader>
-              <EmptyTitle>Ask about this listing</EmptyTitle>
+              <EmptyTitle>Ask Ant about this listing</EmptyTitle>
               <EmptyDescription>Ask a question or describe a change, like a shorter title or a new price.</EmptyDescription>
             </EmptyHeader>
             {hasPhotos ? (

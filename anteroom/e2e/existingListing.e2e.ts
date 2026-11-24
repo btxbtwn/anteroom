@@ -18,10 +18,11 @@ test("a listing with saved copy opens on the listing and its chat invites edits"
       // An existing listing opens on its form, not on chat.
       await expect(page.getByRole("tab", { name: "Listing" })).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
       await info.attach("existing-listing-opens-on-form.png", { body: await page.screenshot(), contentType: "image/png" });
-      await page.getByRole("tab", { name: "Chat" }).click();
+      await page.getByRole("tab", { name: "Ant", exact: true }).click();
     }
     const chat = phone ? page.locator("main") : page.getByRole("region", { name: "Listing chat" });
-    await expect(chat.getByText("Ask about this listing")).toBeVisible({ timeout: 30_000 });
+    await expect(chat.getByText("Ask Ant about this listing")).toBeVisible({ timeout: 30_000 });
+    await page.screenshot({ path: info.outputPath("ant-listing-assistant.png") });
     await info.attach("existing-listing-chat.png", { body: await page.screenshot(), contentType: "image/png" });
     await expect(chat.getByRole("button", { name: "Generate listing" })).toHaveCount(0);
 
@@ -46,9 +47,9 @@ test("a draft with only photos opens on chat with Generate first", async ({ page
   const id = await createListing(request, title);
   try {
     await openListing(page, phone, title);
-    if (phone) await expect(page.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
+    if (phone) await expect(page.getByRole("tab", { name: "Ant", exact: true })).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
     await expect(page.getByRole("button", { name: "Generate listing", exact: true })).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText("Ask about this listing")).toHaveCount(0);
+    await expect(page.getByText("Ask Ant about this listing")).toHaveCount(0);
   } finally {
     await request.delete(`/api/conversations/${id}`);
   }

@@ -13,7 +13,7 @@ import { HostedSetupChecklist, SetupChecklist } from "../components/SetupCheckli
 import { ListingSidebar } from "../components/ListingSidebar";
 import { AssistantThreadPanel } from "../components/sidebar/AssistantThreadPanel";
 import { NavRail } from "../components/sidebar/NavRail";
-import { ArrowLeftIcon, HistoryIcon, PlusIcon, SearchIcon, SquarePenIcon } from "lucide-react";
+import { ArrowLeftIcon, HistoryIcon, PlusIcon, SearchIcon, SparklesIcon, SquarePenIcon } from "lucide-react";
 import {
   DEFAULT_SETTINGS_SECTION,
   SETTINGS_SECTION_LABELS,
@@ -930,10 +930,11 @@ export function App() {
                   type="button"
                   role="tab"
                   aria-selected={mobilePane === "workspace"}
+                  title="Ant, the AI listing assistant"
                   className={mobilePane === "workspace" ? "selected" : ""}
                   onClick={() => { paneChoice.current++; setMobilePane("workspace"); }}
                 >
-                  Chat
+                  <span className="inline-flex items-center gap-1.5 align-middle"><SparklesIcon aria-hidden className="size-4" />Ant</span>
                 </button></>}
                 <button
                   type="button"
