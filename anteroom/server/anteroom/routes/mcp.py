@@ -22,7 +22,14 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import event
 
 from anteroom.database import in_worker_session
-from anteroom.services import mcp_http, mcp_import_match_tools, mcp_marketplace_tools, mcp_oauth, mcp_tokens
+from anteroom.services import (
+    mcp_feedback_tools,
+    mcp_http,
+    mcp_import_match_tools,
+    mcp_marketplace_tools,
+    mcp_oauth,
+    mcp_tokens,
+)
 from anteroom.services.hosted_limits import read_bounded_body
 from anteroom.services.local_requests import came_through_tailnet
 
@@ -204,6 +211,10 @@ async def mcp_post(request: Request):
                 # Marketplace work waits on Chrome, a cloud session, eBay or Etsy: only now that
                 # the session is closed. Work still running at the deadline keeps going.
                 await mcp_marketplace_tools.run_pending(actions, deadline=deadline - _MCP_REPLY_MARGIN_SECONDS)
+            feedback = mcp_feedback_tools.pending_deliveries(outcome[0])
+            if feedback:
+                # Email goes out after the session is closed, within the call's deadline.
+                await mcp_feedback_tools.deliver_pending(feedback, deadline=deadline - _MCP_REPLY_MARGIN_SECONDS)
             if not result.done():
                 result.set_result(outcome)
         except Exception as exc:

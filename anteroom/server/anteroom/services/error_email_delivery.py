@@ -54,6 +54,54 @@ def _warning_deadline(state, active):
     return hourly + WARNING_DIGEST_INTERVAL - 3600 if hourly is not None else None
 
 
+def classify_failure(exc):
+    """``(failure, last_error, pause seconds)`` for a refused or failed SMTP attempt.
+
+    SMTP may include addresses and server identifiers. Keep a safe,
+    actionable classification instead of retaining the raw response.
+    """
+    code = exc.smtp_code if isinstance(exc, smtplib.SMTPResponseException) else None
+    response = exc.smtp_error if isinstance(exc, smtplib.SMTPResponseException) else ''
+    response = (response.decode('utf-8', errors='replace') if isinstance(response, bytes) else response).lower()
+    quota = 'daily' in response and ('limit exceeded' in response or 'quota exceeded' in response)
+    return ('quota_paused' if quota else 'delivery_failed',
+            f'SMTP {code}: {"relay quota exceeded" if quota else "relay rejected delivery"}' if code else type(exc).__name__,
+            DAY if quota else (3600 if code and code >= 500 else 300))
+
+
+def reserve_direct_send(store, daily_limit: int, clock=time.time) -> bool:
+    """Charge one message sent outside the outbox (seller feedback) to the shared budget.
+
+    Refused while the relay is paused or another sender holds the lease, and
+    whenever it would cut into the quarter of the daily budget kept for errors.
+    The reservation commits before any network activity.
+    """
+    daily_limit = max(0, daily_limit)
+    if not daily_limit:
+        return False
+    with store.transaction() as transaction:
+        state = transaction.state
+        now = clock()
+        attempts = state['attempts'] = [t for t in state.get('attempts', []) if t > now - DAY]
+        reserve = max(1, daily_limit // 4)
+        if (len(attempts) >= daily_limit - reserve
+                or sum(t > now - 3600 for t in attempts) >= HOURLY_CAP
+                or state.get('paused_until', 0) > now or state.get('lease_until', 0) > now):
+            return False
+        attempts.append(now)
+        return True
+
+
+def record_direct_failure(store, exc, clock=time.time) -> None:
+    """A relay refusal of a direct message pauses every sender, as one from the outbox does."""
+    failure, last_error, delay = classify_failure(exc)
+    with store.transaction() as transaction:
+        state = transaction.state
+        state['failure'], state['last_error'] = failure, last_error
+        state['paused_until'] = max(state.get('paused_until', 0), clock() + delay)
+        state['last_failure_at'] = clock()
+
+
 class EmailDelivery:
     def __init__(
         self,
@@ -216,15 +264,7 @@ class EmailDelivery:
         try:
             self.send(subject, body)
         except Exception as exc:
-            # SMTP may include addresses and server identifiers. Keep a safe,
-            # actionable classification instead of retaining the raw response.
-            code = exc.smtp_code if isinstance(exc, smtplib.SMTPResponseException) else None
-            response = exc.smtp_error if isinstance(exc, smtplib.SMTPResponseException) else ''
-            response = (response.decode('utf-8', errors='replace') if isinstance(response, bytes) else response).lower()
-            quota = 'daily' in response and ('limit exceeded' in response or 'quota exceeded' in response)
-            failure = ('quota_paused' if quota else 'delivery_failed',
-                       f'SMTP {code}: {"relay quota exceeded" if quota else "relay rejected delivery"}' if code else type(exc).__name__,
-                       DAY if quota else (3600 if code and code >= 500 else 300))
+            failure = classify_failure(exc)
         with self.store.transaction() as transaction:
             state = transaction.state
             if state.get('lease') != token:
