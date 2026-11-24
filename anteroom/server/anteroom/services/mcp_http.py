@@ -100,6 +100,7 @@ TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
     "run_etsy_audit": ("analytics", "read"),
     "get_needs_attention": ("attention", "read"),
     "dismiss_attention_items": ("attention", "write"),
+    "resolve_attention_items": ("attention", "write"),
     "restore_attention_items": ("attention", "write"),
     **mcp_catalog_tools.PERMISSIONS,
 }
@@ -297,10 +298,10 @@ def tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "dismiss_attention_items",
-            "title": "Dismiss attention items",
+            "title": "Snooze attention items",
             "description": (
-                "Dismiss Needs Attention items by their key (from get_needs_attention). "
-                f"A dismissed item comes back after {home_dashboard.DISMISS_TTL_DAYS} days if it "
+                "Snooze Needs Attention items by their key (from get_needs_attention). "
+                f"A snoozed item comes back after {home_dashboard.DISMISS_TTL_DAYS} days if it "
                 "still applies. Only hides the alert in Anteroom: it never changes a listing "
                 "or anything on a marketplace."
             ),
@@ -320,9 +321,35 @@ def tool_definitions() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "resolve_attention_items",
+            "title": "Resolve attention items",
+            "description": (
+                "Resolve Needs Attention items by their key (from get_needs_attention) once the "
+                "seller has dealt with them. A possible-duplicate pair is marked not duplicates and "
+                "never flagged again; either listing can still be flagged against another one. Any "
+                "other item stays hidden until its situation changes (another sale, a new failure, "
+                "a new expiry), then shows again. Only hides the alert in Anteroom: it never "
+                "changes a listing or anything on a marketplace."
+            ),
+            "annotations": {**_WRITE_ANNOTATIONS, "idempotentHint": True},
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "item_keys": {
+                        "type": "array",
+                        "items": {"type": "string", "maxLength": 200},
+                        "minItems": 1,
+                        "maxItems": MAX_ATTENTION_KEYS,
+                    },
+                },
+                "required": ["item_keys"],
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "restore_attention_items",
             "title": "Restore attention items",
-            "description": "Bring dismissed Needs Attention items back into the inbox by their key.",
+            "description": "Bring snoozed or resolved Needs Attention items back into the inbox by their key.",
             "annotations": {**_WRITE_ANNOTATIONS, "idempotentHint": True},
             "inputSchema": {
                 "type": "object",
@@ -706,6 +733,7 @@ def _dispatch_tool(
         "run_etsy_audit": _tool_run_etsy_audit,
         "get_needs_attention": _tool_get_needs_attention,
         "dismiss_attention_items": _tool_dismiss_attention_items,
+        "resolve_attention_items": _tool_resolve_attention_items,
         "restore_attention_items": _tool_restore_attention_items,
         "create_draft_listing": _tool_create_draft_listing,
         "edit_listing": _tool_edit_listing,
@@ -1078,21 +1106,42 @@ def _attention_keys(args: dict[str, Any]) -> list[str]:
 
 def _tool_dismiss_attention_items(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str, Any]:
     keys = _attention_keys(args)
-    kinds = home_dashboard.attention_item_kinds(db)
+    items = home_dashboard.attention_items(db)
     dismissed: list[dict[str, Any]] = []
     not_found: list[str] = []
     for key in keys:
-        if key not in kinds:
+        if key not in items:
             not_found.append(key)
             continue
-        dismissed.append(home_dashboard.dismiss_attention_item(db, item_key=key, kind=kinds[key]))
+        dismissed.append(home_dashboard.dismiss_attention_item(db, item_key=key, kind=items[key]["kind"]))
     return {"dismissed": dismissed, "not_found": not_found}
+
+
+def _tool_resolve_attention_items(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str, Any]:
+    from anteroom.services import similar_items
+
+    keys = _attention_keys(args)
+    items = home_dashboard.attention_items(db)
+    resolved: list[dict[str, Any]] = []
+    not_found: list[str] = []
+    for key in keys:
+        item = items.get(key)
+        if item is None:
+            not_found.append(key)
+            continue
+        try:
+            resolved.append(home_dashboard.resolve_attention_item(
+                db, item_key=key, kind=item["kind"], fingerprint=item["fingerprint"],
+            ))
+        except similar_items.MergeError:
+            not_found.append(key)
+    return {"resolved": resolved, "not_found": not_found}
 
 
 def _tool_restore_attention_items(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str, Any]:
     keys = _attention_keys(args)
     restored = [key for key in keys if home_dashboard.restore_attention_item(db, item_key=key)]
-    return {"restored": restored, "not_dismissed": [key for key in keys if key not in restored]}
+    return {"restored": restored, "not_hidden": [key for key in keys if key not in restored]}
 
 
 # ---------------------------------------------------------------------------

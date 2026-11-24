@@ -1,0 +1,5 @@
+- Needs attention alerts can now be resolved, not only snoozed. **Resolve** hides an alert until something changes, like another sale or a new error, so a sold item still listed elsewhere always comes back when it sells again.
+- A possible duplicate can be marked **Not duplicates**: that pair is never flagged again, and either listing can still be flagged against a different one. Settings → Similar items stops suggesting the pair too.
+- **Dismiss** is now **Snooze 7 days**, and resolved alerts have their own **Resolved** list with **Restore**.
+- The iPhone app has Needs attention under More, with the same Resolve, Snooze and Restore.
+- Assistants connected over MCP can resolve alerts and restore resolved ones.

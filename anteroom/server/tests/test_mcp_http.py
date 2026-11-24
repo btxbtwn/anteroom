@@ -162,6 +162,7 @@ def test_mcp_tools_list_and_read_write_lifecycle_respects_safety_invariant():
         "manage_labels_and_notes",
         "delete_draft_listing",
         "dismiss_attention_items",
+        "resolve_attention_items",
         "restore_attention_items",
     }
     assert expected_tools.issubset(tool_names)
@@ -693,7 +694,7 @@ LISTING_WRITE_TOOLS = {
     "create_draft_listing", "edit_listing", "manage_listing_photos",
     "manage_labels_and_notes", "delete_draft_listing",
 }
-ATTENTION_WRITE_TOOLS = {"dismiss_attention_items", "restore_attention_items"}
+ATTENTION_WRITE_TOOLS = {"dismiss_attention_items", "resolve_attention_items", "restore_attention_items"}
 ALL_TOOLS = READ_TOOLS | LISTING_WRITE_TOOLS | ATTENTION_WRITE_TOOLS
 
 
@@ -934,7 +935,7 @@ def test_mcp_token_with_needs_attention_write_dismisses_and_restores_alerts():
         client, "restore_attention_items", {"item_keys": [key, "never-dismissed"]}, extra_headers=bearer,
     )
     assert not is_error, restored
-    assert restored == {"restored": [key], "not_dismissed": ["never-dismissed"]}
+    assert restored == {"restored": [key], "not_hidden": ["never-dismissed"]}
     assert key in _attention_keys(client, bearer)
 
     _, is_error = _call_tool(client, "dismiss_attention_items", {"item_keys": []}, extra_headers=bearer)
@@ -1421,3 +1422,29 @@ def test_hosted_mcp_listing_photos_are_seller_scoped(cloud, signing_keys, monkey
     bob, error = _call_tool(client, "get_listing_photos", {"conversation_id": conv_id}, extra_headers=tokens[BOB])
     assert error and "not found" in bob["error"].lower()
     assert requested == []
+
+
+def test_mcp_resolve_hides_an_alert_until_it_changes_and_restore_brings_it_back():
+    client = TestClient(app)
+    with SessionLocal() as db:
+        key = _seed_failed_job(db, "conv-resolve-mcp", "Linen Shirt")
+        db.commit()
+    created = client.post(
+        "/api/settings/mcp-tokens", json={"name": "Resolver", "permissions": {"attention": "write"}},
+    ).json()
+    bearer = {"Authorization": f"Bearer {created['token']}"}
+
+    result, is_error = _call_tool(
+        client, "resolve_attention_items", {"item_keys": [key, "failed-job:gone:gone"]}, extra_headers=bearer,
+    )
+    assert not is_error, result
+    assert [row["item_key"] for row in result["resolved"]] == [key]
+    assert result["not_found"] == ["failed-job:gone:gone"]
+    assert key not in _attention_keys(client, bearer)
+    summary, _ = _call_tool(client, "get_needs_attention", {}, extra_headers=bearer)
+    assert [item["key"] for item in summary["resolved"]] == [key]
+
+    restored, is_error = _call_tool(client, "restore_attention_items", {"item_keys": [key]}, extra_headers=bearer)
+    assert not is_error, restored
+    assert restored == {"restored": [key], "not_hidden": []}
+    assert key in _attention_keys(client, bearer)
