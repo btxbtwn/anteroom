@@ -1,1 +1,0 @@
-- AI assistants connected to Anteroom can now view a listing's photos, so they can check its fields against the tags, flaws and measurements in them.
