@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1213 — 2026-11-24
+
+- On the website, a Depop, Poshmark or other marketplace price you set yourself now shows in that marketplace's form instead of the main price.
+
 ## 0.1.1212 — 2026-11-24
 
 - Your AI assistant (Claude, ChatGPT, Gemini, Cursor) can now save marketplace drafts, list, send your saved edits to live listings and delist through Anteroom's MCP connector, but only if you allow it. Each token and connected app has a new **Marketplaces** setting in Settings → Agents: **No access** (the default, also for every assistant you already connected), **Save drafts**, or **Publish, update and delist**. The assistant must name each marketplace and confirm every publish, update and delist, can schedule a listing with Scheduled Draft Publishing, and can check how each action went. Anteroom shows which assistant started a running action.

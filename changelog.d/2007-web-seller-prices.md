@@ -1,1 +1,0 @@
-- On the website, a Depop, Poshmark or other marketplace price you set yourself now shows in that marketplace's form instead of the main price.
