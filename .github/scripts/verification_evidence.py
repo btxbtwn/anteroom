@@ -13,10 +13,12 @@ SHA = re.compile(r'[0-9a-f]{40}')
 # Active pair for new Descendant verification (`prepare`) and Deploy hosted
 # eligibility. Archived receipts keep their own pair on EvidencePin
 # (historical_failure / correcting_merge); do not reuse these constants when
-# inspecting an older pin such as b28ba4b3 / fa824f9a.
-# d19adbff (#1717) left two Alembic heads; 6d72c5e3 (#1728) joined them.
-HISTORICAL = 'd19adbff5a34609dd5c2b7ada19966ae4aeafce8'
-CORRECTED = '6d72c5e3d9d1ee4256f7c754c749a2e19a01818c'
+# inspecting an older pin such as bbb4c8fc / d19adbff or b28ba4b3 / fa824f9a.
+# 99c3b700 (#2032) left two Alembic heads (with #2030); afc3c2db (#2045) joined
+# them. Collateral red pushes 08b97e99 and fb7d5c07 are listed in
+# wait-for-tested-code.HISTORICAL_RECOVERY_FAILURES.
+HISTORICAL = '99c3b7003d1d79cfc20cea283bebde7e54572081'
+CORRECTED = 'afc3c2dbde647b59203c0b761c8c0dfb2b697264'
 REGRESSION = 'server/tests/test_hosted_assistant.py::test_shop_snapshot_survives_calculation_longer_than_the_idle_transaction_deadline'
 WORKFLOW = '.github/workflows/verify-corrected-descendant.yml'
 # Names are the real expanded reusable CI jobs, not merely its aggregate result.
