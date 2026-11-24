@@ -1,0 +1,1 @@
+- Claude and ChatGPT now show Anteroom's tools by plain names, like "Search inventory" or "Delete draft listing", when they ask before running one.
