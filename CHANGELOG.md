@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1214 — 2026-11-24
+
+- Fix Anteroom updates failing to start after two changes each added a database step at the same time.
+
 ## 0.1.1213 — 2026-11-24
 
 - On the website, a Depop, Poshmark or other marketplace price you set yourself now shows in that marketplace's form instead of the main price.
