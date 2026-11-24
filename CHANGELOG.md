@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1209 — 2026-11-24
+
+- The privacy policy now explains what Claude, ChatGPT or Gemini can see and change when you connect them to Anteroom, and how to disconnect them.
+
 ## 0.1.1208 — 2026-11-24
 
 - Importing a listing from eBay now brings over its color, department, size type, package weight and dimensions, shipping, payment and return policies, item location, offer settings, format and duration, subtitle, second category, lot size, private listing, charity and UPC, so the eBay tab matches the listing on eBay. Updating an imported listing keeps the video it already has on eBay.

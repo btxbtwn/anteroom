@@ -1,1 +1,0 @@
-- The privacy policy now explains what Claude, ChatGPT or Gemini can see and change when you connect them to Anteroom, and how to disconnect them.
