@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1200 — 2026-11-24
+
+- Explain when Mercari blocks a hosted offer check and record which request was refused.
+
 ## 0.1.1199 — 2026-11-24
 
 - Keep active Poshmark listings from showing up as sold comps when a search result includes the seller’s Sold Listings count.
