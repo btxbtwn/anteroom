@@ -124,7 +124,8 @@ enum MarketplaceActions {
             return row(.busy, label, detail: draft.progress.map { "\($0.label)…" })
         }
         if let draft, draft.state == "unknown" || busy.contains(draft.state ?? "") {
-            return row(.attention, "Unconfirmed", detail: draft.error ?? "Check the result before trying again.", said: said)
+            return row(.attention, "Unconfirmed", link: live?.state == "deleted" ? nil : live?.url, linkLabel: "View",
+                       detail: draft.error ?? "Check the result before trying again.", said: said)
         }
         if live?.state == "deleting" { return row(.busy, "Delisting…") }
         // The web's rail too: "Delisted" whatever the marketplace calls it.

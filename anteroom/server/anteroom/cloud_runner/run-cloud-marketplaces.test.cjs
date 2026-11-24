@@ -87,6 +87,43 @@ test('Mercari cloud verification reports when initialize returns no signed-in us
   assert.match(result.error, /Sign in to Mercari in Chrome/);
 });
 
+for (const [body, format, marker, header] of [
+  ['<!doctype html><html>challenge-platform private-response</html>', 'html', 'cloudflare', 'challenge'],
+  ['<!doctype html><html>captcha private-response</html>', 'html', 'captcha', 'private-header'],
+  ['{"message":"captcha private-response"}', 'json', 'captcha', 'private-header'],
+]) {
+  test(`Mercari cloud offer review reports a blocked listing read with a ${format} ${marker} response`, async () => {
+    const calls = [];
+    const { result } = await executeMarketplaceOperation({
+      marketplace: 'mercari', cookies: [mercariCookie],
+      command: { type: 'marketplace.promotion_check', payload: {
+        marketplace: 'mercari', action: 'offer', listing_id: 'm123456', discount_percent: 15,
+      } },
+      httpFetch: async (url, options) => {
+        calls.push([url, options.method]);
+        if (url.endsWith('/initialize')) return json({ csrf: 'csrf', user: { userId: 42, name: 'Seller' } });
+        assert.equal(JSON.parse(options.body).operationName, 'sellFetchItemsDetails');
+        return new Response(body, {
+          status: 403, headers: {
+            'content-type': format === 'html' ? 'text/html' : 'application/json',
+            'cf-mitigated': header, 'cf-ray': 'private-id',
+          },
+        });
+      },
+    });
+    assert.deepEqual(calls, [
+      ['https://www.mercari.com/v1/initialize', 'GET'],
+      ['https://www.mercari.com/v1/api', 'POST'],
+    ]);
+    assert.deepEqual(structuredClone(result), {
+      ok: false, safe_to_retry: true, error_code: 'challenge', preview_step: 'mercari-item',
+      error: "Mercari blocked Anteroom's cloud request for listing details. The offer check stopped.",
+      marketplace_message: 'HTTP 403',
+      challenge_response: { status: 403, format, marker, cloudflare_challenge_header: header === 'challenge' },
+    });
+  });
+}
+
 test('Depop verifies the account and polls likes with its bearer', async () => {
   const execute = (type, httpFetch) => executeMarketplaceOperation({
     marketplace: 'depop', cookies: [depopCookie, mercariCookie],

@@ -608,6 +608,19 @@ async function executeMarketplaceOperation({
     result = await context.runCloudMarketplaceCommand(command, Array.isArray(photos) ? photos : []);
   }
 
+  if (marketplace === 'mercari' && cmdType === 'marketplace.promotion_check' && result?.error_code === 'challenge') {
+    const step = {
+      'mercari-account': 'the account check',
+      'mercari-item': 'listing details',
+      'mercari-eligibility': 'offer eligibility',
+      'mercari-bounds': 'the allowed offer price',
+    }[result.preview_step] || 'the offer review';
+    result.error = `Mercari blocked Anteroom's cloud request for ${step}. The offer check stopped.`;
+    // Only the fixed response signals belong in the hosted activity and alerts.
+    delete result.marketplace_message;
+    if (result.challenge_response) result.marketplace_message = `HTTP ${result.challenge_response.status}`;
+  }
+
   const exported = exportCookies(jar, marketplace);
   const cookiesChanged = cookieFingerprint(exported) !== initialSnapshot;
   return { result, cookies_changed: cookiesChanged, cookies: exported };
