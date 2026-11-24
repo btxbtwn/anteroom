@@ -11,6 +11,8 @@ export type {
   DeleteConversationResult,
   DirectRecord,
   ErrorDetail,
+  FavoriteInput,
+  FavoriteResult,
   HTTPValidationError,
   ListingDocument,
   ListingPhoto,

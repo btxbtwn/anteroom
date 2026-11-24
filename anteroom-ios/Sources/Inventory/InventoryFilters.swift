@@ -96,6 +96,8 @@ enum StatusTab: String, CaseIterable, Identifiable, Sendable {
 
 struct InventoryFilters: Equatable, Sendable {
     var status: StatusTab = .active
+    /// Only the listings the seller starred.
+    var favorites = false
     var marketplaces: [String] = []
     /// Turns the marketplace picks around: keep listings missing from one of
     /// them, or, with none picked, the listings no marketplace carries.
@@ -119,7 +121,7 @@ struct InventoryFilters: Equatable, Sendable {
     /// The status tab shows itself, so this counts only the menu filters.
     var activeCount: Int {
         max(marketplaces.count, notListed ? 1 : 0) + labels.count + excludeLabels.count
-            + (inactive ? 1 : 0) + (priceDrift ? 1 : 0)
+            + (inactive ? 1 : 0) + (priceDrift ? 1 : 0) + (favorites ? 1 : 0)
     }
 
     enum LabelState: Equatable, Sendable { case none, include, exclude }
@@ -372,6 +374,7 @@ enum InventoryQuery {
 
     static func matchesFilters(_ listing: ConversationSummary, _ filters: InventoryFilters) -> Bool {
         guard inTab(listing, filters.status) else { return false }
+        if filters.favorites, !listing.favorite { return false }
         let own = Set(listing.vendooLabels.map { $0.lowercased() })
         if !filters.labels.isEmpty, !filters.labels.contains(where: { own.contains($0.lowercased()) }) { return false }
         if filters.excludeLabels.contains(where: { own.contains($0.lowercased()) }) { return false }

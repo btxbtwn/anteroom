@@ -162,6 +162,11 @@ final class AnteroomAPI: Sendable {
         _ = try await send(request("PATCH", "api/conversations/\(id)", json: ConversationInput(title: title)))
     }
 
+    /// Stars or unstars an item. Not an edit: the item keeps its place and its last-updated time.
+    func setFavorite(_ id: String, favorite: Bool) async throws -> FavoriteResult {
+        try await decode(request("PUT", "api/conversations/\(id)/favorite", json: FavoriteInput(favorite: favorite)))
+    }
+
     /// The server only deletes listings that were never sent anywhere.
     func deleteListing(_ id: String) async throws {
         _ = try await send(request("DELETE", "api/conversations/\(id)"))

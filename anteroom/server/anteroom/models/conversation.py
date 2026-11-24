@@ -20,6 +20,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     true,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -55,6 +56,8 @@ class Conversation(SellerOwned, Base):
     # explicitly records False; undoing a sale may only undo that ownership.
     settled_by_seller: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
     unsettled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Starred by the seller to find again. Not an edit: setting it leaves updated_at alone.
+    favorite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=True)
 

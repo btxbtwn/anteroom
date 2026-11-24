@@ -4,6 +4,7 @@ import { labelColor, labelDotClass, type LabelColor } from "../labelColors";
 import type { ReactNode } from "react";
 import { CheckIcon, ChevronDownIcon, ListFilterIcon, XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
+import { FavoriteStar } from "./favorites";
 import { MarketplaceLogo } from "./MarketplaceLogo";
 import { marketplaceLabel } from "./fillLog/marketplaces";
 import { SIDEBAR_ROW } from "./sidebar/sidebarStyles";
@@ -123,6 +124,7 @@ export function ListingFilters({
   marketplaces,
   marketplaceCounts,
   notListedCount,
+  favoriteCount = 0,
   unsentCount,
   missingSaleCount,
   inactiveCount = 0,
@@ -143,6 +145,8 @@ export function ListingFilters({
   /** What each marketplace row would keep: listed there, or missing from there under Not listed. */
   marketplaceCounts: Record<string, number>;
   notListedCount: number;
+  /** How many listings the seller starred. */
+  favoriteCount?: number;
   /** How many listings hold edits not yet sent to a marketplace. */
   unsentCount: number;
   /** How many listings have a sale missing details. */
@@ -215,6 +219,15 @@ export function ListingFilters({
             ) : null}
           </MenuTrigger>
           <MenuPopup align="start" className="max-h-[min(70vh,32rem)] min-w-56" aria-label="Filter listings">
+            <FilterRow
+              checked={filters.favorites}
+              count={favoriteCount}
+              title="Listings you starred"
+              glyph={<FavoriteStar on className="size-3.5 shrink-0 text-muted-foreground" />}
+              label="Favorites"
+              onSelect={() => onChange({ ...filters, favorites: !filters.favorites })}
+            />
+            <MenuSeparator />
             <MenuGroup>
               <MenuGroupLabel>{filters.notListed ? "Not listed on" : "Marketplaces"}</MenuGroupLabel>
               {marketplaces.length ? (

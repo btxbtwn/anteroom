@@ -97,6 +97,8 @@ export interface Conversation {
   etsy_eligible?: boolean;
   /** Sale details the sales ledger still needs from the seller. */
   missing_sale_data?: string[];
+  /** Starred by the seller. Starring is not an edit and leaves ``updated_at`` as it was. */
+  favorite?: boolean;
   notes: string | null;
 }
 
@@ -181,6 +183,8 @@ export interface ConversationSummary {
   etsy_eligible?: boolean;
   /** Sale details the sales ledger still needs from the seller. */
   missing_sale_data?: string[];
+  /** Starred by the seller. Starring is not an edit and leaves ``updated_at`` as it was. */
+  favorite?: boolean;
 }
 
 /** A crop as fractions of the turned and straightened photo. */
@@ -293,6 +297,16 @@ export interface ExpenseUpdate {
   mileage_rate_cents?: string | null;
   origin_destination?: string | null;
   expected_revision: number;
+}
+
+/** Star or unstar one item. */
+export interface FavoriteInput {
+  favorite: boolean;
+}
+
+export interface FavoriteResult {
+  id: string;
+  favorite: boolean;
 }
 
 export interface HTTPValidationError {

@@ -128,10 +128,12 @@ struct Conversation: Identifiable, Codable, Hashable, Sendable {
     var etsyEligible: Bool = true
     /// Sale details the sales ledger still needs from the seller.
     var missingSaleData: [String] = []
+    /// Starred by the seller. Starring is not an edit and leaves ``updated_at`` as it was.
+    var favorite: Bool = false
     var notes: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, status, sku, price, quantity, notes
+        case id, title, status, sku, price, quantity, favorite, notes
         case boxID = "box_id"
         case settledAt = "settled_at"
         case unsettledAt = "unsettled_at"
@@ -200,6 +202,7 @@ extension Conversation {
         unsentEdits = try values.decodeIfPresent(Bool.self, forKey: .unsentEdits) ?? false
         etsyEligible = try values.decodeIfPresent(Bool.self, forKey: .etsyEligible) ?? true
         missingSaleData = try values.decodeIfPresent([String].self, forKey: .missingSaleData) ?? []
+        favorite = try values.decodeIfPresent(Bool.self, forKey: .favorite) ?? false
         notes = try values.decodeIfPresent(String.self, forKey: .notes)
     }
 }
@@ -283,9 +286,11 @@ struct ConversationSummary: Identifiable, Codable, Hashable, Sendable {
     var etsyEligible: Bool = true
     /// Sale details the sales ledger still needs from the seller.
     var missingSaleData: [String] = []
+    /// Starred by the seller. Starring is not an edit and leaves ``updated_at`` as it was.
+    var favorite: Bool = false
 
     enum CodingKeys: String, CodingKey {
-        case id, title, status, sku, price, quantity
+        case id, title, status, sku, price, quantity, favorite
         case boxID = "box_id"
         case settledAt = "settled_at"
         case unsettledAt = "unsettled_at"
@@ -354,6 +359,7 @@ extension ConversationSummary {
         unsentEdits = try values.decodeIfPresent(Bool.self, forKey: .unsentEdits) ?? false
         etsyEligible = try values.decodeIfPresent(Bool.self, forKey: .etsyEligible) ?? true
         missingSaleData = try values.decodeIfPresent([String].self, forKey: .missingSaleData) ?? []
+        favorite = try values.decodeIfPresent(Bool.self, forKey: .favorite) ?? false
     }
 }
 
@@ -587,6 +593,16 @@ extension ExpenseUpdate {
         originDestination = try values.decodeIfPresent(String.self, forKey: .originDestination)
         expectedRevision = try values.decode(Int.self, forKey: .expectedRevision)
     }
+}
+
+/// Star or unstar one item.
+struct FavoriteInput: Codable, Hashable, Sendable {
+    var favorite: Bool
+}
+
+struct FavoriteResult: Identifiable, Codable, Hashable, Sendable {
+    var id: String
+    var favorite: Bool
 }
 
 struct HTTPValidationError: Codable, Hashable, Sendable {

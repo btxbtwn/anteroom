@@ -30,6 +30,8 @@ import type {
   ConversationSummary,
   DatabaseReport,
   DeleteConversationResult,
+  FavoriteInput,
+  FavoriteResult,
   Job,
   ErrorDetail,
   HTTPValidationError,
@@ -1195,6 +1197,9 @@ export const api = {
       request<Conversation>("/conversations", { method: "POST", body: JSON.stringify(body || {}) }),
     update: (id: string, body: ConversationInput) =>
       request<Conversation>(`/conversations/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    /** Stars or unstars an item. Not an edit: the item keeps its place and its last-updated time. */
+    setFavorite: (id: string, favorite: boolean) =>
+      request<FavoriteResult>(`/conversations/${encodeURIComponent(id)}/favorite`, { method: "PUT", body: JSON.stringify({ favorite } satisfies FavoriteInput) }),
     /** Deletes a new listing only while it is still blank; the server decides. `keepalive` outlives a closing tab. */
     discardBlank: (id: string, options?: { keepalive?: boolean }) =>
       request<{ discarded: boolean }>(`/conversations/${id}/discard-blank`, { method: "POST", keepalive: options?.keepalive }),

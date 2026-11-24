@@ -437,6 +437,23 @@ final class InventoryModel {
         }
     }
 
+    /// The star changes at once and goes back if the server refuses it.
+    func setFavorite(_ listing: ConversationSummary, _ favorite: Bool) async {
+        func mark(_ on: Bool) {
+            changeListings { rows in
+                if let index = rows.firstIndex(where: { $0.id == listing.id }) { rows[index].favorite = on }
+            }
+        }
+        mark(favorite)
+        do {
+            _ = try await api.setFavorite(listing.id, favorite: favorite)
+        } catch {
+            mark(!favorite)
+            self.error = (favorite ? "Could not add to favorites. " : "Could not remove from favorites. ")
+                + error.localizedDescription
+        }
+    }
+
     func delete(_ listing: ConversationSummary) async {
         do {
             try await api.deleteListing(listing.id)

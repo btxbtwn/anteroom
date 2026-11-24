@@ -690,7 +690,7 @@ READ_TOOLS = {
 }
 LISTING_WRITE_TOOLS = {
     "create_draft_listing", "edit_listing", "manage_listing_photos",
-    "manage_labels_and_notes", "delete_draft_listing",
+    "manage_labels_and_notes", "delete_draft_listing", "set_favorite",
 }
 ATTENTION_WRITE_TOOLS = {"dismiss_attention_items", "restore_attention_items"}
 ALL_TOOLS = READ_TOOLS | LISTING_WRITE_TOOLS | ATTENTION_WRITE_TOOLS

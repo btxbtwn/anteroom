@@ -268,6 +268,12 @@
             "title": "Etsy Eligible",
             "type": "boolean"
           },
+          "favorite": {
+            "default": false,
+            "description": "Starred by the seller. Starring is not an edit and leaves ``updated_at`` as it was.",
+            "title": "Favorite",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -665,6 +671,12 @@
             "default": true,
             "description": "False for modern resale: Etsy removes those.",
             "title": "Etsy Eligible",
+            "type": "boolean"
+          },
+          "favorite": {
+            "default": false,
+            "description": "Starred by the seller. Starring is not an edit and leaves ``updated_at`` as it was.",
+            "title": "Favorite",
             "type": "boolean"
           },
           "id": {
@@ -1568,6 +1580,39 @@
           "expected_revision"
         ],
         "title": "ExpenseUpdate",
+        "type": "object"
+      },
+      "FavoriteInput": {
+        "additionalProperties": false,
+        "description": "Star or unstar one item.",
+        "properties": {
+          "favorite": {
+            "title": "Favorite",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "favorite"
+        ],
+        "title": "FavoriteInput",
+        "type": "object"
+      },
+      "FavoriteResult": {
+        "properties": {
+          "favorite": {
+            "title": "Favorite",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "favorite"
+        ],
+        "title": "FavoriteResult",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -4473,6 +4518,64 @@
           }
         },
         "summary": "Edit Conversation"
+      }
+    },
+    "/api/conversations/{identity}/favorite": {
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "identity",
+            "required": true,
+            "schema": {
+              "title": "Identity",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FavoriteInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FavoriteResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The listing does not exist for this seller."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Favorite"
       }
     },
     "/api/conversations/{identity}/listing": {

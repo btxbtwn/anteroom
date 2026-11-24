@@ -158,6 +158,15 @@ struct ListingEditorView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
+                Button(model.favorite ? "Remove from favorites" : "Add to favorites",
+                       systemImage: model.favorite ? "star.fill" : "star") {
+                    Task { await model.setFavorite(!model.favorite) }
+                }
+                .frame(minWidth: 44, minHeight: 44)
+                .accessibilityAddTraits(model.favorite ? .isSelected : [])
+                .disabled(!model.hasLoaded)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Menu("Listing actions", systemImage: "ellipsis.circle") {
                     Button("Listing assistant", systemImage: "sparkles") { assistant = AssistantOpening() }
                     Button("Listing history", systemImage: "clock.arrow.circlepath") { showingHistory = true }

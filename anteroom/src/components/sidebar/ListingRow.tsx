@@ -5,7 +5,8 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { MarketplaceLogo } from "../MarketplaceLogo";
-import { LayoutTemplateIcon, CopyIcon, EllipsisIcon, PencilIcon, Trash2Icon, XIcon } from "lucide-react";
+import { LayoutTemplateIcon, CopyIcon, EllipsisIcon, PencilIcon, StarIcon, StarOffIcon, Trash2Icon, XIcon } from "lucide-react";
+import { FavoriteStar, useSetFavorite } from "../favorites";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { toastManager } from "../ui/toast";
 import { cn } from "../../lib/utils";
@@ -86,6 +87,10 @@ export const ListingRow = memo(function ListingRow({
   const [copyOpen, setCopyOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draftTitle, setDraftTitle] = useState(title);
+  const favorite = Boolean(listing.favorite);
+  const setFavorite = useSetFavorite();
+  const toggleFavorite = () => setFavorite.mutate({ id: listing.id, favorite: !favorite });
+  const favoriteLabel = favorite ? "Remove from favorites" : "Add to favorites";
 
   const renameListing = useMutation({
     mutationFn: (nextTitle: string) => api.conversations.update(listing.id, { title: nextTitle }),
@@ -233,9 +238,9 @@ export const ListingRow = memo(function ListingRow({
                 "block w-full cursor-pointer truncate text-left text-base font-medium leading-snug text-inherit no-underline outline-none",
                 // Stretch the link over the row so right-click anywhere offers "Open in new tab".
                 !selecting && "after:absolute after:inset-0 after:content-['']",
-                // The four hover actions (4 x 24px, 8px from the edge) sit over the
+                // The five hover actions (5 x 24px, 8px from the edge) sit over the
                 // title's end; make room so it ends in an ellipsis before them.
-                !selecting && "min-[901px]:pointer-fine:group-hover/row:pr-24 min-[901px]:pointer-fine:group-focus-within/row:pr-24",
+                !selecting && "min-[901px]:pointer-fine:group-hover/row:pr-32 min-[901px]:pointer-fine:group-focus-within/row:pr-32",
               )}
               title={name === title ? title : `${name} · ${title}`}
               onClick={(e) => {
@@ -255,6 +260,11 @@ export const ListingRow = memo(function ListingRow({
             </a>
           )}
           <div className="mt-1 flex items-center gap-2">
+            {favorite ? (
+              <span role="img" aria-label="Favorite" title="Favorite" className="inline-flex shrink-0 text-sidebar-foreground/80">
+                <FavoriteStar on className="size-3.5" />
+              </span>
+            ) : null}
             <ListingStatusLabel status={status} title={statusTitle} />
             {status === "sold" && listing.missing_sale_data?.length ? (
               <ListingTag tone="warning" title={`Missing: ${listing.missing_sale_data.join(", ")}`}>
@@ -288,6 +298,19 @@ export const ListingRow = memo(function ListingRow({
       </div>
       {!renaming && !selecting && (
         <div className="pointer-events-none absolute top-2 right-2 flex items-center opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 max-[900px]:hidden pointer-coarse:hidden">
+          <button
+            type="button"
+            className={actionClass}
+            title={favoriteLabel}
+            aria-label={`${favoriteLabel}: ${title}`}
+            aria-pressed={favorite}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleFavorite();
+            }}
+          >
+            <FavoriteStar on={favorite} className="size-3.5" />
+          </button>
           <button
             type="button"
             className={actionClass}
@@ -328,6 +351,10 @@ export const ListingRow = memo(function ListingRow({
             <EllipsisIcon className="size-4.5" />
           </MenuTrigger>
           <MenuPopup align="end" width="content">
+            <MenuItem onClick={toggleFavorite}>
+              {favorite ? <StarOffIcon /> : <StarIcon />}
+              {favoriteLabel}
+            </MenuItem>
             <MenuItem disabled={renameListing.isPending} onClick={startRename}>
               <PencilIcon />
               Rename

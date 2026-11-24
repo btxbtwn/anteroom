@@ -30,7 +30,7 @@ from anteroom.models.marketplace_listing import LIVE_STATES, MarketplaceListing
 from anteroom.models.marketplace_sale import MarketplaceSale
 from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
 from anteroom.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
-from anteroom.services import boxes, home_dashboard, listing_editor, mcp_tokens
+from anteroom.services import boxes, home_dashboard, listing_editor, mcp_favorite_tools, mcp_tokens
 from anteroom.services.background_tasks import ACTIVE as ACTIVE_TASK_STATUSES
 from anteroom.services.etsy_audit import etsy_not_allowed_live
 from anteroom.services.etsy_fields import etsy_eligible
@@ -101,6 +101,7 @@ TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
     "get_needs_attention": ("attention", "read"),
     "dismiss_attention_items": ("attention", "write"),
     "restore_attention_items": ("attention", "write"),
+    **mcp_favorite_tools.PERMISSIONS,
 }
 
 MAX_ATTENTION_KEYS = 100
@@ -141,7 +142,7 @@ def tool_definitions() -> list[dict[str, Any]]:
             "description": (
                 "Search and filter the seller's Anteroom inventory by keyword "
                 "(title, SKU, brand, labels, private notes), status, marketplace, "
-                "unsent local edits, or sourcing box."
+                "unsent local edits, sourcing box, or favorites."
             ),
             "annotations": _READ_ANNOTATIONS,
             "inputSchema": {
@@ -152,6 +153,7 @@ def tool_definitions() -> list[dict[str, Any]]:
                     "marketplace": {"type": "string", "enum": sorted(MARKETS), "description": "Filter to items currently listed on this marketplace."},
                     "unsent_edits_only": {"type": "boolean", "description": "If true, return only items with local edits not yet sent to live marketplaces."},
                     "box_id": {"type": "string", "description": "Filter to items belonging to a specific sourcing box ID."},
+                    "favorites_only": {"type": "boolean", "description": "If true, return only items the seller starred."},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25},
                     "offset": {"type": "integer", "minimum": 0, "default": 0},
                 },
@@ -479,6 +481,7 @@ def tool_definitions() -> list[dict[str, Any]]:
                 "additionalProperties": False,
             },
         },
+        *mcp_favorite_tools.TOOLS,
     ]
     return [{**tool, "annotations": {**tool["annotations"], "title": tool["title"]}} for tool in tools]
 
@@ -708,6 +711,7 @@ def _dispatch_tool(
         "manage_listing_photos": _tool_manage_listing_photos,
         "manage_labels_and_notes": _tool_manage_labels_and_notes,
         "delete_draft_listing": _tool_delete_draft_listing,
+        **mcp_favorite_tools.HANDLERS,
     }
     handler = handlers.get(name)
     if handler is None:
@@ -742,6 +746,8 @@ def _tool_search_inventory(db: Session, args: dict[str, Any], **_kw: Any) -> dic
         convs = [c for c in convs if c.status == status_filter]
     if box_id:
         convs = [c for c in convs if c.box_id == box_id]
+    if args.get("favorites_only"):
+        convs = [c for c in convs if c.favorite]
 
     revisions_by_conv: dict[str, str] = {}
     fields_by_conv: dict[str, dict[str, Any]] = {}
@@ -814,6 +820,7 @@ def _tool_search_inventory(db: Session, args: dict[str, Any], **_kw: Any) -> dic
             "unsent_edits": has_unsent,
             "photo_count": photo_counts.get(conv.id, 0),
             "box_id": conv.box_id,
+            "favorite": bool(conv.favorite),
             "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
         })
 
