@@ -25,6 +25,8 @@ class JobResponse(BaseModel):
     last_error: str | None
     listing_title: str
     mode: str | None = None
+    # The agent that started it (an MCP access token or connected app); None for the seller's own.
+    requested_by: str | None = None
     created_at: str
     updated_at: str
 
@@ -278,6 +280,7 @@ def _job_response(job) -> JobResponse:
         last_error=job.last_error,
         listing_title=title,
         mode="native_marketplace" if str(job.current_step or "").startswith("native_") else None,
+        requested_by=getattr(job, "requested_by", None),
         created_at=job.created_at.isoformat() if job.created_at else "",
         updated_at=job.updated_at.isoformat() if job.updated_at else "",
     )

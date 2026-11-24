@@ -35,6 +35,12 @@ struct MarketplaceActionsTests {
         let poshmark = rows["poshmark"]!
         precondition(poshmark.label == "Listing…" && poshmark.running && !poshmark.canList && !poshmark.canDelist)
         precondition(poshmark.detail == "Uploading photos…")
+        // One an AI assistant started says which.
+        let byAgent = try JSONDecoder().decode(NativeDraftState.self, from: Data(#"""
+        {"state":"publishing","action":"list","running":true,"progress":{"label":"Listing"},"requested_by":"mcp:Claude"}
+        """#.utf8))
+        precondition(MarketplaceActions.status("poshmark", live: nil, draft: byAgent, revisionID: "r2").detail
+            == "Listing… · From Claude (AI assistant)")
 
         // An outcome nobody confirmed must be checked before acting again.
         let mercari = rows["mercari"]!

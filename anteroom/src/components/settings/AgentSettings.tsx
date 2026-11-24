@@ -31,6 +31,8 @@ const LEVEL_LABELS: Record<McpPermissionLevel, string> = {
   none: "No access",
   read: "Read",
   write: "Read and write",
+  draft: "Save drafts",
+  publish: "Publish, update and delist",
 };
 
 /* What each area covers and which levels it offers; matches services/mcp_tokens.py. */
@@ -42,9 +44,16 @@ const PERMISSION_AREAS: ReadonlyArray<{
   { area: "listings", label: "Listings", levels: ["none", "read", "write"] },
   { area: "analytics", label: "Analytics", levels: ["none", "read"] },
   { area: "attention", label: "Needs Attention", levels: ["none", "read", "write"] },
+  // Off unless the seller turns it on: lets the agent act on the marketplaces it names.
+  { area: "marketplaces", label: "Marketplaces", levels: ["none", "draft", "publish"] },
 ];
 
-export const NEW_TOKEN_PERMISSIONS: McpTokenPermissions = { listings: "read", analytics: "read", attention: "read" };
+export const NEW_TOKEN_PERMISSIONS: McpTokenPermissions = {
+  listings: "read",
+  analytics: "read",
+  attention: "read",
+  marketplaces: "none",
+};
 
 export function PermissionSelects({
   permissions,
@@ -72,7 +81,7 @@ export function PermissionSelects({
               if (value && value !== permissions[area]) onChange(area, value as McpPermissionLevel);
             }}
           >
-            <SelectTrigger size="sm" className="w-full sm:w-36" aria-label={`${labelPrefix} ${label} access`}>
+            <SelectTrigger size="sm" className="w-full sm:w-auto sm:min-w-36" aria-label={`${labelPrefix} ${label} access`}>
               <SelectValue>{LEVEL_LABELS[permissions[area]]}</SelectValue>
             </SelectTrigger>
             <SelectPopup>
@@ -179,7 +188,7 @@ function ConnectedApps() {
     <SettingsRow
       id="agent-mcp-connections"
       title="Connected apps"
-      description={`In Claude, ChatGPT or Gemini, add a custom connector with the endpoint above. The app asks you to sign in to Anteroom and choose what it can do. Apps cannot publish, update live listings or delist.`}
+      description={`In Claude, ChatGPT or Gemini, add a custom connector with the endpoint above. The app asks you to sign in to Anteroom and choose what it can do. It can act on marketplaces only if you set Marketplaces for it here.`}
       status={connections.isPending ? "Loading connected apps…" : rows.length === 0 ? "No apps connected." : undefined}
     >
       {failure ? <SettingsNote tone="error">{failure.message}</SettingsNote> : null}
@@ -290,7 +299,7 @@ export function AgentSettings() {
         <SettingsRow
           id="agent-mcp-url"
           title="Streamable HTTP endpoint"
-          description="Agents can read inventory, analytics, offers, sourcing ROI, and Needs Attention, stage local drafts or edits, and dismiss alerts, as far as each token allows. They can never publish, update live marketplaces, or delist."
+          description="Agents can read inventory, analytics, offers, sourcing ROI, and Needs Attention, stage local drafts or edits, and dismiss alerts, as far as each token or app allows. They act on marketplaces only where you set Marketplaces: Save drafts lets them save private marketplace drafts; Publish, update and delist also lets them list, send saved edits to live listings and delist, on the marketplaces they name. Their jobs show which agent started them."
         >
           {data?.mcp_url ? (
             <div className="flex items-start gap-2">
@@ -308,7 +317,7 @@ export function AgentSettings() {
         <SettingsRow
           id="agent-mcp-tokens"
           title="Access tokens"
-          description="Personal tokens authenticate MCP clients to your account only. Choose what each token can read or change; changes apply to its next request. Tokens cannot publish or delist listings and cannot access other API routes."
+          description="Personal tokens authenticate MCP clients to your account only. Choose what each token can read or change; changes apply to its next request. Marketplaces is off for every new token. Tokens cannot access other API routes."
           status={
             tokensQuery.isPending
               ? "Loading tokens…"

@@ -540,6 +540,7 @@ class JobRepo:
         *,
         status: str = "queued",
         current_step: str | None = None,
+        requested_by: str | None = None,
     ) -> Job:
         # Saved native form catalogs belong to listing revisions, never to job
         # rows: no job consumer reads _native_forms and storing megabytes per
@@ -555,6 +556,7 @@ class JobRepo:
             listing_snapshot=snapshot,
             status=status,
             current_step=current_step if current_step is not None else ("queued" if status == "queued" else status),
+            requested_by=requested_by,
         )
         self.db.add(job)
         self.db.commit()
