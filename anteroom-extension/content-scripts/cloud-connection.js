@@ -60,7 +60,7 @@
       }
       window.postMessage({ source: 'anteroom-extension', version: 1, requestId: data.requestId,
         ok: result?.ok === true, state: ['connected', 'disconnected', 'pending'].includes(result?.state) ? result.state : 'unavailable',
-        extensionVersion: typeof result?.extensionVersion === 'string' ? result.extensionVersion.slice(0, 30) : '', supportedActions: Array.isArray(result?.supportedActions) ? result.supportedActions.filter(action => ['poshmark.form.read', 'marketplace.actions', 'marketplace.regions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts', 'marketplace.signed_commands', 'marketplace.cloud_connect'].includes(action)) : [] }, ORIGIN);
+        extensionVersion: typeof result?.extensionVersion === 'string' ? result.extensionVersion.slice(0, 30) : '', supportedActions: Array.isArray(result?.supportedActions) ? result.supportedActions.filter(action => ['poshmark.form.read', 'marketplace.actions', 'marketplace.regions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'marketplace.form.read', 'vendoo.drafts', 'marketplace.signed_commands', 'marketplace.cloud_connect'].includes(action)) : [] }, ORIGIN);
     }
     try { chrome.runtime.sendMessage(message).then(respond).catch(() => respond(null)); }
     catch { respond(null); }

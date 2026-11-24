@@ -156,6 +156,12 @@
       return value;
     }
     if (PROMOTION_COMMANDS.has(value.type)) return promotion(value) ? value : null;
+    if (value.type === 'marketplace.form') {
+      const fields = ['marketplace', 'listing', 'refresh', 'request_id', 'approval'];
+      return value.job_id === null && ['poshmark', 'depop'].includes(payload.marketplace)
+        && payload.refresh === true && plain(payload.listing) && size(value) <= 200_000
+        && Object.keys(payload).every(key => fields.includes(key)) ? value : null;
+    }
     if (Object.hasOwn(READS, value.type)) {
       if (value.type === 'marketplace.sales_history' && (!Object.hasOwn(payload, 'marketplace') || !Object.hasOwn(payload, 'settled'))) return null;
       const inputs = READS[value.type];

@@ -434,11 +434,14 @@ def _eligible_candidates(
     *,
     conv_id: str | None = None,
     respect_backoff: bool = True,
+    preview: bool = False,
 ) -> list[dict[str, Any]]:
-    done_today = _relisted_last_24h(db, rule.marketplace, moment)
-    remaining = max(min(int(rule.daily_cap), MAX_DAILY_CAP) - done_today, 0)
-    if remaining <= 0:
-        return []
+    remaining = 0
+    if not preview:
+        done_today = _relisted_last_24h(db, rule.marketplace, moment)
+        remaining = max(min(int(rule.daily_cap), MAX_DAILY_CAP) - done_today, 0)
+        if remaining <= 0:
+            return []
 
     age_cutoff = _sql_age_cutoff(rule, moment)
     query = (
@@ -490,9 +493,10 @@ def _eligible_candidates(
         .all()
         if (excluded_id := row[0]) is not None
     }
+    in_backoff = set()
     if respect_backoff:
         backoff_since = moment - RELIST_RETRY_BACKOFF
-        excluded_convs.update(
+        in_backoff = {
             excluded_id
             for row in db.query(MarketplaceRelistLog.conversation_id)
             .filter(
@@ -503,7 +507,9 @@ def _eligible_candidates(
             )
             .all()
             if (excluded_id := row[0]) is not None
-        )
+        }
+        if not preview:
+            excluded_convs.update(in_backoff)
     if rule.marketplace == "ebay":
         cycle_since = moment - EBAY_CYCLE_DEDUPE_WINDOW
         excluded_convs.update(
@@ -592,11 +598,99 @@ def _eligible_candidates(
         }
         if not matches_filters(item, rule.filters or {}):
             continue
+        if preview:
+            item.update(in_backoff=conv.id in in_backoff, conversation=conv, listing_fields=data)
         candidates.append(item)
 
     # Oldest listed items go first, bounded by daily cap.
     candidates.sort(key=lambda item: item["listed_at"] or datetime.min)
-    return candidates[:remaining]
+    return candidates if preview else candidates[:remaining]
+
+
+def preview_status(db: Session, *, marketplace: str | None = None, limit: int = 25) -> dict[str, Any]:
+    """Read rule state and advisory readiness without entering the relist runner."""
+    from anteroom.services.cloud_sessions import SUPPORTED_CLOUD_MARKETPLACES
+
+    moment = _now()
+    markets = (marketplace,) if marketplace else RELIST_MARKETPLACES
+    rules = {rule.marketplace: rule for rule in db.query(MarketplaceRelistRule)
+             .filter(MarketplaceRelistRule.marketplace.in_(markets)).all()}
+    pending_rows = (db.query(MarketplaceRelistLog.marketplace, MarketplaceRelistLog.conversation_id)
+                    .filter(MarketplaceRelistLog.marketplace.in_(markets), MarketplaceRelistLog.status == "relist_pending")
+                    .all())
+    pending = {market: {conv_id for name, conv_id in pending_rows if name == market} for market in markets}
+    previews = []
+    for market in markets:
+        rule = rules.get(market)
+        view = rule_view(db, rule, moment) if rule else _default_rule_view(market, _relisted_last_24h(db, market, moment))
+        if rule and rule.enabled:
+            candidates = _eligible_candidates(db, rule, moment, preview=True)
+            details, counts = _preview_candidates(db, rule, view["remaining_today"], candidates, pending[market], limit)
+        else:
+            details, counts = [], {"within_cap": 0, "over_cap": 0, "retry_backoff": 0, "pending": 0}
+        connection = "Signed-in Chrome with Anteroom Bridge"
+        if market in SUPPORTED_CLOUD_MARKETPLACES:
+            connection = f"Active marketplace cloud session or {connection}"
+        if market == "ebay":
+            connection = "Connected eBay API account"
+        previews.append({
+            **view, "candidate_counts": counts, "pending_items": len(pending[market]), "candidates": details,
+            "connection_requirement": connection,
+        })
+    return {"as_of": _iso(moment), "rules": previews, "connection_verified": False, "listing_mode": listing_mode.read(db),
+            "note": "Eligibility and listing checks use saved records. The next pass rechecks the rule, listing and connection."}
+
+
+def _preview_candidates(db: Session, rule: MarketplaceRelistRule, remaining: int, candidates: list[dict],
+                        pending: set[str], limit: int) -> tuple[list[dict], dict[str, int]]:
+    from anteroom.services import direct_preflight
+
+    market = rule.marketplace
+    counts = {"within_cap": 0, "over_cap": 0, "retry_backoff": 0, "pending": 0}
+    within_cap, blocked = [], []
+    rank = 0
+    for item in candidates:
+        conv_id = item["conversation_id"]
+        if not item["in_backoff"]:
+            # The scheduled planner applies its cap before excluding unsettled attempts.
+            rank += 1
+        state = "within_cap" if rank <= remaining else "over_cap"
+        if item["in_backoff"]:
+            state = "retry_backoff"
+        if conv_id in pending:
+            state = "pending"
+        counts[state] += 1
+        selected = within_cap if state == "within_cap" else blocked
+        if len(selected) < limit:
+            selected.append((item, state))
+    details = []
+    for item, state in (within_cap + blocked)[:limit]:
+        new_price = compute_relist_price(item["price"], rule)
+        detail = {
+            "conversation_id": item["conversation_id"], "title": item["title"], "listing_id": item["listing_id"],
+            "revision_id": item["revision_id"], "listed_at": _iso(item["listed_at"]),
+            "price": item["price"], "proposed_price": new_price, "status": state,
+        }
+        if state == "within_cap":
+            if item["revision_id"] is None:
+                gaps = [direct_preflight.gap("listing", "Save the listing's fields before relisting.")]
+            else:
+                data = item["listing_fields"]
+                if new_price is not None:
+                    data = _snapshot_with_relist_price(data, market, new_price)
+                prepared = direct_preflight.prepare(db, item["conversation"], data, market)
+                gaps = direct_preflight.gaps(prepared, market, direct_preflight.Context(db=db))
+            detail.update(local_fields_ready=not direct_preflight.blocking(gaps), listing_gaps=gaps)
+        details.append(detail)
+    return details, counts
+
+
+def _snapshot_with_relist_price(data: dict, marketplace: str, price: float) -> dict:
+    updated = copy.deepcopy(data)
+    path = CANONICAL_PRICE[marketplace]
+    set_path(updated, path, round(price, 2))
+    _write_locks(updated, locked_paths(updated) | {path})
+    return updated
 
 
 def _prepare_price_revision(
@@ -615,10 +709,7 @@ def _prepare_price_revision(
     current_val = price_for(rev.listing_json, marketplace)
     if current_val is not None and round(float(current_val), 2) == round(new_price, 2):
         return current_revision_id
-    updated = copy.deepcopy(rev.listing_json)
-    path = CANONICAL_PRICE[marketplace]
-    set_path(updated, path, round(new_price, 2))
-    _write_locks(updated, locked_paths(updated) | {path})
+    updated = _snapshot_with_relist_price(rev.listing_json, marketplace, new_price)
     saved = listing_persistence.save_revision(
         db,
         conv_id,

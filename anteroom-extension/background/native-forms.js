@@ -242,6 +242,8 @@ function poshmarkEditorForm(listing, catalog, display, styleTags = [], shippingD
 }
 
 function depopEditorForm(listing, attributes, parcels = [], shipFrom = '') {
+  const region = depopRegion(listing);
+  const currency = { US: 'US$', CA: 'CA$', GB: '£', AU: 'A$' }[region];
   const category = depopCategory(listing, attributes);
   const choices = [];
   for (const group of attributes.group || []) {
@@ -255,7 +257,8 @@ function depopEditorForm(listing, attributes, parcels = [], shipFrom = '') {
     }
   }
   const mapping = (attributes.category_size_mapping || []).find(row => row.department === category?.department && row.product_type === category?.productType);
-  const set = (attributes.size_sets || []).find(row => String(row.id) === String(mapping?.size_set_by_region?.US));
+  const setId = mapping?.size_set_by_region?.[region] ?? mapping?.size_set_by_region?.US;
+  const set = (attributes.size_sets || []).find(row => String(row.id) === String(setId));
   const resolvedSize = category ? depopSize(listing, category, attributes) : null;
   const specifics = listing.depop_specifics || {};
   const posted = depopFormFields(listing, attributes);
@@ -318,28 +321,33 @@ function depopEditorForm(listing, attributes, parcels = [], shipFrom = '') {
   const suggested = sizes.find(row => row.suggested);
   const parcelValue = specifics.parcelSize || specifics.parcel_size || suggested?.title || '';
   const parcelGroups = suggested ? Object.fromEntries(sizes.map(row => [row.title, row.suggested ? 'Suggested' : 'Change size'])) : {};
-  fields.push({ ...price, label: 'Item price', prefix: 'US$' },
+  const parcelFields = [
+    nativeEditorField('depop.note.carrier', region === 'US' ? 'Depop Shipping (via USPS)' : 'Depop Shipping', '', { input_type: 'note',
+      help: region === 'US' ? 'You’ll receive a pre-paid shipping label and a QR code when you sell. Use either of these to ship at your nearest US Post Office.'
+        : 'You’ll receive a pre-paid shipping label and a QR code when you sell.' }),
+    nativeEditorField('depop_specifics.shipFrom', 'Shipping from', shipFrom, { input_type: 'textarea', locked: true,
+      ...(shipFrom ? {} : { help: 'Sign in to Depop to show your shipping address.' }) }),
+    nativeEditorChoice('depop_specifics.parcelSize', 'Package size', parcelValue,
+      sizes.map(row => ({ label: row.title, value: row.id || row.title })),
+      { required: true, ...(Object.keys(parcelGroups).length ? { option_groups: parcelGroups } : {}),
+        ...(suggested ? { help: "Your selection sets your shipping label and the buyer's shipping cost. We've suggested a size based on your item — you can change it if needed." } : {}) }),
+  ];
+  fields.push({ ...price, label: 'Item price', prefix: currency },
   nativeEditorField('depop.note.fees', 'No selling fees.', '', { input_type: 'note' }),
   nativeEditorField('depop.note.boost', 'Learn more about boosting', '', { input_type: 'note' }),
   // Off unless the seller turns it on: Depop charges an extra fee on the sale.
   nativeEditorField('depop_specifics.boost', 'Promote your item in search to help it sell faster. Pay an extra 12% fee, only if you sell.',
     specifics.boost === true, { input_type: 'boolean' }),
-  nativeEditorField('depop.note.carrier', 'Depop Shipping (via USPS)', '', { input_type: 'note',
-    help: 'You’ll receive a pre-paid shipping label and a QR code when you sell. Use either of these to ship at your nearest USPS Post Office.' }),
-  nativeEditorField('depop_specifics.shipFrom', 'Shipping from', shipFrom, { input_type: 'textarea', locked: true,
-    ...(shipFrom ? {} : { help: 'Sign in to Depop to show your shipping address.' }) }),
-  nativeEditorChoice('depop_specifics.parcelSize', 'Package size', parcelValue,
-    sizes.map(row => ({ label: row.title, value: row.id || row.title })),
-    { required: true, ...(Object.keys(parcelGroups).length ? { option_groups: parcelGroups } : {}),
-      ...(suggested ? { help: "Your selection sets your shipping label and the buyer's shipping cost. We've suggested a size based on your item — you can change it if needed." } : {}) }),
+  ...(region === 'CA' ? [nativeEditorField('depop_specifics.domesticShippingPrice', 'Domestic shipping', specifics.domesticShippingPrice,
+    { input_type: 'number', required: true, min_value: 0, prefix: currency })] : parcelFields),
   nativeEditorField('depop_specifics.worldwideShipping.enabled', 'Offer worldwide shipping', specifics.worldwideShipping?.enabled === true,
     { input_type: 'boolean' }),
   // Always present so turning worldwide shipping on shows the fee without reloading the form.
   nativeEditorField('depop_specifics.worldwideShipping.price', 'Worldwide Shipping',
-    specifics.worldwideShipping?.price ?? '', { input_type: 'number', required: true, min_value: 0, max_value: 99.99, step: 0.01, prefix: 'US$' }));
+    specifics.worldwideShipping?.price ?? '', { input_type: 'number', required: true, min_value: 0, max_value: 99.99, step: 0.01, prefix: currency }));
   return { marketplace: 'depop', native: true, known: true, page_labels: true, category_id: depopDirectId(category),
     fields: depopPageLayout(fields),
-    notes: !sizes.length ? ['Sign in to Depop to load the seller’s parcel sizes.'] : [] };
+    notes: region !== 'CA' && !sizes.length ? ['Sign in to Depop to load the seller’s parcel sizes.'] : [] };
 }
 
 // Depop's sell page, read 2026-10-27: its headings, the hint under each field,
@@ -357,7 +365,7 @@ function depopPageLayout(fields) {
         : ['depop_specifics.source', 'depop_specifics.age', 'depop_specifics.style'].includes(path) ? 'Enhance your listing'
           : path === 'price' || path === 'depop.note.fees' ? 'Item price'
             : path === 'depop.note.boost' || path === 'depop_specifics.boost' ? 'Boost your listing'
-              : path === 'depop.note.carrier' || path === 'depop_specifics.shipFrom' || path === 'depop_specifics.parcelSize'
+              : path === 'depop.note.carrier' || path === 'depop_specifics.shipFrom' || path === 'depop_specifics.parcelSize' || path === 'depop_specifics.domesticShippingPrice'
                 || path.startsWith('depop_specifics.worldwideShipping.') ? 'Shipping'
                 : 'Info';
   return fields.map(field => {
@@ -515,49 +523,58 @@ const MERCARI_CONDITION_CHOICES = [
   ['Poor', 'Major flaws, may be damaged, for parts.'],
 ];
 
-async function readPoshmarkEditorForm(listing, deadline) {
+async function readPoshmarkEditorForm(listing, deadline, refresh = false) {
   // Wait for every read to settle before releasing a caller's operation claim.
   const origin = poshmarkOrigin(listing._seller_region);
-  const results = await Promise.allSettled([poshmarkCatalogData(deadline, origin), poshmarkCatalogDisplay(deadline, origin),
-    poshmarkStyleTags(deadline, origin), poshmarkShippingDiscounts(deadline, origin)]);
+  const results = await Promise.allSettled([poshmarkCatalogData(deadline, origin, refresh), poshmarkCatalogDisplay(deadline, origin, refresh),
+    poshmarkStyleTags(deadline, origin, refresh), poshmarkShippingDiscounts(deadline, origin)]);
   const failed = results.find(result => result.status === 'rejected');
   if (failed) throw failed.reason;
   return poshmarkEditorForm(listing, ...results.map(result => result.value));
 }
 
-async function handleNativeMarketplaceForm(msg) {
+async function handleNativeMarketplaceForm(msg, respond = result => sendBrowserResult(msg, result)) {
   const { marketplace, listing = {} } = msg.payload || {};
+  const refresh = msg.payload?.refresh === true;
   const deadline = Date.now() + 20000;
   let answered = false;
   const reply = result => {
     if (answered) return;
     answered = true;
-    sendBrowserResult(msg, result);
+    respond(result);
   };
   // A catalog read that never settles used to leave the form on "Loading…"
   // until Anteroom gave up and reported that Chrome had not answered.
-  const timer = setTimeout(() => reply({ ok: false, error: 'The marketplace catalog did not answer in time. Refresh choices.' }), 20000);
+  const timer = setTimeout(() => reply({ ok: false, error_code: 'timeout', error: 'The marketplace catalog did not answer in time. Refresh choices.' }), 20000);
   try {
     if (marketplace === 'poshmark') {
-      reply({ ok: true, form: await readPoshmarkEditorForm(listing, deadline) });
+      reply({ ok: true, refreshed: refresh, form: await readPoshmarkEditorForm(listing, deadline, refresh) });
     } else if (marketplace === 'depop') {
       // Address does not depend on taxonomy; parcel rates do. Start independent
       // reads together and bound optional account reads so they cannot consume
       // the entire form deadline.
-      const attributesRead = depopAttributes(deadline);
-      const addressRead = depopAccountRead('/api/v1/addresses/?providers=USPS', 'ship-from addresses', deadline, 5000)
+      const attributesRead = depopAttributes(deadline, refresh);
+      const region = depopRegion(listing);
+      const addressFilter = region === 'US' ? '?providers=USPS' : '';
+      // Choice refreshes need rates, never the seller's street address.
+      const addressRead = refresh || region === 'CA' ? Promise.resolve('') : depopAccountRead(`/api/v1/addresses/${addressFilter}`, 'ship-from addresses', deadline, 5000)
         .then(data => depopShipFromLine(depopAddress(listing, data))).catch(() => '');
-      const parcelsRead = attributesRead.then(async attributes => {
-        const params = depopShippingParams(depopCategory(listing, attributes));
-        const price = Number(listing.price);
+      const parcelsRead = region === 'CA' ? Promise.resolve([]) : attributesRead.then(async attributes => {
+        const params = depopShippingParams(depopCategory(listing, attributes), region);
+        const price = Number(depopPrice(listing));
         if (Number.isFinite(price) && price > 0) {
           params.set('item_cost', price.toFixed(2));
-          params.set('item_currency', 'USD');
+          params.set('item_currency', DEPOP_CURRENCIES[region]);
         }
         return depopParcelRows(await depopAccountRead(`/presentation/api/v1/shipping/providers/depop/?${params}`, 'parcel sizes', deadline, 5000));
-      }).catch(() => []);
+      }).catch(() => null);
       const [attributes, parcels, shipFrom] = await Promise.all([attributesRead, parcelsRead, addressRead]);
-      reply({ ok: true, form: depopEditorForm(listing, attributes, parcels, shipFrom) });
+      const form = depopEditorForm(listing, attributes, parcels || [], shipFrom);
+      if (refresh && region !== 'CA') {
+        if (parcels === null) form.notes = ['Depop parcel choices could not be refreshed.'];
+        else if (!parcels.length) form.notes = ['Depop returned no parcel choices for this listing.'];
+      }
+      reply({ ok: true, refreshed: refresh, form });
     } else if (marketplace === 'mercari') {
       const master = await mercariCatalogData(deadline);
       const prepared = mercariShippingListing(listing, await mercariShippingClasses(listing, deadline));
@@ -565,7 +582,8 @@ async function handleNativeMarketplaceForm(msg) {
     }
     else reply({ ok: false, error: 'This marketplace has no Chrome form reader.' });
   } catch (error) {
-    reply({ ok: false, error: error.message || 'The marketplace catalog could not be read.' });
+    reply(refresh ? { ok: false, error_code: error.code || 'network' }
+      : { ok: false, error: error.message || 'The marketplace catalog could not be read.' });
   } finally {
     clearTimeout(timer);
   }

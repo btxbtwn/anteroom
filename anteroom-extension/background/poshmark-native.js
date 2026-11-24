@@ -9,7 +9,7 @@ const POSHMARK_CONDITIONS = new Set(['nwt', 'uln', 'ug', 'uf']);
 const POSHMARK_STYLE_TAG = /^[A-Za-z0-9\-, ']{1,25}$/;
 
 // Poshmark's public catalog: departments, categories, size sets and colours.
-async function poshmarkCatalogData(deadline, origin = POSHMARK) {
+async function poshmarkCatalogData(deadline, origin = POSHMARK, refresh = false) {
   return await marketplaceCatalog(`poshmark:catalog:${origin}`, () => marketplaceCatalogRead('poshmark', 'category list', async () => {
     const { data } = await marketplaceFetch(`${origin}/vm-rest/meta/catalog_v2`, { marketplace: 'poshmark', step: 'catalog',
       credentials: 'omit', headers: { Accept: 'application/json' }, deadline, timeoutMs: 30000 });
@@ -18,31 +18,32 @@ async function poshmarkCatalogData(deadline, origin = POSHMARK) {
       throw marketplaceError('Poshmark\'s category list changed.', { code: 'schema_drift' });
     }
     return catalog;
-  }));
+  }), refresh);
 }
 
 // The order and grouping Poshmark's listing page shows its categories in
 // (departments, categories, and groups such as Global & Traditional Wear).
-async function poshmarkCatalogDisplay(deadline, origin = POSHMARK) {
+async function poshmarkCatalogDisplay(deadline, origin = POSHMARK, refresh = false) {
   return await marketplaceCatalog(`poshmark:catalog_display:${origin}`, () => marketplaceCatalogRead('poshmark', 'category order', async () => {
     const { data } = await marketplaceFetch(`${origin}/vm-rest/meta/catalog_display`, { marketplace: 'poshmark', step: 'catalog',
       credentials: 'omit', headers: { Accept: 'application/json' }, deadline, timeoutMs: 30000 });
     const display = data?.data?.[origin === POSHMARK ? 'us' : 'ca']?.catalog_display;
     if (!Array.isArray(display?.children)) throw marketplaceError('Poshmark\'s category list changed.', { code: 'schema_drift' });
     return display;
-  }));
+  }), refresh);
 }
 
 // Poshmark's own style tags. Free text is accepted too, so a failed read
 // only means the listing's tags go as the seller wrote them.
-async function poshmarkStyleTags(deadline, origin = POSHMARK) {
+async function poshmarkStyleTags(deadline, origin = POSHMARK, refresh = false) {
   try {
     return await marketplaceCatalog(`poshmark:style_tags:${origin}`, async () => {
       const { data } = await marketplaceFetch(`${origin}/vm-rest/meta/style_tags/top?${POSHMARK_QUERY}`, { marketplace: 'poshmark',
         step: 'style-tags', credentials: 'omit', headers: { Accept: 'application/json' }, deadline, timeoutMs: 10000 });
       return Array.isArray(data.data) ? data.data.map(String) : [];
-    });
+    }, refresh);
   } catch (error) {
+    if (refresh) throw error;
     marketplaceLog('poshmark', 'style-tags', { error_code: error.code || 'failed' });
     return [];
   }

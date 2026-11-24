@@ -20,7 +20,7 @@
   // and how it checks them: a signed approval on every relayed command, binding the photos
   // relayed with it (background/cloud-approvals.js). It no longer declares the writes-only
   // `marketplace.signed_approvals` of Bridges 0.2.56 to 0.2.67, which the server drops later.
-  const RELAY_CAPABILITIES = ['marketplace.actions', 'marketplace.regions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts', 'marketplace.signed_commands', 'marketplace.cloud_connect'];
+  const RELAY_CAPABILITIES = ['marketplace.actions', 'marketplace.regions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'marketplace.form.read', 'vendoo.drafts', 'marketplace.signed_commands', 'marketplace.cloud_connect'];
 
   function isMarketplaceCookieDomain(domain, root) {
     const clean = String(domain || '').trim().toLowerCase().replace(/^\./, '');
@@ -375,7 +375,9 @@
       // The marketplace call runs outside the state queue, like a form read. Its
       // reply goes back to the hosted API even if the page then signs out, so
       // a finished List is never mistaken for one that did not happen.
-      return { ok: true, reply: await runCommand({ ...command, payload }, photos) };
+      const reply = await runCommand({ ...command, payload }, photos);
+      if (command.type === 'marketplace.form' && !await current()) return { ok: false, error_code: 'account_changed' };
+      return { ok: true, reply };
     }
     return {
       handle: (message, sender) => message?.type === 'cloud.connection' && message.action === 'poshmark_form'

@@ -65,6 +65,28 @@ function mockResponse({ status = 200, body = {}, headers = {} }) {
   };
 }
 
+test('a refreshed cloud form reads choices without mutating the marketplace', async () => {
+  const paths = [];
+  const { result } = await executeMarketplaceOperation({
+    marketplace: 'poshmark',
+    cookies: makePoshmarkCookies('aaaaaaaaaaaaaaaaaaaaaaaa'),
+    command: { type: 'marketplace.form', payload: { marketplace: 'poshmark', listing: { title: 'Coat' }, refresh: true } },
+    httpFetch: async (url, init) => {
+      assert.equal(init.method, 'GET');
+      const route = new URL(url).pathname;
+      paths.push(route);
+      if (route.endsWith('catalog_v2')) return mockResponse({ body: { catalog: { departments: [] } } });
+      if (route.endsWith('catalog_display')) return mockResponse({ body: { data: { us: { catalog_display: { children: [] } } } } });
+      if (route.endsWith('style_tags/top')) return mockResponse({ body: { data: ['Vintage'] } });
+      if (route.endsWith('seller_shipping_discounts/post')) return mockResponse({ body: [{ id: 'a'.repeat(24), label: 'Current discount' }] });
+      throw new Error(`Unexpected read ${route}`);
+    },
+  });
+  assert.equal(result.refreshed, true);
+  assert.deepEqual(Array.from(result.form.fields.find(row => row.path === 'poshmark_specifics.shippingDiscountId').options), ['Current discount']);
+  assert.equal(paths.length, 4);
+});
+
 test('host allowlist and cookie hygiene', async () => {
   assert.equal(isPoshmarkCookieHost('poshmark.com'), true);
   assert.equal(isPoshmarkCookieHost('www.poshmark.com'), true);

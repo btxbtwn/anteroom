@@ -74,22 +74,29 @@ _preloaded_rows: contextvars.ContextVar[dict[tuple[str, str], list[dict] | None]
 _ebay_client_holder: contextvars.ContextVar[_LazyEbayClient | None] = contextvars.ContextVar(
     "marketplace_schemas_ebay_client", default=None,
 )
+_fresh_rows: contextvars.ContextVar[bool] = contextvars.ContextVar("marketplace_schemas_fresh", default=False)
 
 
 @contextmanager
-def schema_session(preloaded: dict[tuple[str, str], list[dict] | None] | None = None) -> Iterator[None]:
+def schema_session(preloaded: dict[tuple[str, str], list[dict] | None] | None = None, *,
+                   fresh: bool = False) -> Iterator[None]:
     """Scope preloaded DB cache rows and one lazy eBay client to a single form build."""
     rows_token = _preloaded_rows.set(preloaded) if preloaded is not None else None
     client_token = _ebay_client_holder.set(_LazyEbayClient())
+    fresh_token = _fresh_rows.set(True) if fresh else None
     try:
         yield
     finally:
         _ebay_client_holder.reset(client_token)
+        if fresh_token is not None:
+            _fresh_rows.reset(fresh_token)
         if rows_token is not None:
             _preloaded_rows.reset(rows_token)
 
 
 async def _cached_rows(marketplace: str, category_id: str) -> list[dict] | None:
+    if _fresh_rows.get() and marketplace != EBAY_DEFAULT_TREE:
+        return None
     preloaded = _preloaded_rows.get()
     key = (marketplace, category_id)
     if preloaded is not None and key in preloaded:

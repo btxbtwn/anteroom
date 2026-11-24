@@ -106,7 +106,7 @@ def _category_failure_types(exc: BaseException) -> str:
     return " > ".join(labels)
 
 
-def form_snapshot(db: Session, conv_id: str, marketplace: str, revision_id: str | None) -> FormSnapshot:
+def form_snapshot(db: Session, conv_id: str, marketplace: str, revision_id: str | None, *, preload: bool = True) -> FormSnapshot:
     """The plain data a form is built from: the marketplace snapshot, saved listing, and cached schemas.
 
     Rolls back before returning, so no connection is held while eBay, Chrome
@@ -122,7 +122,7 @@ def form_snapshot(db: Session, conv_id: str, marketplace: str, revision_id: str 
     # A draft nobody has generated yet still opens every form, empty, for the seller to fill in.
     listing_json = revision.listing_json if revision else {}
     snapshot = direct_preflight.prepare(db, conv, listing_json, marketplace)
-    schemas, choices = _preload_form_caches(db, snapshot, marketplace)
+    schemas, choices = _preload_form_caches(db, snapshot, marketplace) if preload else ({}, {})
     db.rollback()
     return FormSnapshot(snapshot=snapshot, listing_json=listing_json, schemas=schemas, choices=choices)
 
@@ -274,7 +274,7 @@ def ebay_specifics_order(schema: list[dict]) -> list[dict]:
     return ordered
 
 
-async def _ebay_choices(snapshot: dict) -> list[dict]:
+async def _ebay_choices(snapshot: dict, *, fresh: bool = False) -> list[dict]:
     """Payment, shipping and return policy and item location, as the page offers them for this listing.
 
     Each starts from the listing's own choice, then Settings, then the account's only one.
@@ -286,9 +286,12 @@ async def _ebay_choices(snapshot: dict) -> list[dict]:
 
     try:
         # The saved copy opens the form at once; eBay is asked again behind it.
-        profiles = await saved_choices.kept("ebay-policies", await account_id("ebay"), ebay_listings.listing_profiles)
+        profiles = (await ebay_listings.listing_profiles() if fresh else
+                    await saved_choices.kept("ebay-policies", await account_id("ebay"), ebay_listings.listing_profiles))
         note = ""
     except Exception as exc:  # noqa: BLE001 - the rest of the form still loads; List checks these again
+        if fresh:
+            raise
         profiles = {"fulfillment": [], "payment": [], "return": [], "locations": []}
         note = str(exc) if "access" in str(exc) else "eBay's policies could not be loaded. Reopen the listing to try again."
     own = own_listing_choices(snapshot)
@@ -312,7 +315,7 @@ async def _ebay_choices(snapshot: dict) -> list[dict]:
             row("returnPolicyId", "return", "Return policy", "Preferences")]
 
 
-async def ebay_form(snapshot: dict) -> dict:
+async def ebay_form(snapshot: dict, *, fresh_choices: bool = False) -> dict:
     from anteroom.services import marketplace_schemas
     from anteroom.services.ebay_fields import ebay_optional_raw
     from anteroom.services.ebay_listings import (CHARITY_PERCENTS, CONDITION_IDS, best_offer_terms, card_condition,
@@ -331,6 +334,8 @@ async def ebay_form(snapshot: dict) -> dict:
         try:
             return await marketplace_schemas.fields("ebay", category) if category else []
         except Exception as exc:  # noqa: BLE001 - never substitute a different form
+            if fresh_choices:
+                raise
             # Record before routes replace the cause with a safe HTTP response.
             # Never attach exc_info: even nested exception messages/URLs may carry credentials.
             # Suppress the raw chain too, in case another caller logs our safe wrapper.
@@ -341,13 +346,13 @@ async def ebay_form(snapshot: dict) -> dict:
 
     details = snapshot.get("ebay_specifics") or {}
     # All five independent eBay reads run concurrently and share one lazy client on cache misses.
-    with marketplace_schemas.schema_session():
+    with marketplace_schemas.schema_session(fresh=fresh_choices):
         schema_task = asyncio.create_task(load_schema())
         raw_schema, raw_variations, raw_selling, raw_choices = await asyncio.gather(
             schema_task,
-            _ebay_variations_field(snapshot, category, schema_task),
-            _ebay_format_fields(snapshot, category, details),
-            _ebay_choices(snapshot),
+            _ebay_variations_field(snapshot, category, schema_task, strict=fresh_choices),
+            _ebay_format_fields(snapshot, category, details, strict=fresh_choices),
+            _ebay_choices(snapshot, fresh=fresh_choices),
             return_exceptions=True,
         )
     if isinstance(raw_schema, BaseException):
@@ -504,6 +509,8 @@ async def _ebay_variations_field(
     snapshot: dict,
     category: str,
     schema: list[dict] | Awaitable[list[dict]],
+    *,
+    strict: bool = False,
 ) -> list[dict]:
     """Variations: what they differ by (aspects eBay enables for variations in this leaf) and one row each.
 
@@ -520,6 +527,8 @@ async def _ebay_variations_field(
     try:
         supported = await marketplace_schemas.ebay_variations_supported(None, category)
     except Exception:  # noqa: BLE001 - List checks it again before anything is written
+        if strict:
+            raise
         supported = None
     resolved_schema = await schema if inspect.isawaitable(schema) else schema
     aspects = [{"name": row["name"], "selection_only": row["mode"] == "selection",
@@ -541,7 +550,7 @@ _FORMAT_CLEARS = ["ebay_specifics.listingDuration", "ebay_specifics.auctionStart
                   "ebay_specifics.auctionReservePrice", "ebay_specifics.auctionBuyItNow"]
 
 
-async def _ebay_format_fields(snapshot: dict, category: str, details: dict) -> list[dict]:
+async def _ebay_format_fields(snapshot: dict, category: str, details: dict, *, strict: bool = False) -> list[dict]:
     """Format, duration and auction prices for this category.
 
     When the category allows an auction, the payload carries fixed-price and
@@ -559,6 +568,8 @@ async def _ebay_format_fields(snapshot: dict, category: str, details: dict) -> l
         try:
             allowed = await marketplace_schemas.ebay_listing_types(None, category)
         except Exception:  # noqa: BLE001 - fixed price needs no lookup; List checks auctions again
+            if strict:
+                raise
             note = "eBay's auction rules for this category could not be loaded. Reopen the listing to try again."
     auction_lengths = allowed.get(AUCTION) or []
     offers_auction = bool(auction_lengths) or kind == AUCTION

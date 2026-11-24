@@ -81,6 +81,31 @@ test('form contract keeps native rows/layout and strips uncontracted private res
   assert.equal(protocol.form({ ...FORM, marketplace: 'depop' }), null);
 });
 
+test('a relayed Depop choice refresh reads the catalog and parcels without loading the address', async () => {
+  const c = loadWorker();
+  const command = { type: 'marketplace.form', job_id: null, message_id: 'a'.repeat(32),
+    payload: { marketplace: 'depop', listing: { title: 'Coat' }, refresh: true, request_id: 'a'.repeat(32) } };
+  assert.equal(protocol.command(command), command);
+  assert.equal(protocol.command({ ...command, payload: { ...command.payload, confirm: true } }), null);
+  assert.equal(protocol.command({ ...command, payload: { ...command.payload, marketplace: 'mercari' } }), null);
+  c.depopAttributes = async (_deadline, refresh) => {
+    assert.equal(refresh, true);
+    return {};
+  };
+  c.depopAccountRead = async path => {
+    assert.match(path, /shipping\/providers\/depop/);
+    return [];
+  };
+  c.depopEditorForm = (_listing, _attributes, _parcels, shipFrom) => {
+    assert.equal(shipFrom, '');
+    return { marketplace: 'depop', fields: [] };
+  };
+  const reply = await c.runCloudMarketplaceCommand(command, []);
+  assert.equal(reply.ok, true);
+  assert.equal(reply.refreshed, true);
+  assert.equal(reply.form.marketplace, 'depop');
+});
+
 test('disconnecting during the final document probe also discards the result', async () => {
   const s = await connected(async () => ({ ok: true, form: FORM }));
   let finish, entered; let calls = 0;
