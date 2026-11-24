@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1217 — 2026-11-24
+
+- When your AI assistant schedules a listing, the publish that runs at that time now shows it was started by that assistant, and the assistant's status check says who scheduled it.
+
 ## 0.1.1216 — 2026-11-24
 
 - Connected AI agents (Claude, ChatGPT and others) can now look up your orders, your profit and loss for a period, your business expenses and a snapshot of your inventory, with the same numbers Anteroom shows. They only read; buyer details are never shared.

@@ -1,1 +1,0 @@
-- When your AI assistant schedules a listing, the publish that runs at that time now shows it was started by that assistant, and the assistant's status check says who scheduled it.
