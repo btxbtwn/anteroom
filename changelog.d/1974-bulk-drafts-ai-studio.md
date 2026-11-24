@@ -1,3 +1,0 @@
-- Bulk drafts keep their place in line while the worker is processing your drafts.
-- Inventory refreshes less often while drafts finish and photo edits save, and keeps the correct status for drafts still generating.
-- Keep working in other drafts while AI Studio finishes editing your photos.
