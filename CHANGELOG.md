@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1219 — 2026-11-24
+
+- Importing a listing from Mercari now brings over everything Mercari has for it: its category, condition, size, brand (or No brand), who pays shipping, ship on your own or Mercari's shipping label, package weight and size, ships-from ZIP, and Smart Pricing with its minimum price. Updating that listing from Anteroom afterwards no longer turns Smart Pricing on or switches who pays shipping.
+
 ## 0.1.1218 — 2026-11-24
 
 - Listings that Import all holds because they look like an item you already have now stay on the import screen after a reload and on your other devices, until you link them, import them as new, or mark them **Not the same item**.
