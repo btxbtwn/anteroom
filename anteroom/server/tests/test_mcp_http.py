@@ -150,6 +150,7 @@ def test_mcp_tools_list_and_read_write_lifecycle_respects_safety_invariant():
     expected_tools = {
         "search_inventory",
         "get_listing",
+        "get_listing_photos",
         "get_sales_analytics",
         "get_offer_activity",
         "get_sourcing_roi",
@@ -684,7 +685,7 @@ def test_hosted_today_concurrent_mutations_stay_seller_scoped(cloud, signing_key
 
 
 READ_TOOLS = {
-    "search_inventory", "get_listing", "get_sales_analytics", "get_offer_activity",
+    "search_inventory", "get_listing", "get_listing_photos", "get_sales_analytics", "get_offer_activity",
     "get_sourcing_roi", "run_etsy_audit", "get_needs_attention",
 }
 LISTING_WRITE_TOOLS = {
@@ -1253,3 +1254,169 @@ def test_an_mcp_write_that_finishes_after_the_timeout_is_not_saved(monkeypatch):
         assert not mcp_route._active_calls
     with SessionLocal() as db:
         assert db.query(Conversation).filter(Conversation.title == "Late draft").count() == 0
+
+
+def _jpeg(width: int, height: int, color: str = "navy") -> bytes:
+    import io
+
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new("RGB", (width, height), color).save(out, "JPEG")
+    return out.getvalue()
+
+
+def _call_tool_raw(client: TestClient, name: str, arguments: dict, extra_headers: dict | None = None) -> dict:
+    resp = _rpc(client, "tools/call", {"name": name, "arguments": arguments}, extra_headers=extra_headers)
+    assert resp.status_code == 200, resp.text
+    return resp.json()["result"]
+
+
+def _image_sides(item: dict) -> tuple[int, int]:
+    import base64
+    import io
+
+    from PIL import Image
+
+    assert item["type"] == "image" and item["mimeType"] == "image/jpeg"
+    assert set(item) == {"type", "mimeType", "data"}
+    with Image.open(io.BytesIO(base64.b64decode(item["data"]))) as image:
+        assert image.format == "JPEG"
+        return image.size
+
+
+def test_desktop_mcp_returns_listing_photos_as_images_in_display_order():
+    from anteroom.services.photo_store import photo_store
+
+    client = TestClient(app)
+    draft, error = _call_tool(client, "create_draft_listing", {"title": "Shirt to check"})
+    assert not error, draft
+    conv_id = draft["conversation_id"]
+    store = photo_store()
+    with SessionLocal() as db:
+        for order, (photo_id, size) in enumerate([("front", (2400, 1800)), ("tag", (600, 750)), ("missing", None)]):
+            key = store.new_key(conv_id, ".jpg")
+            if size is not None:
+                store.put(key, _jpeg(*size))
+            db.add(Photo(
+                id=f"{conv_id}-{photo_id}", conversation_id=conv_id, original_filename=f"{photo_id}.jpg",
+                stored_filename=key, mime_type="image/jpeg", size_bytes=1, display_order=order,
+            ))
+        db.commit()
+    revision = client.get(f"/api/conversations/{conv_id}/listing").json()
+
+    result = _call_tool_raw(client, "get_listing_photos", {"conversation_id": conv_id, "max_side": 800})
+    assert result["isError"] is False
+    summary = json.loads(result["content"][0]["text"])
+    assert [p["id"] for p in summary["photos"]] == [f"{conv_id}-front", f"{conv_id}-tag", f"{conv_id}-missing"]
+    images = result["content"][1:]
+    assert [_image_sides(images[0]), _image_sides(images[1])] == [(800, 600), (600, 750)]
+    # A photo that cannot be read is named instead of failing the whole call.
+    assert images[2] == {"type": "text", "text": f"Photo {conv_id}-missing could not be loaded."}
+    assert summary["pushed_to_marketplaces"] is False
+
+    only_tag = _call_tool_raw(client, "get_listing_photos", {"conversation_id": conv_id, "photo_ids": [f"{conv_id}-tag"]})
+    assert [item["type"] for item in only_tag["content"]] == ["text", "image"]
+
+    unknown, error = _call_tool(client, "get_listing_photos", {"conversation_id": conv_id, "photo_ids": ["nope"]})
+    assert error and "nope" in unknown["error"]
+    missing, error = _call_tool(client, "get_listing_photos", {"conversation_id": "no-such-listing"})
+    assert error and "not found" in missing["error"].lower()
+    # Reading photos never changes the listing.
+    assert client.get(f"/api/conversations/{conv_id}/listing").json() == revision
+
+
+def test_mcp_listing_photos_load_after_db_session_closes(monkeypatch):
+    from anteroom.routes import mcp as mcp_route
+
+    events: list[str] = []
+
+    async def fake_in_worker(fn):
+        events.append("session_enter")
+        try:
+            return fn(object())
+        finally:
+            events.append("session_exit")
+
+    def fake_run_call(_db, _payload, **_kwargs):
+        content = [{"type": "text", "text": "{}"}, mcp_http._photo_placeholder("p1", "user/conv/key.jpg", 512)]
+        return {"jsonrpc": "2.0", "id": 1, "result": {"content": content, "isError": False}}, 200, {}
+
+    def fake_read(key, *, timeout):
+        events.append(f"read:{key}")
+        assert 0 < timeout <= mcp_route._MCP_RPC_TIMEOUT_SECONDS
+        return _jpeg(1000, 500)
+
+    monkeypatch.setattr(mcp_route, "in_worker_session", fake_in_worker)
+    monkeypatch.setattr(mcp_route, "_run_mcp_call", fake_run_call)
+    monkeypatch.setattr(mcp_http, "_read_photo", fake_read)
+
+    resp = _rpc(TestClient(app), "ping")
+    assert resp.status_code == 200
+    assert events == ["session_enter", "session_exit", "read:user/conv/key.jpg"]
+    assert _image_sides(resp.json()["result"]["content"][1]) == (512, 256)
+
+
+def test_mcp_listing_photos_apply_exif_orientation(monkeypatch):
+    import io
+
+    from PIL import Image
+
+    # Stored 1000x500 with EXIF "rotate 90", as a phone camera saves a portrait shot.
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    buf = io.BytesIO()
+    Image.new("RGB", (1000, 500), "white").save(buf, "JPEG", exif=exif)
+    monkeypatch.setattr(mcp_http, "_read_photo", lambda _key, *, timeout: buf.getvalue())
+
+    content = [mcp_http._photo_placeholder("p1", "conv/key.jpg", 400)]
+    mcp_http.load_pending_photos([(content, 0)], deadline=float("inf"))
+    assert _image_sides(content[0]) == (200, 400)
+
+
+def test_hosted_mcp_listing_photos_are_seller_scoped(cloud, signing_keys, monkeypatch):  # noqa: F811
+    import httpx
+
+    from anteroom.services import hosted_photos
+
+    client, engine = cloud
+    tokens = {}
+    for seller in (USER_ID, BOB):
+        made = client.post(
+            "/api/settings/mcp-tokens", headers=headers(signing_keys, seller),
+            json={"name": "Photo check", "permissions": {"listings": "read"}},
+        )
+        assert made.status_code == 201, made.text
+        tokens[seller] = {"Authorization": f"Bearer {made.json()['token']}"}
+    conv_id = f"photos-{uuid.uuid4().hex[:8]}"
+    present, gone = (f"{USER_ID}/{conv_id}/{char * 32}.jpg" for char in ("a", "b"))
+    with Session(engine) as db:
+        db.add(Conversation(id=conv_id, user_id=USER_ID, status="draft", title="Hosted shirt"))
+        for order, key in enumerate((present, gone)):
+            db.add(Photo(
+                id=f"{conv_id}-{order}", user_id=USER_ID, conversation_id=conv_id, original_filename="p.jpg",
+                stored_filename=key, mime_type="image/jpeg", size_bytes=1, display_order=order,
+            ))
+        db.commit()
+
+    requested: list[str] = []
+
+    def storage(method, url, **kwargs):
+        assert method == "GET" and kwargs["timeout"] > 0
+        requested.append(url.rsplit("/anteroom-photos/", 1)[1])
+        return httpx.Response(200, content=_jpeg(1600, 1600)) if url.endswith(present) else httpx.Response(404)
+
+    monkeypatch.setenv("SUPABASE_URL", "https://storage.example.test")
+    monkeypatch.setenv("SUPABASE_SERVER_SECRET_KEY", "fixture-only")
+    monkeypatch.setattr(hosted_photos._storage, "request", storage)
+
+    result = _call_tool_raw(client, "get_listing_photos", {"conversation_id": conv_id}, extra_headers=tokens[USER_ID])
+    assert result["isError"] is False, result
+    assert requested == [present, gone]
+    assert _image_sides(result["content"][1]) == (1024, 1024)
+    assert result["content"][2] == {"type": "text", "text": f"Photo {conv_id}-1 could not be loaded."}
+
+    requested.clear()
+    bob, error = _call_tool(client, "get_listing_photos", {"conversation_id": conv_id}, extra_headers=tokens[BOB])
+    assert error and "not found" in bob["error"].lower()
+    assert requested == []
