@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1203 — 2026-11-24
+
+- Cheap items no longer fail to list on Poshmark because Smart Sell's Lowest Price was below Poshmark's fee. Anteroom leaves Smart Sell off when the lowest offer wouldn't cover the fee, and the Poshmark tab tells you before you list when a Lowest Price you set doesn't cover Poshmark's fee and your shipping discount.
+
 ## 0.1.1202 — 2026-11-24
 
 - Saving a listing no longer rewrites its title: a title that already names the size (Large, Men's L, 11/30, S (6-7)) stays as written, and a title you type is kept exactly as you typed it. Changing the size still updates it in the title.
