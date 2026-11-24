@@ -171,7 +171,12 @@ def test_populated_previous_release_upgrade_preserves_records_and_old_foreign_ke
     assert read_rows(engine, names) == before
     with engine.connect() as connection:
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []
+    retired = {"scout_checks"}
+    current_tables = set(sa.inspect(engine).get_table_names())
     for table, keys in old.items():
+        if table in retired:
+            assert table not in current_tables
+            continue
         assert all(key in sa.inspect(engine).get_foreign_keys(table) for key in keys)
 
 

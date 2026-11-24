@@ -223,14 +223,9 @@ Mobile and narrow screens use Photos, Chat, Listing, and Automation tabs.
 - Fully usable desktop and mobile layouts.
 - Settings → Connections → Remote access enables private Tailscale Serve to the loopback Anteroom (same process/data as the Mac UI). Copy the HTTPS link for phone browsers on the Tailnet; this remote-access path is browser-only (the iPhone app uses the hosted API). Funnel stays off.
 
-### Sourcing
+### Bought Boxes
 
-- Compare a combined wholesale buy list with supplier-only alternatives using the same purchase budget. Open supplier carts for the seller to review; never purchase or publish automatically.
-- Let sellers set shipping/preparation time and a target selling window. Pass dated window context and recorded sales from comparable calendar periods to sourcing research; show the window and fold historical context into optional details. Follow the canonical seasonal, evidence and selection rules in `skills/box-scout/SKILL.md`.
-- Keep sourcing rules and calculations in `skills/box-scout/`. The Anteroom service supplies catalog data, model research and saved preferences; it does not maintain a second rule set.
-- Show dated, linked, AI-reported sold examples, research recency, purchase costs, operating allowance, estimated profit, break-even sales and a lower-sales sensitivity result. Distinguish validated supplied data from independent source-page verification and measured demand from planning assumptions. Never claim a guaranteed sale or an uncalibrated confidence percentage.
-- Show all checked box variants outside the selected buy list immediately, including when there are no recommendations; do not collapse them or hide same-theme variants. Distinguish available inventory from missing sold evidence and financial exclusions. Explain why each alternative did not qualify using the skill’s decisions. Keep cart links disabled while saved planning preferences differ from the snapshot, including changes made during an ongoing refresh.
-- Store disposable sourcing snapshots and preferences in the local sourcing state file; rebuild obsolete snapshots without losing preferences. No inventory database schema change is needed for this workflow.
+- Record purchased wholesale boxes under **Analytics → Boxes** (`/api/boxes`), including cost, shipping, piece count, and unlisted pieces, so each box tracks what its linked listings have earned back after fees.
 
 ### Listing Library
 

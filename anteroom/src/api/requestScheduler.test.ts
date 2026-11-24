@@ -31,7 +31,7 @@ describe("requestScheduler", () => {
       return interactive.promise;
     });
 
-    const pBg = scheduleRequest("/api/sourcing", { signal: bgController.signal }, async () => {
+    const pBg = scheduleRequest("/api/automations", { signal: bgController.signal }, async () => {
       order.push("background:start");
       return "bg";
     });

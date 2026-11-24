@@ -38,14 +38,13 @@ def sold(price, market, listed, sold_at, **sale):
 
 
 @pytest.fixture
-def workspace(monkeypatch, tmp_path):
+def workspace(monkeypatch):
     load_models()
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
     monkeypatch.setattr(assistant_route, "SessionLocal", factory)
     monkeypatch.setattr("anteroom.database.SessionLocal", factory)
-    monkeypatch.setattr("anteroom.services.box_scout.state_path", lambda: tmp_path / "sourcing.json")
     db = factory()
     app = FastAPI()
     app.include_router(assistant_route.router)
@@ -100,15 +99,13 @@ def test_the_brief_summarizes_the_shop_and_points_to_the_rows(workspace):
     assert f"{coat.id} | " in brief.split("--- Asking-price changes")[1] and " | 150 | 120" in brief
     for heading in ("Inventory now", "Sales by range", "Sales over time", "Sales by marketplace",
                     "Sales by category", "Brands", "Wholesale boxes bought", "Ad spend the seller recorded",
-                    "Sale events", "Sourcing checks"):
+                    "Sale events"):
         assert f"--- {heading}" in brief
     assert "\n30d | 1 | 48 | 32 | 1 | " in brief.split("--- Sales by range ---")[1]
     assert "\n30d Levi's | 1 | 48 | 32 | 1 | " in brief.split("--- Brands ---")[1]
     assert '"store":"Raghouse"' in brief.split("--- Wholesale boxes by store ---")[1]
     assert "| Raghouse | Mixed denim |" in brief.split("--- Wholesale boxes bought")[1]
     assert "etsy | 2026-09-01 | 2026-09-30 | 31" in brief.split("--- Ad spend the seller recorded ---")[1]
-    assert "No sourcing check has finished yet" in brief.split("--- Sourcing buy list ---")[1]
-    assert "--- Best boxes on the Sourcing tab (0 of 0) ---\nNo boxes in the last sourcing check." in brief
     assert "What the seller says" not in brief
     shop.lookups.close()
 
@@ -343,11 +340,8 @@ def test_every_way_a_model_writes_a_lookup_is_read_as_one():
     # An empty block is still a lookup, so it gets an answer instead of being shown.
     assert sql("```sql\n```") == ""
     assert sql("No lookup here.") is None and sql("```python\nprint(1)\n```") is None
-    media = business_assistant.find_lookup("```view_box_media\nraghouse:1\n```")
-    assert (media.kind, media.body) == ("media", "raghouse:1")
     assert business_assistant.lookup_label("-- sales by size.\nSELECT 1") == "Looking up sales by size…"
     assert business_assistant.lookup_label("SELECT 1") == "Looking up more detail…"
-    assert business_assistant.lookup_label(media) == "Looking at the box photos…"
 
 
 class Provider:
@@ -1090,7 +1084,7 @@ def test_cancelled_lookup_records_attempt_and_wait(monkeypatch):
     timing = business_assistant.AnswerTiming()
 
     async def consume():
-        async for _ in business_assistant.answer(Provider(('```view_box_media\nbox:1\n```',)), [], None, timing):
+        async for _ in business_assistant.answer(Provider(('```sql\nSELECT 1\n```',)), [], None, timing):
             pass
 
     with pytest.raises(asyncio.CancelledError):
@@ -1572,8 +1566,6 @@ def test_an_answer_without_a_lookup_never_builds_the_copy(workspace, monkeypatch
 
 
 def test_the_copy_is_built_off_the_event_loop(workspace, monkeypatch):
-    from anteroom.services import box_media
-
     db, _client = workspace
     seed(db)
     real = business_assistant._lookup_database
@@ -1587,33 +1579,20 @@ def test_the_copy_is_built_off_the_event_loop(workspace, monkeypatch):
             built_on_loop.append(False)
         return real(tables)
 
-    async def fake_view_boxes(chosen):
-        return [box_media.BoxView(box_id=row["id"], title=row["title"], store=row["store"], url=row["url"])
-                for row in chosen]
-
     monkeypatch.setattr(business_assistant, "_lookup_database", checked)
-    monkeypatch.setattr(box_media, "view_boxes", fake_view_boxes)
 
     async def exercise():
         shop_sql = business_assistant.read_shop(db, now=NOW)
         try:
             result = await business_assistant.run_any_lookup(
-                business_assistant.Lookup("sql", "SELECT count(*) FROM listings", 0, 1), shop_sql, [],
+                business_assistant.Lookup("sql", "SELECT count(*) FROM listings", 0, 1), shop_sql,
             )
             assert isinstance(result, str) and result.endswith("\n3")
         finally:
             shop_sql.close()
 
-        shop_media = business_assistant.read_shop(db, now=NOW)
-        try:
-            await business_assistant.run_any_lookup(
-                business_assistant.Lookup("media", "raghouse:1", 0, 1), shop_media, [],
-            )
-        finally:
-            shop_media.close()
-
     asyncio.run(exercise())
-    assert built_on_loop == [False, False]
+    assert built_on_loop == [False]
 
 
 def test_sold_listings_skip_the_size_audit(workspace, monkeypatch):
@@ -1881,65 +1860,6 @@ def test_more_than_three_lookups_in_one_round_are_capped(workspace):
     assert "1 more lookup was not run: at most 3 run at once." in fed_back
 
 
-def test_sql_and_box_media_lookups_combine_text_then_images(workspace, monkeypatch):
-    from anteroom.services import box_media
-
-    db, _client = workspace
-    seed(db)
-    base_shop = business_assistant.read_shop(db, now=NOW)
-    first_box = {
-        "id": "raghouse:1", "store": "Raghouse", "title": "Vintage Tees 20 pcs",
-        "url": "https://raghouse.example/lot/1",
-    }
-    second_box = {**first_box, "id": "raghouse:2", "title": "Denim", "url": "https://raghouse.example/lot/2"}
-    shop = business_assistant.Shop(
-        brief=base_shop.brief,
-        tables={**base_shop.tables, "sourcing_boxes": [first_box, second_box]},
-    )
-
-    async def fake_view_boxes(chosen):
-        return [
-            box_media.BoxView(
-                box_id=row["id"], title=row["title"], store=row["store"], url=row["url"],
-                images=(
-                    [("front", "data:image/jpeg;base64,AAAA"), ("back", "data:image/jpeg;base64,BBBB")]
-                    if row["id"] == first_box["id"] else [("detail", "data:image/jpeg;base64,CCCC")]
-                ),
-            )
-            for row in chosen
-        ]
-
-    monkeypatch.setattr(box_media, "view_boxes", fake_view_boxes)
-    mixed = (
-        f"{FENCE}view_box_media\nraghouse:1\n{FENCE}\n"
-        f"{FENCE}sql\n-- total listings\nSELECT count(*) AS total FROM listings\n{FENCE}\n"
-        f"{FENCE}view_box_media\nraghouse:2\n{FENCE}"
-    )
-    provider = Provider((mixed,), ("Looked at both.",))
-    try:
-        async def collect():
-            return [event async for event in business_assistant.answer(
-                provider, [{"role": "user", "content": "Check listings and photos"}], shop,
-            )]
-        events = asyncio.run(collect())
-    finally:
-        shop.close()
-        base_shop.close()
-
-    statuses = [text for kind, text in events if kind == "status"]
-    assert statuses == ["Looking at the box photos…", "Looking up total listings…", "Looking at the box photos…"]
-    fed_back = provider.calls[1][-1]["content"]
-    assert isinstance(fed_back, list)
-    assert fed_back[0]["type"] == "text"
-    assert "Lookup 2 of 3 (total listings):" in fed_back[0]["text"]
-    assert "Box raghouse:1 (Vintage Tees 20 pcs, Raghouse): VIEWED — images 1-2: #1 front; #2 back" in fed_back[0]["text"]
-    assert "Box raghouse:2 (Denim, Raghouse): VIEWED — images 3-3: #3 detail" in fed_back[0]["text"]
-    assert fed_back[1:] == [
-        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data}"}}
-        for data in ("AAAA", "BBBB", "CCCC")
-    ]
-
-
 def test_failing_and_good_lookups_in_one_round_both_report(workspace, monkeypatch):
     db, client = workspace
     seed(db)
@@ -2062,20 +1982,20 @@ def test_listing_details_table_populates_lazily_only_when_referenced(workspace):
     shop = business_assistant.read_shop(db, now=NOW)
     try:
         res_listings = asyncio.run(business_assistant.run_any_lookup(
-            business_assistant.Lookup("sql", "SELECT count(*) FROM listings", 0, 1), shop, [],
+            business_assistant.Lookup("sql", "SELECT count(*) FROM listings", 0, 1), shop,
         ))
         assert isinstance(res_listings, str) and res_listings.endswith("\n3")
         assert shop._details_loaded is False
 
         res_details = asyncio.run(business_assistant.run_any_lookup(
-            business_assistant.Lookup("sql", "SELECT count(*) FROM listing_details", 0, 1), shop, [],
+            business_assistant.Lookup("sql", "SELECT count(*) FROM listing_details", 0, 1), shop,
         ))
         assert isinstance(res_details, str) and res_details.endswith("\n3")
         assert shop._details_loaded is True
 
         # Read-only authorizer stays active after on-demand table population.
         denied = asyncio.run(business_assistant.run_any_lookup(
-            business_assistant.Lookup("sql", "DELETE FROM listing_details", 0, 1), shop, [],
+            business_assistant.Lookup("sql", "DELETE FROM listing_details", 0, 1), shop,
         ))
         assert isinstance(denied, str) and "not authorized" in denied.lower()
     finally:

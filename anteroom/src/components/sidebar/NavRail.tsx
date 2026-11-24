@@ -1,7 +1,6 @@
 import { useWorkspaceRuntime } from "../../app/runtime";
 import { useEffect, useRef, useState, type ComponentType, type FocusEvent, type PointerEvent } from "react";
 import {
-  BoxIcon,
   CalendarClockIcon,
   ChartColumnIcon,
   HomeIcon,
@@ -102,7 +101,6 @@ const RAIL_LABEL =
 export function NavRail({
   activeView,
   onOpenHome,
-  onOpenSourcing,
   onOpenAnalytics,
   onOpenMarketplaces,
   onOpenAutomations,
@@ -111,7 +109,6 @@ export function NavRail({
 }: {
   activeView: WorkspaceView;
   onOpenHome: () => void;
-  onOpenSourcing: () => void;
   onOpenAnalytics: () => void;
   onOpenMarketplaces: () => void;
   onOpenAutomations: () => void;
@@ -185,7 +182,6 @@ export function NavRail({
         <nav aria-label="Pages" className="flex min-h-0 flex-1 flex-col gap-0.5">
           <RailButton page="home" label="Today" icon={HomeIcon} active={activeView === "home"} onClick={onOpenHome} />
           <RailButton page="assistant" label="Assistant" icon={MessageCircleIcon} active={activeView === "assistant"} onClick={onOpenAssistant} />
-          <RailButton page="sourcing" label="Sourcing" icon={BoxIcon} active={activeView === "sourcing"} onClick={onOpenSourcing} />
           <RailButton page="analytics" label="Analytics" icon={ChartColumnIcon} active={activeView === "analytics"} onClick={onOpenAnalytics} />
           <RailButton page="marketplaces" label="Marketplaces" icon={StoreIcon} active={activeView === "marketplaces"} onClick={onOpenMarketplaces} />
           <RailButton page="automations" label="Automations" icon={CalendarClockIcon} active={activeView === "automations"} onClick={onOpenAutomations} />

@@ -9,11 +9,10 @@ export const HOME_CRUMB = "Today";
 export const LISTINGS_CRUMB = "Inventory";
 export const SETTINGS_CRUMB = "Settings";
 export const ANALYTICS_CRUMB = "Analytics";
-export const SOURCING_CRUMB = "Sourcing";
 export const ASSISTANT_CRUMB = "Assistant";
 export const UNTITLED_LISTING = "Untitled listing";
 
-export type WorkspaceView = "home" | "suggestions" | "listings" | "inventory" | "settings" | "analytics" | "sourcing" | "assistant" | "marketplaces" | "automations";
+export type WorkspaceView = "home" | "suggestions" | "listings" | "inventory" | "settings" | "analytics" | "assistant" | "marketplaces" | "automations";
 
 export function workspaceCrumbs(
   view: WorkspaceView,
@@ -31,9 +30,6 @@ export function workspaceCrumbs(
   }
   if (view === "analytics") {
     return { context: ANALYTICS_CRUMB, title: null };
-  }
-  if (view === "sourcing") {
-    return { context: SOURCING_CRUMB, title: null };
   }
   if (view === "assistant") {
     const title = String(detail || "").trim();

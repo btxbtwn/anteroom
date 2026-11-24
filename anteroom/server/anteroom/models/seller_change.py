@@ -79,8 +79,7 @@ TOPIC_BY_TABLE: dict[str, str | None] = {
     "marketplace_offer_floors": "automations",
     "promotion_automations": "automations",
     "promotion_runs": "automations",
-    "source_boxes": "sourcing",
-    "scout_checks": "sourcing",
+    "source_boxes": "sales",
     # Streamed generation progress: the device running it already polls live.
     "background_task_events": None,
     "cloud_operation_journals": None,

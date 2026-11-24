@@ -14,7 +14,7 @@ def _skills_read_by_server() -> set[str]:
 
 def test_hosted_image_copies_every_skill_the_server_reads():
     skills = _skills_read_by_server()
-    assert {'list-this', 'measure-this', 'box-scout'} <= skills
+    assert {'list-this', 'measure-this'} <= skills
     dockerfile = (ROOT / 'deploy/fly/Dockerfile').read_text(encoding='utf-8')
     dockerignore = (ROOT / '.dockerignore').read_text(encoding='utf-8').splitlines()
     for name in sorted(skills):

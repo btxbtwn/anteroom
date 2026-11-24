@@ -441,7 +441,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             from anteroom.database import engine
             from anteroom.services import (
                 background_worker, hosted_automation_scheduler, hosted_job_watchdog, hosted_offer_scheduler,
-                hosted_promotion_scheduler, hosted_sale_checks, hosted_sourcing_scheduler, hosted_sales_scheduler,
+                hosted_promotion_scheduler, hosted_sale_checks, hosted_sales_scheduler,
                 plaid_expenses,
             )
             from anteroom.services import background_tasks as queue
@@ -472,8 +472,6 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
                 (lambda: hosted_offer_scheduler.serve(engine), 'anteroom-offers'),
                 # Frees the marketplace slot a restart left held and reads unconfirmed results.
                 (lambda: hosted_job_watchdog.serve(engine), 'anteroom-watchdog'),
-                # Refreshes each seller's due buy list, as the Mac's Sourcing timer does.
-                (lambda: hosted_sourcing_scheduler.serve(engine), 'anteroom-sourcing'),
                 (lambda: hosted_sales_scheduler.serve(engine), 'anteroom-sales'),
                 (lambda: plaid_expenses.serve(hosted=True), 'anteroom-plaid'),
                 # Cloud marketplace sales and promotion schedulers run only on worker/all Machines.
@@ -605,9 +603,9 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     from anteroom.routes.hosted_attachments import router as attachment_router
     app.include_router(attachment_router)
     from anteroom.routes import analytics, boxes, home, mcp, sale_calendar, sales_ledger
-    from anteroom.routes import business_expenses, plaid, scout, sourcing
+    from anteroom.routes import business_expenses, plaid
     for shared_router in (analytics.router, boxes.router, home.router, mcp.router, sale_calendar.router, sales_ledger.router,
-                          sourcing.router, scout.router, business_expenses.router, plaid.router):
+                          business_expenses.router, plaid.router):
         app.include_router(shared_router)
     from anteroom.routes.photos import edit_router
     app.include_router(edit_router)

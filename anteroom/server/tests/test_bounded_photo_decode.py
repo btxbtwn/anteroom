@@ -9,10 +9,8 @@ import time
 import warnings
 
 import pytest
-from fastapi.testclient import TestClient
 from PIL import Image
 
-from anteroom.main import app
 from anteroom.services import ebay_actions, photos, safe_fetch
 from anteroom.services.photo_store import LocalPhotoStore
 
@@ -63,33 +61,6 @@ def test_a_hosted_upload_is_stored_as_a_bounded_jpeg(monkeypatch):
     with Image.open(io.BytesIO(kept[meta["stored_filename"]])) as image:
         assert image.format == "JPEG"
         assert max(image.size) == 2400
-
-
-def test_scout_photos_are_processed_off_the_event_loop(monkeypatch):
-    seen = []
-
-    def process(contents, filename, content_type, *, collection_id):
-        try:
-            asyncio.get_running_loop()
-            seen.append("event loop")
-        except RuntimeError:
-            seen.append("worker thread")
-        raise ValueError("stop here")
-
-    monkeypatch.setattr("anteroom.routes.scout.process_bytes", process)
-    response = TestClient(app).post("/api/scout", files=[("files", ("tag.jpg", b"x", "image/jpeg"))])
-    assert response.status_code == 400
-    assert seen == ["worker thread"]
-
-
-def test_an_oversized_scout_photo_is_refused_before_it_is_read(monkeypatch):
-    monkeypatch.setattr("anteroom.routes.scout.MAX_PHOTO_SIZE_MB", 1)
-    monkeypatch.setattr("anteroom.routes.scout.process_bytes", lambda *a, **k: pytest.fail("processed"))
-    response = TestClient(app).post(
-        "/api/scout", files=[("files", ("tag.jpg", b"\xff\xd8" + b"0" * (2 * 1024 * 1024), "image/jpeg"))],
-    )
-    assert response.status_code == 413
-    assert "too large" in response.json()["detail"]
 
 
 def test_an_ebay_decompression_bomb_is_a_422(monkeypatch):

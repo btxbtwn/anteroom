@@ -10,7 +10,7 @@ async function cached(client: QueryClient, queryKey: unknown[], fail = false) {
 describe("what the hosted app keeps on the device", () => {
   it("keeps the inventory and account-wide page reads", async () => {
     const client = new QueryClient();
-    for (const key of [["conversations"], ["sourcing"], ["automations"], ["sales-ledger", { start: "2026-10-10" }, 1], ["settings-ui"]]) {
+    for (const key of [["conversations"], ["boxes"], ["automations"], ["sales-ledger", { start: "2026-10-10" }, 1], ["settings-ui"]]) {
       expect(keepsOnDevice(await cached(client, key)), JSON.stringify(key)).toBe(true);
     }
   });

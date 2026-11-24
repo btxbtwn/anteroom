@@ -1,5 +1,6 @@
 import { SalesLedger } from "./SalesLedger";
 import { AccountingChoice, BusinessExpenses, expenseMoney, type AccountingMode } from "./BusinessExpenses";
+import { BoughtBoxes } from "./BoughtBoxes";
 import { WorkspaceTabs } from "./ebay/WorkspaceTabs";
 import "./ebay/ebay.css";
 import { useState } from "react";
@@ -49,11 +50,12 @@ export function AnalyticsPage({ onOpenListing }: Props) {
       ? "Expenses" : "Sales records",
   );
   const [mode, setMode] = useState<AccountingMode>("accrual");
-  return <WorkspacePage width="expanded"><h1 className="sr-only">Analytics</h1><WorkspaceTabs label="Analytics views" main items={["Sales records", "Inventory analytics", "Expenses", "Profit & loss"]} value={view} onChange={setView}>
+  return <WorkspacePage width="expanded"><h1 className="sr-only">Analytics</h1><WorkspaceTabs label="Analytics views" main items={["Sales records", "Inventory analytics", "Expenses", "Profit & loss", "Boxes"]} value={view} onChange={setView}>
     {view === "Sales records"
       ? <SalesLedger onOpenListing={onOpenListing} />
       : view === "Inventory analytics" ? <InventoryAnalyticsView onOpenListing={onOpenListing} mode={mode} setMode={setMode} />
-        : <BusinessExpenses key={view} report={view === "Profit & loss"} mode={mode} setMode={setMode} />}
+        : view === "Boxes" ? <BoughtBoxes />
+          : <BusinessExpenses key={view} report={view === "Profit & loss"} mode={mode} setMode={setMode} />}
   </WorkspaceTabs></WorkspacePage>;
 }
 

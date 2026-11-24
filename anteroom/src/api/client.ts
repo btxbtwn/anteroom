@@ -81,13 +81,8 @@ import type {
   InventoryAnalytics,
   MeasurementReadResult,
   SizeTagReadResult,
-  ScoutCheck,
-  ScoutState,
   SourceBoxInput,
   SourceBoxes,
-  SourcingPrefs,
-  SourcingEvidence,
-  SourcingState,
 } from "./types";
 import { readSse } from "./sse";
 import { AssistantRefused, type AssistantMemory, type AssistantMessage, type AssistantStreamHandlers, type AssistantThread } from "./assistant";
@@ -728,22 +723,6 @@ export const api = {
         method: "POST",
       }),
   },
-  scout: {
-    list: () => request<ScoutState>("/scout"),
-    create: async (files: File[], askingPrice: number | null): Promise<ScoutCheck> => {
-      const form = new FormData();
-      files.forEach((file) => form.append("files", file));
-      if (askingPrice != null) form.append("asking_price", String(askingPrice));
-      const response = await studioFetch(`${BASE}/scout`, { method: "POST", body: form });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(errorMessage(data, `Check failed: ${response.status}`));
-      return data as ScoutCheck;
-    },
-    setAskingPrice: (id: string, askingPrice: number | null) =>
-      request<ScoutCheck>(`/scout/${id}`, { method: "PATCH", body: JSON.stringify({ asking_price: askingPrice }) }),
-    decide: (id: string, decision: "bought" | "passed") =>
-      request<ScoutCheck>(`/scout/${id}/decision`, { method: "POST", body: JSON.stringify({ decision }) }),
-  },
   assistant: {
     threads: (options?: ReadOptions) => read<AssistantThread[]>("/assistant/threads", options),
     createThread: () => request<AssistantThread>("/assistant/threads", { method: "POST" }),
@@ -904,19 +883,6 @@ export const api = {
     update: (id: string, body: Partial<SourceBoxInput>) =>
       request<SourceBoxes>(`/boxes/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
     remove: (id: string) => request<SourceBoxes>(`/boxes/${id}`, { method: "DELETE" }),
-  },
-  sourcing: {
-    // A stalled read ends in an error with Try again, not an endless skeleton.
-    get: () => requestWithTimeout<SourcingState>("/sourcing", {}, "Sourcing took too long to answer."),
-    refresh: () => request<SourcingState>("/sourcing/refresh", { method: "POST" }),
-    evidence: (theme: string) =>
-      request<SourcingEvidence>(`/sourcing/evidence?theme=${encodeURIComponent(theme)}`),
-    savePrefs: (prefs: Partial<SourcingPrefs>) =>
-      request<SourcingState>("/sourcing/prefs", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(prefs),
-      }),
   },
   ebay: {
     importCandidates: (page: number) => request<MarketplaceImportPage>(`/ebay/import/active?page=${page}`),

@@ -262,7 +262,6 @@ def assistant(monkeypatch, tmp_path):
     factory = sessionmaker(bind=engine)
     monkeypatch.setattr(assistant_route, "SessionLocal", factory)
     monkeypatch.setattr("anteroom.database.SessionLocal", factory)
-    monkeypatch.setattr("anteroom.services.box_scout.state_path", lambda: tmp_path / "sourcing.json")
     monkeypatch.setenv(sandbox.ENV_VAR, "1")
     monkeypatch.setattr(provider_deadlines, "STREAM_IDLE_SEC", SHORT)
     monkeypatch.setattr(provider_deadlines, "CALL_DEADLINE_SEC", SHORT)

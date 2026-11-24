@@ -30,8 +30,8 @@ function render(activeView: WorkspaceView = "listings", onOpenHome = noop) {
   act(() => {
     root.render(
       <QueryClientProvider client={new QueryClient()}>
-        <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(), views: new Set(["home", "assistant", "sourcing", "analytics", "marketplaces", "automations", "settings"]), marketplaceForms: new Set(), actionMarketplaces: new Set() }}>
-          <NavRail activeView={activeView} onOpenHome={onOpenHome} onOpenSourcing={noop} onOpenAnalytics={noop}
+        <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(), views: new Set(["home", "assistant", "analytics", "marketplaces", "automations", "settings"]), marketplaceForms: new Set(), actionMarketplaces: new Set() }}>
+          <NavRail activeView={activeView} onOpenHome={onOpenHome} onOpenAnalytics={noop}
             onOpenMarketplaces={noop} onOpenAutomations={noop} onOpenAssistant={noop} onOpenSettings={noop} />
         </WorkspaceRuntimeProvider>
       </QueryClientProvider>,
@@ -50,7 +50,7 @@ const press = (key: string, target: EventTarget = document.body) =>
 it("names every page in a labelled navigation and marks the open one", () => {
   render("marketplaces");
   const nav = container.querySelector('nav[aria-label="Pages"]')!;
-  for (const label of ["Today", "Assistant", "Sourcing", "Analytics", "Marketplaces", "Automations", "Settings"]) {
+  for (const label of ["Today", "Assistant", "Analytics", "Marketplaces", "Automations", "Settings"]) {
     expect(nav.querySelector(`button[aria-label="${label}"]`)?.textContent).toContain(label);
   }
   expect(nav.querySelector('[aria-current="page"]')?.getAttribute("aria-label")).toBe("Marketplaces");

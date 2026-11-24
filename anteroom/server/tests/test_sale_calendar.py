@@ -281,12 +281,6 @@ def test_tied_weekday_windows_do_not_recommend_an_arbitrary_winner(monkeypatch):
     assert advice['suggested_end'] == (NOW.date() + timedelta(days=6)).isoformat()
 
 
-def test_unknown_sale_prices_are_not_used_to_estimate_fees():
-    from dataclasses import replace
-    from anteroom.services import box_scout
-    missing = replace(sale(NOW - timedelta(days=1)), sold_price=None)
-    assert box_scout.measured_fees([missing] * box_scout.MEASURED_MIN_SALES, NOW) is None
-
 @pytest.mark.parametrize("record", [False, True])
 def test_invalid_time_zone_gives_actionable_copy_without_validation_prefix(workspace, record):
     db, client = workspace

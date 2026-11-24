@@ -31,12 +31,11 @@ export const TOPIC_QUERY_KEYS: Record<string, readonly string[]> = {
   ],
   assistant: ["assistant"],
   sales: ["marketplace-sales", "sales-ledger", "sale-calendar", "sale-detection", "analytics", "conversations",
-    "business-expenses", "profit-and-loss", "plaid-status", "home"],
+    "business-expenses", "profit-and-loss", "plaid-status", "boxes", "home"],
   automations: [
     "automations", "automation-approvals", "automation-gaps", "promotion-automations", "promotions",
     "promotion-floors", "ebay-offers", "price-drop-preview", "offer-analytics", "offer-log", "home",
   ],
-  sourcing: ["sourcing", "boxes", "scout", "profit-and-loss"],
 };
 
 export function queryKeyMatchesTopic(topic: string, queryKey: QueryKey): boolean {

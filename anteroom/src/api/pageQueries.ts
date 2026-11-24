@@ -36,7 +36,6 @@ export function homeQuery(timezone = browserTimeZone()) {
   };
 }
 
-export const sourcingQuery = { queryKey: ["sourcing"] as const, queryFn: api.sourcing.get, gcTime: KEEP_MS };
 export const boxesQuery = { queryKey: ["boxes"] as const, queryFn: api.boxes.list, gcTime: KEEP_MS };
 
 export const automationsQuery = { queryKey: ["automations"] as const, queryFn: () => api.automations.list(), gcTime: KEEP_MS };
@@ -102,9 +101,7 @@ export async function prefetchPageReads(client: QueryClient, runtime: Runtime, n
   if (runtime.views.has("analytics")) {
     tasks.push(() => prefetch(salesLedgerQuery({ start, end, q: "", attention: "all", sort: "newest" }, 1)));
     tasks.push(() => prefetch(salesOverviewQuery(start, end, "all")));
-  }
-  if (runtime.views.has("sourcing")) {
-    tasks.push(() => prefetch(sourcingQuery), () => prefetch(boxesQuery));
+    tasks.push(() => prefetch(boxesQuery));
   }
   if (runtime.views.has("automations")) {
     tasks.push(

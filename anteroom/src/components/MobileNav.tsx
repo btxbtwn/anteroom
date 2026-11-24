@@ -1,7 +1,6 @@
 import { useWorkspaceRuntime } from "../app/runtime";
 import type { ComponentType } from "react";
 import {
-  BoxIcon,
   CalendarClockIcon,
   ChartColumnIcon,
   HomeIcon,
@@ -17,14 +16,13 @@ import { Sheet, SheetPopup, SheetTitle } from "./ui/sheet";
 import type { WorkspaceView } from "./workspaceCrumbs";
 import { pageLoaders } from "../app/pageLoaders";
 
-export type MobileNavTarget = "home" | "assistant" | "listings" | "sourcing" | "analytics" | "settings" | "marketplaces" | "automations";
+export type MobileNavTarget = "home" | "assistant" | "listings" | "analytics" | "settings" | "marketplaces" | "automations";
 
-/** Same order as the desktop navigation rail: today, assistant and inventory, the day's work, insight, settings. */
+/** Same order as the desktop navigation rail: today, assistant and inventory, insight, settings. */
 const ITEMS: { id: MobileNavTarget; label: string; icon: ComponentType<{ className?: string }> }[] = [
   { id: "home", label: "Today", icon: HomeIcon },
   { id: "assistant", label: "Assistant", icon: MessageCircleIcon },
   { id: "listings", label: "Inventory", icon: Rows3Icon },
-  { id: "sourcing", label: "Sourcing", icon: BoxIcon },
   { id: "analytics", label: "Analytics", icon: ChartColumnIcon },
   { id: "marketplaces", label: "Marketplaces", icon: StoreIcon },
   { id: "automations", label: "Automations", icon: CalendarClockIcon },

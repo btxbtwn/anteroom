@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 
-// Sign-in, Settings and Sourcing at desktop (1440×900) and iPhone 15 sizes, in the
+// Sign-in, Settings and Analytics at desktop (1440×900) and iPhone 15 sizes, in the
 // device's light and dark appearance. Screenshots land in e2e/results/hosted/screens-*.
 
 /** Opens the phone sidebar the way the other hosted tests do; in Settings the header's back button opens it. */
@@ -41,7 +41,7 @@ for (const scheme of ["light", "dark"] as const) {
   test.describe(`${scheme} appearance`, () => {
     test.use({ colorScheme: scheme });
 
-    test("sign-in, Settings and Sourcing follow the device and explain blocked controls", async ({ page }, info) => {
+    test("sign-in, Settings and Analytics follow the device and explain blocked controls", async ({ page }, info) => {
       test.setTimeout(180_000);
       const phone = info.project.name === "phone";
       if (!phone) await page.setViewportSize({ width: 1440, height: 900 });
@@ -88,10 +88,10 @@ for (const scheme of ["light", "dark"] as const) {
       await expect(page.locator("#ships-from-zip")).toContainText("eBay, Mercari and Depop");
       await shot("settings-ships-from");
 
-      await openPage(page, "Sourcing", phone);
-      // The sandbox can't reach suppliers: a failed refresh ends in an error with Try again, not an endless wait.
-      await page.getByText(/Your buy list isn’t ready|Boxes you bought/).first().waitFor({ timeout: 90_000 }).catch(() => {});
-      await shot("sourcing");
+      await openPage(page, "Analytics", phone);
+      await page.getByRole("tab", { name: "Boxes", exact: true }).click();
+      await expect(page.getByText("Boxes you bought", { exact: true })).toBeVisible();
+      await shot("analytics-boxes");
       expect(errors).toEqual([]);
     });
   });

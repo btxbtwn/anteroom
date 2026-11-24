@@ -3,17 +3,17 @@
 A listing's chat knows one item. This one is handed a summary of the business
 on every question — the same sales and inventory totals Analytics shows, by
 range and by month, the leading brands and categories, the listings that have
-sat longest and the latest sales, the boxes bought and what they returned, the
-current buy list with its best boxes, ad spend, sale events, and sourcing
-checks — and the exact tables it can look the rest up in. The brief is read
-fresh each time, so an answer reflects Anteroom's records as they are now.
+sat longest and the latest sales, the boxes bought and what they returned, ad
+spend, and sale events — and the exact tables it can look the rest up in. The
+brief is read fresh each time, so an answer reflects Anteroom's records as they
+are now.
 
 Every row behind the summary can be looked up. Each listing, its description and
-full field values (in ``listing_details``), every Sourcing-tab box, and the sales
-breakdowns are copied into a throwaway in-memory SQLite database on first lookup,
-and the model may ask for a ``SELECT`` over it before it answers. The copy is the
-only thing a lookup can touch. The summary stays small, so a question does not
-spend the seller's model usage on rows it never needed.
+full field values (in ``listing_details``), and the sales breakdowns are copied
+into a throwaway in-memory SQLite database on first lookup, and the model may
+ask for a ``SELECT`` over it before it answers. The copy is the only thing a
+lookup can touch. The summary stays small, so a question does not spend the
+seller's model usage on rows it never needed.
 
 It reads, and it proposes. A reply may end with changes to listings, which are
 kept with the reply for the seller to apply or dismiss
@@ -48,9 +48,7 @@ from anteroom.services import (
     answer_links,
     assistant_changes,
     assistant_memory,
-    box_media,
     business_context,
-    sourcing_boxes,
 )
 from anteroom.services.inventory_analytics import ANALYTICS_RANGES, AnalyticsItem
 
@@ -61,9 +59,9 @@ log = logging.getLogger("anteroom.business_assistant")
 HISTORY_MESSAGES = 20
 HISTORY_STEP = 10
 # How many rows of each kind the summary shows; a lookup reads every one.
-TOP_BOXES = 15
 LONGEST_LISTED = 15
 LATEST_SALES = 10
+TOP_BOXES = 15
 SIZING_ROWS = 10
 PRICE_CHANGE_ROWS = 10
 AD_ROWS = 10
@@ -90,7 +88,7 @@ INSTRUCTIONS = (
     "Below is a summary of the business, taken now: the totals Analytics shows and the few rows most often "
     "wanted. Every row behind it is in the lookup tables described below.\n"
     "- Answer from the summary only when it holds everything the question needs. When the question needs rows "
-    "it leaves out, look them up first and then answer: ranking or comparing the boxes, a specific listing's "
+    "it leaves out, look them up first and then answer: comparing bought boxes, a specific listing's "
     "details, every stale listing, sales of one brand, category, size, marketplace or month, a breakdown the "
     "summary does not show. The summary's short tables are the top rows only; never present one as the whole "
     "list or rank from it alone. Never tell the seller a figure is unavailable until a lookup has failed to "
@@ -101,7 +99,7 @@ INSTRUCTIONS = (
     "- When neither the summary nor a lookup can answer the question, say what is missing and where in Anteroom "
     "it gets recorded. Never invent a sale, a price, a cost or a date.\n"
     "- Profit is the sold price plus shipping the buyer paid, less fees, shipping the seller paid, and the item's cost.\n"
-    "- Give advice when asked — what to source, reprice, discount or drop — and tie each point to the numbers behind it. "
+    "- Give advice when asked — what to reprice, discount or drop — and tie each point to the numbers behind it. "
     "Fit it to what the seller says about their business and to what you remember about them.\n"
     "- You can propose changes to listings, described below, and the seller applies them. You cannot change a setting, "
     "and you cannot list, delist, publish or send anything yourself. When the seller asks for a scheduled "
@@ -109,29 +107,9 @@ INSTRUCTIONS = (
     "- When you name a specific listing, link it so the seller can open it: [its title](#listing-ID), "
     "with the id from its row. Use only ids that appear in the summary or in a lookup result.\n"
     "- Other ids only tie rows together. Name a box by its store and title, never by its id.\n"
-    "- Web links: never build, guess or complete a URL, not even from a box's title or store. Give only a `url` "
-    "Anteroom returned, exactly as it came, from the summary or a lookup this turn. A box missing from the summary "
-    "has its `url` in sourcing_boxes: select it with the box. When none came back for a box, say so and tell "
-    "the seller to open it from the Sourcing tab. Anteroom removes any other link from the answer.\n"
-    "- Box photos: when the seller asks about specific boxes or whether a box is worth buying, look at their "
-    "photos first with a view_box_media lookup (up to 5 boxes per answer, 8 images each). Then judge whether the "
-    "contents are worth buying and give each box a clear verdict, Buy, Maybe or Skip, with its reasons. Weigh: "
-    "brands visible on tags, condition issues (stains, holes, pilling, fading), the spread of sizes, season and "
-    "fabric weight, how much of the box is actually visible against the claimed piece count, and red flags "
-    "(stock or reused photos, a single photo for a large lot, contents that do not match the title). Set that "
-    "against the box's figures and the seller's own sales of that kind (`kind_*`, `sales_by_category`). Mark "
-    "which observations come from the photos (\"from the listing photos\"); they are what the store chose to "
-    "show, not verified contents. Say which boxes you actually saw images for. A box whose photos were not "
-    "attached this turn, failed to load, or has none is \"not viewed\": never call it fine or clean, and judge "
-    "it on its figures alone, saying so. A video marked NOT viewed was not watched.\n"
-    "- Sourcing: the summary's box table holds only the tab's best boxes; every box, with its url and every "
-    "figure, is in the `sourcing_boxes` lookup table. `recommended_lots` is the buy list Anteroom recommends; when "
-    "it is empty, `empty_reason` says why. To rank boxes against what the seller sells, look up sourcing_boxes "
-    "and set each box's projected profit and ROI beside its `kind_*` figures (the seller's own sales of that "
-    "kind of piece in the last 12 months: count, average price, margin, median days to sell) and "
-    "`sales_by_category`. A box whose kind the seller has sold often, at a good margin and quickly, beats one "
-    "with a higher ROI resting on few or no sales of its kind. A box missing the min ROI says by how many points "
-    "(`roi_gap_points`) and dollars (`profit_shortfall`). Empty figures are unknown, never zero.\n"
+    "- Web links: never build, guess or complete a URL. Give only a `url` "
+    "Anteroom returned, exactly as it came, from the summary or a lookup this turn. Anteroom removes any other "
+    "link from the answer.\n"
     "- Write plain English and lead with the answer. Use a table when comparing several things. Amounts are US dollars.\n"
 )
 
@@ -155,10 +133,6 @@ LOOKUP_INSTRUCTIONS = (
     "`category` is the Analytics category; a kind of piece is best matched on the title too, like title LIKE '%jacket%'.\n"
     "`boxes` is the wholesale boxes the seller bought and what each returned; `price_changes` each asking-price "
     "change made in Anteroom.\n"
-    "`sourcing_boxes` is every box on the Sourcing tab from its last check: `contents` the kind of piece, `landed` "
-    "price plus shipping and checkout fee, `projected_profit` and `roi_percent` at the settings that check used, "
-    "`on_its_own` how the box fares bought on its own (qualifies, return_target, downside, needs_research, budget), "
-    "`buy_list` recommended or what kept it off the list, and `kind_*` the seller's own sales of its kind.\n"
     "`sales_by_category`, `sales_by_brand` and `sales_by_marketplace` are the Analytics breakdowns for each "
     "`period` (30d, 90d, 12m, all). `sales_over_time` is each range's sales per `bucket`, as the Analytics chart "
     "draws them, `position` 1 the oldest; range all reaches back to the first sale and range 12m is one row per "
@@ -167,10 +141,6 @@ LOOKUP_INSTRUCTIONS = (
     "Every lookup answers: rows, \"0 rows matched\" (with the closest real values in that column when any exist), or "
     "\"Lookup ... failed: <reason>\". Read that reply; when a lookup failed or matched nothing, say so or try a "
     "corrected query using a listed value only if it names the same thing, and never fill the gap with a guess.\n"
-    "Seeing a box's photos: include a ```view_box_media block (alone or alongside ```sql blocks, within the "
-    "{per_round}-block limit) listing the box ids from the sourcing_boxes table (or the summary's box table), "
-    "one per line. Anteroom fetches each box's product page now and replies with its photos and frames from its "
-    "video as images, saying which images belong to which box and which boxes could not be viewed and why.\n"
 )
 
 CHANGES_INSTRUCTIONS = (
@@ -232,10 +202,6 @@ RANGE_COLUMNS = (
     "sell_through", "ad_spend", "previous_count", "previous_revenue", "previous_profit", "previous_margin",
 )
 GROUP_COLUMNS = ("label", "count", "revenue", "profit", "profit_known", "margin", "average_price", "median_days")
-TOP_BOX_COLUMNS = (
-    "id", "store", "title", "url", "contents", "landed", "projected_profit", "roi_percent", "passes_min_roi",
-    "kind_sold_12m", "kind_margin",
-)
 LONGEST_COLUMNS = ("id", "title", "brand", "category", "size", "asking", "cost", "days", "listed", "listed_on")
 SALE_COLUMNS = ("id", "title", "brand", "category", "sold_for", "profit", "sold_on", "sold", "days")
 ACTIVE_GROUP_COLUMNS = ("category", "active", "asking_value", "median_days_listed", "most_days_listed")
@@ -270,7 +236,6 @@ TABLES = {
     "boxes": BOX_COLUMNS,
     "ad_spend": AD_COLUMNS,
     "sale_events": EVENT_COLUMNS,
-    "sourcing_boxes": sourcing_boxes.BOX_COLUMNS,
     "sales_by_category": CATEGORY_COLUMNS,
     "sales_by_brand": BRAND_COLUMNS,
     "sales_by_marketplace": MARKETPLACE_COLUMNS,
@@ -287,10 +252,10 @@ _RANGE_LABELS = {
     "12m": "last 12 calendar months",
     "all": "all time",
 }
-# A lookup is a fenced block in the reply: ```sql (or ```sqlite) holding one SELECT, or
-# ```view_box_media holding box ids. A bare ``` fence opening the reply with a SELECT counts too.
-_LOOKUP_LANGS = {"sql": "sql", "sqlite": "sql", "view_box_media": "media"}
-_LOOKUP_FENCES = ("```sql", "```view_box_media")
+# A lookup is a fenced block in the reply: ```sql (or ```sqlite) holding one SELECT.
+# A bare ``` fence opening the reply with a SELECT counts too.
+_LOOKUP_LANGS = {"sql": "sql", "sqlite": "sql"}
+_LOOKUP_FENCES = ("```sql",)
 _FENCED = re.compile(r"```[ \t]*([A-Za-z_]*)(.*?)(?:```|\Z)", re.DOTALL)
 _SELECTISH = re.compile(r"^(?:--|select\b|with\b)", re.IGNORECASE)
 _FROM_TABLE = re.compile(r"\bfrom\s+([A-Za-z_]+)", re.IGNORECASE)
@@ -306,7 +271,6 @@ _HINT_COLUMNS: dict[str, frozenset[str]] = {
     "sales_by_category": frozenset({"category"}),
     "sales_by_brand": frozenset({"brand"}),
     "sales_by_marketplace": frozenset({"marketplace"}),
-    "sourcing_boxes": frozenset({"store", "contents"}),
 }
 _HINT_MATCHES = 5
 _HINT_CHARS = 600
@@ -538,7 +502,7 @@ def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
 
 def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[str, Any]]]]:
     """The summary as text, and the tables a lookup reads."""
-    from anteroom.services import ad_spend, boxes, box_scout, scout
+    from anteroom.services import ad_spend, boxes
     from anteroom.database import end_read
     from anteroom.services.business_expenses import entries
     from anteroom.services.inventory_analytics import analytics_ranges, read_analytics_inputs, rows_from_inputs
@@ -574,17 +538,8 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
         for mode in ("accrual", "cash")
     }
     end_read(db)
-    scout_sales = scout.outcomes(db, rows)
     automation_lines = _automation_lines(db)
-    scout_record = scout.track_record(db, scout_sales, release=True)
-    scout_recent = [
-        {key: check[key] for key in ("title", "asking_price", "estimate", "comps_count", "decision",
-                                     "sold_price", "created_at")}
-        for check in (scout.to_dict(row, scout_sales.get(row.id)) for row in scout.recent(db))
-    ]
     end_read(db)
-    sourcing_state = box_scout.read_state()
-    tab_boxes = sourcing_boxes.box_rows(sourcing_state, rows, clock)
     breakdowns = {
         name: _breakdown(ranges, key, label)
         for name, key, label in (
@@ -619,15 +574,9 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
         _sizing_rows(records),
         _price_change_rows(changes),
         _box_rows(box_results),
-        _sourcing(sourcing_state, tab_boxes, clock),
-        _sourcing_box_rows(tab_boxes),
         _ad_rows(ads),
         _event_rows(events),
         automation_lines,
-        _section("Sourcing checks (is this worth buying?)", {
-            "track_record": scout_record,
-            "recent": scout_recent,
-        }),
     ]
     return (
         "\n\n".join(section for section in sections if section),
@@ -639,7 +588,6 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
             "ad_spend": ads,
             "sale_events": events,
             "business_expenses": expense_rows,
-            "sourcing_boxes": tab_boxes,
             **breakdowns,
             "sales_over_time": over_time,
         },
@@ -791,7 +739,7 @@ class AnswerTiming:
 class Lookup:
     """A lookup the model asked for: where its block sits in the reply, and what it holds."""
 
-    kind: str  # "sql" or "media"
+    kind: str  # "sql"
     body: str
     start: int
     end: int
@@ -813,7 +761,6 @@ async def answer(
     timing = timing or AnswerTiming()
     messages = list(messages)
     links = answer_links.LinkGuard(answer_links.message_texts(messages))
-    viewed: list[str] = []
     written = False
     for used in range(MAX_LOOKUPS + 1):
         reply = ""
@@ -870,61 +817,41 @@ async def answer(
             return
         batch = lookups[:LOOKUPS_PER_ROUND]
         skipped = len(lookups) - len(batch)
-        results: list[str | list[dict[str, Any]]] = []
-        image_offset = 0
+        results: list[str] = []
         for item in batch:
             yield "status", lookup_label(item)
             lookup_started = time.monotonic()
             timing.lookups += 1
             try:
-                lookup_result = await run_any_lookup(item, shop, viewed, image_offset=image_offset)
+                lookup_result = await run_any_lookup(item, shop)
             finally:
                 timing.lookup_ms = min(TIMING_CAP_MS, timing.lookup_ms + elapsed_ms(lookup_started))
             results.append(lookup_result)
-            if isinstance(lookup_result, list):
-                image_offset += sum(part.get("type") == "image_url" for part in lookup_result)
         result = _combined(batch, results, skipped)
-        texts = [result] if isinstance(result, str) else [part["text"] for part in result if part.get("type") == "text"]
-        links.allow(texts)
+        links.allow([result])
         if used == MAX_LOOKUPS - 1:
-            last = "\n\nThat was the last lookup for this question. Answer now with what you have."
-            if isinstance(result, str):
-                result += last
-            else:
-                result[0] = {"type": "text", "text": result[0]["text"] + last}
+            result += "\n\nThat was the last lookup for this question. Answer now with what you have."
         messages += [{"role": "assistant", "content": reply[:lookups[-1].end]}, {"role": "user", "content": result}]
 
 
 def _lookup_heading(lookup: Lookup) -> str:
-    if lookup.kind == "media":
-        return "box photos"
     first = lookup.body.lstrip().splitlines()[0].strip() if lookup.body.strip() else ""
     words = first[2:].strip(" .") if first.startswith("--") else ""
     return words[:80] if words else _lookup_name(lookup.body)
 
 
-def _combined(
-    batch: list[Lookup], results: list[str | list[dict[str, Any]]], skipped: int,
-) -> str | list[dict[str, Any]]:
+def _combined(batch: list[Lookup], results: list[str], skipped: int) -> str:
     if len(batch) == 1 and not skipped:
         return results[0]
     sections: list[str] = []
-    images: list[dict[str, Any]] = []
     total = len(batch)
-    for index, (lookup, item_result) in enumerate(zip(batch, results, strict=True), 1):
+    for index, (lookup, body) in enumerate(zip(batch, results, strict=True), 1):
         header = f"Lookup {index} of {total} ({_lookup_heading(lookup)}):"
-        if isinstance(item_result, str):
-            body = item_result
-        else:
-            text_parts = [part["text"] for part in item_result if part.get("type") == "text"]
-            images.extend(part for part in item_result if part.get("type") != "text")
-            body = "\n".join(text_parts)
         sections.append(f"{header}\n{body}")
     if skipped:
         noun = "lookup was" if skipped == 1 else "lookups were"
         sections.append(f"{skipped} more {noun} not run: at most {LOOKUPS_PER_ROUND} run at once.")
-    combined_text = "\n\n".join(sections)
-    return [{"type": "text", "text": combined_text}, *images] if images else combined_text
+    return "\n\n".join(sections)
 
 
 def _visible(reply: str) -> str:
@@ -983,8 +910,6 @@ def lookup_sql(reply: str) -> str | None:
 
 def lookup_label(lookup: Lookup | str) -> str:
     """What the seller sees while a lookup runs: the model's own first-line comment."""
-    if isinstance(lookup, Lookup) and lookup.kind == "media":
-        return "Looking at the box photos…"
     sql = lookup.body if isinstance(lookup, Lookup) else lookup
     first = sql.lstrip().splitlines()[0].strip() if sql.strip() else ""
     words = first[2:].strip(" .") if first.startswith("--") else ""
@@ -996,14 +921,10 @@ def _run_sql(shop: Shop, body: str) -> str:
     return shop.read_lookup(lambda conn: run_lookup(conn, body), need_details=need_details)
 
 
-async def run_any_lookup(
-    lookup: Lookup, shop: Shop, viewed: list[str], *, image_offset: int = 0,
-) -> str | list[dict[str, Any]]:
+async def run_any_lookup(lookup: Lookup, shop: Shop) -> str:
     """Run one lookup and return what goes back to the model; a failure comes back as its reason."""
-    name = "view_box_media" if lookup.kind == "media" else _lookup_name(lookup.body)
+    name = _lookup_name(lookup.body)
     try:
-        if lookup.kind == "media":
-            return await view_box_media(shop, lookup.body, viewed, image_offset=image_offset)
         return await asyncio.to_thread(_run_sql, shop, lookup.body)
     except Exception as exc:  # noqa: BLE001 - the model is told, so it never answers from nothing
         log.exception("assistant lookup failed")
@@ -1147,64 +1068,6 @@ def run_lookup(lookups: sqlite3.Connection, sql: str) -> str:
     if len(lines) < len(rows):
         count = f"the first {len(lines)} rows; there are more, so narrow or aggregate the query to see the rest"
     return "\n".join([f"Lookup result ({count}):", header, *lines])
-
-
-def _box_ids(body: str) -> list[str]:
-    try:
-        parsed = json.loads(body)
-    except ValueError:
-        parsed = None
-    if isinstance(parsed, list):
-        items = [str(item) for item in parsed]
-    elif isinstance(parsed, (str, int)):
-        items = [str(parsed)]
-    else:
-        items = re.split(r"[\n,]+", body)
-    ids = [item.strip().lstrip("-*• ").strip().strip("\"'`").strip() for item in items]
-    return list(dict.fromkeys(item for item in ids if item))
-
-
-def _sourcing_rows(lookups: sqlite3.Connection) -> list[dict[str, Any]]:
-    cursor = lookups.execute("SELECT id, store, title, url FROM sourcing_boxes")
-    return [dict(zip(("id", "store", "title", "url"), row, strict=True)) for row in cursor.fetchall()]
-
-
-async def view_box_media(
-    shop: Shop, body: str, viewed: list[str], *, image_offset: int = 0,
-) -> str | list[dict[str, Any]]:
-    """The photos and video frames of the boxes asked for, as image parts the model can see.
-
-    Up to ``box_media.MAX_BOXES_PER_ANSWER`` boxes in one answer, however many
-    lookups ask; ``viewed`` carries the ones already attached.
-    """
-    ids = _box_ids(body)
-    if not ids:
-        return ("Lookup view_box_media failed: no box ids were given. Put the id of each box from the "
-                "sourcing_boxes table on its own line.")
-    rows = await asyncio.to_thread(shop.read_lookup, _sourcing_rows)
-    by_id = {row["id"]: row for row in rows}
-    by_title: dict[str, list[dict[str, Any]]] = {}
-    for row in rows:
-        by_title.setdefault(str(row["title"]).strip().lower(), []).append(row)
-    chosen: list[dict[str, Any]] = []
-    skipped: list[str] = []
-    for ident in ids:
-        row = by_id.get(ident)
-        if row is None and len(by_title.get(ident.lower(), [])) == 1:
-            row = by_title[ident.lower()][0]
-        if row is None:
-            skipped.append(f"{ident}: NOT VIEWED — no box with that id is on the Sourcing tab.")
-        elif row["id"] in viewed or any(row["id"] == other["id"] for other in chosen):
-            skipped.append(f"Box {row['id']} ({row['title']}): its images are already attached in this answer.")
-        elif len(viewed) + len(chosen) >= box_media.MAX_BOXES_PER_ANSWER:
-            skipped.append(f"Box {row['id']} ({row['title']}, {row['store']}): NOT VIEWED — at most "
-                           f"{box_media.MAX_BOXES_PER_ANSWER} boxes' photos can be viewed in one answer.")
-        else:
-            chosen.append(row)
-    views = await box_media.view_boxes(chosen) if chosen else []
-    viewed.extend(view.box_id for view in views if view.viewed)
-    text, parts = box_media.describe(views, skipped=skipped, image_offset=image_offset)
-    return [{"type": "text", "text": text}, *parts] if parts else text
 
 
 class _Median:
@@ -1566,35 +1429,6 @@ def _event_rows(events: list[dict[str, Any]]) -> str:
     if len(events) > EVENT_ROWS:
         note = f"Only the latest {EVENT_ROWS} of {len(events)} events are shown; the `sale_events` lookup table has every one."
     return _table("Sale events", note, EVENT_COLUMNS, events[:EVENT_ROWS])
-
-
-def _sourcing(state: dict, tab_boxes: list[dict[str, Any]], now: datetime) -> str:
-    """The current buy list: what the seller told Sourcing, what it would buy, and why when nothing."""
-    return _section("Sourcing buy list", {
-        "current_settings": state.get("prefs"),
-        "trending_terms": (state.get("trend") or {}).get("terms"),
-        **sourcing_boxes.buy_list_summary(state, tab_boxes, now),
-    })
-
-
-def _sourcing_box_rows(tab_boxes: list[dict[str, Any]]) -> str:
-    """The Sourcing tab's best boxes, in the tab's order; the sourcing_boxes lookup has every one."""
-    title = f"--- Best boxes on the Sourcing tab ({min(TOP_BOXES, len(tab_boxes))} of {len(tab_boxes)}) ---"
-    if not tab_boxes:
-        return f"{title}\nNo boxes in the last sourcing check."
-    note = (
-        "Recommended boxes first, then each supplier's top picks, then the rest by ROI. `url` is the box's product "
-        "page as the store gave it; it is the only link to give the seller for that box. `contents` is the kind of "
-        "piece, `landed` price plus shipping and fees, `roi_percent` and `projected_profit` at the settings the "
-        "check used, and `kind_*` the seller's own sales of that kind in the last 12 months. Empty means unknown."
-    )
-    if len(tab_boxes) > TOP_BOXES:
-        note += (f" The other {len(tab_boxes) - TOP_BOXES} boxes, and every box's other figures (shipping, pieces, "
-                 "resale_per_piece, roi_gap_points, on_its_own, buy_list), are in the sourcing_boxes lookup table, "
-                 "with their urls.")
-    return "\n".join([
-        title, note, " | ".join(TOP_BOX_COLUMNS), *(_line(box, TOP_BOX_COLUMNS) for box in tab_boxes[:TOP_BOXES]),
-    ])
 
 
 def _sale_events(db: Session) -> list[dict[str, Any]]:

@@ -128,8 +128,6 @@ class ExtensionManager(ReplyWaits):
         self.build: str | None = None
         self.capabilities: frozenset[str] = frozenset()
         self.reload_generation: str | None = None
-        # The server's event loop, for the sourcing thread to reach Chrome through.
-        self.loop: asyncio.AbstractEventLoop | None = None
         self._pairing_token: str | None = None
         ReplyWaits.__init__(self)
         # Monotonic time of the last accepted pairing, kept across disconnects so
@@ -626,7 +624,6 @@ async def extension_websocket(ws: WebSocket):
                     continue
                 old = extension_manager.connection
                 extension_manager.connection = ws
-                extension_manager.loop = asyncio.get_running_loop()
                 extension_manager.version = version
                 extension_manager.build = build
                 extension_manager.capabilities = _reported_capabilities(payload)
@@ -653,11 +650,6 @@ async def extension_websocket(ws: WebSocket):
                 continue
 
             if msg_type == "browser.result":
-                payload = message.get("payload") or {}
-                extension_manager.resolve_wait(str(payload.get("request_id") or ""), payload)
-                continue
-
-            if msg_type == "market.sold_listings_result":
                 payload = message.get("payload") or {}
                 extension_manager.resolve_wait(str(payload.get("request_id") or ""), payload)
                 continue

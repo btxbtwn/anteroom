@@ -39,16 +39,6 @@
                     "lineCount": 1
                 }
             }
-        ],
-        "./server/anteroom/services/sold_listings.py": [
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 71,
-                    "endColumn": 93,
-                    "lineCount": 1
-                }
-            }
         ]
     }
 }

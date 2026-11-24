@@ -33,14 +33,6 @@ from anteroom.services.inventory_analytics import (
 )
 
 _LISTED = {"active", "sold"}
-# Sales from bought boxes before a store's resale estimates are adjusted, and
-# how far they may move: a few lucky or unlucky sales should not swing the list.
-CALIBRATION_MIN_SALES = 5
-CALIBRATION_RANGE = (0.3, 2.0)
-# Orders from a store before its shipping estimates follow what it charged,
-# and how far they may move from the carrier's list rate.
-SHIPPING_MIN_ORDERS = 2
-SHIPPING_RANGE = (0.2, 1.5)
 # Days after buying a box at which its sell-through is read, once it is that old.
 SELL_THROUGH_DAYS = (30, 60, 90)
 
@@ -160,57 +152,6 @@ def results(
     return {
         "boxes": box_rows,
         "stores": [_store_row(name, entries, now) for name, entries in sorted(stores.items())],
-    }
-
-
-def resale_calibration(db: Session) -> dict[str, dict[str, Any]]:
-    """Per store, what pieces from bought boxes sold for against the estimate the
-    buy list used when the box was bought. The median ratio becomes the store's
-    factor once there are enough sales to trust it."""
-    estimates = {
-        box.id: (box.store, box.estimate_per_piece)
-        for box in list_boxes(db)
-        if box.estimate_per_piece
-    }
-    ratios: dict[str, list[float]] = {}
-    for item in load_rows(db):
-        if item.status != "sold" or not item.sold_price or item.box_id not in estimates:
-            continue
-        store, estimate = estimates[item.box_id]
-        ratios.setdefault(store, []).append(item.sold_price / estimate)
-    low, high = CALIBRATION_RANGE
-    return {
-        store: {
-            "factor": (
-                round(min(high, max(low, statistics.median(values))), 2)
-                if len(values) >= CALIBRATION_MIN_SALES else None
-            ),
-            "sales": len(values),
-            "needed": CALIBRATION_MIN_SALES,
-        }
-        for store, values in ratios.items()
-    }
-
-
-def shipping_calibration(db: Session) -> dict[str, dict[str, Any]]:
-    """Per store, what its orders were charged for shipping against the carrier
-    list rate the buy list estimated from. The median ratio becomes the store's
-    shipping factor once enough orders are recorded."""
-    ratios: dict[str, list[float]] = {}
-    for box in list_boxes(db):
-        if box.list_shipping and box.shipping > 0:
-            ratios.setdefault(box.store, []).append(box.shipping / box.list_shipping)
-    low, high = SHIPPING_RANGE
-    return {
-        store: {
-            "factor": (
-                round(min(high, max(low, statistics.median(values))), 4)
-                if len(values) >= SHIPPING_MIN_ORDERS else None
-            ),
-            "orders": len(values),
-            "needed": SHIPPING_MIN_ORDERS,
-        }
-        for store, values in ratios.items()
     }
 
 

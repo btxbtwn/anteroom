@@ -149,9 +149,6 @@ def delete_listing(db: Session, conv_id: str) -> tuple[int, int]:
     conv = repo.get(conv_id)
     if conv is None:
         raise LookupError("Conversation not found")
-    from anteroom.models.scout import ScoutCheck
-    # The check stays as a record of the decision; only the link goes.
-    db.query(ScoutCheck).filter(ScoutCheck.conversation_id == conv_id).update({ScoutCheck.conversation_id: None})
     from anteroom.models.listing_evidence import ListingCorrection, SaleSnapshot
     for model in (ListingCorrection, SaleSnapshot):
         db.query(model).filter_by(conversation_id=conv_id).delete(synchronize_session=False)

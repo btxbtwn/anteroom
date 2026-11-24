@@ -142,6 +142,5 @@ ignore_imports = [
   "anteroom.repositories.queries -> anteroom.services.vendoo_import",
   "anteroom.services.automation_actions -> anteroom.routes.chat",
   "anteroom.services.background_worker -> anteroom.routes.chat",
-  "anteroom.services.box_scout -> anteroom.desktop",
   "anteroom.services.marketplace_accounts -> anteroom.desktop",
 ]

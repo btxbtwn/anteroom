@@ -1,75 +1,19 @@
-import type { BoxTotals, SourceBox, SourceBoxInput, SourcingLot } from "../api/types";
+import type { BoxTotals } from "../api/types";
 import { formatMoney } from "./analyticsFormat";
 
 export const BOXES_QUERY_KEY = ["boxes"];
 
 const STORE_NAMES: Record<string, string> = { raghouse: "Raghouse", tvf: "Thrift Vintage Fashion", papercrane: "PaperCrane" };
 
-/** A recently recorded box with the same link counts as already bought. */
-const RECENT_DAYS = 14;
-
 export function boxStoreName(store: string): string {
   return STORE_NAMES[store] ?? store;
 }
 
-/** A typed store name, with the two stores Studio scouts saved under their own keys. */
+/** A typed store name, with known wholesale stores saved under their canonical keys. */
 export function boxStoreKey(name: string): string {
   const text = name.trim();
   const match = Object.entries(STORE_NAMES).find(([, label]) => label.toLowerCase() === text.toLowerCase());
   return match ? match[0] : text;
-}
-
-/** A buy-list box as the seller would record it once paid for. */
-export function boxFromLot(lot: SourcingLot): SourceBoxInput {
-  return {
-    store: lot.store,
-    title: lot.title,
-    url: lot.url,
-    price: lot.price,
-    shipping: Math.round(lot.ship_est * 100) / 100,
-    pieces: lot.pcs || null,
-    // The carrier list rate, so what the store charges can tune later estimates.
-    list_shipping: lot.ship_list || null,
-    // The estimate before the seller's own sales adjusted it, so the next
-    // adjustment compares like with like.
-    estimate_per_piece: lot.resale_per_pc != null
-      ? Math.round((lot.resale_per_pc / (lot.resale_factor || 1)) * 100) / 100
-      : null,
-  };
-}
-
-export function recentlyBought(lot: SourcingLot, boxes: SourceBox[], now = Date.now()): boolean {
-  return boxes.some((box) => (
-    box.url === lot.url
-    && box.bought_at != null
-    && now - Date.parse(box.bought_at) < RECENT_DAYS * 86_400_000
-  ));
-}
-
-/** One sentence on how a store's real sales have moved its estimates, or null. */
-export function calibrationNote(
-  storeLabel: string,
-  calibration: { factor: number | null; sales: number; needed: number },
-): string | null {
-  const sales = calibration.sales === 1 ? "1 sale" : `${calibration.sales} sales`;
-  if (calibration.factor == null) {
-    const more = calibration.needed - calibration.sales;
-    return `${storeLabel}: ${sales} from bought boxes so far. Anteroom starts adjusting its estimates after ${more} more.`;
-  }
-  const percent = Math.round(calibration.factor * 100);
-  if (percent > 100) return `${storeLabel}: your ${sales} beat Anteroom's past estimates. Current research still caps new price estimates.`;
-  if (percent === 100) return `${storeLabel}: your ${sales} match Anteroom's estimates.`;
-  return `${storeLabel}: your ${sales} sold for ${percent}% of what Anteroom estimated, so its ${storeLabel} prices are set to ${percent}%.`;
-}
-
-/** One sentence on how a store's real shipping charges have set its estimates, or null. */
-export function shippingNote(
-  storeLabel: string,
-  calibration: { factor: number | null; orders: number; needed: number } | undefined,
-): string | null {
-  if (!calibration || calibration.factor == null) return null;
-  const orders = calibration.orders === 1 ? "1 order" : `${calibration.orders} orders`;
-  return `${storeLabel} shipping is set to ${Math.round(calibration.factor * 100)}% of the carrier list rate, from ${orders} you recorded.`;
 }
 
 export function formatPercent(value: number | null): string {
@@ -87,7 +31,7 @@ export function boxProgress(box: { sold: number; listed: number; listings: numbe
 }
 
 /** The lowest price of the premium band; matches PREMIUM_PRICE in inventory_analytics.py. */
-export const PREMIUM_PRICE = 35;
+const PREMIUM_PRICE = 35;
 
 /**
  * How a box or store grades as a supplier: average sale, premium sales, how

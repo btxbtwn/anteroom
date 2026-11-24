@@ -1,11 +1,10 @@
 """A short-lived copy of what the business assistant reads about the shop.
 
 Reading the shop takes most of a second on a real inventory (every listing,
-eight sales ranges, boxes, sourcing), and a follow-up a minute later usually
+eight sales ranges, boxes), and a follow-up a minute later usually
 reads exactly the same rows. The copy is kept for ``TTL_SECONDS`` and dropped
 as soon as anything it was built from is written: a flush that touches one of
-``WATCHED_TABLES``, or a sourcing refresh (``box_scout`` calls
-``invalidate_business_context`` when it saves). What the seller says about the
+``WATCHED_TABLES``. What the seller says about the
 business and what the assistant remembers are read fresh every time.
 """
 
@@ -27,7 +26,7 @@ _CACHE_SIZE = 16
 # assistant threads) leave the copy alone.
 WATCHED_TABLES = frozenset({
     "conversations", "messages", "listings", "listing_revisions", "source_boxes", "ad_spend",
-    "sale_events", "scout_checks", "sale_snapshots", "business_expenses", "marketplace_sales",
+    "sale_events", "sale_snapshots", "business_expenses", "marketplace_sales",
 })
 
 _lock = threading.Lock()

@@ -58,10 +58,13 @@ REFERENCES = (
 
 def upgrade() -> None:
     connection = op.get_bind()
+    inspector = sa.inspect(connection)
     # Check before any table rebuild, including SQLite where the migration
     # connection disables enforcement. Never repair ownership by guessing or
     # deleting rows. A mismatched database needs explicit owner reconciliation.
     for child, column, parent in REFERENCES:
+        if not inspector.has_table(child):
+            continue  # A retired table is not recreated during legacy adoption.
         mismatch = connection.execute(sa.text(f"""
             SELECT 1 FROM "{child}" AS child
             WHERE child."{column}" IS NOT NULL AND NOT EXISTS (
@@ -75,14 +78,15 @@ def upgrade() -> None:
     # PostgreSQL requires the referenced unique key to exist before the FK.
     for parent in PARENTS:
         name = f"uq_{parent}_seller_id"
-        if any(key["name"] == name for key in sa.inspect(connection).get_unique_constraints(parent)):
+        if any(key["name"] == name for key in inspector.get_unique_constraints(parent)):
             continue  # A table created during legacy adoption already has it.
         with op.batch_alter_table(parent) as batch:
             batch.create_unique_constraint(name, ["user_id", "id"])
 
     grouped = defaultdict(list)
     for child, column, parent in REFERENCES:
-        grouped[child].append((column, parent))
+        if inspector.has_table(child):
+            grouped[child].append((column, parent))
     for child, references in grouped.items():
         existing = {key["name"] for key in sa.inspect(connection).get_foreign_keys(child)}
         with op.batch_alter_table(child) as batch:

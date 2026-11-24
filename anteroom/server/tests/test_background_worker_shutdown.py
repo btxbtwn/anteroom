@@ -132,7 +132,7 @@ def test_blocked_marketplace_scheduler_cannot_stop_draft_heartbeats(monkeypatch)
     monkeypatch.setattr(hosted, 'BackgroundLoop', tracked_loop)
     monkeypatch.setattr(background_worker, 'serve', worker)
     monkeypatch.setattr('anteroom.services.hosted_offer_scheduler.serve', blocking_offers)
-    for name in ('hosted_automation_scheduler', 'hosted_job_watchdog', 'hosted_sourcing_scheduler'):
+    for name in ('hosted_automation_scheduler', 'hosted_job_watchdog'):
         monkeypatch.setattr(f'anteroom.services.{name}.serve', idle)
     with TestClient(hosted.create_app('https://example.supabase.co')) as client:
         try:
