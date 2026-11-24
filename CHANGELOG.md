@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1215 — 2026-11-24
+
+- Importing a listing from Depop now brings over its category, department, both colors, style, age, source, material and other details, package size or shipping price, worldwide shipping, boost and hashtags, so its Depop tab matches the listing on Depop.
+
 ## 0.1.1214 — 2026-11-24
 
 - Fix Anteroom updates failing to start after two changes each added a database step at the same time.
