@@ -162,6 +162,7 @@ def test_mcp_tools_list_and_read_write_lifecycle_respects_safety_invariant():
         "manage_labels_and_notes",
         "delete_draft_listing",
         "dismiss_attention_items",
+        "resolve_attention_items",
         "restore_attention_items",
     }
     assert expected_tools.issubset(tool_names)
@@ -686,14 +687,14 @@ def test_hosted_today_concurrent_mutations_stay_seller_scoped(cloud, signing_key
 
 READ_TOOLS = {
     "search_inventory", "get_listing", "get_listing_photos", "get_sales_analytics", "get_offer_activity",
-    "get_sourcing_roi", "run_etsy_audit", "get_needs_attention",
+    "get_sourcing_roi", "run_etsy_audit", "get_needs_attention", "get_action_status",
 }
 READ_TOOLS |= set(mcp_catalog_tools.PERMISSIONS)
 LISTING_WRITE_TOOLS = {
     "create_draft_listing", "edit_listing", "manage_listing_photos",
     "manage_labels_and_notes", "delete_draft_listing",
 }
-ATTENTION_WRITE_TOOLS = {"dismiss_attention_items", "restore_attention_items"}
+ATTENTION_WRITE_TOOLS = {"dismiss_attention_items", "resolve_attention_items", "restore_attention_items"}
 ALL_TOOLS = READ_TOOLS | LISTING_WRITE_TOOLS | ATTENTION_WRITE_TOOLS
 
 
@@ -713,7 +714,7 @@ def test_desktop_mcp_token_permissions_limit_tools_and_apply_on_the_next_call():
     created = client.post("/api/settings/mcp-tokens", json={"name": "Claude Desktop"})
     assert created.status_code == 201
     token = created.json()
-    assert token["permissions"] == {"listings": "read", "analytics": "read", "attention": "read"}
+    assert token["permissions"] == {"listings": "read", "analytics": "read", "attention": "read", "marketplaces": "none"}
     bearer = {"Authorization": f"Bearer {token['token']}"}
 
     # A new token reads but cannot change anything.
@@ -728,7 +729,7 @@ def test_desktop_mcp_token_permissions_limit_tools_and_apply_on_the_next_call():
     # Turning on write applies to the very next request, with the same token.
     patched = client.patch(f"/api/settings/mcp-tokens/{token['id']}", json={"permissions": {"listings": "write"}})
     assert patched.status_code == 200, patched.text
-    assert patched.json()["permissions"] == {"listings": "write", "analytics": "read", "attention": "read"}
+    assert patched.json()["permissions"] == {"listings": "write", "analytics": "read", "attention": "read", "marketplaces": "none"}
     assert _tool_names(client, bearer) == READ_TOOLS | LISTING_WRITE_TOOLS
     draft, is_error = _call_tool(client, "create_draft_listing", {"title": "Allowed draft"}, extra_headers=bearer)
     assert not is_error, draft
@@ -771,7 +772,7 @@ def test_mcp_token_created_with_chosen_permissions():
     bearer = {"Authorization": f"Bearer {created.json()['token']}"}
     assert _tool_names(client, bearer) == {"get_sales_analytics", "get_offer_activity", "get_sourcing_roi", "run_etsy_audit"}
     listed = client.get("/api/settings/mcp-tokens").json()["tokens"][0]
-    assert listed["permissions"] == {"listings": "none", "analytics": "read", "attention": "none"}
+    assert listed["permissions"] == {"listings": "none", "analytics": "read", "attention": "none", "marketplaces": "none"}
     bad = client.post("/api/settings/mcp-tokens", json={"name": "Bad", "permissions": {"listings": "admin"}})
     assert bad.status_code == 422
 
@@ -934,7 +935,7 @@ def test_mcp_token_with_needs_attention_write_dismisses_and_restores_alerts():
         client, "restore_attention_items", {"item_keys": [key, "never-dismissed"]}, extra_headers=bearer,
     )
     assert not is_error, restored
-    assert restored == {"restored": [key], "not_dismissed": ["never-dismissed"]}
+    assert restored == {"restored": [key], "not_hidden": ["never-dismissed"]}
     assert key in _attention_keys(client, bearer)
 
     _, is_error = _call_tool(client, "dismiss_attention_items", {"item_keys": []}, extra_headers=bearer)
@@ -1160,7 +1161,7 @@ def test_supabase_sign_out_of_a_connected_app_has_a_deadline(monkeypatch):
 
 def test_connected_app_starts_read_only_and_stays_off_once_turned_off():
     with SessionLocal() as db:
-        assert mcp_oauth.permissions_for(db, "app-1") == {"listings": "read", "analytics": "read", "attention": "read"}
+        assert mcp_oauth.permissions_for(db, "app-1") == {"listings": "read", "analytics": "read", "attention": "read", "marketplaces": "none"}
         mcp_oauth.revoke(db, "app-1")
         assert mcp_oauth.permissions_for(db, "app-1") is None
         assert mcp_oauth.mark_signed_out(db, "app-1")["signed_out_at"] is not None
@@ -1421,3 +1422,29 @@ def test_hosted_mcp_listing_photos_are_seller_scoped(cloud, signing_keys, monkey
     bob, error = _call_tool(client, "get_listing_photos", {"conversation_id": conv_id}, extra_headers=tokens[BOB])
     assert error and "not found" in bob["error"].lower()
     assert requested == []
+
+
+def test_mcp_resolve_hides_an_alert_until_it_changes_and_restore_brings_it_back():
+    client = TestClient(app)
+    with SessionLocal() as db:
+        key = _seed_failed_job(db, "conv-resolve-mcp", "Linen Shirt")
+        db.commit()
+    created = client.post(
+        "/api/settings/mcp-tokens", json={"name": "Resolver", "permissions": {"attention": "write"}},
+    ).json()
+    bearer = {"Authorization": f"Bearer {created['token']}"}
+
+    result, is_error = _call_tool(
+        client, "resolve_attention_items", {"item_keys": [key, "failed-job:gone:gone"]}, extra_headers=bearer,
+    )
+    assert not is_error, result
+    assert [row["item_key"] for row in result["resolved"]] == [key]
+    assert result["not_found"] == ["failed-job:gone:gone"]
+    assert key not in _attention_keys(client, bearer)
+    summary, _ = _call_tool(client, "get_needs_attention", {}, extra_headers=bearer)
+    assert [item["key"] for item in summary["resolved"]] == [key]
+
+    restored, is_error = _call_tool(client, "restore_attention_items", {"item_keys": [key]}, extra_headers=bearer)
+    assert not is_error, restored
+    assert restored == {"restored": [key], "not_hidden": []}
+    assert key in _attention_keys(client, bearer)

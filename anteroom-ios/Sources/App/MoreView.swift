@@ -13,7 +13,7 @@ struct MoreView: View {
     @State private var path: [Destination] = []
 
     enum Destination: Hashable {
-        case automations, settings
+        case attention, automations, settings
     }
 
     var body: some View {
@@ -46,6 +46,11 @@ struct MoreView: View {
                         }
                     }
                 }
+                if views.contains("home") {
+                    NavigationLink(value: Destination.attention) {
+                        Label("Needs attention", systemImage: "exclamationmark.bubble")
+                    }
+                }
                 if views.contains("automations") {
                     NavigationLink(value: Destination.automations) {
                         Label("Automations", systemImage: "calendar.badge.clock")
@@ -58,6 +63,7 @@ struct MoreView: View {
             .navigationTitle("More")
             .navigationDestination(for: Destination.self) { destination in
                 switch destination {
+                case .attention: NeedsAttentionView(api: api)
                 case .automations: AutomationsView(api: api, canApprove: features.contains("marketplace_actions"), showsEbayOffers: features.contains("ebay_offers"), showsPromotions: features.contains("marketplace_sessions"))
                 case .settings: SettingsRootView(api: api, canDeleteAccount: features.contains("account_deletion"), managedAI: features.contains("managed_ai"))
                 }
