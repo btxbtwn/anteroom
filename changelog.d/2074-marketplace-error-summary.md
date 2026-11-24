@@ -1,3 +1,0 @@
-- See marketplace validation issues at the top of the listing editor and use Fix to jump straight to the field.
-- Use Fix with Ant to ask the AI listing assistant to correct flagged fields in your draft.
-- Ant has a small pixel-art avatar that dances when it appears and hops when work starts.

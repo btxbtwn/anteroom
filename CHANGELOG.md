@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1234 — 2026-11-24
+
+- See marketplace validation issues at the top of the listing editor and use Fix to jump straight to the field.
+- Use Fix with Ant to ask the AI listing assistant to correct flagged fields in your draft.
+- Ant has a small pixel-art avatar that dances when it appears and hops when work starts.
+
 ## 0.1.1233 — 2026-11-24
 
 - Retired the Sourcing tab, wholesale box buy-list, and item scouting tool.
