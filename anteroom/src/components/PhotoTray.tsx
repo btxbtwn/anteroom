@@ -2,12 +2,13 @@ import { useWorkspaceRuntime } from "../app/runtime";
 import React, { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { refreshInventory } from "../api/inventoryRefresh";
 import { groupImageFilesByFolder, moveItem, type PhotoFolderGroup } from "../photoDrop";
 import type { ListingPhoto } from "../api/types";
 import { toastManager } from "./ui/toast";
 import { BulkUploadDialog } from "./BulkUploadDialog";
 import { InspectorSection } from "./ListingFormControls";
-import { PhotoEditorDialog } from "./PhotoEditorDialog";
+import { PhotoEditorDialog, usePhotoStudioPending } from "./PhotoEditorDialog";
 import { PhotoLightbox, PhotoStrip, PhotoThumb } from "./PhotoThumbs";
 import { SortablePhoto, SortablePhotos } from "./SortablePhotos";
 import { useListingSessionActive } from "./listingSession";
@@ -31,6 +32,8 @@ interface Props {
 export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
   const runtime = useWorkspaceRuntime();
   const queryClient = useQueryClient();
+  const studioPending = usePhotoStudioPending(convId);
+  const canEditPhotos = runtime.features.has("photo_edits") && !studioPending;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -61,7 +64,7 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
     queryClient.setQueryData<ListingPhoto[]>(["photos", convId], (current) =>
       current?.map((photo) => (photo.id === changed.id ? changed : photo)),
     );
-    queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    refreshInventory(queryClient);
   };
 
   const adjustPhotoMutation = useMutation({
@@ -255,9 +258,9 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
                     dragging={dragging}
                     title={canReorder ? (touchScreen ? "Press and hold, then drag to set upload order" : "Drag to set upload order") : undefined}
                     onOpen={() => setPreviewId(p.id)}
-                    onRotate={runtime.features.has("photo_edits") ? () => adjustPhoto(p.id, 90) : undefined}
+                    onRotate={canEditPhotos ? () => adjustPhoto(p.id, 90) : undefined}
                     rotating={rotatingId === p.id}
-                    onRemove={() => deleteMutation.mutate(p.id)}
+                    onRemove={studioPending ? undefined : () => deleteMutation.mutate(p.id)}
                     controlsInViewerOnTouch
                   />
                 )}
@@ -272,19 +275,19 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
           index={previewIndex}
           error={uploadError}
           rotating={adjustPhotoMutation.isPending}
-          onRotate={runtime.features.has("photo_edits") ? (degrees) => adjustPhoto(previewPhoto.id, degrees) : undefined}
-          onEdit={runtime.features.has("photo_edits") ? () => {
+          onRotate={canEditPhotos ? (degrees) => adjustPhoto(previewPhoto.id, degrees) : undefined}
+          onEdit={canEditPhotos ? () => {
             setEditing({ id: previewPhoto.id, tab: "crop" });
             setPreviewId(null);
           } : undefined}
-          onStudio={runtime.features.has("photo_studio") ? () => {
+          onStudio={runtime.features.has("photo_studio") && !studioPending ? () => {
             setEditing({ id: previewPhoto.id, tab: "studio" });
             setPreviewId(null);
           } : undefined}
-          onRevert={runtime.features.has("photo_edits") && previewPhoto.edits ? () => adjustPhoto(previewPhoto.id, null) : undefined}
+          onRevert={canEditPhotos && previewPhoto.edits ? () => adjustPhoto(previewPhoto.id, null) : undefined}
           onStep={(next) => setPreviewId(photos[next].id)}
           onMove={(delta) => movePhoto(previewIndex, previewIndex + delta)}
-          onRemove={() => {
+          onRemove={studioPending ? undefined : () => {
             const rest = photos.filter((photo) => photo.id !== previewPhoto.id);
             deleteMutation.mutate(previewPhoto.id);
             setPreviewId(rest.length ? rest[Math.min(previewIndex, rest.length - 1)].id : null);
@@ -301,9 +304,8 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
           photos={photos ?? undefined}
           initialTab={editing?.tab}
           onSaved={replacePhoto}
-          onClose={() => {
-            // Back to the enlarged photo the editor was opened from.
-            setPreviewId(editingPhoto.id);
+          onClose={(background) => {
+            setPreviewId(background ? null : editingPhoto.id);
             setEditing(null);
           }}
         />

@@ -18,7 +18,7 @@ import { COVER_LIMIT, formPhotos, isVideoFile, pastSlots, pickedIds, videoRuleTe
 import { dragHasFiles, isImageFile, moveItem } from "../photoDrop";
 import { InspectorSection } from "./ListingFormControls";
 import { marketplaceName } from "./marketplaceNames";
-import { PhotoEditorDialog } from "./PhotoEditorDialog";
+import { PhotoEditorDialog, usePhotoStudioPending } from "./PhotoEditorDialog";
 import { PhotoLightbox, PhotoStrip, PhotoThumb } from "./PhotoThumbs";
 import { SortablePhoto, SortablePhotos } from "./SortablePhotos";
 import { useListingSessionActive } from "./listingSession";
@@ -39,6 +39,8 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
 }) {
   const runtime = useWorkspaceRuntime();
   const queryClient = useQueryClient();
+  const studioPending = usePhotoStudioPending(convId);
+  const canEditPhotos = runtime.features.has("photo_edits") && !studioPending;
   const input = React.useRef<HTMLInputElement>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -281,7 +283,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
       onOpen={() => setPreviewId(photo.id)}
       onAdd={locked ? undefined : () => setPick([...ids, photo.id])}
       addLabel={`Send this photo to ${name}`}
-      onRemove={locked || !photo.marketplace ? undefined : () => void deleteOwn(photo)}
+      onRemove={locked || studioPending || !photo.marketplace ? undefined : () => void deleteOwn(photo)}
       removeLabel={`Delete this ${name} photo`}
       controlsInViewerOnTouch
     />)}
@@ -293,10 +295,10 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
       onStep={(next) => setPreviewId(all[next].id)}
       error={error}
       rotating={adjustingPhoto}
-      onRotate={runtime.features.has("photo_edits") ? (degrees) => void adjustPhoto(all[previewIndex].id, degrees) : undefined}
-      onEdit={runtime.features.has("photo_edits") ? () => { setEditingTab("crop"); setEditingId(all[previewIndex].id); setPreviewId(null); } : undefined}
-      onStudio={runtime.features.has("photo_studio") ? () => { setEditingTab("studio"); setEditingId(all[previewIndex].id); setPreviewId(null); } : undefined}
-      onRevert={runtime.features.has("photo_edits") && all[previewIndex].edits ? () => void adjustPhoto(all[previewIndex].id, null) : undefined}
+      onRotate={canEditPhotos ? (degrees) => void adjustPhoto(all[previewIndex].id, degrees) : undefined}
+      onEdit={canEditPhotos ? () => { setEditingTab("crop"); setEditingId(all[previewIndex].id); setPreviewId(null); } : undefined}
+      onStudio={runtime.features.has("photo_studio") && !studioPending ? () => { setEditingTab("studio"); setEditingId(all[previewIndex].id); setPreviewId(null); } : undefined}
+      onRevert={canEditPhotos && all[previewIndex].edits ? () => void adjustPhoto(all[previewIndex].id, null) : undefined}
       onMove={previewIndex < picked.length && !locked ? (delta) => movePick(previewIndex, previewIndex + delta) : undefined}
       // A touch screen hides the tiles' remove buttons; the viewer offers it instead.
       onRemove={previewIndex < picked.length && !locked ? () => {
@@ -308,8 +310,9 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
     />}
     {editing && <PhotoEditorDialog key={editing.id} convId={convId} photo={editing} index={all.indexOf(editing)}
       photos={all} initialTab={editingTab}
-      onSaved={() => void refreshPhotos()}
-      onClose={() => { setPreviewId(editing.id); setEditingId(null); }} />}
+      onSaved={(changed) => queryClient.setQueriesData<ListingPhoto[]>({ queryKey: ["photos", convId] },
+        (current) => current?.map((photo) => photo.id === changed.id ? changed : photo))}
+      onClose={(background) => { setPreviewId(background ? null : editing.id); setEditingId(null); }} />}
   </>;
 
   if (page) {

@@ -176,6 +176,29 @@ def test_busy_membership_changes_the_version_but_lease_renewals_do_not(cloud, si
     assert snapshots._version(owner) == idle
 
 
+def test_inventory_read_keeps_a_draft_busy_on_another_process(cloud, signing_keys):  # noqa: F811
+    from datetime import UTC, datetime, timedelta
+    from sqlalchemy.orm import Session
+
+    from anteroom.models.background_task import BackgroundTask
+    from anteroom.models.conversation import Conversation
+
+    client, engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/drafts', headers=alice, json={'title': 'Generating tee'}).json()['id']
+    with Session(engine) as db:
+        db.get(Conversation, identity).status = 'in_progress'
+        db.add(BackgroundTask(user_id=USER_ID, conversation_id=identity, kind='generate', status='running',
+                              leased_until=datetime.now(UTC) + timedelta(minutes=2)))
+        db.commit()
+
+    response = client.get('/api/conversations', headers=alice)
+    assert response.status_code == 200, response.text
+    assert response.json()[0]['status'] == 'in_progress'
+    with Session(engine) as db:
+        assert db.get(Conversation, identity).status == 'in_progress'
+
+
 def timed(read):
     """Run one snapshot read the way a request does; return its slow-line fields."""
     from anteroom.services import request_timing
@@ -191,8 +214,7 @@ def timed(read):
 
 
 def test_slow_line_separates_waiting_on_a_discarded_build_from_rebuilding(monkeypatch):
-    # Fable's unmeasured hypothesis: a build whose own commit moves the change
-    # vector is discarded, so a tab that waited on it builds a second time.
+    # The second tab observed a commit the older build had not started with.
     cache = snapshots.SellerReadSnapshots()
     versions, checks, entered, release = [0], [], threading.Event(), threading.Event()
 
@@ -214,6 +236,7 @@ def test_slow_line_separates_waiting_on_a_discarded_build_from_rebuilding(monkey
         with use(context('alice')):
             first = asyncio.create_task(timed(lambda: cache.read('inventory', 'committing')))
             assert await asyncio.to_thread(entered.wait, 3)
+            versions[0] += 1
             second = asyncio.create_task(timed(lambda: cache.read('inventory', 'plain')))
             while len(checks) < 2:
                 await asyncio.sleep(0.001)
@@ -241,6 +264,54 @@ def test_slow_line_separates_waiting_on_a_discarded_build_from_rebuilding(monkey
         assert all(isinstance(value, int) for key, value in fields.items()
                    if key not in ('snapshot', 'pool_start', 'pool_end'))
         assert 'alice' not in repr(fields)
+
+
+def test_parallel_reads_share_a_build_even_when_writes_keep_it_out_of_cache(monkeypatch):
+    cache = snapshots.SellerReadSnapshots()
+    entered, release = threading.Event(), threading.Event()
+    checks, builds = [], []
+    version = [0]
+
+    def check(_owner):
+        return version[0]
+
+    in_thread = snapshots._in_thread
+
+    async def track_check(function, *args):
+        result = await in_thread(function, *args)
+        if function is check:
+            checks.append(True)
+        return result
+
+    def load(_owner, _read):
+        builds.append(True)
+        entered.set()
+        assert release.wait(5)
+        version[0] += 1
+        return 'inventory'
+
+    monkeypatch.setattr(snapshots, '_version', check)
+    monkeypatch.setattr(snapshots, '_load', load)
+    monkeypatch.setattr(snapshots, '_in_thread', track_check)
+
+    async def run():
+        with use(context('alice')):
+            first = asyncio.create_task(cache.read('inventory', lambda _: None))
+            assert await asyncio.to_thread(entered.wait, 3)
+            peers = [asyncio.create_task(cache.read('inventory', lambda _: None)) for _ in range(5)]
+            try:
+                async with asyncio.timeout(3):
+                    while len(checks) < 6:
+                        await asyncio.sleep(0.001)
+            finally:
+                release.set()
+            assert await asyncio.gather(first, *peers) == ['inventory'] * 6
+            assert not cache.completed
+            assert len(builds) == 1
+            assert await cache.read('inventory', lambda _: None) == 'inventory'
+            assert len(builds) == 2
+
+    asyncio.run(run())
 
 
 def test_load_splits_connection_database_and_assembly_time_and_counts_commits(monkeypatch):

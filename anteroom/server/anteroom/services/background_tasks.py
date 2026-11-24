@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import delete, func, insert, select, text, update
+from sqlalchemy import and_, delete, func, insert, or_, select, text, update
+from sqlalchemy.orm import aliased
 from fastapi import HTTPException
 
 from anteroom.models.background_task import BackgroundTask, BackgroundTaskEvent
@@ -18,8 +19,7 @@ ACTIVE = ('queued', 'running')
 # task (services/task_signals.py), which then reads it. Streams also read this
 # often while that notice listener is down.
 EVENT_INTERVAL = .5
-# A worker claims a queued task within seconds. One still queued after this
-# long has no worker to run it, and would otherwise keep its draft busy.
+# After this long, a task with no sign of worker progress can release its draft.
 UNCLAIMED_LIMIT_S = 300
 WORKER_UNAVAILABLE = 'The draft worker is unavailable; try again shortly.'
 
@@ -135,14 +135,23 @@ def finish(task_id, token, *, error=None):
 
 
 def expire_unclaimed(db, task_id):
-    """Fail a task no worker claimed within UNCLAIMED_LIMIT_S and free its draft.
+    """Free a long-queued draft if its seller's worker has stopped making progress.
 
-    Returns False when a worker claimed it meanwhile; the update and the
-    worker's claim cannot both succeed.
+    A worker claim and this transition cannot both update the same queued task.
     """
+    peer = aliased(BackgroundTask)
+    worker_progress = select(peer.id).where(
+        peer.user_id == BackgroundTask.user_id,
+        or_(
+            and_(peer.status == 'running', peer.leased_until > func.now()),
+            # A slot may be between finishing one draft and claiming the next.
+            and_(peer.status == 'completed', peer.updated_at > func.now() - text("interval '2 minutes'")),
+        ),
+    ).correlate(BackgroundTask).exists()
     expired = db.execute(update(BackgroundTask).where(
         BackgroundTask.id == task_id, BackgroundTask.status == 'queued',
         BackgroundTask.created_at < func.now() - text(f"interval '{UNCLAIMED_LIMIT_S} seconds'"),
+        ~worker_progress,
     ).values(status='failed', error=WORKER_UNAVAILABLE, updated_at=func.now())
         .returning(BackgroundTask.conversation_id)).first()
     if expired is not None and expired.conversation_id is not None:
