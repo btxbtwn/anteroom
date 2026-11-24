@@ -1,2 +1,0 @@
-- Give Chrome and Cloud their own sign-in buttons in Connections, and show the result as soon as a cloud test finishes.
-- Explain when to use Chrome or Cloud beside each sign-in button.

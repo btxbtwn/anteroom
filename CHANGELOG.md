@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1238 — 2026-11-24
+
+- Give Chrome and Cloud their own sign-in buttons in Connections, and show the result as soon as a cloud test finishes.
+- Explain when to use Chrome or Cloud beside each sign-in button.
+
 ## 0.1.1237 — 2026-11-24
 
 - Keep listing guidelines out of agent and catalog responses.
