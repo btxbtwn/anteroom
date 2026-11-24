@@ -1486,3 +1486,38 @@ def test_mcp_category_edit_sticks_on_a_listing_with_saved_marketplace_forms():
     assert not err
     assert stored["listing"]["direct_category_ids"]["etsy"] == "559"
     assert stored["listing"]["direct_category_ids"]["ebay"] == "53159"
+
+
+def test_mcp_category_change_clears_the_old_category_answers():
+    """Answers saved for the old category do not carry into an agent's new one."""
+    from anteroom.services import native_contract
+
+    listing = {
+        "title": "Graphic Tee", "price": 20.0,
+        "category_path": "Clothing, Shoes & Accessories > Men > Men's Clothing > Shirts & T-Shirts",
+        "direct_category_ids": {"ebay": "15687"}, "ebay_specifics": {"style": "Graphic Tee"},
+    }
+    form = {"marketplace": "ebay", "native": True, "known": True, "category_id": "15687", "fields": [
+        {"path": "ebay_specifics.style", "label": "Style", "category_specific": True,
+         "options": ["Graphic Tee"], "option_values": {"Graphic Tee": "Graphic Tee"}},
+    ]}
+    listing[native_contract.KEY] = native_contract.capture(listing, {"ebay": form}, ["ebay"])
+    client = TestClient(app)
+    with SessionLocal() as db:
+        db.add(Conversation(id="conv-cat-change", title="Graphic Tee", status="draft"))
+        db.flush()
+        db.add(ListingRevision(id="rev-cat-change-1", conversation_id="conv-cat-change", source="test",
+                               listing_json=listing))
+        db.flush()
+        db.add(Listing(conversation_id="conv-cat-change", current_revision_id="rev-cat-change-1"))
+        db.commit()
+
+    edited, err = _call_tool(client, "edit_listing", {
+        "conversation_id": "conv-cat-change",
+        "fields": {"direct_category_ids": {"ebay": "53159"}},
+    })
+    assert not err, edited
+    stored, err = _call_tool(client, "get_listing", {"conversation_id": "conv-cat-change"})
+    assert not err
+    assert stored["listing"]["direct_category_ids"]["ebay"] == "53159"
+    assert not (stored["listing"].get("ebay_specifics") or {}).get("style")
