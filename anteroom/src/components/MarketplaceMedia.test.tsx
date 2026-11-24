@@ -2,7 +2,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, it, vi } from "vitest";
 
 const { useQuery } = vi.hoisted(() => ({ useQuery: vi.fn() }));
-vi.mock("@tanstack/react-query", () => ({ useQuery, useQueryClient: () => ({ invalidateQueries: vi.fn() }) }));
+vi.mock("@tanstack/react-query", () => ({
+  useQuery,
+  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useIsMutating: () => 0,
+}));
 
 const { MarketplaceMedia } = await import("./MarketplaceMedia");
 const { desktopRuntime, WorkspaceRuntimeProvider } = await import("../app/runtime");
