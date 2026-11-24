@@ -173,19 +173,6 @@ test('defaultUploadCloudSession strips non-poshmark cookies and sends X-Cloud-Up
   }
 });
 
-// Chrome's cookies API returns a cookie only when the extension holds host permission for
-// the cookie's URL, and it builds that URL as http:// for a cookie without Secure
-// (extensions/api/cookies/cookies_helpers.cc, GetURLFromCanonicalCookie).
-function permittedCookies(cookies) {
-  const manifest = require('../manifest.json');
-  const granted = manifest.host_permissions.map(pattern => new RegExp(
-    `^${pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`));
-  return cookies.filter(cookie => {
-    const url = `${cookie.secure ? 'https' : 'http'}://${cookie.domain.replace(/^\./, '')}/`;
-    return granted.some(pattern => pattern.test(url));
-  });
-}
-
 test('Mercari is not a cloud marketplace: its cookies are never read or uploaded', async () => {
   // Mercari answers server requests with a Cloudflare challenge, so it runs only in Chrome.
   const calls = [];
