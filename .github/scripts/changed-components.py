@@ -10,6 +10,12 @@ Version workflow's "Release Anteroom" commits change nothing else, so they
 skip the test jobs, and the CI aggregator still reports success for the deploy
 that waits on it (.github/workflows/deploy-hosted.yml).
 
+A pull request that is not queued to merge runs the quick stage: everything
+but the backend and browser suites, which take most of CI's time and which
+agents run with ./check.sh before pushing. Queuing it (auto-merge) runs the
+full stage, and only that run reports the required CI check
+(.github/workflows/ci.yml).
+
     changed-components.py --base <sha> [--head <sha>]
     git diff --name-only | changed-components.py --stdin    (check.sh)
 """
@@ -24,6 +30,8 @@ import sys
 
 COMPONENTS = ("frontend", "backend", "browser", "health", "audit", "extension", "relay")
 BROWSER_SUITES = ("sandbox", "hosted")
+# Left for the full stage of a pull request (see the module docstring).
+LONG_SUITES = ("backend", "browser")
 
 # Files every job reads: a change here runs everything.
 CI_FILES = (".github/workflows/ci.yml", ".github/workflows/dependency-audit.yml", ".github/scripts/", "check.sh")
@@ -149,7 +157,9 @@ def main() -> int:
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--stdin", action="store_true", help="read changed paths from stdin")
     parser.add_argument("--workflow", choices=("pull_request", "push", "workflow_dispatch"),
-                        help="emit the browser matrix for a GitHub Actions run")
+                        help="emit the stage and browser matrix for a GitHub Actions run")
+    parser.add_argument("--queued", choices=("true", "false"), default="false",
+                        help="the pull request is queued to merge, so it runs the full stage")
     args = parser.parse_args()
 
     base = args.base.strip()
@@ -172,9 +182,13 @@ def main() -> int:
         for path in files:
             print(f"  {path}", file=sys.stderr)
         result = components(files)
+    stage = "quick" if args.workflow == "pull_request" and args.queued == "false" else "full"
+    if stage == "quick":
+        result.update(dict.fromkeys(LONG_SUITES, False))
     for name in COMPONENTS:
         print(f"{name}={'true' if result[name] else 'false'}")
     if args.workflow:
+        print(f"stage={stage}")
         suites = browser_suites(files) if args.workflow == "pull_request" else []
         if not suites:
             suites = list(BROWSER_SUITES)

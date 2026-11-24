@@ -625,13 +625,17 @@ def repair_changed_paths(head_before: str, local: str, main_sha: str | None) -> 
 
 
 def failed_ci_jobs(jobs: list[dict]) -> list[dict]:
-    """Leaf CI jobs that failed. Skip the aggregate `CI` gate (it only mirrors them)."""
+    """Leaf CI jobs that failed. Skip the aggregate gate (it only mirrors them).
+
+    ci.yml names the gate by stage: `CI` on a full run, `Quick checks` on an
+    unqueued pull request's run.
+    """
     out = []
     for job in jobs:
         if job.get("conclusion") != "failure":
             continue
         name = (job.get("name") or "").strip()
-        if not name or name == "CI":
+        if not name or name in ("CI", "Quick checks"):
             continue
         out.append(
             {

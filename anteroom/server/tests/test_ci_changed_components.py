@@ -199,3 +199,21 @@ def test_a_rename_runs_both_components(repository: tuple[Path, str]) -> None:
     git(root, "mv", str(source), str(destination))
     git(root, "commit", "-qm", "Move source to relay")
     assert components(root, "--base", base) == flags("frontend", "backend", "browser", "health", "relay")
+
+
+@pytest.mark.parametrize(
+    ("event", "queued", "stage"),
+    [
+        ("pull_request", "false", "quick"),
+        ("pull_request", "true", "full"),
+        ("push", "false", "full"),
+        ("workflow_dispatch", "false", "full"),
+    ],
+)
+def test_pull_requests_run_the_long_suites_once_queued(tmp_path: Path, event: str, queued: str, stage: str) -> None:
+    paths = "anteroom/server/anteroom/routes/listings.py\nanteroom/src/App.tsx\n"
+    selected = components(tmp_path, "--stdin", "--workflow", event, "--queued", queued, stdin=paths)
+    assert selected["stage"] == stage
+    long_suites = "false" if stage == "quick" else "true"
+    assert (selected["backend"], selected["browser"]) == (long_suites, long_suites)
+    assert (selected["frontend"], selected["health"]) == ("true", "true")
