@@ -251,6 +251,11 @@ def snapshot(marketplace: str, listing: dict) -> tuple[dict, list[str]]:
     colors = [_text(color, 40) for color in listing.get("colors") or [] if _text(color, 40)]
     if colors:
         out["primaryColor"] = colors[0]
+    if len(colors) > 1:
+        out["secondaryColor"] = colors[1]
+    department = _text(listing.get("department"), 40)
+    if department:
+        out["department"] = department
     if category:
         out["category_path"] = category
         out["marketplace_categories"] = {marketplace: category}
@@ -259,8 +264,61 @@ def snapshot(marketplace: str, listing: dict) -> tuple[dict, list[str]]:
         # The marketplace's own category is the one its tab shows.
         if marketplace in {"poshmark", "depop", "mercari"}:
             out["direct_category_ids"] = {marketplace: category_id}
+    if marketplace == "depop":
+        _depop_fields(listing, out)
     photos = [url for url in listing.get("photos") or [] if isinstance(url, str) and url.startswith("https://")]
     return out, photos
+
+
+def _texts(value, limit: int, most: int) -> list[str]:
+    rows = [_text(item, limit) for item in value] if isinstance(value, list) else []
+    return list(dict.fromkeys(item for item in rows if item))[:most]
+
+
+def _depop_fields(listing: dict, out: dict) -> None:
+    """Every Depop form field the listing has, under the keys its tab and List read.
+
+    Depop sends its own ids for style, age and source; the tab shows the sell
+    page's names for them. An id the captured catalog does not name is kept,
+    since List matches Depop's ids as well as its names.
+    """
+    from anteroom.services import depop_form
+
+    names = {key: {value: label for label, value in options.items()}
+             for key, options in depop_form.catalog()["fixed_option_values"].items()}
+    specifics: dict = {}
+    condition = _text(listing.get("condition"), 40)
+    if condition in names["condition"]:
+        specifics["condition"] = condition
+    colours = [colour for colour in _texts(listing.get("colors"), 40, 2) if colour in names["colour"]]
+    if colours:
+        specifics["colour"] = colours
+    for key, most in (("style", 3), ("age", 1), ("source", 2)):
+        values = [names[key].get(value, value) for value in _texts(listing.get(key), 60, most)]
+        if values:
+            specifics[key] = values
+    raw = listing.get("attributes")
+    attributes = {key: values for key, value in raw.items()
+                  if isinstance(key, str) and re.fullmatch(r"[a-z0-9-]{1,60}", key) and (values := _texts(value, 60, 10))
+                  } if isinstance(raw, dict) else {}
+    if attributes:
+        specifics["attributes"] = attributes
+    parcel = _text(listing.get("parcel_size"), 60)
+    domestic = _price(listing.get("domestic_shipping"))
+    if parcel:
+        specifics["parcelSize"] = parcel
+    elif domestic is not None:
+        specifics["domesticShippingPrice"] = domestic
+    worldwide = _price(listing.get("worldwide_shipping"))
+    specifics["worldwideShipping"] = {"enabled": True, "price": worldwide} if worldwide is not None else {"enabled": False}
+    if isinstance(listing.get("boost"), bool):
+        specifics["boost"] = listing["boost"]
+    out["depop_specifics"] = specifics
+    # Depop's own values are the seller's choices: later passes keep them as they are.
+    out["seller_fields"] = sorted(f"depop_specifics.{key}" for key in specifics)
+    tags = [re.sub(r"[^a-z0-9_]", "", tag.lower()) for tag in _texts(listing.get("hashtags"), 40, 5)]
+    if tags := list(dict.fromkeys(tag for tag in tags if tag)):
+        out["tags"] = tags
 
 
 async def _read(marketplace: str, listing_id: str) -> dict:

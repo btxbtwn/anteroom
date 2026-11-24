@@ -162,13 +162,24 @@ test('Mercari refuses another seller and an item that is not on sale', async () 
   assert.match((await listing(mercari({ ...MERCARI_ITEM, status: 'trading' }).c, 'mercari', 'm12345678901')).error, /not on sale/);
 });
 
-const DEPOP_ATTRIBUTES = { department: [{ id: 'womenswear', name: 'Womenswear' }],
-  group: [{ id: 'outerwear', name: 'Coats and jackets', product_types: [{ id: 'denim-jackets', name: 'Denim jackets' }] }],
-  brand: [{ id: 77, name: 'Levi\'s' }], generic_attributes: [] };
+// Depop's live product (2026-11) names the department as gender male/female/unisex
+// plus is_kids, as its sell page posts them, not as a department id.
+const DEPOP_ATTRIBUTES = { department: [{ id: 'womenswear', name: 'Womenswear' }, { id: 'menswear', name: 'Menswear' },
+  { id: 'kidswear', name: 'Kidswear' }, { id: 'everything-else', name: 'Everything else' }],
+  group: [{ id: 'outerwear', name: 'Coats and jackets', department: ['womenswear', 'menswear', 'kidswear'],
+    product_types: [{ id: 'denim-jackets', name: 'Denim jackets', attribute_ids: ['material', 'occasion'] }] },
+  { id: 'home', name: 'Home', department: ['everything-else'], product_types: [{ id: 'candles', name: 'Candles' }] }],
+  brand: [{ id: 77, name: 'Levi\'s' }],
+  generic_attributes: [{ id: 'material', name: 'Material', max_selection: 4, attributes: [{ id: 'denim', name_i18n: { en: 'Denim' } }, { id: 'cotton', name: 'Cotton' }] },
+    { id: 'occasion', name: 'Occasion', attributes: [{ id: 'casual', name: 'Casual' }] }] };
+const DEPOP_PROVIDERS = [{ id: 'USPS', parcel_sizes: [{ id: 'under_8oz', title: 'Extra small' }, { id: 'under_1lb', title: 'Medium' }] }];
 const DEPOP_SIZES = { category_size_mapping: [], size_sets: [{ id: 3, sizes: [{ id: 4, name: 'M' }] }] };
 const DEPOP_PRODUCT = { id: 957, slug: 'shop-denim-jacket-136d', user_id: 5, status: 'STATUS_ONSALE', description: 'Denim jacket #levis\nClassic fit',
-  price_amount: '45.00', price_currency: 'USD', brand_id: 77, condition: 'used_excellent', gender: 'womenswear', product_type: 'denim-jackets',
-  variant_set: 3, variants: { 4: 1 }, sku: 'JKT-1', colour: ['blue'],
+  price_amount: '45.00', price_currency: 'USD', brand_id: 77, condition: 'used_excellent', gender: 'female', is_kids: false,
+  product_type: 'denim-jackets', variant_set: 3, variants: { 4: 1 }, sku: 'JKT-1', colour: ['blue', 'black'],
+  style: ['streetwear', 'retro'], age: ['90s'], source: ['vintage'], attributes: { material: ['denim', 'cotton'], occasion: ['casual'] },
+  shipping_methods: [{ payer: 'buyer', parcel_size: 'under_1lb', shipping_provider_id: 'USPS' }], national_shipping_cost: '0.00',
+  international_shipping_cost: '15.00', hashtags: ['levis', 'vintage'],
   pictures: [{ id: 1, formats: { P0: { url: 'https://media-photos.depop.com/b1/1/P0.jpg' } } }] };
 
 function depop(product = DEPOP_PRODUCT, shop = {}) {
@@ -178,6 +189,7 @@ function depop(product = DEPOP_PRODUCT, shop = {}) {
     [`/presentation/api/v1/products/by-slug/${product.slug}/`]: [200, product],
     '/presentation/api/v1/attributes/': [200, DEPOP_ATTRIBUTES],
     '/presentation/api/v1/attributes/categories/size-mapping/': [200, DEPOP_SIZES],
+    '/presentation/api/v1/shipping/providers/depop/': [200, DEPOP_PROVIDERS],
   }, { cookies: { access_token: 'secret-token' } });
 }
 
@@ -203,9 +215,40 @@ test('Depop returns the product with names from its attribute list', async () =>
     id: 'shop-denim-jacket-136d', url: 'https://www.depop.com/products/shop-denim-jacket-136d/', title: 'Denim jacket',
     description: 'Denim jacket #levis\nClassic fit', price: 45, currency: 'USD', quantity: 1, brand: 'Levi\'s', size: 'M',
     condition: 'used_excellent', category_path: 'Womenswear > Coats and jackets > Denim jackets', category_id: 'womenswear_denim-jackets',
-    sku: 'JKT-1', colors: ['blue'], photos: ['https://media-photos.depop.com/b1/1/P0.jpg'],
+    department: 'Women', sku: 'JKT-1', colors: ['blue', 'black'], photos: ['https://media-photos.depop.com/b1/1/P0.jpg'],
+    style: ['streetwear', 'retro'], age: ['90s'], source: ['vintage'],
+    attributes: { material: ['Denim', 'Cotton'], occasion: ['Casual'] },
+    parcel_size: 'Medium', domestic_shipping: null, worldwide_shipping: 15, boost: null, hashtags: ['levis', 'vintage'],
   });
   readOnly(requests);
+});
+
+test('Depop builds a category its List accepts from gender and is_kids', async () => {
+  const id = async product => (await listing(depop({ ...DEPOP_PRODUCT, ...product }).c, 'depop', DEPOP_PRODUCT.slug)).listing;
+  assert.equal((await id({ gender: 'male' })).category_id, 'menswear_denim-jackets');
+  assert.equal((await id({ gender: 'male' })).department, 'Men');
+  const boys = await id({ gender: 'male', is_kids: true });
+  assert.deepEqual([boys.category_id, boys.department, boys.category_path], ['kidswear_denim-jackets', 'Boys', 'Kidswear > Coats and jackets > Denim jackets']);
+  assert.equal((await id({ gender: 'female', isKids: true })).department, 'Girls');
+  const candle = await id({ gender: undefined, is_kids: false, product_type: 'candles', attributes: {} });
+  assert.deepEqual([candle.category_id, candle.department], ['everything-else_candles', null]);
+  // An id Depop already names as a department is kept.
+  assert.equal((await id({ gender: undefined, department: 'womenswear' })).category_id, 'womenswear_denim-jackets');
+  // A product type Depop does not list under that department is no category at all.
+  assert.equal((await id({ gender: 'male', product_type: 'candles' })).category_id, null);
+});
+
+test('Depop keeps a seller-paid shipping price when the listing does not use Depop Shipping', async () => {
+  const own = (await listing(depop({ ...DEPOP_PRODUCT, shipping_methods: [], national_shipping_cost: '6.50',
+    international_shipping_cost: null }).c, 'depop', DEPOP_PRODUCT.slug)).listing;
+  assert.deepEqual([own.parcel_size, own.domestic_shipping, own.worldwide_shipping], [null, 6.5, null]);
+  // A parcel Depop's list no longer names keeps its own id, which List still matches.
+  const { c } = depop({ ...DEPOP_PRODUCT, shipping_methods: [{ parcel_size: 'under_4oz' }] });
+  assert.equal((await listing(c, 'depop', DEPOP_PRODUCT.slug)).listing.parcel_size, 'under_4oz');
+  // Hashtags written only in the description still come over.
+  const tags = (await listing(depop({ ...DEPOP_PRODUCT, hashtags: undefined, description: 'Jacket #Levis #90s denim' }).c,
+    'depop', DEPOP_PRODUCT.slug)).listing.hashtags;
+  assert.deepEqual(tags, ['levis', '90s']);
 });
 
 test('Depop takes the price from the shop list when its product document has none', async () => {

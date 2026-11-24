@@ -119,6 +119,61 @@ def test_each_chrome_marketplace_imports_with_its_public_link(chrome, marketplac
     if marketplace == "mercari":
         assert response.json()["warnings"] == ["The marketplace did not provide photos. Add photos before crosslisting."]
 
+DEPOP_FULL = {**LISTINGS["depop"], "category_id": "womenswear_jackets", "brand": "Levi's", "size": "6", "sku": "JKT-1", "department": "Women",
+              "category_path": "Womenswear > Coats and jackets > Jackets", "colors": ["blue", "black"],
+              "style": ["streetwear", "retro"], "age": ["y2k"], "source": ["vintage", "unknown-new-source"],
+              "attributes": {"material": ["Denim", "Cotton"], "occasion": ["Casual"]},
+              "parcel_size": "Medium", "domestic_shipping": None, "worldwide_shipping": 15, "boost": True,
+              "hashtags": ["levis", "vintage"]}
+
+
+def test_depop_import_fills_every_field_of_the_depop_tab(chrome):
+    from anteroom.services import depop_form
+
+    chrome.remote.listings["depop"] = copy.deepcopy(DEPOP_FULL)
+    assert post(chrome, "depop", DEPOP_FULL["id"]).status_code == 200
+    snapshot = chrome.db.query(ListingRevision).one().listing_json
+    assert snapshot["direct_category_ids"] == {"depop": "womenswear_jackets"}
+    assert (snapshot["primaryColor"], snapshot["secondaryColor"], snapshot["department"]) == ("blue", "black", "Women")
+    assert snapshot["tags"] == ["levis", "vintage"]
+    assert snapshot["depop_specifics"] == {
+        "condition": "used_excellent", "colour": ["blue", "black"], "style": ["Streetwear", "Retro"], "age": ["00s"],
+        "source": ["Vintage", "unknown-new-source"], "attributes": {"material": ["Denim", "Cotton"], "occasion": ["Casual"]},
+        "parcelSize": "Medium", "worldwideShipping": {"enabled": True, "price": 15.0}, "boost": True,
+    }
+    # Depop's values are the seller's; later passes do not pad or replace them.
+    assert {"depop_specifics.style", "depop_specifics.age", "depop_specifics.source", "depop_specifics.colour",
+            "depop_specifics.condition", "depop_specifics.parcelSize"} <= set(snapshot["seller_fields"])
+    rows = {row["path"]: row["value"] for row in depop_form.form(snapshot)["fields"]}
+    assert rows["direct_category_ids.depop"] == "womenswear_jackets"
+    assert rows["depop_specifics.description"] == "Denim jacket #levis"
+    assert rows["depop_specifics.brand"] == "Levi's"
+    assert rows["depop_specifics.condition"] == "used_excellent"
+    assert rows["depop_specifics.colour"] == ["blue", "black"]
+    assert rows["depop_specifics.size"] == "6"
+    assert rows["depop_specifics.sku"] == "JKT-1"
+    assert rows["depop_specifics.style"] == ["Streetwear", "Retro"]
+    assert rows["depop_specifics.age"] == ["00s"]
+    assert rows["depop_specifics.source"] == ["Vintage", "unknown-new-source"]
+    assert rows["depop_specifics.attributes.material"] == ["Denim", "Cotton"]
+    assert rows["depop_specifics.attributes.occasion"] == ["Casual"]
+    assert rows["depop_specifics.parcelSize"] == "Medium"
+    assert rows["depop_specifics.worldwideShipping.enabled"] is True
+    assert rows["depop_specifics.worldwideShipping.price"] == 15.0
+    assert rows["depop_specifics.boost"] is True
+    assert (rows["price"], rows["quantity"]) == (45.0, 1)
+
+
+def test_depop_import_keeps_a_seller_paid_domestic_price(chrome):
+    chrome.remote.listings["depop"] = {**copy.deepcopy(DEPOP_FULL), "parcel_size": None, "domestic_shipping": 6.5,
+                                       "worldwide_shipping": None, "boost": None}
+    assert post(chrome, "depop", DEPOP_FULL["id"]).status_code == 200
+    specifics = chrome.db.query(ListingRevision).one().listing_json["depop_specifics"]
+    assert specifics["domesticShippingPrice"] == 6.5
+    assert specifics["worldwideShipping"] == {"enabled": False}
+    assert "parcelSize" not in specifics and "boost" not in specifics
+
+
 def test_repeat_import_keeps_local_edits_without_reading_chrome(chrome):
     first = post(chrome, "depop", "shop-denim-jacket-136d").json()
     listing_persistence.save_revision(chrome.db, first["conversation_id"], {"title": "Edited", "price": 99}, "user")
