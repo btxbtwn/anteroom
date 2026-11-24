@@ -8,7 +8,7 @@ item back to that sent revision. Nothing here contacts a marketplace.
 from __future__ import annotations
 
 import copy
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -35,9 +35,9 @@ class PendingEditsError(ValueError):
 
 def _comparable(listing: dict | None) -> dict[str, Any]:
     raw = listing if isinstance(listing, dict) else {}
-    projected: dict[str, Any] = without_operational_keys(
-        {key: value for key, value in raw.items() if key in ROOTS and key not in _PRIVATE})
-    return projected
+    # A dict in gives a dict out; the helper is typed for any JSON value.
+    return cast(dict[str, Any], without_operational_keys(
+        {key: value for key, value in raw.items() if key in ROOTS and key not in _PRIVATE}))
 
 
 def _changes(live: dict, new: dict, path: tuple[str, ...] = ()) -> list[dict[str, Any]]:
