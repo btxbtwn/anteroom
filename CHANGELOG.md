@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1224 — 2026-11-24
+
+- Your AI agent can now see which items have edits not yet sent to their live marketplaces and what changed field by field, and put an item back to the version that's live, keeping your labels and cost. It never contacts a marketplace.
+- Your AI agent can list your labels with how many items wear each, and rename or delete a label across your whole inventory.
+- Your AI agent can mark two items as not duplicates so that pair never comes back.
+
 ## 0.1.1223 — 2026-11-24
 
 - Fix Anteroom updates failing to start after another pair of changes each added a database step at the same time.
