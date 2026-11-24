@@ -145,6 +145,9 @@ function studioWords(value: string | undefined): string {
   return (value ?? "").trim().replace(/\s+/g, " ");
 }
 
+/** Match the maximum number of photos accepted by the AI Studio route. */
+export const MAX_STUDIO_PHOTOS = 20;
+
 /** The AI Studio choices the server accepts, made consistent the way it makes them. */
 export function normalizeStudio(options: StudioOptions): StudioOptions {
   if (options.virtual_model) {

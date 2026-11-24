@@ -18,6 +18,7 @@ from sqlalchemy.pool import StaticPool
 from anteroom import database
 from anteroom.database import Base, get_db, load_models
 from anteroom.main import app
+from anteroom.models.listing import Listing
 from anteroom.repositories.queries import ConversationRepo
 from anteroom.services import listing_persistence, photoroom
 from anteroom.services.photo_edits import Annotation, PhotoEdits, Redaction
@@ -348,17 +349,103 @@ def test_one_failed_photo_does_not_stop_the_others(env, monkeypatch):
     _mock_photoroom(monkeypatch, answer)
     monkeypatch.setattr(photoroom, "CONCURRENCY", 1)
     response = env.client.post(env.studio, json={"photo_ids": ["missing"], "options": {"remove_background": True}})
-    assert response.json() == {"photos": [], "errors": [{"photo_id": "missing", "detail": "Photo not found"}]}
+    assert response.json() == {
+        "photos": [], "errors": [{"photo_id": "missing", "detail": "Photo not found", "needs_review": True}],
+        "provider_blocked": False,
+    }
     assert calls["count"] == 0
     response = env.client.post(env.studio, json={"photo_ids": [photo.id for photo in env.photos],
                                                  "options": {"remove_background": True}})
     body = response.json()
     assert len(body["photos"]) == 1
-    assert body["errors"] == [{"photo_id": env.photos[1].id, "detail": "Your Photoroom plan has no credits left for this edit."}]
+    assert body["errors"] == [{
+        "photo_id": env.photos[1].id, "detail": "Your Photoroom plan has no credits left for this edit.", "needs_review": False,
+    }]
     env.db.refresh(env.photos[1])
     assert env.photos[1].edits is None
     # Only the saved photo's result and the two uploads are on disk.
     assert len(list(env.dir.glob("*.jpg"))) == 4  # two uploads, one AI base, one rendered edit
+
+
+def _reviewed_edits(env):
+    return {
+        "photo_ids": [photo.id for photo in env.photos],
+        "options": {"remove_background": True},
+        "review": {"photo_versions": {photo.id: photo.checksum[:12] for photo in env.photos}},
+    }
+
+
+def test_bulk_studio_skips_stale_and_non_draft_photos_before_calling_photoroom(env, monkeypatch):
+    from anteroom.services.keychain import write_slot
+
+    write_slot(photoroom.KEY_ACCOUNT, KEY)
+    monkeypatch.setattr(photoroom, "CONCURRENCY", 1)
+    seen = _mock_photoroom(monkeypatch, lambda _: httpx.Response(200, content=_png("white")))
+    payload = _reviewed_edits(env)
+    env.conv.status = "active"
+    env.db.commit()
+    refused = env.client.post(env.studio, json=payload).json()
+    assert len(refused["errors"]) == 2
+    assert all(error["needs_review"] for error in refused["errors"])
+    assert seen == []
+
+    env.conv.status = "draft"
+    env.photos[1].checksum = "b" * 64
+    env.db.commit()
+    result = env.client.post(env.studio, json=payload).json()
+    assert [photo["id"] for photo in result["photos"]] == [env.photos[0].id]
+    assert result["errors"] == [{
+        "photo_id": env.photos[1].id, "detail": "Photo changed. Review this draft again.", "needs_review": True,
+    }]
+    assert len(seen) == 1
+
+
+def test_bulk_studio_checks_the_schedule_at_save_time(env, monkeypatch):
+    from datetime import datetime
+
+    from anteroom.services.keychain import write_slot
+
+    write_slot(photoroom.KEY_ACCOUNT, KEY)
+    monkeypatch.setattr(photoroom, "CONCURRENCY", 1)
+    payload = _reviewed_edits(env)
+    identity = env.conv.id
+
+    def schedule_during_edit(_):
+        with database.SessionLocal() as db:
+            db.add(Listing(conversation_id=identity, ready_to_list=True, scheduled_status="scheduled",
+                           scheduled_confirmed_at=datetime(2026, 11, 23), scheduled_publish_at=datetime(2027, 1, 1)))
+            db.commit()
+        return httpx.Response(200, content=_png("white"))
+
+    seen = _mock_photoroom(monkeypatch, schedule_during_edit)
+    result = env.client.post(env.studio, json=payload).json()
+    assert result["photos"] == []
+    assert len(result["errors"]) == 2
+    assert all(error["needs_review"] for error in result["errors"])
+    assert len(seen) == 1
+
+    # Once the seller has reviewed that schedule, the first edit clears it
+    # and the remaining selected photos still save.
+    payload["review"]["scheduled_confirmed_at"] = "2026-11-23T00:00:00Z"
+    _mock_photoroom(monkeypatch, lambda _: httpx.Response(200, content=_png("white")))
+    result = env.client.post(env.studio, json=payload).json()
+    assert result["errors"] == []
+    assert len(result["photos"]) == 2
+    schedule = env.client.get(f"/api/conversations/{identity}/schedule").json()
+    assert schedule["scheduled_status"] is None
+
+
+def test_bulk_studio_stops_sending_photos_when_plan_is_out_of_credits(env, monkeypatch):
+    from anteroom.services.keychain import write_slot
+
+    write_slot(photoroom.KEY_ACCOUNT, KEY)
+    monkeypatch.setattr(photoroom, "CONCURRENCY", 1)
+    seen = _mock_photoroom(monkeypatch, lambda _: httpx.Response(402, json={}))
+    result = env.client.post(env.studio, json=_reviewed_edits(env)).json()
+    assert result["provider_blocked"]
+    assert result["photos"] == []
+    assert len(result["errors"]) == 2
+    assert len(seen) == 1
 
 
 def test_edits_cannot_point_at_another_file(env):

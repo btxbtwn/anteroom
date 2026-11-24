@@ -980,10 +980,22 @@ struct PhotoStudioFailure: Codable, Hashable, Sendable {
     var photoID: String
     /// Why this photo was not changed, for the seller; the others still saved.
     var detail: String
+    /// The photo or draft changed. Refresh the review before trying again.
+    var needsReview: Bool = false
 
     enum CodingKeys: String, CodingKey {
         case detail
         case photoID = "photo_id"
+        case needsReview = "needs_review"
+    }
+}
+
+extension PhotoStudioFailure {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        photoID = try values.decode(String.self, forKey: .photoID)
+        detail = try values.decode(String.self, forKey: .detail)
+        needsReview = try values.decodeIfPresent(Bool.self, forKey: .needsReview) ?? false
     }
 }
 
@@ -991,9 +1003,11 @@ struct PhotoStudioFailure: Codable, Hashable, Sendable {
 struct PhotoStudioRequest: Codable, Hashable, Sendable {
     var photoIDs: [String]
     var options: StudioOptions
+    /// When present, apply to shared draft photos and enforce the reviewed versions.
+    var review: PhotoStudioReview?
 
     enum CodingKeys: String, CodingKey {
-        case options
+        case options, review
         case photoIDs = "photo_ids"
     }
 }
@@ -1002,6 +1016,34 @@ struct PhotoStudioResult: Codable, Hashable, Sendable {
     /// The photos AI Studio changed, each with its new ``url`` and ``edits.studio``.
     var photos: [ListingPhoto]
     var errors: [PhotoStudioFailure]
+    /// The key or plan refused the edit. Pause the remaining bulk work.
+    var providerBlocked: Bool = false
+
+    enum CodingKeys: String, CodingKey {
+        case photos, errors
+        case providerBlocked = "provider_blocked"
+    }
+}
+
+extension PhotoStudioResult {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        photos = try values.decode([ListingPhoto].self, forKey: .photos)
+        errors = try values.decode([PhotoStudioFailure].self, forKey: .errors)
+        providerBlocked = try values.decodeIfPresent(Bool.self, forKey: .providerBlocked) ?? false
+    }
+}
+
+struct PhotoStudioReview: Codable, Hashable, Sendable {
+    /// The v query parameter the seller reviewed, keyed by photo ID. Empty for an unversioned photo.
+    var photoVersions: [String: String]
+    /// The confirmation timestamp of the schedule the seller reviewed, if any.
+    var scheduledConfirmedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case photoVersions = "photo_versions"
+        case scheduledConfirmedAt = "scheduled_confirmed_at"
+    }
 }
 
 struct PlaidExchange: Codable, Hashable, Sendable {

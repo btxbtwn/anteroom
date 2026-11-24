@@ -2626,6 +2626,12 @@
             "title": "Detail",
             "type": "string"
           },
+          "needs_review": {
+            "default": false,
+            "description": "The photo or draft changed. Refresh the review before trying again.",
+            "title": "Needs Review",
+            "type": "boolean"
+          },
           "photo_id": {
             "title": "Photo Id",
             "type": "string"
@@ -2653,6 +2659,17 @@
             "minItems": 1,
             "title": "Photo Ids",
             "type": "array"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhotoStudioReview"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When present, apply to shared draft photos and enforce the reviewed versions."
           }
         },
         "required": [
@@ -2678,6 +2695,12 @@
             },
             "title": "Photos",
             "type": "array"
+          },
+          "provider_blocked": {
+            "default": false,
+            "description": "The key or plan refused the edit. Pause the remaining bulk work.",
+            "title": "Provider Blocked",
+            "type": "boolean"
           }
         },
         "required": [
@@ -2685,6 +2708,37 @@
           "errors"
         ],
         "title": "PhotoStudioResult",
+        "type": "object"
+      },
+      "PhotoStudioReview": {
+        "properties": {
+          "photo_versions": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The v query parameter the seller reviewed, keyed by photo ID. Empty for an unversioned photo.",
+            "maxProperties": 20,
+            "minProperties": 1,
+            "title": "Photo Versions",
+            "type": "object"
+          },
+          "scheduled_confirmed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The confirmation timestamp of the schedule the seller reviewed, if any.",
+            "title": "Scheduled Confirmed At"
+          }
+        },
+        "required": [
+          "photo_versions"
+        ],
+        "title": "PhotoStudioReview",
         "type": "object"
       },
       "PlaidExchange": {

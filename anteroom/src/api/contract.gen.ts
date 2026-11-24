@@ -504,18 +504,31 @@ export interface PhotoStudioFailure {
   photo_id: string;
   /** Why this photo was not changed, for the seller; the others still saved. */
   detail: string;
+  /** The photo or draft changed. Refresh the review before trying again. */
+  needs_review?: boolean;
 }
 
 /** AI Studio (Photoroom) on one or more of a listing's photos, all with the same options. */
 export interface PhotoStudioRequest {
   photo_ids: string[];
   options: StudioOptions;
+  /** When present, apply to shared draft photos and enforce the reviewed versions. */
+  review?: PhotoStudioReview | null;
 }
 
 export interface PhotoStudioResult {
   /** The photos AI Studio changed, each with its new ``url`` and ``edits.studio``. */
   photos: ListingPhoto[];
   errors: PhotoStudioFailure[];
+  /** The key or plan refused the edit. Pause the remaining bulk work. */
+  provider_blocked?: boolean;
+}
+
+export interface PhotoStudioReview {
+  /** The v query parameter the seller reviewed, keyed by photo ID. Empty for an unversioned photo. */
+  photo_versions: Record<string, string>;
+  /** The confirmation timestamp of the schedule the seller reviewed, if any. */
+  scheduled_confirmed_at?: string | null;
 }
 
 export interface PlaidExchange {

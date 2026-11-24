@@ -83,6 +83,7 @@ interface Props {
   onCloseSettings: () => void;
   onSettingsSectionChange: (section: SettingsSectionId) => void;
   onSettingsSearchResult: (item: SettingsSearchItem) => void;
+  onEditPhotos?: (listings: Listing[]) => void;
   /** The bulk Regenerate / Generate run, owned by App so it outlives the sidebar. */
   bulk: BulkRegenerate;
 }
@@ -106,6 +107,7 @@ export function ListingSidebar({
   onCloseSettings,
   onSettingsSectionChange,
   onSettingsSearchResult,
+  onEditPhotos,
   bulk,
 }: Props) {
   const runtime = useWorkspaceRuntime();
@@ -451,7 +453,10 @@ export function ListingSidebar({
       )}
 
       {!settingsMode && (selecting || bulk.running) && (
-        <BulkActionBar bulk={bulk} selection={selection} eligibleIds={eligibleIds} />
+        <BulkActionBar bulk={bulk} selection={selection} eligibleIds={eligibleIds} editPhotos={onEditPhotos && ((ids) => {
+          onEditPhotos(ids.flatMap((id) => listingsById.get(id) ?? []));
+          exitSelecting();
+        })} />
       )}
 
       {settingsMode && (

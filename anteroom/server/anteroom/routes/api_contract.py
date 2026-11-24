@@ -299,6 +299,13 @@ class ListingPhoto(ContractModel):
     """Set for a photo added on one marketplace's form; only that marketplace can send it."""
 
 
+class PhotoStudioReview(ContractModel):
+    photo_versions: dict[str, str] = Field(min_length=1, max_length=MAX_BATCH)
+    """The v query parameter the seller reviewed, keyed by photo ID. Empty for an unversioned photo."""
+    scheduled_confirmed_at: str | None = None
+    """The confirmation timestamp of the schedule the seller reviewed, if any."""
+
+
 class PhotoStudioRequest(ContractModel):
     """AI Studio (Photoroom) on one or more of a listing's photos, all with the same options."""
 
@@ -306,18 +313,24 @@ class PhotoStudioRequest(ContractModel):
 
     photo_ids: list[str] = Field(min_length=1, max_length=MAX_BATCH)
     options: StudioOptions
+    review: PhotoStudioReview | None = None
+    """When present, apply to shared draft photos and enforce the reviewed versions."""
 
 
 class PhotoStudioFailure(ContractModel):
     photo_id: str
     detail: str
     """Why this photo was not changed, for the seller; the others still saved."""
+    needs_review: bool = False
+    """The photo or draft changed. Refresh the review before trying again."""
 
 
 class PhotoStudioResult(ContractModel):
     photos: list[ListingPhoto]
     """The photos AI Studio changed, each with its new ``url`` and ``edits.studio``."""
     errors: list[PhotoStudioFailure]
+    provider_blocked: bool = False
+    """The key or plan refused the edit. Pause the remaining bulk work."""
 
 
 PHOTO_STUDIO_ERRORS: Responses = {

@@ -1,5 +1,5 @@
 import { deflateSync } from "node:zlib";
-import { expect, openForm, openListing, test } from "./fixtures";
+import { expect, openForm, openListing, showStatusTab, test } from "./fixtures";
 
 /** PNG chunk checksum, including on Node versions before zlib exposed crc32. */
 function crc32(bytes: Buffer): number {
@@ -34,6 +34,101 @@ function png(red: number, green: number, blue: number): Buffer {
     chunk("IEND", Buffer.alloc(0)),
   ]);
 }
+
+test("bulk AI Studio reviews covers across drafts and saves each selected photo independently", async ({ page, phone, request, createConversation }, info) => {
+  test.setTimeout(90_000);
+  const drafts = await Promise.all(["Olive field jacket", "Straight-leg blue jeans"].map(async (title) => {
+    const { id } = await (await createConversation({ title, notes: "" })).json();
+    for (const [index, color] of [[1, [45, 110, 85]], [2, [30, 60, 160]]] as const) {
+      const response = await request.post(`/api/conversations/${id}/photos`, {
+        multipart: { files: { name: `photo-${index}.png`, mimeType: "image/png", buffer: png(...color) } },
+      });
+      expect(response.ok()).toBe(true);
+    }
+    return { id, title };
+  }));
+  const otherTitle = "Wool cardigan";
+  const { id: otherId } = await (await createConversation({ title: otherTitle, notes: "" })).json();
+
+  await page.goto("/");
+  if (phone) {
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
+  }
+  await showStatusTab(page, "Draft");
+  await page.getByRole("button", { name: "Select listings", exact: true }).click();
+  for (const draft of drafts) await page.getByRole("checkbox", { name: `Select ${draft.title}`, exact: true }).click();
+  await page.getByRole("region", { name: "Bulk listing actions" }).getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Edit photos" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Edit photos" });
+  await dialog.getByRole("textbox", { name: "Keep in cutout" }).fill("garment");
+  await dialog.getByRole("textbox", { name: "Leave out of cutout" }).fill("stand");
+  await dialog.getByRole("button", { name: "Review photos" }).click();
+  const cover = (title: string) => dialog.getByRole("group", { name: title }).getByRole("checkbox", { name: "Cover photo" });
+  const detail = (title: string) => dialog.getByRole("group", { name: title }).getByRole("checkbox", { name: "Photo 2" });
+  for (const draft of drafts) {
+    await expect(cover(draft.title)).toBeChecked();
+    await expect(detail(draft.title)).not.toBeChecked();
+  }
+  await dialog.getByRole("button", { name: "All photos" }).click();
+  await expect(detail(drafts[0].title)).toBeChecked();
+  await detail(drafts[0].title).uncheck();
+  await expect(dialog.getByRole("button", { name: "Apply to 3 photos" })).toBeEnabled();
+  for (const theme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: theme });
+    await expect(page.locator("html")).toHaveCSS("color-scheme", theme);
+    const path = info.outputPath(`bulk-photo-review-${theme}.png`);
+    await page.screenshot({ path, animations: "disabled" });
+    await info.attach(`bulk-photo-review-${theme}`, { path, contentType: "image/png" });
+  }
+
+  const photos = async (id: string) => (await request.get(`/api/conversations/${id}/photos`)).json();
+  const before = await photos(drafts[1].id);
+  expect((await request.delete(`/api/conversations/${drafts[1].id}/photos/${before[1].id}`)).ok()).toBe(true);
+  const results = page.getByRole("dialog", { name: "Photo edit results" });
+  // Test navigation while the batch is in flight, then drop one reply after
+  // the real sandbox route has saved the edit.
+  let resume = () => {};
+  const waiting = new Promise<void>((resolve) => { resume = resolve; });
+  await page.route("**/photos/studio", async (route) => {
+    await waiting;
+    if (route.request().url().endsWith(`/conversations/${drafts[0].id}/photos/studio`)) {
+      expect((await route.fetch()).ok()).toBe(true);
+      await route.abort();
+    } else {
+      await route.continue();
+    }
+  });
+  try {
+    await dialog.getByRole("button", { name: "Apply to 3 photos" }).click();
+    await results.getByRole("button", { name: "Continue in background" }).click();
+    await page.getByRole("link", { name: otherTitle, exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`listing=${otherId}`));
+    await page.getByRole("button", { name: "Photo edits · 0 of 3" }).click();
+  } finally {
+    resume();
+  }
+  await expect(results.getByText("1 saved · 0 failed · 2 skipped", { exact: true })).toBeVisible();
+  await expect(results.getByText(/Couldn't confirm the edit/)).toBeVisible();
+  await expect(results.getByText("Photo 2 · Photo not found", { exact: true })).toBeVisible();
+
+  const first = await photos(drafts[0].id);
+  expect(first[0].edits?.studio?.options).toMatchObject({ keep: "garment", exclude: "stand" });
+  expect(first[1].edits?.studio).toBeFalsy();
+  expect((await photos(drafts[1].id))[0].edits?.studio?.options).toMatchObject({ keep: "garment", exclude: "stand" });
+  await results.getByRole("button", { name: "Review again" }).click();
+  await expect(cover(drafts[0].title)).toBeVisible();
+  await expect(cover(drafts[0].title)).not.toBeChecked();
+  await expect(dialog.getByRole("button", { name: "Apply to 0 photos" })).toBeDisabled();
+  const recovery = info.outputPath("bulk-photo-recovery.png");
+  await page.screenshot({ path: recovery, animations: "disabled" });
+  await info.attach("bulk-photo-recovery", { path: recovery, contentType: "image/png" });
+
+  const reset = await request.delete(`/api/conversations/${drafts[1].id}/photos/${before[0].id}/edits`);
+  expect(reset.ok()).toBe(true);
+  expect((await reset.json()).url).toBe(before[0].url);
+});
 
 test("AI Studio edits several photos at once offline, markup and filters save, and Revert brings the upload back", async ({ page, phone, request, createConversation }, info) => {
   test.setTimeout(120_000);
