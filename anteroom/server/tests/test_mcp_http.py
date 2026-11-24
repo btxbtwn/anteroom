@@ -27,7 +27,7 @@ from anteroom.models.marketplace_listing import MarketplaceListing
 from anteroom.models.marketplace_sale import MarketplaceSale
 from anteroom.models.mcp_token import McpAccessToken, McpOAuthConnection
 from anteroom.models.sourcing import SourceBox
-from anteroom.services import mcp_http, mcp_oauth, sales_ledger
+from anteroom.services import mcp_catalog_tools, mcp_http, mcp_oauth, sales_ledger
 
 
 def _rpc(client: TestClient, method: str, params: dict | None = None, req_id: int | None = 1, extra_headers: dict | None = None):
@@ -688,6 +688,7 @@ READ_TOOLS = {
     "search_inventory", "get_listing", "get_listing_photos", "get_sales_analytics", "get_offer_activity",
     "get_sourcing_roi", "run_etsy_audit", "get_needs_attention",
 }
+READ_TOOLS |= set(mcp_catalog_tools.PERMISSIONS)
 LISTING_WRITE_TOOLS = {
     "create_draft_listing", "edit_listing", "manage_listing_photos",
     "manage_labels_and_notes", "delete_draft_listing",
