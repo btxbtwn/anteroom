@@ -38,9 +38,7 @@ permissions:
 jobs:
   resolve:
     name: Resolve pull request
-    # In a called workflow github.event_name is the caller's event (push from
-    # claude-conflict-autofix.yml, pull_request from claude-review.yml), so
-    # workflow_call and workflow_dispatch are recognised by their PR input.
+    # The conflict scan and Claude review pass the PR number explicitly.
     if: >-
       inputs.pr_number > 0 ||
       (github.event_name == 'pull_request_review' &&
@@ -139,15 +137,13 @@ jobs:
         run: |
           git config user.name "claude[bot]"
           git config user.email "41898282+claude[bot]@users.noreply.github.com"
-      # workflow_run always uses this file from the default branch, and the
-      # push-triggered conflict caller runs from main too; keep the bot scripts
-      # in sync with that definition so older PR heads still work. Extract
-      # outside the worktree so Claude cannot stage them into a fix.
+      # Dispatched repairs and CI-triggered repairs use the default branch's
+      # bot scripts so older PR heads still work. Keep them outside the worktree.
       - name: Load review-bot scripts
         id: bot
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_run" ] || [ "${{ github.event_name }}" = "push" ]; then
+          if [ "${{ github.event_name }}" = "workflow_run" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             git fetch --quiet origin "${{ github.event.repository.default_branch }}"
             mkdir -p "$RUNNER_TEMP/review-bot-src"
             git archive "origin/${{ github.event.repository.default_branch }}" .github/review-bot \
@@ -199,9 +195,11 @@ jobs:
         if: steps.prepare.outputs.skip == 'false'
         id: claude
         uses: anthropics/claude-code-action@acfe7992852970efb4fee683d63d628e3e52df67 # v1.0.286
+        env:
+          CLAUDE_BRANCH: ${{ needs.resolve.outputs.branch }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: "chatgpt-codex-connector[bot],claude[bot],dependabot[bot]"
+          allowed_bots: "github-actions[bot],chatgpt-codex-connector[bot],claude[bot],dependabot[bot]"
           allow_fork_prs: "false"
           prompt: |
             Follow ${{ steps.bot.outputs.dir }}/autofix-prompt.md.
@@ -214,7 +212,7 @@ jobs:
             --add-dir ${{ runner.temp }}/claude-autofix
             --add-dir ${{ steps.bot.outputs.dir }}
             --allowedTools "Read,Glob,Grep,Edit,Write,Bash(cd:*),Bash(ls:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git fetch:*),Bash(git merge:*),Bash(./check.sh --fast:*),Bash(.venv/bin/python -m pytest:*),Bash(anteroom/.venv/bin/python -m pytest:*),Bash(.venv/bin/ruff:*),Bash(anteroom/.venv/bin/ruff:*),Bash(npx vitest:*),Bash(npm test:*),Bash(npm run lint:*),Bash(node --test:*),Bash(gh pr view:*)"
-            --disallowedTools "Edit(.github/**),Write(.github/**),Edit(anteroom/VERSION),Write(anteroom/VERSION),Edit(CHANGELOG.md),Write(CHANGELOG.md)"
+            --disallowedTools "Edit(.github/**),Write(.github/**),Edit(${{ steps.bot.outputs.dir }}/**),Write(${{ steps.bot.outputs.dir }}/**),Edit(anteroom/VERSION),Write(anteroom/VERSION),Edit(CHANGELOG.md),Write(CHANGELOG.md)"
             --json-schema '${{ steps.schema.outputs.json }}'
       - name: Reply to findings
         if: steps.prepare.outputs.skip == 'false' && !cancelled()

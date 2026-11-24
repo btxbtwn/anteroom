@@ -583,7 +583,7 @@ class AutofixTests(unittest.TestCase):
             bot.autofix_decision(tried, [1], "h", conflict_files=["app.py"]),
             ("run", None),
         )
-        tried_conflict = [{"head": "h", "pushed": False, "open": [], "conflict_files": ["app.py"]}]
+        tried_conflict = [{"head": "h", "merge_attempted": True, "conflict_files": ["app.py"]}]
         self.assertEqual(
             bot.autofix_decision(tried_conflict, [], "h", conflict_files=["app.py"]),
             ("skip", "same_blockers"),
@@ -783,6 +783,56 @@ class AutofixTests(unittest.TestCase):
             self.assertFalse(ctx["dependencies_installed"])
             # The merge is left in progress for Claude to finish.
             self.assertTrue(Path(work, ".git", "MERGE_HEAD").exists())
+
+    def test_prepare_retries_conflicts_after_the_old_launch_failure(self):
+        with tempfile.TemporaryDirectory() as root:
+            work, git = self._conflict_fixture(root, {"app.py": "pr\n"}, {"app.py": "main\n"})
+            previous_state = {
+                "head": git("rev-parse", "HEAD"), "reason": "same_blockers",
+                "conflict_files": ["app.py"], "pushed": False,
+            }
+            outputs, posts = self._prepare(work, os.path.join(root, "ctx"), states=[previous_state])
+            self.assertEqual(outputs["skip"], "false")
+            self.assertEqual(posts, [])
+            self.assertTrue(Path(work, ".git", "MERGE_HEAD").exists())
+
+    def test_conflict_retry_depends_on_whether_claude_returned_a_merge_result(self):
+        for raw, attempted in (("", False), (json.dumps({"conflict_result": {"outcome": "not_fixed"}}), True)):
+            with self.subTest(attempted=attempted), tempfile.TemporaryDirectory() as root:
+                work, git = self._conflict_fixture(root, {"app.py": "pr\n"}, {"app.py": "main\n"})
+                git("push", "-q", "origin", "pr")
+                out = os.path.join(root, "ctx")
+                self._prepare(work, out)
+                posts = []
+                old = os.getcwd()
+                os.chdir(work)
+                try:
+                    with (
+                        patch.dict(os.environ, {"AUTOFIX_OUTPUT": raw}),
+                        patch.object(bot, "api", side_effect=lambda *a: posts.append(a)),
+                        patch.object(bot, "repo", return_value="o/r"),
+                    ):
+                        bot.post_autofix(SimpleNamespace(context=out, branch="pr"))
+                finally:
+                    os.chdir(old)
+                body = posts[0][2]["body"]
+                state = bot.read_marker(bot.AUTOFIX_STATE, body)
+                self.assertEqual(state["merge_attempted"], attempted)
+                self.assertEqual(state["conflict_files"], ["app.py"])
+                decision = bot.autofix_decision([state], [], state["head"], conflict_files=["app.py"])
+                self.assertEqual(decision, ("skip", "same_blockers") if attempted else ("run", None))
+                if attempted:
+                    git("merge", "--abort")
+                    outputs, posts = self._prepare(work, out, states=[state])
+                    self.assertEqual(outputs["skip"], "true")
+                    skipped = bot.read_marker(bot.AUTOFIX_STATE, posts[0][2]["body"])
+                    self.assertEqual(skipped["reason"], "same_blockers")
+                    self.assertEqual(
+                        bot.autofix_decision([state, skipped], [], state["head"], conflict_files=["app.py"]),
+                        ("skip", None),
+                    )
+                else:
+                    self.assertIn("Claude returned no repair result", body)
 
     def test_prepare_leaves_protected_only_conflicts_and_notes_them_once(self):
         with tempfile.TemporaryDirectory() as root:
