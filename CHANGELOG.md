@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1192 — 2026-11-24
+
+- Changing only a listing's labels, notes or cost no longer rewrites its title to add the size.
+
 ## 0.1.1191 — 2026-11-24
 
 - In AI Studio, optionally tell Photoroom what to keep and what to leave out (for example keep the shirt, leave out a ruler or mannequin stand) when removing the background.
