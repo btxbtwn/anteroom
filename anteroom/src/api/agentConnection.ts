@@ -32,8 +32,8 @@ export interface AgentConnectionTest {
   base_url: string | null;
 }
 
-export type McpPermissionArea = "listings" | "analytics" | "attention";
-export type McpPermissionLevel = "none" | "read" | "write";
+export type McpPermissionArea = "listings" | "analytics" | "attention" | "marketplaces";
+export type McpPermissionLevel = "none" | "read" | "write" | "draft" | "publish";
 export type McpTokenPermissions = Record<McpPermissionArea, McpPermissionLevel>;
 
 export interface McpAccessToken {
