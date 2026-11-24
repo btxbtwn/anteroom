@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1226 — 2026-11-24
+
+- Box Scout no longer reads Poshmark's search, which Poshmark doesn't allow. It prices boxes from your own sales and eBay's sold listings, and says that Poshmark sales aren't checked.
+- Box Scout no longer shows Poshmark asking prices or caps its estimate at them.
+
 ## 0.1.1225 — 2026-11-24
 
 - Star the items you care about from the inventory list, the inventory table or the item editor, on the web and the iPhone app, and use the new Favorites filter to see only them. Starring never changes a marketplace and doesn't move the item in Recent activity.

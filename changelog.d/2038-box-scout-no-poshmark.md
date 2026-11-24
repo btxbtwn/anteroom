@@ -1,2 +1,0 @@
-- Box Scout no longer reads Poshmark's search, which Poshmark doesn't allow. It prices boxes from your own sales and eBay's sold listings, and says that Poshmark sales aren't checked.
-- Box Scout no longer shows Poshmark asking prices or caps its estimate at them.
