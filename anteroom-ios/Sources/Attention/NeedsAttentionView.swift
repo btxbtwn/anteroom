@@ -9,6 +9,9 @@ struct NeedsAttentionView: View {
     @State private var inbox: AttentionInbox?
     @State private var error: String?
     @State private var actionError: String?
+    /// Alerts with a save in flight. Their actions are disabled until it
+    /// finishes, so a Restore can never race the Resolve or Snooze before it.
+    @State private var saving: Set<String> = []
 
     var body: some View {
         List {
@@ -98,6 +101,7 @@ struct NeedsAttentionView: View {
                 }
             }
         }
+        .disabled(saving.contains(item.key))
     }
 
     @ViewBuilder
@@ -120,6 +124,7 @@ struct NeedsAttentionView: View {
             }
         }
         .buttonStyle(.borderless)
+        .disabled(saving.contains(item.key))
     }
 
     private func load() async {
@@ -136,8 +141,12 @@ struct NeedsAttentionView: View {
     }
 
     /// Move the row at once, then reload from the server if the save fails.
-    private func change(_ move: (inout AttentionInbox) -> Void, _ save: () async throws -> Void, failure: String) async {
-        guard var next = inbox else { return }
+    /// One save per alert at a time: an action on an alert whose save is
+    /// still in flight is ignored (its buttons are disabled meanwhile).
+    private func change(_ key: String, _ move: (inout AttentionInbox) -> Void, _ save: () async throws -> Void, failure: String) async {
+        guard !saving.contains(key), var next = inbox else { return }
+        saving.insert(key)
+        defer { saving.remove(key) }
         move(&next)
         inbox = next
         actionError = nil
@@ -150,14 +159,14 @@ struct NeedsAttentionView: View {
     }
 
     private func snooze(_ item: AttentionItem) async {
-        await change({ $0.snooze(item) }, { _ = try await api.snoozeAttention(item) }, failure: "Could not snooze “\(item.title)”.")
+        await change(item.key, { $0.snooze(item) }, { _ = try await api.snoozeAttention(item) }, failure: "Could not snooze “\(item.title)”.")
     }
 
     private func resolve(_ item: AttentionItem) async {
-        await change({ $0.resolve(item) }, { _ = try await api.resolveAttention(item) }, failure: "Could not resolve “\(item.title)”.")
+        await change(item.key, { $0.resolve(item) }, { _ = try await api.resolveAttention(item) }, failure: "Could not resolve “\(item.title)”.")
     }
 
     private func restore(_ item: AttentionItem) async {
-        await change({ $0.restore(item.key) }, { _ = try await api.restoreAttention(item.key) }, failure: "Could not restore “\(item.title)”.")
+        await change(item.key, { $0.restore(item.key) }, { _ = try await api.restoreAttention(item.key) }, failure: "Could not restore “\(item.title)”.")
     }
 }
