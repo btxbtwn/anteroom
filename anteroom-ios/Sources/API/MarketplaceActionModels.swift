@@ -121,7 +121,8 @@ enum MarketplaceActions {
         if let live, live.soldHere == true { return row(.sold, "Sold here", link: live.url, linkLabel: "View") }
         if let draft, isRunning(draft) {
             let label = draft.state == "updating" ? "Updating…" : draft.action == "save_draft" ? "Saving draft…" : "Listing…"
-            return row(.busy, label, detail: draft.progress.map { "\($0.label)…" })
+            let detail = [draft.progress.map { "\($0.label)…" }, draft.fromAgent].compactMap { $0 }.joined(separator: " · ")
+            return row(.busy, label, detail: detail.isEmpty ? nil : detail)
         }
         if let draft, draft.state == "unknown" || busy.contains(draft.state ?? "") {
             return row(.attention, "Unconfirmed", link: live?.state == "deleted" ? nil : live?.url, linkLabel: "View",

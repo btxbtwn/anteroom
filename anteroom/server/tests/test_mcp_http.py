@@ -687,7 +687,7 @@ def test_hosted_today_concurrent_mutations_stay_seller_scoped(cloud, signing_key
 
 READ_TOOLS = {
     "search_inventory", "get_listing", "get_listing_photos", "get_sales_analytics", "get_offer_activity",
-    "get_sourcing_roi", "run_etsy_audit", "get_needs_attention",
+    "get_sourcing_roi", "run_etsy_audit", "get_needs_attention", "get_action_status",
 }
 READ_TOOLS |= set(mcp_catalog_tools.PERMISSIONS)
 LISTING_WRITE_TOOLS = {
@@ -714,7 +714,7 @@ def test_desktop_mcp_token_permissions_limit_tools_and_apply_on_the_next_call():
     created = client.post("/api/settings/mcp-tokens", json={"name": "Claude Desktop"})
     assert created.status_code == 201
     token = created.json()
-    assert token["permissions"] == {"listings": "read", "analytics": "read", "attention": "read"}
+    assert token["permissions"] == {"listings": "read", "analytics": "read", "attention": "read", "marketplaces": "none"}
     bearer = {"Authorization": f"Bearer {token['token']}"}
 
     # A new token reads but cannot change anything.
@@ -729,7 +729,7 @@ def test_desktop_mcp_token_permissions_limit_tools_and_apply_on_the_next_call():
     # Turning on write applies to the very next request, with the same token.
     patched = client.patch(f"/api/settings/mcp-tokens/{token['id']}", json={"permissions": {"listings": "write"}})
     assert patched.status_code == 200, patched.text
-    assert patched.json()["permissions"] == {"listings": "write", "analytics": "read", "attention": "read"}
+    assert patched.json()["permissions"] == {"listings": "write", "analytics": "read", "attention": "read", "marketplaces": "none"}
     assert _tool_names(client, bearer) == READ_TOOLS | LISTING_WRITE_TOOLS
     draft, is_error = _call_tool(client, "create_draft_listing", {"title": "Allowed draft"}, extra_headers=bearer)
     assert not is_error, draft
@@ -772,7 +772,7 @@ def test_mcp_token_created_with_chosen_permissions():
     bearer = {"Authorization": f"Bearer {created.json()['token']}"}
     assert _tool_names(client, bearer) == {"get_sales_analytics", "get_offer_activity", "get_sourcing_roi", "run_etsy_audit"}
     listed = client.get("/api/settings/mcp-tokens").json()["tokens"][0]
-    assert listed["permissions"] == {"listings": "none", "analytics": "read", "attention": "none"}
+    assert listed["permissions"] == {"listings": "none", "analytics": "read", "attention": "none", "marketplaces": "none"}
     bad = client.post("/api/settings/mcp-tokens", json={"name": "Bad", "permissions": {"listings": "admin"}})
     assert bad.status_code == 422
 
@@ -1161,7 +1161,7 @@ def test_supabase_sign_out_of_a_connected_app_has_a_deadline(monkeypatch):
 
 def test_connected_app_starts_read_only_and_stays_off_once_turned_off():
     with SessionLocal() as db:
-        assert mcp_oauth.permissions_for(db, "app-1") == {"listings": "read", "analytics": "read", "attention": "read"}
+        assert mcp_oauth.permissions_for(db, "app-1") == {"listings": "read", "analytics": "read", "attention": "read", "marketplaces": "none"}
         mcp_oauth.revoke(db, "app-1")
         assert mcp_oauth.permissions_for(db, "app-1") is None
         assert mcp_oauth.mark_signed_out(db, "app-1")["signed_out_at"] is not None

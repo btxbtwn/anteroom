@@ -177,7 +177,12 @@ def running_marketplace(db: Session, conv_id: str) -> str | None:
 
 
 def status(conv_id: str, db: Session, *, conv=None, records: dict | None = None) -> dict:
-    """Each marketplace's record, with what a running action is doing now."""
+    """Each marketplace's record, with what a running action is doing now and who asked for it.
+
+    ``requested_by`` names the agent that started a running action (``mcp:<name>``); None for the seller's own.
+    """
+    from anteroom.models.job import Job
+
     if conv is None:
         _conversation(db, conv_id)
     if records is None:
@@ -188,6 +193,7 @@ def status(conv_id: str, db: Session, *, conv=None, records: dict | None = None)
         if record["running"]:
             event = repo.latest_event(record["job_id"], PROGRESS_EVENT)
             record["progress"] = event.payload if event else None
+            record["requested_by"] = db.query(Job.requested_by).filter(Job.id == record["job_id"]).scalar()
     return records
 
 
@@ -433,7 +439,7 @@ def _photos(db: Session, conv_id: str, snapshot: dict, marketplace: str) -> tupl
 
 
 async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str,
-                 relist_rule_id: str | None = None) -> dict:
+                 relist_rule_id: str | None = None, requested_by: str | None = None) -> dict:
     """Check, ask Chrome or eBay, then open the job. Each database step runs on a worker thread
     with its own session, so no pooled connection is held while Chrome or eBay answers."""
     snapshot, photos, deleted_here = await in_worker_session(_check_start, conv_id, marketplace, body, kind)
@@ -456,7 +462,7 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str,
 
     async def open_and_launch() -> dict:
         record, job_id, steps = await in_worker_session(
-            _open_job, conv_id, marketplace, body, kind, snapshot, photos, deleted_here, relist_rule_id)
+            _open_job, conv_id, marketplace, body, kind, snapshot, photos, deleted_here, relist_rule_id, requested_by)
         _launch(run_job(job_id, conv_id, marketplace, steps, options))
         record["running"] = True
         return record
@@ -515,7 +521,8 @@ def _after_preview(db: Session, marketplace: str, body: ListRequest, snapshot: d
 
 
 def _open_job(db: Session, conv_id: str, marketplace: str, body: ListRequest, kind: str, snapshot: dict,
-              photos: list, deleted_here: bool, relist_rule_id: str | None = None) -> tuple[dict, str, list[str]]:
+              photos: list, deleted_here: bool, relist_rule_id: str | None = None,
+              requested_by: str | None = None) -> tuple[dict, str, list[str]]:
     from anteroom.services import approved_photos, listing_mode
     from anteroom.services.pricing_rules import SNAPSHOT_RULES
 
@@ -579,7 +586,8 @@ def _open_job(db: Session, conv_id: str, marketplace: str, body: ListRequest, ki
                 )
                 if previous_versions != current_versions or pricing_changed:
                     steps = ["save_draft", "publish"]
-            job = repo.create(conv_id, body.revision_id, snapshot, status="dispatched", current_step=f"native_{marketplace}_{steps[0]}")
+            job = repo.create(conv_id, body.revision_id, snapshot, status="dispatched",
+                              current_step=f"native_{marketplace}_{steps[0]}", requested_by=requested_by)
             claim_api_job(db, job.id)
             executor: str | None = None
             if marketplace not in API_MARKETPLACES:
@@ -660,19 +668,25 @@ def preflight(conv_id: str, db: Session) -> dict:
 
 
 async def list_now(conv_id: str, marketplace: Marketplace, body: ListRequest, *,
-                   relist_rule_id: str | None = None) -> dict:
-    """Start listing on one marketplace in one seller-confirmed step. Returns at once; poll status."""
-    return await _start(conv_id, marketplace, body, "list", relist_rule_id)
+                   relist_rule_id: str | None = None, requested_by: str | None = None) -> dict:
+    """Start listing on one marketplace in one seller-confirmed step. Returns at once; poll status.
+
+    ``requested_by`` names the agent the seller allowed to ask for it (``services/mcp_marketplace_tools.py``).
+    """
+    return await _start(conv_id, marketplace, body, "list", relist_rule_id, requested_by)
 
 
-async def update_live(conv_id: str, marketplace: Marketplace, body: ListRequest) -> dict:
+async def update_live(conv_id: str, marketplace: Marketplace, body: ListRequest, *,
+                      requested_by: str | None = None) -> dict:
     """Write the listing saved in Anteroom onto the one already live. One confirmation, never a second listing."""
-    return await _start(conv_id, marketplace, body, "update")
+    return await _start(conv_id, marketplace, body, "update", requested_by=requested_by)
 
 
-async def save_draft(conv_id: str, marketplace: Marketplace, revision_id: str) -> dict:
+async def save_draft(conv_id: str, marketplace: Marketplace, revision_id: str, *,
+                     requested_by: str | None = None) -> dict:
     """Save only. No confirmation, publish step, or automatic publish retry."""
-    return await _start(conv_id, marketplace, ListRequest(revision_id=revision_id), "save_draft")
+    return await _start(conv_id, marketplace, ListRequest(revision_id=revision_id), "save_draft",
+                        requested_by=requested_by)
 
 
 def _active(db: Session, job_id: str, conv_id: str, marketplace: str) -> bool:

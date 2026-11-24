@@ -527,6 +527,13 @@ describe("marketplaces section", () => {
     expect(render({}, {}, { preflightPlaceholder: true, preflight: { marketplaces: { depop: { ready: true, gaps: [] } } } })).not.toContain("Ready");
   });
 
+  it("says which AI assistant started a running action", () => {
+    const running = { state: "publishing", running: true, action: "list", progress: { step: "list", label: "Listing", index: 0, total: 1 } };
+    expect(rowStatus("poshmark", undefined, { ...running, requested_by: "mcp:Claude" } as NativeDraft, "current", true))
+      .toMatchObject({ tone: "busy", label: "Listing…", detail: "Listing… · From Claude (AI assistant)" });
+    expect(rowStatus("poshmark", undefined, running as NativeDraft, "current", true)).toMatchObject({ detail: "Listing…" });
+  });
+
   it("describes each marketplace in List everywhere's picker, and only ready ones are picked by Select all ready", () => {
     const idle = rowStatus("ebay", undefined, undefined, "current", true);
     const base = { status: idle, canAct: true, listable: true, retryIn: 0, soldSomewhere: false, check: { ready: true, gaps: [], missing: [] } };
