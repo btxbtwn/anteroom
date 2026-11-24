@@ -120,10 +120,14 @@ class McpToolError(Exception):
 
 
 def tool_definitions() -> list[dict[str, Any]]:
-    """Curated MCP tool catalog exposed to Claude, ChatGPT, Gemini, and Cursor."""
-    return [
+    """Curated MCP tool catalog exposed to Claude, ChatGPT, Gemini, and Cursor.
+
+    Each title also goes into the annotations, where 2025-03-26 clients read it.
+    """
+    tools: list[dict[str, Any]] = [
         {
             "name": "search_inventory",
+            "title": "Search inventory",
             "description": (
                 "Search and filter the seller's Anteroom inventory by keyword "
                 "(title, SKU, brand, labels, private notes), status, marketplace, "
@@ -146,6 +150,7 @@ def tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "get_listing",
+            "title": "Get listing details",
             "description": (
                 "Inspect full local listing details, fields, marketplace specifics, "
                 "validation errors/warnings, Etsy eligibility, live/sold marketplace "
@@ -163,6 +168,7 @@ def tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "get_sales_analytics",
+            "title": "Get sales analytics",
             "description": (
                 "Read sales and inventory analytics KPIs (units sold, revenue, profit, "
                 "average price, median days to sell, margin, active inventory value, "
@@ -185,6 +191,7 @@ def tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "get_offer_activity",
+            "title": "Get offer activity",
             "description": (
                 "Read marketplace offer analytics and recent sent offer log across "
                 "eBay, Poshmark, Mercari, and Depop."
@@ -203,6 +210,7 @@ def tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "get_sourcing_roi",
+            "title": "Get sourcing ROI",
             "description": (
                 "Read sourcing box and supplier/store ROI analytics (spend, profit, "
                 "ROI, sell-through, average selling price, unsold asking value)."
@@ -219,6 +227,7 @@ def tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "run_etsy_audit",
+            "title": "Audit Etsy listings",
             "description": (
                 "Run the read-only Etsy Not-Allowed audit to find unsold Etsy listings "
                 "that fail Etsy Creativity Standards eligibility. Never delists."
@@ -232,6 +241,7 @@ def tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "get_needs_attention",
+            "title": "Get items that need attention",
             "description": (
                 "Read the seller's Home Command Center snapshot: today's activity summary, "
                 "seller goals progress, and high-priority Needs Attention inbox items "
@@ -249,6 +259,7 @@ def tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "dismiss_attention_items",
+            "title": "Dismiss attention items",
             "description": (
                 "Dismiss Needs Attention items by their key (from get_needs_attention). "
                 f"A dismissed item comes back after {home_dashboard.DISMISS_TTL_DAYS} days if it "
@@ -272,6 +283,7 @@ def tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "restore_attention_items",
+            "title": "Restore attention items",
             "description": "Bring dismissed Needs Attention items back into the inbox by their key.",
             "annotations": {**_WRITE_ANNOTATIONS, "idempotentHint": True},
             "inputSchema": {
@@ -290,6 +302,7 @@ def tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "create_draft_listing",
+            "title": "Create draft listing",
             "description": (
                 "Create a new local draft listing in Anteroom. Does NOT publish to any "
                 "marketplace; the seller reviews and sends it in Anteroom."
@@ -333,6 +346,7 @@ def tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "edit_listing",
+            "title": "Edit listing",
             "description": (
                 "Stage local field edits on an existing listing (title, description, "
                 "condition, price, quantity, cost, SKU, category, marketplace attributes). "
@@ -362,6 +376,7 @@ def tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "manage_listing_photos",
+            "title": "Manage listing photos",
             "description": (
                 "Reorder or remove local photos attached to a listing. "
                 "Does not push changes to live marketplaces."
@@ -388,6 +403,7 @@ def tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "manage_labels_and_notes",
+            "title": "Manage labels and notes",
             "description": (
                 "Add, remove, or replace listing labels and update private seller notes "
                 "on a listing locally without contacting marketplaces."
@@ -409,6 +425,7 @@ def tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "delete_draft_listing",
+            "title": "Delete draft listing",
             "description": (
                 "Delete an unsent local draft listing. Strictly refuses any listing that "
                 "is active, sold, has marketplace records, sales history, or jobs. "
@@ -426,6 +443,7 @@ def tool_definitions() -> list[dict[str, Any]]:
             },
         },
     ]
+    return [{**tool, "annotations": {**tool["annotations"], "title": tool["title"]}} for tool in tools]
 
 
 MAX_RPC_BATCH_SIZE = 20

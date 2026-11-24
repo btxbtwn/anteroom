@@ -124,6 +124,20 @@ def test_mcp_protocol_handshake_sse_and_errors():
     assert bad.json()["error"]["code"] == -32700
 
 
+def test_mcp_every_tool_has_a_human_readable_title():
+    """Claude and ChatGPT show the title when asking to run a tool; Anthropic's directory requires one."""
+    tools = _rpc(TestClient(app), "tools/list").json()["result"]["tools"]
+    assert tools
+    for tool in tools:
+        title = tool.get("title")
+        assert isinstance(title, str) and title.strip(), tool["name"]
+        assert "_" not in title, tool["name"]
+        # 2025-03-26 clients read the title from the annotations.
+        assert tool["annotations"].get("title") == title, tool["name"]
+    titles = [tool["title"] for tool in tools]
+    assert len(set(titles)) == len(titles)
+
+
 def test_mcp_tools_list_and_read_write_lifecycle_respects_safety_invariant():
     client = TestClient(app)
     now = datetime.now(UTC).replace(tzinfo=None)
