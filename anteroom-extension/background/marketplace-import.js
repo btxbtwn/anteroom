@@ -74,6 +74,13 @@ function importMoney(value) {
   return Number.isFinite(number) && number > 0 ? Math.round(number * 100) / 100 : null;
 }
 
+// A shipping price, where 0 is free shipping and null or blank is not offered.
+function importShippingCost(value) {
+  if (value == null || (typeof value === 'string' && !value.trim()) || typeof value === 'boolean') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.round(number * 100) / 100 : null;
+}
+
 function importCount(value) {
   const number = Number(value);
   return Number.isInteger(number) && number >= 0 ? number : null;
@@ -337,14 +344,17 @@ async function depopImportListing(slug, deadline) {
   const brands = Array.isArray(attributes?.brand) ? attributes.brand : attributes?.brands || [];
   const brand = brandId ? depopName(brands.find(entry => String(entry.id) === brandId)) || null : null;
   const type = depopProductType(product);
-  const department = String(product.gender ?? product.department ?? product.attributes?.department ?? '');
-  const group = (attributes?.group || []).find(entry => (entry.product_types || []).some(row => row.id === type));
+  const department = depopImportDepartment(product, type, attributes);
+  const category = attributes && department && type ? depopProduct(attributes, department, type) : null;
+  const group = (attributes?.group || []).find(entry => entry.id === category?.group)
+    || (attributes?.group || []).find(entry => (entry.product_types || []).some(row => row.id === type));
   const typeName = depopName(group?.product_types?.find(row => row.id === type)) || type.replace(/[-_]+/g, ' ');
   const departmentName = depopName(attributes?.department?.find(entry => entry.id === department)) || department;
   const variant = variants[0];
   const sizeSet = (attributes?.size_sets || []).find(entry => String(entry.id) === String(product.variant_set ?? product.variant_set_id ?? ''));
   const size = variant ? importText(String(variant.name ?? depopName(sizeSet?.sizes?.find(entry => String(entry.id) === variant.id)) ?? ''), 80) || null : null;
   const pictures = depopPictureRows(product.pictures ?? product.pictures_data ?? product);
+  const shipping = await depopImportShipping(product, category, deadline);
   return {
     account,
     id: slug, url: depopListingUrl(slug), title: importTitleFromText(product.description), description: importText(product.description),
@@ -353,14 +363,108 @@ async function depopImportListing(slug, deadline) {
     brand: brand && !/^other$/i.test(brand) ? importText(brand, 120) : null, size,
     condition: importText(typeof product.condition === 'object' ? product.condition?.id : product.condition, 40) || null,
     category_path: [departmentName, depopName(group), typeName].map(name => importText(name, 120)).filter(Boolean).join(' > ') || null,
-    category_id: department && type ? `${department}_${type}` : null,
+    // Depop's own category id, only when its live list has that product type under that department.
+    category_id: category ? category.leaf : null,
+    department: depopImportGeneralDepartment(department, product),
     sku: importText(product.sku, 80) || null,
-    colors: (Array.isArray(product.colour) ? product.colour : product.colour ? [product.colour] : []).map(color => importText(String(color), 40)).filter(Boolean),
+    colors: depopImportIds(product.colour ?? product.colours ?? product.color).slice(0, 2),
     photos: importPhotos(pictures.map(row => (row && typeof row === 'object'
       ? row.url || row.formats?.P0?.url || row.formats?.P8?.url || Object.values(row.formats || {})[0]?.url : null))),
+    // Depop's own ids; Anteroom names them as the sell page does.
+    style: depopImportIds(product.style).slice(0, 3), age: depopImportIds(product.age).slice(0, 1), source: depopImportIds(product.source).slice(0, 2),
+    attributes: depopImportAttributes(product, category, attributes),
+    ...shipping,
+    boost: depopImportBoost(product),
+    hashtags: depopImportHashtags(product),
   };
 }
 
+const DEPOP_DEPARTMENTS = ['womenswear', 'menswear', 'kidswear', 'everything-else'];
+
+// Depop's product says male/female/unisex and whether it is kids', the way its
+// sell page posts them. Its department is womenswear, menswear or kidswear from
+// those, and for anything else the one department whose groups list the type.
+function depopImportDepartment(product, type, attributes) {
+  const named = [product.department, product.attributes?.department, product.gender]
+    .map(value => String(value ?? '').trim().toLowerCase()).find(value => DEPOP_DEPARTMENTS.includes(value));
+  if (named) return named;
+  const kids = [product.is_kids, product.isKids, product.attributes?.is_kids].includes(true);
+  const gender = String(product.gender ?? product.attributes?.gender ?? '').trim().toLowerCase();
+  if (kids) return 'kidswear';
+  if (gender === 'male') return 'menswear';
+  if (gender === 'female') return 'womenswear';
+  const listed = [...new Set((attributes?.group || []).filter(entry => (entry.product_types || []).some(row => row.id === type))
+    .flatMap(entry => (Array.isArray(entry.department) ? entry.department : [])))];
+  if (listed.includes('everything-else')) return 'everything-else';
+  return listed.length === 1 ? listed[0] : '';
+}
+
+// General's department, which Depop's List reads back for a kids' gender.
+function depopImportGeneralDepartment(department, product) {
+  const gender = String(product.gender ?? product.attributes?.gender ?? '').trim().toLowerCase();
+  if (department === 'menswear') return 'Men';
+  if (department === 'womenswear') return 'Women';
+  if (department === 'kidswear') return gender === 'male' ? 'Boys' : gender === 'female' ? 'Girls' : null;
+  return null;
+}
+
+// A list of Depop ids, written as strings or as { id }.
+function depopImportIds(value) {
+  const rows = Array.isArray(value) ? value : value == null || value === '' ? [] : [value];
+  return [...new Set(rows.map(row => importText(typeof row === 'object' && row ? depopFieldId(row) || String(row.name ?? '') : String(row ?? ''), 60))
+    .filter(Boolean))];
+}
+
+// Material, occasion, body fit and the type attribute, named as Depop's sell page names them.
+function depopImportAttributes(product, category, attributes) {
+  const map = depopAttributeMap(product.attributes);
+  const out = {};
+  for (const id of category?.attributeIds || []) {
+    const values = depopImportIds(map[id]);
+    if (!values.length) continue;
+    const definition = (attributes?.generic_attributes || []).find(entry => entry.id === id);
+    out[id] = values.map(value => {
+      const option = (definition?.attributes || []).find(row => String(row.id) === value);
+      return importText(option ? depopPageName(option) || depopName(option) : value, 60);
+    }).filter(Boolean);
+  }
+  return out;
+}
+
+// The package size (the sell page's title for Depop's parcel id), or the
+// seller's own domestic price when the listing does not use Depop Shipping,
+// and the worldwide price when it ships abroad.
+async function depopImportShipping(product, category, deadline) {
+  const methods = Array.isArray(product.shipping_methods ?? product.shippingMethods) ? product.shipping_methods ?? product.shippingMethods : [];
+  const parcelId = importText(String(methods.find(row => row?.parcel_size ?? row?.parcelSize)?.parcel_size
+    ?? methods.find(row => row?.parcelSize)?.parcelSize ?? ''), 60);
+  let parcel = parcelId || null;
+  if (parcelId) {
+    try {
+      const params = depopShippingParams(category);
+      const providers = await importGet('depop', `${DEPOP_WEBAPI}/presentation/api/v1/shipping/providers/depop/?${params}`, deadline,
+        { Authorization: await depopBearer() });
+      parcel = importText(depopParcelRows(providers).find(row => row.id === parcelId)?.title, 60) || parcelId;
+    } catch { /* The id stays; Depop's List matches a package size by id too. */ }
+  }
+  const national = importShippingCost(product.national_shipping_cost ?? product.nationalShippingCost);
+  const worldwide = importShippingCost(product.international_shipping_cost ?? product.internationalShippingCost);
+  return { parcel_size: parcel, domestic_shipping: parcel ? null : national, worldwide_shipping: worldwide };
+}
+
+function depopImportBoost(product) {
+  const boost = product.boost ?? product.boosted ?? product.is_boosted;
+  if (typeof boost === 'boolean') return boost;
+  const status = boost && typeof boost === 'object' ? boost.status : null;
+  return status === 'active' ? true : status === 'inactive' ? false : null;
+}
+
+// Depop's hashtags, or the ones written in the description, without the #.
+function depopImportHashtags(product) {
+  const listed = Array.isArray(product.hashtags) ? product.hashtags.map(String)
+    : (importText(product.description).match(/#[A-Za-z0-9_]+/g) || []);
+  return [...new Set(listed.map(tag => tag.replace(/^#/, '').replace(/[^A-Za-z0-9_]+/g, '').toLowerCase()).filter(Boolean))].slice(0, 5);
+}
 
 const IMPORT_READERS = {
   poshmark: { page: poshmarkImportPage, listing: poshmarkImportListing },

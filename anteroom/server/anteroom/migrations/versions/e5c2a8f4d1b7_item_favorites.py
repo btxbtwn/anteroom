@@ -1,11 +1,8 @@
 """The seller can star an item
 
 Revision ID: e5c2a8f4d1b7
-Revises: e3b7a1c9d402, e4b7c2a9d6f1
+Revises: 1c42be3d1f71
 Create Date: 2026-11-24 12:00:00.000000
-
-It also joins the two heads ``main`` gained in parallel (resolving attention
-items and recording who requested a job), so Alembic has one head again.
 
 Every existing item starts unstarred. Row security on ``conversations`` is
 per row, so the new column needs no policy of its own.
@@ -17,7 +14,7 @@ import sqlalchemy as sa
 
 
 revision = 'e5c2a8f4d1b7'
-down_revision = ('e3b7a1c9d402', 'e4b7c2a9d6f1')
+down_revision = '1c42be3d1f71'
 branch_labels = None
 depends_on = None
 
