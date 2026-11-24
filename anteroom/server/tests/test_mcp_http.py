@@ -688,6 +688,7 @@ def test_hosted_today_concurrent_mutations_stay_seller_scoped(cloud, signing_key
 READ_TOOLS = {
     "search_inventory", "get_listing", "get_listing_photos", "get_sales_analytics", "get_offer_activity",
     "get_sourcing_roi", "run_etsy_audit", "get_needs_attention", "get_action_status",
+    "search_orders", "get_profit_and_loss", "search_expenses", "get_inventory_summary",
 }
 READ_TOOLS |= set(mcp_catalog_tools.PERMISSIONS)
 LISTING_WRITE_TOOLS = {
@@ -774,7 +775,10 @@ def test_mcp_token_created_with_chosen_permissions():
     )
     assert created.status_code == 201
     bearer = {"Authorization": f"Bearer {created.json()['token']}"}
-    assert _tool_names(client, bearer) == {"get_sales_analytics", "get_offer_activity", "get_sourcing_roi", "run_etsy_audit"}
+    assert _tool_names(client, bearer) == {
+        "get_sales_analytics", "get_offer_activity", "get_sourcing_roi", "run_etsy_audit",
+        "search_orders", "get_profit_and_loss", "search_expenses", "get_inventory_summary",
+    }
     listed = client.get("/api/settings/mcp-tokens").json()["tokens"][0]
     assert listed["permissions"] == {"listings": "none", "analytics": "read", "attention": "none", "marketplaces": "none"}
     bad = client.post("/api/settings/mcp-tokens", json={"name": "Bad", "permissions": {"listings": "admin"}})

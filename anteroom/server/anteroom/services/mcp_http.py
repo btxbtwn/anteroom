@@ -39,6 +39,7 @@ from anteroom.services import (
     inventory_labels,
     listing_editor,
     mcp_catalog_tools,
+    mcp_finance_tools,
     mcp_marketplace_tools,
     mcp_organize_tools,
     mcp_tokens,
@@ -123,6 +124,7 @@ TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
     **mcp_catalog_tools.PERMISSIONS,
     **mcp_marketplace_tools.PERMISSIONS,
     **mcp_organize_tools.PERMISSIONS,
+    **mcp_finance_tools.PERMISSIONS,
 }
 
 MAX_ATTENTION_KEYS = 100
@@ -553,6 +555,7 @@ def tool_definitions() -> list[dict[str, Any]]:
     tools.extend(mcp_catalog_tools.TOOLS)
     tools.extend(mcp_marketplace_tools.TOOLS)
     tools.extend(mcp_organize_tools.TOOLS)
+    tools.extend(mcp_finance_tools.TOOLS)
     return [{**tool, "annotations": {**tool["annotations"], "title": tool["title"]}} for tool in tools]
 
 
@@ -793,6 +796,7 @@ def _dispatch_tool(
         "delete_draft_listing": _tool_delete_draft_listing,
         **mcp_catalog_tools.HANDLERS,
         **mcp_organize_tools.HANDLERS,
+        **mcp_finance_tools.HANDLERS,
     }
     handler = handlers.get(name)
     if handler is None:
