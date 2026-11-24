@@ -165,3 +165,20 @@ test('Depop delists only after confirmation and verifies removal', async () => {
     ['GET', '/presentation/api/v1/products/by-slug/seller-coat/'],
   ]);
 });
+
+test('Depop cloud auto-relist keeps the old listing when its drafts session is refused', async () => {
+  const requests = [];
+  const { result } = await executeMarketplaceOperation({
+    marketplace: 'depop', cookies: [depopCookie],
+    command: {
+      type: 'marketplace.delete',
+      payload: { marketplace: 'depop', listing_id: 'seller-coat', confirm: true, action: 'relist' },
+    },
+    httpFetch: async (url, options) => {
+      requests.push([options.method, new URL(url).pathname]);
+      return json({ message: 'Unauthorized' }, 401);
+    },
+  });
+  assert.equal(result.error_code, 'signed_out');
+  assert.deepEqual(requests, [['GET', '/presentation/api/v1/drafts/']]);
+});

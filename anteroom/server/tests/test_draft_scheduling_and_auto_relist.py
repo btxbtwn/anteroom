@@ -423,6 +423,112 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
             marketplace_read.assert_not_called()
         self.assertEqual(self.db.query(MarketplaceRelistLog).filter_by(status="completed").count(), 1)
 
+    def test_relist_stops_only_the_marketplace_that_requires_a_browser_check(self):
+        from unittest.mock import AsyncMock
+
+        now = _now()
+        ids = {}
+        for index, (market, url, old_id) in enumerate([
+            ("mercari", "https://www.mercari.com/us/item/m123456789/", "m123456789"),
+            ("mercari", "https://www.mercari.com/us/item/m123456790/", "m123456790"),
+            ("depop", "https://www.depop.com/products/seller-fleece/", "seller-fleece"),
+        ]):
+            conv, _, rev = self._create_draft(f"Connection Check {index}")
+            conv.status = "listed"
+            ids[old_id] = (conv.id, rev.id)
+            self.db.add(MarketplaceListing(
+                id=new_id(), conversation_id=conv.id, marketplace=market, state="published",
+                listing_id=old_id, listing_url=url, listed_price=58.0,
+                listed_at=now - timedelta(days=45 - index),
+            ))
+        self.db.add_all(
+            MarketplaceRelistRule(id=new_id(), marketplace=market, enabled=True,
+                                  price_adjust_mode="percent", price_adjust_value=10)
+            for market in ("mercari", "depop")
+        )
+        self.db.commit()
+
+        async def delete(market, _command, **_kwargs):
+            if market == "mercari":
+                return {"ok": False, "error_code": "challenge", "error": "Mercari asked for a browser check."}
+            return {"ok": True, "state": "deleted"}
+
+        with (
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+            patch("anteroom.services.cloud_marketplace.execute", side_effect=delete) as execute,
+            patch("anteroom.services.native_marketplaces.list_now", AsyncMock(return_value={
+                "state": "published", "listing_id": "seller-new-fleece",
+                "listing_url": "https://www.depop.com/products/seller-new-fleece/",
+            })) as publish,
+        ):
+            outcomes = asyncio.run(auto_relist.run_auto_relist(now=now))
+
+        self.assertEqual([call.args[0] for call in execute.await_args_list], ["mercari", "depop"])
+        self.assertEqual(execute.await_args_list[1].args[1]["payload"]["action"], "relist")
+        self.assertEqual([row["status"] for row in outcomes], ["failed", "completed"])
+        self.assertEqual(publish.await_count, 1)
+        self.assertEqual(publish.await_args.args[:2], (ids["seller-fleece"][0], "depop"))
+        self.db.expire_all()
+        for old_id in ("m123456789", "m123456790"):
+            conv_id, revision_id = ids[old_id]
+            current = self.db.query(Listing).filter_by(conversation_id=conv_id).one()
+            prices = self.db.get(ListingRevision, current.current_revision_id)
+            assert prices is not None
+            self.assertEqual(auto_relist.price_for(prices.listing_json, "mercari"), 58.0)
+            if old_id == "m123456790":
+                self.assertEqual(current.current_revision_id, revision_id)
+
+    def test_relist_stops_deleting_after_a_replacement_job_fails(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from anteroom.models.job import Job
+        from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
+
+        now = _now()
+        for age, slug in [(45, "seller-fleece"), (44, "seller-coat")]:
+            conv, _, _ = self._create_draft(slug)
+            conv.status = "listed"
+            self.db.add(MarketplaceListing(
+                id=new_id(), conversation_id=conv.id, marketplace="depop", state="published",
+                listing_id=slug, listing_url=f"https://www.depop.com/products/{slug}/",
+                listed_price=58.0, listed_at=now - timedelta(days=age),
+            ))
+        self.db.add(MarketplaceRelistRule(id=new_id(), marketplace="depop", enabled=True))
+        self.db.commit()
+
+        async def publish(conv_id, marketplace, body, **_kwargs):
+            with self.Session() as db:
+                job_id = new_id()
+                error = "Depop asked to sign in again."
+                db.add(Job(id=job_id, conversation_id=conv_id, approved_revision_id=body.revision_id,
+                           status="failed", listing_snapshot={}, last_error=error))
+                MarketplaceListingRepo(db).save(conv_id, marketplace, {
+                    "state": "not_saved", "job_id": job_id, "error": error, "error_code": "signed_out",
+                })
+            return {"state": "saving", "job_id": job_id}
+
+        with (
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=False),
+            patch("anteroom.services.extension_connection.current_extension", return_value=SimpleNamespace(connected=True)),
+            patch("anteroom.services.browser_bridge.request", AsyncMock(return_value={
+                "ok": True, "state": "deleted",
+            })) as bridge,
+            patch("anteroom.services.native_marketplaces.list_now", side_effect=publish) as list_now,
+        ):
+            outcomes = asyncio.run(auto_relist.run_auto_relist(now=now))
+
+        self.assertEqual([row["status"] for row in outcomes], ["down_needs_relist"])
+        self.assertEqual(outcomes[0]["reason"], "Depop asked to sign in again.")
+        bridge.assert_awaited_once()
+        self.assertEqual(bridge.await_args.args[1:3], ("marketplace.delete", {
+            "marketplace": "depop", "listing_id": "seller-fleece", "confirm": True, "action": "relist",
+        }))
+        list_now.assert_awaited_once()
+        self.db.expire_all()
+        untouched = self.db.query(MarketplaceListing).filter_by(marketplace="depop", listing_id="seller-coat").one()
+        self.assertEqual(untouched.state, "published")
+
     def _relist_after_opt_out(self, *, disable_during_delete_start: bool):
         from contextlib import asynccontextmanager
         from unittest.mock import AsyncMock
