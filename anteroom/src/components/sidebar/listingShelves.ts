@@ -38,6 +38,8 @@ export type Listing = {
   inactive_marketplaces?: string[];
   /** Marketplace prices that differ from the seller's pricing rules. */
   price_drift?: PriceDrift[];
+  /** Starred by the seller. */
+  favorite?: boolean;
 };
 
 function timestampMs(value?: string | null): number {

@@ -20,6 +20,10 @@ final class ListingEditorModel {
     let api: AnteroomAPI
     let listingID: String
     private(set) var status: String
+    /// Starred by the seller. Saved on its own, apart from the form: it is not an edit.
+    private(set) var favorite: Bool
+    /// The latest star write; the next one waits for it.
+    @ObservationIgnored private var favoriteWrite: Task<Void, Error>?
     private(set) var options = GeneralOptions()
     private(set) var marketplaceTabs: [String] = []
     var form = Form()
@@ -63,10 +67,31 @@ final class ListingEditorModel {
         self.api = api
         listingID = listing.id
         status = listing.status.isEmpty ? "draft" : listing.status
+        favorite = listing.favorite
         coverPhotoID = listing.coverPhotoID
         coverPhotoVersion = listing.coverPhotoVersion
         form.fields.title = listing.title ?? ""
         saved = form
+    }
+
+    /// The star changes at once and goes back if the server refuses it. Writes
+    /// go out one after another, so the last tap is what is saved.
+    func setFavorite(_ on: Bool) async {
+        favorite = on
+        let previous = favoriteWrite
+        let write = Task {
+            _ = try? await previous?.value
+            _ = try await api.setFavorite(listingID, favorite: on)
+        }
+        favoriteWrite = write
+        do {
+            try await write.value
+        } catch {
+            // A newer tap is on its way and decides the star.
+            guard favoriteWrite == write else { return }
+            favorite = !on
+            saveError = (on ? "Could not add to favorites. " : "Could not remove from favorites. ") + error.localizedDescription
+        }
     }
 
     var hasChanges: Bool { hasLoaded && !isLoading && (form != saved || !pending.isEmpty) }
@@ -117,6 +142,7 @@ final class ListingEditorModel {
             draftNotice = "Your earlier unsaved edits are still kept on this phone. Review each kept copy before choosing what to keep."
         }
         status = screen.conversation.status
+        favorite = screen.conversation.favorite
         document = screen.listing.listing
         revisionID = screen.listing.currentRevisionID
         pending = [:]

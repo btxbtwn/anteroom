@@ -39,6 +39,7 @@ from anteroom.services import (
     inventory_labels,
     listing_editor,
     mcp_catalog_tools,
+    mcp_favorite_tools,
     mcp_feedback_tools,
     mcp_finance_tools,
     mcp_import_match_tools,
@@ -123,6 +124,7 @@ TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
     "dismiss_attention_items": ("attention", "write"),
     "resolve_attention_items": ("attention", "write"),
     "restore_attention_items": ("attention", "write"),
+    **mcp_favorite_tools.PERMISSIONS,
     **mcp_catalog_tools.PERMISSIONS,
     **mcp_import_match_tools.PERMISSIONS,
     **mcp_marketplace_tools.PERMISSIONS,
@@ -189,7 +191,7 @@ def tool_definitions() -> list[dict[str, Any]]:
             "description": (
                 "Search and filter the seller's Anteroom inventory by keyword "
                 "(title, SKU, brand, labels, private notes), status, marketplace, "
-                "unsent local edits, or sourcing box."
+                "unsent local edits, sourcing box, or favorites."
             ),
             "annotations": _READ_ANNOTATIONS,
             "inputSchema": {
@@ -200,6 +202,7 @@ def tool_definitions() -> list[dict[str, Any]]:
                     "marketplace": {"type": "string", "enum": sorted(MARKETS), "description": "Filter to items currently listed on this marketplace."},
                     "unsent_edits_only": {"type": "boolean", "description": "If true, return only items with local edits not yet sent to live marketplaces."},
                     "box_id": {"type": "string", "description": "Filter to items belonging to a specific sourcing box ID."},
+                    "favorites_only": {"type": "boolean", "description": "If true, return only items the seller starred."},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25},
                     "offset": {"type": "integer", "minimum": 0, "default": 0},
                 },
@@ -555,6 +558,7 @@ def tool_definitions() -> list[dict[str, Any]]:
                 "additionalProperties": False,
             },
         },
+        *mcp_favorite_tools.TOOLS,
     ]
     tools.extend(mcp_catalog_tools.TOOLS)
     tools.extend(mcp_import_match_tools.TOOLS)
@@ -806,6 +810,7 @@ def _dispatch_tool(
         "manage_listing_photos": _tool_manage_listing_photos,
         "manage_labels_and_notes": _tool_manage_labels_and_notes,
         "delete_draft_listing": _tool_delete_draft_listing,
+        **mcp_favorite_tools.HANDLERS,
         **mcp_catalog_tools.HANDLERS,
         **mcp_organize_tools.HANDLERS,
         **mcp_import_match_tools.HANDLERS,
@@ -844,6 +849,8 @@ def _tool_search_inventory(db: Session, args: dict[str, Any], **_kw: Any) -> dic
         convs = [c for c in convs if c.status == status_filter]
     if box_id:
         convs = [c for c in convs if c.box_id == box_id]
+    if args.get("favorites_only"):
+        convs = [c for c in convs if c.favorite]
 
     revisions_by_conv: dict[str, str] = {}
     fields_by_conv: dict[str, dict[str, Any]] = {}
@@ -916,6 +923,7 @@ def _tool_search_inventory(db: Session, args: dict[str, Any], **_kw: Any) -> dic
             "unsent_edits": has_unsent,
             "photo_count": photo_counts.get(conv.id, 0),
             "box_id": conv.box_id,
+            "favorite": bool(conv.favorite),
             "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
         })
 

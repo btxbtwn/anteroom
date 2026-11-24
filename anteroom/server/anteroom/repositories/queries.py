@@ -239,6 +239,21 @@ class ConversationRepo:
             return None
         return self.db.query(Conversation).filter(Conversation.id == conv_id).populate_existing().first()
 
+    def set_favorites(self, conv_ids: list[str], favorite: bool) -> list[str]:
+        """Star or unstar items; returns the IDs found, in the order asked.
+
+        A star is not an edit: ``updated_at`` keeps its value, so the item
+        keeps its place in Recent activity and gains no unsent edits.
+        """
+        wanted = list(dict.fromkeys(conv_ids))
+        found = set(self.db.scalars(select(Conversation.id).where(Conversation.id.in_(wanted))).all()) if wanted else set()
+        if found:
+            self.db.execute(update(Conversation).where(Conversation.id.in_(found))
+                            .values(favorite=favorite, updated_at=Conversation.updated_at)
+                            .execution_options(synchronize_session=False))
+        self.db.commit()
+        return [conv_id for conv_id in wanted if conv_id in found]
+
     def unsettle(self, conv_id: str) -> Conversation | None:
         conv = self.get(conv_id)
         if not conv:

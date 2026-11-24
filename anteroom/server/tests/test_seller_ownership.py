@@ -84,7 +84,8 @@ def seed_previous_release(engine):
 # Columns a later revision added to jobs, as an upgraded row reads them.
 JOB_LEASE_DEFAULTS = {"lease_owner": None, "leased_until": None, "cancel_requested": False, "requested_by": None}
 # Revision d0e4f3a92b68: Finished items from older builds stay the seller's decision.
-CONVERSATION_SETTLEMENT_DEFAULTS = {"settled_by_seller": True}
+# Revision e5c2a8f4d1b7 adds the star, off for every existing item.
+CONVERSATION_SETTLEMENT_DEFAULTS = {"settled_by_seller": True, "favorite": False}
 # Revision c2d9f4a8e103: Draft scheduling is opt-in and off by default.
 LISTING_SCHEDULE_DEFAULTS = {
     "ready_to_list": False,

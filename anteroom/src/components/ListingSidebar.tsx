@@ -22,6 +22,7 @@ import {
   matchesSearch,
   marketplaceCounts,
   marketplaceOptions,
+  favoriteCount,
   notListedCount,
   notListedOnCounts,
   unsentCount,
@@ -211,6 +212,7 @@ export function ListingSidebar({
   const filterNotListedCount = useMemo(() => notListedCount(facetSource), [facetSource]);
   const staleThreshold = uiPrefs?.stale_listing_days;
   const filterStaleCounts = useMemo(() => staleCounts(facetSource, undefined, staleThreshold), [facetSource, staleThreshold]);
+  const filterFavoriteCount = useMemo(() => favoriteCount(facetSource), [facetSource]);
   const filterUnsentCount = useMemo(() => unsentCount(facetSource), [facetSource]);
   const filterMissingSaleCount = useMemo(() => missingSaleCount(facetSource), [facetSource]);
   const filterInactiveCount = useMemo(() => inactiveCount(facetSource), [facetSource]);
@@ -407,6 +409,7 @@ export function ListingSidebar({
             marketplaces={filterMarketplaces}
             marketplaceCounts={filterMarketplaceCounts}
             notListedCount={filterNotListedCount}
+            favoriteCount={filterFavoriteCount}
             unsentCount={filterUnsentCount}
             missingSaleCount={filterMissingSaleCount}
             inactiveCount={filterInactiveCount}

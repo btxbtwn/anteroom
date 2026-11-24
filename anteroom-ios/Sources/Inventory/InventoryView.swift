@@ -194,6 +194,10 @@ struct InventoryView: View {
             }
             Divider()
         }
+        Button(listing.favorite ? "Remove from favorites" : "Add to favorites",
+               systemImage: listing.favorite ? "star.slash" : "star") {
+            Task { await model.setFavorite(listing, !listing.favorite) }
+        }
         Button("Rename", systemImage: "pencil") {
             newTitle = listing.title ?? ""
             renaming = listing
@@ -534,6 +538,13 @@ struct InventoryView: View {
         .listRowSeparatorTint(WorkspaceStyle.border)
         .listRowBackground(sideBySide && open?.id == listing.id ? WorkspaceStyle.selected : Color.clear)
         .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: activeMarketplace == nil ? 4 : 16))
+        // Mail flags from the leading edge; the star sits there too.
+        .swipeActions(edge: .leading) {
+            Button(listing.favorite ? "Unfavorite" : "Favorite", systemImage: listing.favorite ? "star.slash" : "star") {
+                Task { await model.setFavorite(listing, !listing.favorite) }
+            }
+            .tint(WorkspaceStyle.accent)
+        }
         .swipeActions(edge: .trailing) {
             Button("Delete", systemImage: "trash") { deleting = listing }
                 .tint(.red)
@@ -633,6 +644,12 @@ private struct InventoryFilterMenu: View {
         let options = model.marketplaceOptions()
         let counts = InventoryQuery.marketplaceCounts(source, options: options, notListed: model.filters.notListed)
         return Menu {
+            Section {
+                Button { model.filters.favorites.toggle() } label: {
+                    CheckedLabel(title: "Favorites  \(source.filter(\.favorite).count)", on: model.filters.favorites)
+                }
+                .accessibilityAddTraits(model.filters.favorites ? .isSelected : [])
+            }
             Section(model.filters.notListed ? "Not listed on" : "Marketplaces") {
                 // Checkmarked rows, not switches: a Toggle in a menu drew with
                 // blank gaps and pushed the last marketplace off screen.
@@ -685,6 +702,7 @@ private struct InventoryFilterMenu: View {
             }
             if model.filters.activeCount > 0 {
                 Button("Clear filters", role: .destructive) {
+                    model.filters.favorites = false
                     model.filters.marketplaces = []
                     model.filters.notListed = false
                     model.filters.labels = []
@@ -1052,6 +1070,12 @@ struct ListingRowContent<Thumbnail: View>: View {
                     ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(spacing: 8))
                 statusLayout {
                     HStack(spacing: 6) {
+                        if listing.favorite {
+                            Image(systemName: "star.fill")
+                                .imageScale(.small)
+                                .foregroundStyle(.primary)
+                                .accessibilityLabel("Favorite")
+                        }
                         Circle().fill(statusColor).frame(width: 6, height: 6).accessibilityHidden(true)
                         Text(listing.statusLabel)
                             .foregroundStyle(listing.inventoryStatus == "failed" ? WorkspaceStyle.destructive : WorkspaceStyle.mutedText)

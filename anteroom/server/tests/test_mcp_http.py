@@ -693,7 +693,7 @@ READ_TOOLS = {
 READ_TOOLS |= set(mcp_catalog_tools.PERMISSIONS)
 LISTING_WRITE_TOOLS = {
     "create_draft_listing", "edit_listing", "manage_listing_photos",
-    "manage_labels_and_notes", "delete_draft_listing", "confirm_import_match", "reject_import_match",
+    "manage_labels_and_notes", "delete_draft_listing", "set_favorite", "confirm_import_match", "reject_import_match",
 }
 ATTENTION_WRITE_TOOLS = {"dismiss_attention_items", "resolve_attention_items", "restore_attention_items"}
 # Inventory tidying tools (services/mcp_organize_tools.py).

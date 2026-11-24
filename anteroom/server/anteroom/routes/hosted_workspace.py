@@ -86,7 +86,7 @@ def conversation_response(row, listing=None, direct=None, *, notes=None, include
             'sold_at': sold.sold_at.isoformat() if sold and sold.sold_at else None,
             'missing_sale_data': missing_sale_data or [],
             'inactive_marketplaces': [market for market, record in (direct or {}).items() if record.get('inactive')],
-            'price_drift': price_drift or [], **imported_fields(notes, direct or {})}
+            'price_drift': price_drift or [], 'favorite': bool(row.favorite), **imported_fields(notes, direct or {})}
     if include_notes:
         result['notes'] = row.notes
     return result
@@ -284,6 +284,16 @@ def edit_conversation(identity: str, body: contract.ConversationInput, db=Depend
     db.commit()
     db.refresh(row)
     return conversation_response(row)
+
+
+@router.put('/conversations/{identity}/favorite', response_model=contract.FavoriteResult, responses=NOT_FOUND)
+def set_favorite(identity: str, body: contract.FavoriteInput, db=Depends(get_seller_db, scope="function")):
+    from anteroom.repositories.queries import ConversationRepo
+
+    # Not an edit, so a busy item can still be starred.
+    if not ConversationRepo(db).set_favorites([identity], body.favorite):
+        raise HTTPException(404, 'Listing not found')
+    return {'id': identity, 'favorite': body.favorite}
 
 
 @router.get('/conversations/{identity}/screen')
