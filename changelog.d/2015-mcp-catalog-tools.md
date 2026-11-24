@@ -1,0 +1,1 @@
+- Your AI agent can now look up each marketplace's categories, the fields a category asks for and the values they accept, read the form a listing shows for one marketplace, check your region, currency and connected marketplaces, and read your listing rules before it writes or edits a draft. These lookups only read: nothing is published or changed.

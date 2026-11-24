@@ -30,7 +30,7 @@ from anteroom.models.marketplace_listing import LIVE_STATES, MarketplaceListing
 from anteroom.models.marketplace_sale import MarketplaceSale
 from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
 from anteroom.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
-from anteroom.services import boxes, home_dashboard, listing_editor, mcp_tokens
+from anteroom.services import boxes, home_dashboard, listing_editor, mcp_catalog_tools, mcp_tokens
 from anteroom.services.background_tasks import ACTIVE as ACTIVE_TASK_STATUSES
 from anteroom.services.etsy_audit import etsy_not_allowed_live
 from anteroom.services.etsy_fields import etsy_eligible
@@ -101,6 +101,7 @@ TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
     "get_needs_attention": ("attention", "read"),
     "dismiss_attention_items": ("attention", "write"),
     "restore_attention_items": ("attention", "write"),
+    **mcp_catalog_tools.PERMISSIONS,
 }
 
 MAX_ATTENTION_KEYS = 100
@@ -343,6 +344,7 @@ def tool_definitions() -> list[dict[str, Any]]:
             "description": (
                 "Create a new local draft listing in Anteroom. Does NOT publish to any "
                 "marketplace; the seller reviews and sends it in Anteroom."
+                + mcp_catalog_tools.WRITE_GUIDANCE
             ),
             "annotations": _WRITE_ANNOTATIONS,
             "inputSchema": {
@@ -389,6 +391,7 @@ def tool_definitions() -> list[dict[str, Any]]:
                 "condition, price, quantity, cost, SKU, category, marketplace attributes). "
                 "NEVER pushes to live marketplaces; edits on live listings stay as local "
                 "unsent edits for the seller to confirm in Anteroom."
+                + mcp_catalog_tools.WRITE_GUIDANCE
             ),
             "annotations": _WRITE_ANNOTATIONS,
             "inputSchema": {
@@ -480,6 +483,7 @@ def tool_definitions() -> list[dict[str, Any]]:
             },
         },
     ]
+    tools.extend(mcp_catalog_tools.TOOLS)
     return [{**tool, "annotations": {**tool["annotations"], "title": tool["title"]}} for tool in tools]
 
 
@@ -708,6 +712,7 @@ def _dispatch_tool(
         "manage_listing_photos": _tool_manage_listing_photos,
         "manage_labels_and_notes": _tool_manage_labels_and_notes,
         "delete_draft_listing": _tool_delete_draft_listing,
+        **mcp_catalog_tools.HANDLERS,
     }
     handler = handlers.get(name)
     if handler is None:
