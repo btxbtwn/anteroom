@@ -62,6 +62,10 @@ CONTRACT_OPERATIONS: tuple[tuple[str, str], ...] = (
     ("post", "/api/conversations/{conv_id}/photos/studio"),
     ("get", "/api/assistant/name"),
     ("put", "/api/assistant/name"),
+    ("get", "/api/home/attention"),
+    ("post", "/api/home/attention/dismiss"),
+    ("post", "/api/home/attention/resolve"),
+    ("post", "/api/home/attention/restore"),
 )
 HOSTED_ONLY_OPERATIONS = {
     ("get", "/api/runtime"),
@@ -496,3 +500,106 @@ class ListingSheetResponse(ContractModel):
     marketplace: Literal["ebay", "poshmark", "mercari", "depop", "etsy"]
     listings: dict[str, ListingSheetRow] = Field(default_factory=dict)
 
+
+
+AttentionKind = Literal[
+    "still_listed", "expired_session", "failed_job", "unsent_edits", "pending_approval", "relist_gap",
+    "duplicate_listing",
+]
+
+
+class AttentionTarget(ContractModel):
+    """Where the item's action opens."""
+
+    view: Literal["listings", "settings", "automations"]
+    conversation_id: str | None = None
+    settings_section: Literal["connections", "listings"] | None = None
+    target_id: str | None = None
+
+
+class AttentionItem(ContractModel):
+    """One Needs Attention alert. Snoozing or resolving it only hides it in Anteroom."""
+
+    key: str
+    kind: AttentionKind
+    priority: Literal["high", "medium", "low"]
+    title: str
+    detail: str
+    action_label: str
+    target: AttentionTarget
+    occurred_at: str | None = None
+    fingerprint: str = ""
+    """The state the alert reports. Resolve keeps it hidden only while this stays the same."""
+    dismissed_at: str | None = None
+    """Set on a snoozed item."""
+    expires_at: str | None = None
+    """When a snoozed item shows again if it still applies."""
+    reappears_in_days: int | None = None
+    resolved_at: str | None = None
+    """Set on a resolved item."""
+
+
+class AttentionCounts(ContractModel):
+    active: int
+    dismissed: int
+    resolved: int
+    by_kind: dict[str, int] = Field(default_factory=dict)
+
+
+class AttentionInbox(ContractModel):
+    """Needs Attention: what shows, what is snoozed, and what is resolved."""
+
+    needs_attention: list[AttentionItem]
+    dismissed: list[AttentionItem]
+    """Snoozed items, back after 7 days if they still apply."""
+    resolved: list[AttentionItem]
+    """Resolved items. A duplicate pair stays resolved; anything else shows again when its state changes."""
+    counts: AttentionCounts
+
+
+class AttentionSnoozeInput(ContractModel):
+    model_config = ConfigDict(extra="forbid", use_attribute_docstrings=True)
+    item_key: str = Field(min_length=1, max_length=200)
+    kind: str = Field(default="general", max_length=40)
+
+
+class AttentionResolveInput(ContractModel):
+    model_config = ConfigDict(extra="forbid", use_attribute_docstrings=True)
+    item_key: str = Field(min_length=1, max_length=200)
+    kind: str = Field(default="general", max_length=40)
+    fingerprint: str = Field(default="", max_length=64)
+    """The item's fingerprint as shown; required for every kind but a duplicate pair."""
+
+
+class AttentionRestoreInput(ContractModel):
+    model_config = ConfigDict(extra="forbid", use_attribute_docstrings=True)
+    item_key: str = Field(min_length=1, max_length=200)
+
+
+class AttentionSnooze(ContractModel):
+    item_key: str
+    dismissed_at: str
+    expires_at: str
+    reappears_in_days: int
+
+
+class AttentionSnoozeResult(ContractModel):
+    ok: bool
+    dismissal: AttentionSnooze
+
+
+class AttentionResolution(ContractModel):
+    item_key: str
+    kind: str
+    resolved_at: str
+
+
+class AttentionResolveResult(ContractModel):
+    ok: bool
+    resolution: AttentionResolution
+
+
+class AttentionRestoreResult(ContractModel):
+    ok: bool
+    restored: bool
+    item_key: str

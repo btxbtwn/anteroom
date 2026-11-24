@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyGoalHomeSnapshot,
   patchHomeAfterDismiss,
+  patchHomeAfterResolve,
   patchHomeAfterRestore,
   type AttentionItem,
   type HomeSummaryResponse,
@@ -35,7 +36,8 @@ const sample: HomeSummaryResponse = {
   goals: [],
   needs_attention: [baseItem("a"), baseItem("b", "still_listed")],
   dismissed: [],
-  counts: { active: 2, dismissed: 0, by_kind: { failed_job: 1, still_listed: 1 } },
+  resolved: [],
+  counts: { active: 2, dismissed: 0, resolved: 0, by_kind: { failed_job: 1, still_listed: 1 } },
 };
 
 describe("patchHomeAfterDismiss / restore", () => {
@@ -48,7 +50,7 @@ describe("patchHomeAfterDismiss / restore", () => {
     });
     expect(next.needs_attention.map((item) => item.key)).toEqual(["b"]);
     expect(next.dismissed.map((item) => item.key)).toEqual(["a"]);
-    expect(next.counts).toEqual({ active: 1, dismissed: 1, by_kind: { still_listed: 1 } });
+    expect(next.counts).toEqual({ active: 1, dismissed: 1, resolved: 0, by_kind: { still_listed: 1 } });
     expect(next.dismissed[0]?.reappears_in_days).toBe(7);
   });
 
@@ -59,6 +61,25 @@ describe("patchHomeAfterDismiss / restore", () => {
     expect(restored.dismissed).toEqual([]);
     expect(restored.counts.active).toBe(2);
     expect(restored.needs_attention.find((item) => item.key === "a")?.reappears_in_days).toBeUndefined();
+  });
+});
+
+describe("patchHomeAfterResolve", () => {
+  it("moves an alert into resolved, out of snoozed, and back on restore", () => {
+    const snoozed = patchHomeAfterDismiss(sample, sample.needs_attention[0]!);
+    const resolved = patchHomeAfterResolve(snoozed, snoozed.dismissed[0]!, {
+      resolved_at: "2026-11-24T12:00:00Z",
+    });
+    expect(resolved.dismissed).toEqual([]);
+    expect(resolved.resolved.map((item) => item.key)).toEqual(["a"]);
+    expect(resolved.resolved[0]?.resolved_at).toBe("2026-11-24T12:00:00Z");
+    expect(resolved.resolved[0]?.expires_at).toBeUndefined();
+    expect(resolved.counts).toEqual({ active: 1, dismissed: 0, resolved: 1, by_kind: { still_listed: 1 } });
+
+    const restored = patchHomeAfterRestore(resolved, "a");
+    expect(restored.resolved).toEqual([]);
+    expect(restored.needs_attention.find((item) => item.key === "a")?.resolved_at).toBeUndefined();
+    expect(restored.counts.active).toBe(2);
   });
 });
 

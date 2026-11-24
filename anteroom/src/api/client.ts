@@ -1,7 +1,7 @@
 import { listingScreenRead } from "./listingScreen";
 import { reportError } from "./errorReports";
 import type { VendooDraft } from "./vendooDraft";
-import type { ConnectionStatus, CsvInput, CsvResult, CurrencyReport, Expense, ExpenseInput, ExpenseUpdate, MarketplaceCloudResult, MileageAmount, MileageInput, OfferLogResponse, PlaidExchange, PlaidLinkToken, PlaidStatus, PreferredName, PreferredNameInput } from "./contract.gen";
+import type { AttentionItem, AttentionResolveInput, AttentionResolveResult, AttentionRestoreInput, AttentionRestoreResult, AttentionSnoozeInput, AttentionSnoozeResult, ConnectionStatus, CsvInput, CsvResult, CurrencyReport, Expense, ExpenseInput, ExpenseUpdate, MarketplaceCloudResult, MileageAmount, MileageInput, OfferLogResponse, PlaidExchange, PlaidLinkToken, PlaidStatus, PreferredName, PreferredNameInput } from "./contract.gen";
 import { ApiRequestError, currentHostedSession, retryAfterMs, studioFetch, studioUpload, hasHostedApiSession } from "./transport";
 import { trackPhotoUpload } from "../photoUploads";
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
@@ -1939,14 +1939,21 @@ export const api = {
         { method: "DELETE" },
       ),
     dismissAttention: (itemKey: string, kind: string, _timezone = browserTimeZone()) =>
-      request<HomeMutationResponse>("/home/attention/dismiss", {
+      request<AttentionSnoozeResult>("/home/attention/dismiss", {
         method: "POST",
-        body: JSON.stringify({ item_key: itemKey, kind }),
+        body: JSON.stringify({ item_key: itemKey, kind } satisfies AttentionSnoozeInput),
+      }),
+    resolveAttention: (item: Pick<AttentionItem, "key" | "kind" | "fingerprint">) =>
+      request<AttentionResolveResult>("/home/attention/resolve", {
+        method: "POST",
+        body: JSON.stringify({
+          item_key: item.key, kind: item.kind, fingerprint: item.fingerprint ?? "",
+        } satisfies AttentionResolveInput),
       }),
     restoreAttention: (itemKey: string, _timezone = browserTimeZone()) =>
-      request<HomeMutationResponse>("/home/attention/restore", {
+      request<AttentionRestoreResult>("/home/attention/restore", {
         method: "POST",
-        body: JSON.stringify({ item_key: itemKey }),
+        body: JSON.stringify({ item_key: itemKey } satisfies AttentionRestoreInput),
       }),
   },
 

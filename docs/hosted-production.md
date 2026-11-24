@@ -567,6 +567,19 @@ Supabase settings (dashboard, or `[auth.oauth_server]` in `config.toml`):
    need the seller's recent sign-in or email confirmation, so an app cannot take
    over the account.
 
+A new app starts with **Marketplaces** at No access, and an app approved before
+that area existed reads as No access too. Only when the seller sets it in
+Settings → Agents (or on the approval page) can the app save marketplace drafts
+(`save_marketplace_draft`) or also publish, update live listings and delist
+(`publish_listing`, `send_unsent_edits`, `delist_listing`), each call naming
+its marketplaces and carrying `confirm` (AGENTS.md, **Invariant**). These run
+the same services as the app's own buttons. A connected app's request carries no
+seller browser session, so its jobs use the seller's eBay and Etsy tokens, a
+cloud session, or the seller's own Chrome through the hosted browser relay; when
+none is connected the tool answers with the refusal the app would show (for
+example, Connect Chrome first). Jobs it starts record `requested_by` =
+`mcp:<app name>`.
+
 Storage, Realtime and the change feed refuse any JWT with a `client_id` claim
 (restrictive policies in revision `138d3602d2e2`), so an app cannot read or
 delete photos directly. Its photo work through `/api/mcp` runs on the server key.

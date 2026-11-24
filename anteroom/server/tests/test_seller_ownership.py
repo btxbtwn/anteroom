@@ -82,7 +82,7 @@ def seed_previous_release(engine):
 
 
 # Columns a later revision added to jobs, as an upgraded row reads them.
-JOB_LEASE_DEFAULTS = {"lease_owner": None, "leased_until": None, "cancel_requested": False}
+JOB_LEASE_DEFAULTS = {"lease_owner": None, "leased_until": None, "cancel_requested": False, "requested_by": None}
 # Revision d0e4f3a92b68: Finished items from older builds stay the seller's decision.
 # Revision e5c2a8f4d1b7 adds the star, off for every existing item.
 CONVERSATION_SETTLEMENT_DEFAULTS = {"settled_by_seller": True, "favorite": False}

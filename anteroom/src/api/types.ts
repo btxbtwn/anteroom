@@ -231,6 +231,8 @@ export interface Job {
   mode?: string | null;
   blocker_fields?: Record<string, unknown>[] | null;
   send_progress?: { completed: number; total: number } | null;
+  /** The agent that started it ("mcp:<name>"); null for the seller's own. */
+  requested_by?: string | null;
   started_at?: string | null;
   created_at: string;
   updated_at: string;

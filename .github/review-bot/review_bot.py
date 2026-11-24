@@ -527,10 +527,13 @@ def autofix_decision(
             return "skip", None
         return "skip", "max_rounds"
     last = states[-1] if states else None
-    if last and last.get("head") == head:
+    if last and last.get("head") == head and last.get("reason") != "no_result":
         same_findings = set(open_ids) <= set(last.get("open") or [])
         same_ci = set(ci_open) <= set(last.get("ci_open") or [])
-        same_conflicts = set(conflict_files) <= set(last.get("conflict_files") or [])
+        # Workflow startup failures can record conflicted paths before Claude runs.
+        same_conflicts = not conflict_files or (
+            last.get("merge_attempted") and set(conflict_files) <= set(last.get("conflict_files") or [])
+        )
         same_merge = (not merge_clean) or bool(last.get("merge_clean"))
         if same_findings and same_ci and same_conflicts and same_merge:
             if last.get("reason") == "same_blockers":
@@ -980,6 +983,7 @@ def prepare_autofix(args) -> None:
                 "open": [f["comment_id"] for f in findings],
                 "ci_open": ci_names,
                 "conflict_files": conflict_files,
+                "merge_attempted": reason == "same_blockers" and bool(conflict_files),
                 "merge_clean": merge_clean,
                 "reason": reason,
                 "round": sum(1 for s in states if s.get("pushed")),
@@ -1050,7 +1054,8 @@ def post_autofix(args) -> None:
             },
         )
     conflict_result = data.get("conflict_result")
-    if (conflict_files or ctx.get("merge_clean")) and not isinstance(conflict_result, dict):
+    merge_attempted = isinstance(conflict_result, dict)
+    if (conflict_files or ctx.get("merge_clean")) and not merge_attempted:
         conflict_result = {
             "outcome": "not_fixed",
             "explanation": "Claude returned no result for the main merge.",
@@ -1087,9 +1092,10 @@ def post_autofix(args) -> None:
             conflict_result["outcome"] = "not_fixed"
             conflict_result["explanation"] = conflict_result.get("explanation", "") + " (The fix was not pushed.)"
 
-    for comment_id, result in results.items():
-        body = render_autofix_reply(result, head=head_after, fixed_in=head_after if pushed else None)
-        api(f"repos/{repo()}/pulls/{ctx['pr']}/comments/{comment_id}/replies", "POST", {"body": body})
+    if raw:
+        for comment_id, result in results.items():
+            body = render_autofix_reply(result, head=head_after, fixed_in=head_after if pushed else None)
+            api(f"repos/{repo()}/pulls/{ctx['pr']}/comments/{comment_id}/replies", "POST", {"body": body})
 
     unresolved = [cid for cid, r in results.items() if r["outcome"] == "not_fixed"]
     unresolved_ci = [name for name, r in ci_results.items() if r["outcome"] == "not_fixed"]
@@ -1098,6 +1104,8 @@ def post_autofix(args) -> None:
         if isinstance(conflict_result, dict) and conflict_result.get("outcome") == "not_fixed"
         else []
     )
+    if not raw and not pushed:
+        blocking = "Claude returned no repair result. See the Fix with Claude step in Actions."
     if not blocking and (unresolved or unresolved_ci or unresolved_conflicts):
         parts = []
         if unresolved:
@@ -1119,9 +1127,10 @@ def post_autofix(args) -> None:
         "open": unresolved,
         "ci_open": unresolved_ci,
         "conflict_files": unresolved_conflicts,
+        "merge_attempted": merge_attempted,
         "merge_clean": bool(ctx.get("merge_clean")) and pushed and not unresolved_conflicts,
         "round": ctx["round"],
-        "reason": "blocked" if blocking else "ready",
+        "reason": "no_result" if not raw else "blocked" if blocking else "ready",
     }
     api(f"repos/{repo()}/issues/{ctx['pr']}/comments", "POST",
         {"body": render_autofix_result(state, blocking=blocking, auto_merge_disabled=auto_merge_off)})

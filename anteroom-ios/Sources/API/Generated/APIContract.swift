@@ -35,6 +35,196 @@ extension Annotation {
     }
 }
 
+struct AttentionCounts: Codable, Hashable, Sendable {
+    var active: Int
+    var dismissed: Int
+    var resolved: Int
+    var byKind: [String: Int]?
+
+    enum CodingKeys: String, CodingKey {
+        case active, dismissed, resolved
+        case byKind = "by_kind"
+    }
+}
+
+/// Needs Attention: what shows, what is snoozed, and what is resolved.
+struct AttentionInbox: Codable, Hashable, Sendable {
+    var needsAttention: [AttentionItem]
+    /// Snoozed items, back after 7 days if they still apply.
+    var dismissed: [AttentionItem]
+    /// Resolved items. A duplicate pair stays resolved; anything else shows again when its state changes.
+    var resolved: [AttentionItem]
+    var counts: AttentionCounts
+
+    enum CodingKeys: String, CodingKey {
+        case dismissed, resolved, counts
+        case needsAttention = "needs_attention"
+    }
+}
+
+/// One Needs Attention alert. Snoozing or resolving it only hides it in Anteroom.
+struct AttentionItem: Codable, Hashable, Sendable {
+    var key: String
+    /// One of: still_listed, expired_session, failed_job, unsent_edits, pending_approval, relist_gap, duplicate_listing.
+    var kind: String
+    /// One of: high, medium, low.
+    var priority: String
+    var title: String
+    var detail: String
+    var actionLabel: String
+    var target: AttentionTarget
+    var occurredAt: String?
+    /// The state the alert reports. Resolve keeps it hidden only while this stays the same.
+    var fingerprint: String = ""
+    /// Set on a snoozed item.
+    var dismissedAt: String?
+    /// When a snoozed item shows again if it still applies.
+    var expiresAt: String?
+    var reappearsInDays: Int?
+    /// Set on a resolved item.
+    var resolvedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case key, kind, priority, title, detail, target, fingerprint
+        case actionLabel = "action_label"
+        case occurredAt = "occurred_at"
+        case dismissedAt = "dismissed_at"
+        case expiresAt = "expires_at"
+        case reappearsInDays = "reappears_in_days"
+        case resolvedAt = "resolved_at"
+    }
+}
+
+extension AttentionItem {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        key = try values.decode(String.self, forKey: .key)
+        kind = try values.decode(String.self, forKey: .kind)
+        priority = try values.decode(String.self, forKey: .priority)
+        title = try values.decode(String.self, forKey: .title)
+        detail = try values.decode(String.self, forKey: .detail)
+        actionLabel = try values.decode(String.self, forKey: .actionLabel)
+        target = try values.decode(AttentionTarget.self, forKey: .target)
+        occurredAt = try values.decodeIfPresent(String.self, forKey: .occurredAt)
+        fingerprint = try values.decodeIfPresent(String.self, forKey: .fingerprint) ?? ""
+        dismissedAt = try values.decodeIfPresent(String.self, forKey: .dismissedAt)
+        expiresAt = try values.decodeIfPresent(String.self, forKey: .expiresAt)
+        reappearsInDays = try values.decodeIfPresent(Int.self, forKey: .reappearsInDays)
+        resolvedAt = try values.decodeIfPresent(String.self, forKey: .resolvedAt)
+    }
+}
+
+struct AttentionResolution: Codable, Hashable, Sendable {
+    var itemKey: String
+    var kind: String
+    var resolvedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case itemKey = "item_key"
+        case resolvedAt = "resolved_at"
+    }
+}
+
+struct AttentionResolveInput: Codable, Hashable, Sendable {
+    var itemKey: String
+    var kind: String = "general"
+    /// The item's fingerprint as shown; required for every kind but a duplicate pair.
+    var fingerprint: String = ""
+
+    enum CodingKeys: String, CodingKey {
+        case kind, fingerprint
+        case itemKey = "item_key"
+    }
+}
+
+extension AttentionResolveInput {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        itemKey = try values.decode(String.self, forKey: .itemKey)
+        kind = try values.decodeIfPresent(String.self, forKey: .kind) ?? "general"
+        fingerprint = try values.decodeIfPresent(String.self, forKey: .fingerprint) ?? ""
+    }
+}
+
+struct AttentionResolveResult: Codable, Hashable, Sendable {
+    var ok: Bool
+    var resolution: AttentionResolution
+}
+
+struct AttentionRestoreInput: Codable, Hashable, Sendable {
+    var itemKey: String
+
+    enum CodingKeys: String, CodingKey {
+        case itemKey = "item_key"
+    }
+}
+
+struct AttentionRestoreResult: Codable, Hashable, Sendable {
+    var ok: Bool
+    var restored: Bool
+    var itemKey: String
+
+    enum CodingKeys: String, CodingKey {
+        case ok, restored
+        case itemKey = "item_key"
+    }
+}
+
+struct AttentionSnooze: Codable, Hashable, Sendable {
+    var itemKey: String
+    var dismissedAt: String
+    var expiresAt: String
+    var reappearsInDays: Int
+
+    enum CodingKeys: String, CodingKey {
+        case itemKey = "item_key"
+        case dismissedAt = "dismissed_at"
+        case expiresAt = "expires_at"
+        case reappearsInDays = "reappears_in_days"
+    }
+}
+
+struct AttentionSnoozeInput: Codable, Hashable, Sendable {
+    var itemKey: String
+    var kind: String = "general"
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case itemKey = "item_key"
+    }
+}
+
+extension AttentionSnoozeInput {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        itemKey = try values.decode(String.self, forKey: .itemKey)
+        kind = try values.decodeIfPresent(String.self, forKey: .kind) ?? "general"
+    }
+}
+
+struct AttentionSnoozeResult: Codable, Hashable, Sendable {
+    var ok: Bool
+    var dismissal: AttentionSnooze
+}
+
+/// Where the item's action opens.
+struct AttentionTarget: Codable, Hashable, Sendable {
+    /// One of: listings, settings, automations.
+    var view: String
+    var conversationID: String?
+    /// One of: connections, listings.
+    var settingsSection: String?
+    var targetID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case view
+        case conversationID = "conversation_id"
+        case settingsSection = "settings_section"
+        case targetID = "target_id"
+    }
+}
+
 struct Border: Codable, Hashable, Sendable {
     var width: Double
     var color: String = "#FFFFFF"

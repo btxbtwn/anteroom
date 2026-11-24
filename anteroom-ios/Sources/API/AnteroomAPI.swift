@@ -994,6 +994,27 @@ final class AnteroomAPI: Sendable {
         }
     }
 
+    // MARK: Needs Attention
+
+    /// Needs Attention as on the web's Home: what shows, what is snoozed and what is resolved.
+    func attentionInbox() async throws -> AttentionInbox {
+        try await decode(request("GET", "api/home/attention"))
+    }
+
+    /// Hide an alert for 7 days; it comes back if it still applies.
+    func snoozeAttention(_ item: AttentionItem) async throws -> AttentionSnoozeResult {
+        try await decode(request("POST", "api/home/attention/dismiss", json: AttentionSnoozeInput(itemKey: item.key, kind: item.kind)))
+    }
+
+    /// Hide an alert until its situation changes; a duplicate pair is never flagged again.
+    func resolveAttention(_ item: AttentionItem) async throws -> AttentionResolveResult {
+        try await decode(request("POST", "api/home/attention/resolve", json: AttentionResolveInput(itemKey: item.key, kind: item.kind, fingerprint: item.fingerprint)))
+    }
+
+    func restoreAttention(_ key: String) async throws -> AttentionRestoreResult {
+        try await decode(request("POST", "api/home/attention/restore", json: AttentionRestoreInput(itemKey: key)))
+    }
+
     // MARK: Business assistant
 
     /// What the seller asked to be called (Settings → Assistant on the web); empty until they say.

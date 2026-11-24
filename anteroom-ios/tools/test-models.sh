@@ -111,3 +111,7 @@ xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift So
 echo "Test direct marketplace Connections settings presentation"
 xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift Sources/Marketplaces/MarketplaceModels.swift Sources/Settings/ConnectionsSettingsModels.swift Tests/ConnectionsSettingsTests.swift -o "$RUNNER_TEMP/connections-settings-tests"
 "$RUNNER_TEMP/connections-settings-tests"
+
+echo "Test Needs Attention snooze, resolve and restore"
+xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift Sources/Attention/AttentionModels.swift Tests/AttentionTests.swift -o "$RUNNER_TEMP/attention-tests"
+"$RUNNER_TEMP/attention-tests"
