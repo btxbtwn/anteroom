@@ -297,7 +297,7 @@ def _mercari_specifics(raw) -> dict:
         out["shippingPayerId"] = raw["shippingPayerId"]
     if isinstance(raw.get("shipsFrom"), str) and re.fullmatch(r"\d{5}", raw["shipsFrom"]):
         out["shipsFrom"] = raw["shipsFrom"]
-    package = raw.get("package") if isinstance(raw.get("package"), dict) else {}
+    package: dict = raw["package"] if isinstance(raw.get("package"), dict) else {}
     pack: dict = {}
     pounds, ounces = _size(package.get("pounds")), _size(package.get("ounces"))
     if pounds is not None and ounces is not None and ounces < 16:
