@@ -351,7 +351,7 @@ def _delist_listing(db: Session, args: dict[str, Any], *, agent: str | None) -> 
 
 
 def _get_action_status(db: Session, args: dict[str, Any], *, agent: str | None = None) -> dict[str, Any]:
-    from anteroom.services import draft_scheduling, marketplace_delist
+    from anteroom.services import marketplace_delist
     from anteroom.services import native_marketplaces as native
 
     conv_id = _require_str(args, "conversation_id")
@@ -366,7 +366,7 @@ def _get_action_status(db: Session, args: dict[str, Any], *, agent: str | None =
             name: summary for name in MARKETPLACES
             if (summary := marketplace_status(name, records.get(name) or {}, live.get(name)))
         },
-        "schedule": draft_scheduling.schedule_view(ListingRepo(db).get_current(conv_id), conv),
+        "schedule": _schedule(ListingRepo(db).get_current(conv_id), conv),
         "recent_jobs": [
             {
                 "job_id": job.id,
@@ -380,6 +380,14 @@ def _get_action_status(db: Session, args: dict[str, Any], *, agent: str | None =
             for job in jobs
         ],
     }
+
+
+def _schedule(listing, conv) -> dict[str, Any]:
+    from anteroom.services import draft_scheduling
+
+    view = draft_scheduling.schedule_view(listing, conv)
+    scheduled_by = getattr(listing, "scheduled_requested_by", None) if view["scheduled_status"] else None
+    return {**view, "scheduled_by": agent_name(scheduled_by) or ("seller" if view["scheduled_status"] else None)}
 
 
 HANDLERS = {
