@@ -77,9 +77,16 @@ def title_names_size(title: Any, size: Any) -> bool:
     wanted = [part.casefold() for part in (part.strip("()") for part in str(size or "").split()) if part]
     if not words or not wanted:
         return False
+    if len(wanted) == 1 and _NUMBER.fullmatch(wanted[0]):
+        # A bare number is a size only after a size word: ``Size 11`` or
+        # ``Men's 11`` names 11, ``Air Jordan 11`` and ``3/4 Sleeve`` do not.
+        # ``11/30`` names 11 when the part after the slash is not a fraction's.
+        return any(
+            (word == wanted[0] and i > 0 and words[i - 1].replace("’", "'") in _SIZE_LEAD_WORDS)
+            or (word.startswith(wanted[0] + "/") and word[len(wanted[0]) + 1:] not in _FRACTION_DENOMINATORS)
+            for i, word in enumerate(words)
+        )
     if any(words[i:i + len(wanted)] == wanted for i in range(len(words) - len(wanted) + 1)):
-        return True
-    if len(wanted) == 1 and any(word.startswith(wanted[0] + "/") for word in words):
         return True
     key = size_key(size)
     if not key:
@@ -107,6 +114,14 @@ def _measured(text: str) -> str | None:
     return value if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", value) else None
 
 
+_NUMBER = re.compile(r"[0-9]+(?:\.[0-9]+)?")
+# Words a title puts before a numeric size: Size 11, Men's 11, W 32.
+_SIZE_LEAD_WORDS = {
+    "size", "sz", "us", "uk", "eu", "it", "w", "waist", "men's", "mens", "women's", "womens",
+    "youth", "kids", "kid's", "boys", "boys'", "girls", "girls'", "juniors", "toddler", "petite",
+}
+# 3/4 Sleeve, 1/2 Zip and 1/8 inch are fractions, not a size and its inseam.
+_FRACTION_DENOMINATORS = {"", "2", "3", "4", "8"}
 # A measurement's label and unit are how a marketplace writes the size, not a
 # different size: Depop's men's 36" is the 36 a tag reads.
 _MEASUREMENT_LABEL = re.compile(r"^(?:WAIST|NECK|CHEST|INSEAM|LENGTH|US)\s+", re.IGNORECASE)

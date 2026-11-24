@@ -852,8 +852,9 @@ def align_size_fields(listing: dict, *, previous_size: str | None = None) -> boo
 
 
 _TITLE_SIZE_TOKEN_RE = re.compile(
-    # Two digits at most, so a model number like 501 is never mistaken for a size.
-    r"(?i)^(?:x{0,3}s|m|x{0,3}l|os|p[sml]|\d{1,2}[x\u00d7/]\d{1,2}|\d{1,2}(?:\.5)?[wl]?)$"
+    # Two digits at most, so a model number like 501 is never mistaken for a size,
+    # and a fraction like 3/4 Sleeve or 1/2 Zip is not a size and inseam.
+    r"(?i)^(?:x{0,3}s|m|x{0,3}l|os|p[sml]|\d{1,2}[x\u00d7]\d{1,2}|\d{1,2}/(?![2348]$)\d{1,2}|\d{1,2}(?:\.5)?[wl]?)$"
 )
 
 

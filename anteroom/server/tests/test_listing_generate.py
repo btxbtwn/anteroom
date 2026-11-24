@@ -2226,6 +2226,31 @@ def test_sync_title_size_leaves_a_title_that_already_names_the_size():
         assert listing["title"] == title
 
 
+def test_sync_title_size_reads_a_size_word_before_a_number_as_the_size():
+    from anteroom.services.listing_generate import sync_title_size
+
+    for title, brand, size in (
+        ("Nike Air Jordan 11 Retro Sneakers Size 11", "Nike", "11"),
+        ("Levi's 501 Jeans Blue W 32 Straight", "Levi's", "32"),
+    ):
+        listing = {"title": title, "brand": brand, "size": size}
+        assert sync_title_size(listing) is False, title
+        assert listing["title"] == title
+
+
+def test_sync_title_size_does_not_read_a_fraction_or_model_number_as_the_size():
+    from anteroom.services.listing_generate import sync_title_size
+
+    for title, brand, size, expected in (
+        ("Hollister 3/4 Sleeve Henley Top Blue", "Hollister", "3", "Hollister 3 3/4 Sleeve Henley Top Blue"),
+        ("Patagonia 1/2 Zip Pullover Fleece Gray", "Patagonia", "1", "Patagonia 1 1/2 Zip Pullover Fleece Gray"),
+        ("Nike Air Jordan 11 Retro Sneakers Black", "Nike", "11", "Nike 11 Air Jordan 11 Retro Sneakers Black"),
+    ):
+        listing = {"title": title, "brand": brand, "size": size}
+        assert sync_title_size(listing) is True, title
+        assert listing["title"] == expected
+
+
 def test_sync_title_size_swaps_the_old_size_after_the_brand():
     from anteroom.services.listing_generate import sync_title_size
 
