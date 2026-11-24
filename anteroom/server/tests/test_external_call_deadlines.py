@@ -205,6 +205,7 @@ class StalledGenerationTest(_Workspace):
             ConversationRepo(db).add_message(
                 self.conv_id, "system", "Photo analysis:\n- brand: Levi's",
                 provider="sandbox", model="sandbox", photo_fingerprint=listing_generation.photo_fingerprint(photos),
+                notes_fingerprint=listing_generation.notes_fingerprint(self.notes),
             )
         finally:
             db.close()

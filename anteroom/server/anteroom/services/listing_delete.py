@@ -57,11 +57,12 @@ class ListingBusy(RuntimeError):
 
 
 def wipe_contents(db: Session, conv_id: str, *, keep_photos: bool = False,
-                  keep_marketplace_listings: bool = False) -> tuple[int, int]:
+                  keep_marketplace_listings: bool = False, keep_message_id: str | None = None) -> tuple[int, int]:
     """Delete a listing's jobs, revisions, messages and photos, keeping the row.
 
     ``keep_marketplace_listings`` keeps its direct marketplace records and the
     jobs they name: their snapshots are what Check reads a result against.
+    ``keep_message_id`` keeps that one message (Regenerate's photo reading).
     """
     from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
     from anteroom.services.background_tasks import delete_history
@@ -113,7 +114,10 @@ def wipe_contents(db: Session, conv_id: str, *, keep_photos: bool = False,
 
     db.query(ListingRevision).filter(ListingRevision.conversation_id == conv_id).delete(synchronize_session=False)
     db.query(Listing).filter(Listing.conversation_id == conv_id).delete(synchronize_session=False)
-    db.query(Message).filter(Message.conversation_id == conv_id).delete(synchronize_session=False)
+    messages = db.query(Message).filter(Message.conversation_id == conv_id)
+    if keep_message_id is not None:
+        messages = messages.filter(Message.id != keep_message_id)
+    messages.delete(synchronize_session=False)
     if not keep_photos:
         db.query(PhotoModel).filter(PhotoModel.conversation_id == conv_id).delete(synchronize_session=False)
     return len(job_ids), deleted_photos

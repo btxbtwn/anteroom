@@ -126,6 +126,34 @@ class ConversationResetTest(unittest.TestCase):
         self.assertEqual(self.db.query(VendooDraftCache).count(), 0)
         self.assertEqual(self.db.query(Job).filter(Job.conversation_id == self.conv.id).count(), 0)
 
+    def test_regenerate_keeps_the_photo_reading_of_unchanged_photos_and_notes(self):
+        from anteroom.services.listing_generate import generation_reading, notes_fingerprint, photo_fingerprint
+
+        repo = ConversationRepo(self.db)
+        photos = photo_fingerprint(repo.get_photos(self.conv.id))
+        stale = repo.add_message(self.conv.id, "system", "Photo analysis:\n- brand: Adidas",
+                                 photo_fingerprint=photos, notes_fingerprint=notes_fingerprint("{}"))
+        reading = repo.add_message(self.conv.id, "system", "Photo analysis:\n- brand: Nike",
+                                   photo_fingerprint=photos, notes_fingerprint=notes_fingerprint(self.conv.notes))
+        stale_id, reading_id = stale.id, reading.id
+        with photos_dir(self.photos_tmp.name):
+            response = self.client.post(f"/api/conversations/{self.conv.id}/reset", json={"keep_inputs": True})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.db.expire_all()
+        messages = repo.get_messages(self.conv.id)
+        self.assertEqual([m.id for m in messages], [reading_id])
+        self.assertNotEqual(reading_id, stale_id)
+        # The listing's price moved into Item Details; the next Generate still finds the reading.
+        notes = repo.get(self.conv.id).notes
+        self.assertIn("askingPrice", json.loads(notes))
+        self.assertEqual(generation_reading(messages, photos=photos, notes=notes).id, reading_id)
+
+        with photos_dir(self.photos_tmp.name):
+            response = self.client.post(f"/api/conversations/{self.conv.id}/reset", json={"keep_inputs": False})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.db.expire_all()
+        self.assertEqual(repo.get_messages(self.conv.id), [])
+
     def test_clear_drops_old_corrections_but_regenerate_keeps_them(self):
         from anteroom.models.listing_evidence import ListingCorrection
         from anteroom.services.listing_evidence import corrections_context

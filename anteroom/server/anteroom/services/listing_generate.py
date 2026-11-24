@@ -91,6 +91,44 @@ def latest_photo_analysis(messages: list[Any], *, fingerprint: str | None = None
     return None
 
 
+def notes_fingerprint(notes: str | None) -> str:
+    """Bind a generation's photo reading to the Item Details it was given."""
+    return hashlib.sha256(seller_item_details(notes).encode()).hexdigest()
+
+
+def generation_reading(messages: list[Any], *, photos: str, notes: str | None) -> Any | None:
+    """The photo reading a generation may reuse: these photos, read with these Item Details."""
+    key = notes_fingerprint(notes)
+    for msg in reversed(messages):
+        if (getattr(msg, "role", None) == "system" and photo_analysis_usable(getattr(msg, "text", None))
+                and getattr(msg, "photo_fingerprint", None) == photos
+                and getattr(msg, "notes_fingerprint", None) == key):
+            return msg
+    return None
+
+
+def regenerate_reading(db, conv_id: str) -> str | None:
+    """The reading Regenerate keeps: the current photos, read with the current Item Details."""
+    repo = ConversationRepo(db)
+    conv = repo.get(conv_id)
+    reading = generation_reading(repo.get_messages(conv_id), photos=photo_fingerprint(repo.get_photos(conv_id)),
+                                 notes=conv.notes if conv else None)
+    return str(reading.id) if reading else None
+
+
+def restamp_reading(db, message_id: str, notes: str | None) -> None:
+    """Regenerate moved the listing's own facts into Item Details; the photos it read did not change.
+
+    Those facts came from the listing this reading produced, so they are not a
+    seller edit that calls for reading the photos again.
+    """
+    from sqlalchemy import update
+
+    from anteroom.models.conversation import Message
+
+    db.execute(update(Message).where(Message.id == message_id).values(notes_fingerprint=notes_fingerprint(notes)))
+
+
 def format_photo_analysis(evidence: dict) -> str:
     evidence = normalize_evidence(evidence)
     parts = ["Photo analysis:"]

@@ -27,8 +27,9 @@ from anteroom.services.listing_generate import (
     analysis_with_photo_count,
     analyze_photos_with_tag_retry,
     extract_listing_json,
-    latest_photo_analysis,
+    generation_reading,
     listing_save_summary,
+    notes_fingerprint,
     persist_generated_listing_with_repair,
     photo_analysis_failure,
     photo_fingerprint,
@@ -194,7 +195,9 @@ async def run_listing_generation(
         skill_rules = await asyncio.to_thread(load_skill_rules, item_details)
         evidence: dict = {}
         history = await in_worker_session(lambda db: ConversationRepo(db).get_messages(conv_id))
-        existing = latest_photo_analysis(history, fingerprint=analysis_fingerprint)
+        # A retry or Regenerate with the same photos and Item Details reuses the reading.
+        reading = generation_reading(history, photos=analysis_fingerprint, notes=notes)
+        existing = reading.text.strip() if reading else None
         listing_rules = skill_rules
         if existing:
             analysis_text = existing
@@ -241,7 +244,7 @@ async def run_listing_generation(
             still_current()
             analysis_message_id = await in_worker_session(lambda db: _post(
                 db, conv_id, "system", analysis_text, provider=vision_name, model=vision_model,
-                photo_fingerprint=analysis_fingerprint,
+                photo_fingerprint=analysis_fingerprint, notes_fingerprint=notes_fingerprint(notes),
             ))
             run.publish(sse_event("posted", analysis_message_id))
 
