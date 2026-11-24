@@ -14,6 +14,7 @@ from anteroom.models.job import Job
 from anteroom.models.listing import ListingRevision
 from anteroom.models.marketplace_listing import MarketplaceListing
 from anteroom.services import hosted_photos
+from anteroom.services.listing_generate import notes_fingerprint, photo_fingerprint
 
 
 def test_regenerate_and_clear_wipe_only_owned_idle_items(cloud, signing_keys, monkeypatch):  # noqa: F811
@@ -41,7 +42,13 @@ def test_regenerate_and_clear_wipe_only_owned_idle_items(cloud, signing_keys, mo
     assert saved.status_code == 200, saved.text
     with Session(engine) as db:
         db.add(Message(user_id=USER_ID, conversation_id=identity, role='assistant', text='Old chat'))
+        photos = db.query(Photo).filter_by(conversation_id=identity).order_by(Photo.display_order).all()
+        # The photo reading generation saved for these photos and Item Details.
+        reading = Message(user_id=USER_ID, conversation_id=identity, role='system', text='Photo analysis:\n- brand: Acme',
+                          photo_fingerprint=photo_fingerprint(photos), notes_fingerprint=notes_fingerprint(notes))
+        db.add(reading)
         db.commit()
+        reading_id = reading.id
 
     # The single price drop bulk Regenerate saves before its rewrite.
     preview = client.post(path + '/price-drop/preview', headers=alice)
@@ -97,7 +104,10 @@ def test_regenerate_and_clear_wipe_only_owned_idle_items(cloud, signing_keys, mo
     assert regenerated.json()['title'] == 'Generated coat'
     with Session(engine) as db:
         assert db.query(ListingRevision).filter_by(conversation_id=identity).count() == 0
-        assert db.query(Message).filter_by(conversation_id=identity).count() == 0
+        # Regenerate keeps only the photo reading, stamped with the Item Details it now starts from.
+        kept = db.query(Message).filter_by(conversation_id=identity).all()
+        assert [m.id for m in kept] == [reading_id]
+        assert kept[0].notes_fingerprint == notes_fingerprint(db.get(Conversation, identity).notes)
         assert db.query(BackgroundTask).filter_by(conversation_id=identity).count() == 0
         assert db.query(Photo).filter_by(conversation_id=identity).count() == 1
         assert json.loads(db.get(Conversation, identity).notes)['titlePinned'] is True
@@ -108,6 +118,7 @@ def test_regenerate_and_clear_wipe_only_owned_idle_items(cloud, signing_keys, mo
     assert cleared.json()['title'] == 'New Listing' and cleared.json()['notes'] is None
     assert not stored
     with Session(engine) as db:
+        assert db.query(Message).filter_by(conversation_id=identity).count() == 0
         assert db.query(Photo).filter_by(conversation_id=identity).count() == 0
         db.get(Conversation, identity).status = 'active'
         db.commit()

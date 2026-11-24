@@ -313,11 +313,13 @@ class ConversationRepo:
         model: str | None = None,
         attachments: list[dict] | None = None,
         photo_fingerprint: str | None = None,
+        notes_fingerprint: str | None = None,
     ) -> Message:
         msg = Message(
             conversation_id=conv_id, role=role, text=text, provider=provider, model=model,
             attachments=attachments or None,
             photo_fingerprint=photo_fingerprint,
+            notes_fingerprint=notes_fingerprint,
         )
         self.db.add(msg)
         # ``created_at`` is a column default, so it exists only once the INSERT

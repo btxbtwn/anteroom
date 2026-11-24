@@ -415,10 +415,12 @@ async def prepare_generation_forms(conv_id: str, provider, *, evidence: str) -> 
 
     markets = set(MARKETS) & set(get_selected_marketplaces())
     await _fill_native_fields(conv_id, provider, evidence=evidence, markets=markets, categories=True)
-    return await record_forms(conv_id, markets, reset_evidence=True)
+    # Answers verified earlier stay: fillable_rows asks again only for those
+    # whose value or quote no longer matches the evidence this run supplies.
+    return await record_forms(conv_id, markets)
 
 
-async def record_forms(conv_id: str, markets, *, reset_evidence: bool = False) -> dict:
+async def record_forms(conv_id: str, markets) -> dict:
     """Save current form definitions and their effective values onto the same revision snapshot."""
     from anteroom.database import in_worker_session
 
@@ -427,19 +429,16 @@ async def record_forms(conv_id: str, markets, *, reset_evidence: bool = False) -
         return {}
     revision_id, saved = current
     forms = await load_forms(conv_id, markets)
-    return await in_worker_session(_record_forms, conv_id, revision_id, saved, forms, markets, reset_evidence)
+    return await in_worker_session(_record_forms, conv_id, revision_id, saved, forms, markets)
 
 
-def _record_forms(db: Session, conv_id: str, revision_id: str, saved: dict, forms: dict[str, dict], markets,
-                  reset_evidence: bool) -> dict:
+def _record_forms(db: Session, conv_id: str, revision_id: str, saved: dict, forms: dict[str, dict], markets) -> dict:
     latest = ListingRepo(db).get_current(conv_id)
     if not latest or latest.current_revision_id != revision_id:
         return {}
     from anteroom.services import choice_lists
 
     listing = native_contract.copy_listing(saved)
-    if reset_evidence:
-        listing[native_contract.EVIDENCE_KEY] = {}
     for market, form in forms.items():
         for row in form.get("fields") or []:
             path = _path(row)
@@ -506,7 +505,7 @@ async def _fill_native_fields(conv_id: str, provider, *, evidence: str,
             # Record freshly loaded contracts before filling so save_revision's
             # constrain_generated validates against them instead of stale/unavailable ones.
             recorded = await in_worker_session(
-                _record_forms, conv_id, revision_id, listing, loaded, loaded.keys(), False)
+                _record_forms, conv_id, revision_id, listing, loaded, loaded.keys())
             if not recorded:
                 return None
             refreshed = await in_worker_session(_fill_inputs, conv_id)

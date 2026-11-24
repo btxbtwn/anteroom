@@ -424,10 +424,16 @@ def _carried_notes(db: Session, conv_id: str, notes: str | None) -> str | None:
 
 
 def _wipe(db: Session, conv_id: str, keep_inputs: bool, notes: str | None) -> None:
+    from anteroom.services.listing_generate import regenerate_reading, restamp_reading
     from anteroom.services.vendoo_import import parse_notes
 
+    # Regenerate keeps the photo reading of these photos and Item Details, so
+    # the photos are not paid for again.
+    reading = regenerate_reading(db, conv_id) if keep_inputs else None
     # Marketplace records survive Clear and Regenerate, with the jobs they name.
-    wipe_contents(db, conv_id, keep_photos=keep_inputs, keep_marketplace_listings=True)
+    wipe_contents(db, conv_id, keep_photos=keep_inputs, keep_marketplace_listings=True, keep_message_id=reading)
+    if reading is not None:
+        restamp_reading(db, reading, notes)
     db.expire_all()
     conv = ConversationRepo(db).get(conv_id)
     if not conv:
