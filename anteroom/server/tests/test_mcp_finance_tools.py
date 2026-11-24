@@ -309,8 +309,9 @@ def test_hosted_finance_tools_read_only_the_tokens_seller(cloud, signing_keys): 
     assert [row["order_id"] for row in orders["orders"]] == ["alice-order"]
     expenses, err = _call(client, "search_expenses", {}, extra_headers=bearer)
     assert not err and [row["vendor"] for row in expenses["expenses"]] == ["Alice Supplies"]
-    report, err = _call(client, "get_profit_and_loss", {"start": TODAY.isoformat(), "end": TODAY.isoformat()},
-                        extra_headers=bearer)
+    # The seeded sales are dated yesterday and the expenses today.
+    report, err = _call(client, "get_profit_and_loss",
+                        {"start": (TODAY - timedelta(days=2)).isoformat(), "end": TODAY.isoformat()}, extra_headers=bearer)
     assert not err, report
     lines = {line["label"]: line["amount_cents"] for line in report["currencies"][0]["lines"]}
     assert lines["Gross Sales"] == 4000 and lines["Operating Expenses"] == 500
