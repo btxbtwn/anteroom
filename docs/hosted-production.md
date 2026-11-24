@@ -584,6 +584,14 @@ Storage, Realtime and the change feed refuse any JWT with a `client_id` claim
 (restrictive policies in revision `138d3602d2e2`), so an app cannot read or
 delete photos directly. Its photo work through `/api/mcp` runs on the server key.
 
+`POST /api/mcp/photo-uploads/{id}` is the one MCP path that carries no seller
+session: `create_photo_upload_url` gives an assistant a single-use link for one
+listing, and the request authenticates with that link's secret in
+`X-Upload-Token` (only its SHA-256 is stored, revision `e4b8c2a91d07`). The
+link is spent by `anteroom_private.consume_mcp_photo_upload` before the body is
+read, expires after 15 minutes, and its photo is written on the server key
+under that seller's own folder. Failed attempts are rate limited per client IP.
+
 Roll out in this order: deploy the API first, so a token carrying `client_id`
 is already refused everywhere but `/api/mcp`, then turn on the OAuth server. Try
 it on Anteroom Staging before production. Turning the OAuth server off stops new

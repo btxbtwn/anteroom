@@ -694,6 +694,7 @@ READ_TOOLS |= set(mcp_catalog_tools.PERMISSIONS)
 LISTING_WRITE_TOOLS = {
     "create_draft_listing", "edit_listing", "manage_listing_photos",
     "manage_labels_and_notes", "delete_draft_listing", "set_favorite", "confirm_import_match", "reject_import_match",
+    "add_listing_photos", "create_photo_upload_url", "set_cover_photo",
 }
 ATTENTION_WRITE_TOOLS = {"dismiss_attention_items", "resolve_attention_items", "restore_attention_items"}
 # Inventory tidying tools (services/mcp_organize_tools.py).
@@ -1130,7 +1131,7 @@ def test_mcp_deferred_delete_survives_abnormal_completion(monkeypatch, ending):
         if ending == "timeout":
             monkeypatch.setattr(mcp_route, "_MCP_RPC_TIMEOUT_SECONDS", 0.01)
         request = SimpleNamespace(state=SimpleNamespace(), app=SimpleNamespace(state=SimpleNamespace()),
-                                  headers={}, client=None)
+                                  headers={}, client=None, base_url="http://127.0.0.1:4318/")
         call = asyncio.create_task(mcp_route.mcp_post(request))
         await asyncio.wait_for(entered.wait(), 2)
         if ending == "timeout":

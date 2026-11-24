@@ -45,6 +45,7 @@ from anteroom.services import (
     mcp_import_match_tools,
     mcp_marketplace_tools,
     mcp_organize_tools,
+    mcp_photo_tools,
     mcp_tokens,
 )
 from anteroom.services.background_tasks import ACTIVE as ACTIVE_TASK_STATUSES
@@ -131,6 +132,7 @@ TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
     **mcp_organize_tools.PERMISSIONS,
     **mcp_finance_tools.PERMISSIONS,
     **mcp_feedback_tools.PERMISSIONS,
+    **mcp_photo_tools.PERMISSIONS,
 }
 
 MAX_ATTENTION_KEYS = 100
@@ -419,7 +421,9 @@ def tool_definitions() -> list[dict[str, Any]]:
             "title": "Create draft listing",
             "description": (
                 "Create a new local draft listing in Anteroom. Does NOT publish to any "
-                "marketplace; publishing is publish_listing, and only when the seller allows it."
+                "marketplace; publishing is publish_listing, and only when the seller allows it. "
+                "To add photos afterwards, use add_listing_photos (inline base64) or "
+                "create_photo_upload_url (upload links for assistants that can run commands)."
                 + mcp_catalog_tools.WRITE_GUIDANCE
             ),
             "annotations": _WRITE_ANNOTATIONS,
@@ -566,6 +570,7 @@ def tool_definitions() -> list[dict[str, Any]]:
     tools.extend(mcp_organize_tools.TOOLS)
     tools.extend(mcp_finance_tools.TOOLS)
     tools.extend(mcp_feedback_tools.TOOLS)
+    tools.extend(mcp_photo_tools.TOOLS)
     return [{**tool, "annotations": {**tool["annotations"], "title": tool["title"]}} for tool in tools]
 
 
@@ -815,6 +820,7 @@ def _dispatch_tool(
         **mcp_organize_tools.HANDLERS,
         **mcp_import_match_tools.HANDLERS,
         **mcp_finance_tools.HANDLERS,
+        **mcp_photo_tools.HANDLERS,
     }
     handler = handlers.get(name)
     if handler is None:
