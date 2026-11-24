@@ -25,7 +25,7 @@ from anteroom.models.listing import Listing, ListingRevision
 from anteroom.models.marketplace_listing import LIVE_STATES, MarketplaceListing
 from anteroom.models.marketplace_sale import PAID_STATUSES, MarketplaceSale, SaleSyncEvent
 from anteroom.services import auto_relist, listing_persistence
-from anteroom.services.marketplace_delist import MARKETPLACES, DelistError, delist, listings
+from anteroom.services.marketplace_delist import MARKETPLACES, DelistError, delist, listings, listings_for
 from anteroom.services.marketplace_identity import listing_id as extract_listing_id
 from anteroom.services.vendoo_import import parse_notes
 
@@ -65,19 +65,32 @@ def resolve_sku(db: Session, conv: Conversation | None) -> str | None:
     """Resolve the item SKU from the current listing revision or saved notes."""
     if conv is None:
         return None
-    listing = db.query(Listing).filter_by(conversation_id=conv.id).first()
-    if listing and listing.current_revision_id:
-        rev = db.get(ListingRevision, listing.current_revision_id)
+    return resolve_skus(db, [conv])[conv.id]
+
+
+def resolve_skus(db: Session, convs: list[Conversation]) -> dict[str, str | None]:
+    """``resolve_sku`` for many items, in two queries."""
+    current = {listing.conversation_id: listing.current_revision_id for listing in
+               db.query(Listing).filter(Listing.conversation_id.in_({conv.id for conv in convs}))}
+    wanted = set(current.values()) - {None}
+    revisions: dict[str | None, ListingRevision] = {
+        rev.id: rev for rev in db.query(ListingRevision).filter(ListingRevision.id.in_(wanted))} if wanted else {}
+    skus: dict[str, str | None] = {}
+    for conv in convs:
+        skus[conv.id] = None
+        rev = revisions.get(current.get(conv.id))
         if rev and isinstance(rev.listing_json, dict):
             raw_sku = rev.listing_json.get("sku")
             if isinstance(raw_sku, str) and raw_sku.strip():
-                return raw_sku.strip()
-    notes = parse_notes(conv.notes)
-    for key in ("sku", "vendooSku"):
-        val = notes.get(key)
-        if isinstance(val, str) and val.strip():
-            return val.strip()
-    return None
+                skus[conv.id] = raw_sku.strip()
+                continue
+        notes = parse_notes(conv.notes)
+        for key in ("sku", "vendooSku"):
+            val = notes.get(key)
+            if isinstance(val, str) and val.strip():
+                skus[conv.id] = val.strip()
+                break
+    return skus
 
 
 def _current_revision_and_qty(db: Session, conv_id: str) -> tuple[str | None, int | None, dict[str, Any]]:
@@ -895,7 +908,7 @@ def _event_out(row: SaleSyncEvent, *, order_status: str) -> dict[str, Any]:
 
 def tracker_60_days(db: Session, *, limit: int = 200) -> dict[str, Any]:
     """Unified 60-day sale detection tracker with SKU, timestamps, outcomes, retry state, and errors."""
-    from anteroom.services.sale_inventory import stock_after_sale
+    from anteroom.services.sale_inventory import stocks_after_sales
     from anteroom.services.user_settings import auto_adjust_quantity_enabled, autodelist_enabled
 
     since = _now() - TRACKER_WINDOW
@@ -922,9 +935,12 @@ def tracker_60_days(db: Session, *, limit: int = 200) -> dict[str, Any]:
         ):
             events_by_sale.setdefault(ev.sale_id, []).append(ev)
 
-    sku_cache: dict[str, str | None] = {}
-    listings_cache: dict[str, dict[str, Any]] = {}
-    stock_cache: dict[tuple[str, str, str | None], dict[str, Any]] = {}
+    # Read every item's SKU, listings and stock together: one read per sale held
+    # the seller's connection for as long as the tracker was long.
+    sku_cache = resolve_skus(db, list(convs.values()))
+    listings_cache = listings_for(db, list(convs.values()))
+    stock_cache = stocks_after_sales(db, [(sale.conversation_id, sale.marketplace, sale.listing_id)
+                                          for sale in sales if sale.conversation_id in convs])
 
     entries: list[dict[str, Any]] = []
     totals = {"succeeded": 0, "failed": 0, "pending": 0, "skipped": 0}
@@ -933,15 +949,8 @@ def tracker_60_days(db: Session, *, limit: int = 200) -> dict[str, Any]:
         conv = convs.get(sale.conversation_id) if sale.conversation_id else None
         sku: str | None = None
         if conv is not None:
-            if conv.id not in sku_cache:
-                sku_cache[conv.id] = resolve_sku(db, conv)
             sku = sku_cache[conv.id]
-            if conv.id not in listings_cache:
-                listings_cache[conv.id] = listings(db, conv.id, conv=conv)
-            stock_key = (conv.id, sale.marketplace, sale.listing_id)
-            if stock_key not in stock_cache:
-                stock_cache[stock_key] = stock_after_sale(db, conv.id, sale.marketplace, sale.listing_id)
-            stock = stock_cache[stock_key]
+            stock = stock_cache[(conv.id, sale.marketplace, sale.listing_id)]
         else:
             stock = {"status": "unknown", "remaining": None}
 

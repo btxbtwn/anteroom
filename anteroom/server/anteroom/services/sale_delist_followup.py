@@ -97,9 +97,8 @@ def still_listed(db: Session) -> list[dict]:
     ``followed`` says whether the follow-up may delist that listing: it is the one
     the sale left up, by listing ID, never one put up after the sale.
     """
-    from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
-    from anteroom.services.marketplace_delist import MARKETPLACES, listings, sale_pins
-    from anteroom.services.sale_inventory import stock_after_sale
+    from anteroom.services.marketplace_delist import MARKETPLACES, listings_for, native_for, sale_pins
+    from anteroom.services.sale_inventory import stocks_after_sales
     from anteroom.services.vendoo_import import parse_notes
 
     since = (_now() - WINDOW).replace(tzinfo=None)
@@ -108,21 +107,31 @@ def still_listed(db: Session) -> list[dict]:
                      MarketplaceSale.source.in_(("marketplace", "seller", "vendoo")),
                      func.coalesce(MarketplaceSale.sold_at, MarketplaceSale.received_at) >= since)
              .order_by(MarketplaceSale.received_at.desc()).all())
+    # A sale the seller recorded (in person included) or imported from Vendoo is shown; only a reported one is delisted automatically.
+    sales = [sale for sale in sales
+             if sale.source in {"seller", "vendoo"} or sale.source == "marketplace" and sale.marketplace in MARKETPLACES]
+    # Today shows these alerts: read every sale's stock and item together, not
+    # one sale at a time on the seller's connection.
+    stocks = stocks_after_sales(db, [(str(sale.conversation_id), sale.marketplace, sale.listing_id) for sale in sales])
+    sold_out = {str(sale.conversation_id) for sale in sales
+                if stocks[(str(sale.conversation_id), sale.marketplace, sale.listing_id)]["status"] == "sold_out"}
+    convs = {conv.id: conv for conv in db.query(Conversation).filter(Conversation.id.in_(sold_out))} if sold_out else {}
+    native_by_conv = native_for(db, convs) if convs else {}
+    known_by_conv = listings_for(db, list(convs.values()), native=native_by_conv) if convs else {}
     found: dict[str, dict] = {}
     for sale in sales:
         conv_id = str(sale.conversation_id)
-        detected = sale.source == "marketplace" and sale.marketplace in MARKETPLACES
-        # A sale the seller recorded (in person included) or imported from Vendoo is shown; only a reported one is delisted automatically.
-        if conv_id in found or not detected and sale.source not in {"seller", "vendoo"}:
+        detected = sale.source == "marketplace"
+        if conv_id in found:
             continue
-        if stock_after_sale(db, conv_id, sale.marketplace, sale.listing_id)["status"] != "sold_out":
+        if stocks[(conv_id, sale.marketplace, sale.listing_id)]["status"] != "sold_out":
             continue
-        conv = db.get(Conversation, conv_id)
+        conv = convs.get(conv_id)
         if conv is None:
             continue
         notes = parse_notes(conv.notes)
-        native = MarketplaceListingRepo(db).for_conversation(conv_id)
-        known = listings(db, conv_id, conv=conv, native=native)
+        native = native_by_conv.get(conv_id, {})
+        known = known_by_conv[conv_id]
         pinned = sale_pins(notes).get(sale.id)
         marks = notes.get("marketplaceMarks")
         marks = marks if isinstance(marks, dict) else {}
