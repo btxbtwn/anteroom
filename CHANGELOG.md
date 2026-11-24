@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1196 — 2026-11-24
+
+- Bulk drafts keep their place in line while the worker is processing your drafts.
+- Inventory refreshes less often while drafts finish and photo edits save, and keeps the correct status for drafts still generating.
+- Keep working in other drafts while AI Studio finishes editing your photos.
+
 ## 0.1.1195 — 2026-11-24
 
 - AI assistants connected to Anteroom can now view a listing's photos, so they can check its fields against the tags, flaws and measurements in them.

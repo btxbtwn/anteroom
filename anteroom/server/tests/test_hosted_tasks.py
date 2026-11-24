@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from test_hosted_drafts import BOB, headers
+from test_hosted_service_storage import storage  # noqa: F401
 from test_seller_ownership import migration_engine  # noqa: F401
 from test_seller_sessions import PROJECT_URL, USER_ID, jwks, signing_keys  # noqa: F401
 from anteroom.hosted import create_app
@@ -254,6 +255,40 @@ def test_a_connection_taken_on_the_request_loop_is_logged(monkeypatch, caplog):
     warnings = [record for record in caplog.records if 'request event loop' in record.getMessage()]
     assert len(warnings) == 1
     assert 'test_hosted_tasks.py' not in warnings[0].getMessage()
+
+
+def test_a_task_waits_past_the_deadline_while_the_worker_is_processing_its_batch(storage):  # noqa: F811
+    from datetime import UTC, datetime, timedelta
+
+    from anteroom.models.conversation import Conversation
+    from anteroom.services import background_tasks as queue
+
+    engine, sessions = storage
+    now = datetime.now(UTC)
+    with sessions(USER_ID)() as db:
+        db.add_all(Conversation(id=name, title=name) for name in ('waiting', 'working'))
+        db.commit()
+        waiting = BackgroundTask(conversation_id='waiting', kind='generate', created_at=now - timedelta(minutes=6))
+        working = BackgroundTask(conversation_id='working', kind='generate', status='running',
+                                 leased_until=now + timedelta(minutes=1))
+        db.add_all([waiting, working])
+        db.commit()
+        waiting_id, working_id = waiting.id, working.id
+        assert not queue.expire_unclaimed(db, waiting_id)
+        working.status = 'completed'
+        working.leased_until = None
+        db.commit()
+        assert not queue.expire_unclaimed(db, waiting_id)
+        assert db.get(BackgroundTask, waiting_id).status == 'queued'
+
+    # With no live lease and no recent completion for this seller, the same
+    # outage handling still applies.
+    with Session(engine) as db:
+        db.get(BackgroundTask, working_id).updated_at = now - timedelta(minutes=6)
+        db.commit()
+    with sessions(USER_ID)() as db:
+        assert queue.expire_unclaimed(db, waiting_id)
+        assert db.get(BackgroundTask, waiting_id).status == 'failed'
 
 
 def test_a_task_no_worker_claims_ends_its_stream_and_frees_the_draft(migration_engine, monkeypatch):  # noqa: F811

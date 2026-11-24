@@ -150,7 +150,9 @@ async def suggestions(request: Request):
 
 
 def inventory_response(db):
+    from anteroom.models.background_task import BackgroundTask
     from anteroom.repositories.queries import ConversationRepo
+    from anteroom.services.background_tasks import ACTIVE
     from anteroom.services.hosted_read_snapshots import snapshot_step
 
     # The shared sidebar filters stored inventory status. Reconcile it from
@@ -160,8 +162,15 @@ def inventory_response(db):
     with snapshot_step(db, 'analytics'):
         analytics = read_analytics_inputs(db)
     with snapshot_step(db, 'reconcile'):
+        # The hosted worker can own a draft on another Machine. Leave its
+        # status to the worker while it still has queued or running work.
+        busy = select(BackgroundTask.id).where(
+            BackgroundTask.conversation_id == Conversation.id,
+            BackgroundTask.user_id == Conversation.user_id,
+            BackgroundTask.status.in_(ACTIVE),
+        ).exists()
         ConversationRepo(db).reconcile_item_statuses(
-            [row for row in db.scalars(select(Conversation).options(defer(Conversation.notes))).all()
+            [row for row in db.scalars(select(Conversation).options(defer(Conversation.notes)).where(~busy)).all()
              if row.id in analytics.statuses],
             {identity: notes for identity, _title, _status, notes, _box in analytics.conversations},
             analytics.statuses)

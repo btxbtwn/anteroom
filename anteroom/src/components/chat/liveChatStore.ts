@@ -1,5 +1,6 @@
 import React from "react";
 import { type QueryClient } from "@tanstack/react-query";
+import { refreshInventory } from "../../api/inventoryRefresh";
 import { type SseParts } from "../sseCoalesce";
 import { streamingDisplayText } from "../streamingText";
 import { settleAgents, type LiveAgents, type LiveTraceEntry } from "../liveTrace";
@@ -245,7 +246,7 @@ export async function refreshListingQueries(queryClient: QueryClient, convId: st
   await queryClient.invalidateQueries({ queryKey: ["messages", convId] });
   await queryClient.invalidateQueries({ queryKey: ["listing", convId] });
   await queryClient.invalidateQueries({ queryKey: ["conversation", convId] });
-  queryClient.invalidateQueries({ queryKey: ["conversations"] });
+  refreshInventory(queryClient);
   queryClient.invalidateQueries({ queryKey: ["fill-log"] });
   queryClient.invalidateQueries({ queryKey: ["activity", convId] });
 }

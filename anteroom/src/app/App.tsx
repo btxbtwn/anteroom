@@ -649,7 +649,7 @@ export function App() {
         },
       }));
       void queryClient.invalidateQueries({ queryKey: ["listing", id] });
-      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      refreshInventory(queryClient);
     }));
   };
 

@@ -234,6 +234,54 @@ test("AI Studio edits several photos at once offline, markup and filters save, a
   expect([photos[0].width, photos[0].height]).toEqual([320, 400]);
 });
 
+test("AI Studio lets the seller open another draft while an edit runs", async ({ page, phone, request, createConversation }, info) => {
+  const title = `Background studio ${info.project.name} ${Date.now()}`;
+  const other = `Other draft ${info.project.name} ${Date.now()}`;
+  const { id } = await (await createConversation({ title, notes: "" })).json();
+  await createConversation({ title: other, notes: "" });
+  expect((await request.post(`/api/conversations/${id}/photos`, {
+    multipart: { files: { name: "photo.png", mimeType: "image/png", buffer: png(30, 60, 160) } },
+  })).ok()).toBe(true);
+  expect((await request.put(`/api/conversations/${id}/listing`, {
+    data: { expected_revision_id: "", listing: { title, description: "AI Studio background", price: 20 } },
+  })).ok()).toBe(true);
+  await page.route("**/api/settings/marketplaces", async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({ response, json: { ...await response.json(), selected: ["depop"] } });
+  });
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  await page.route(`**/conversations/${id}/photos/studio`, async (route) => {
+    await held;
+    await route.continue();
+  });
+  await openListing(page, phone, title);
+  if (phone) await page.getByRole("tab", { name: "Listing" }).click();
+  await openForm(page, phone, "Depop");
+  await page.locator('[data-marketplace-media="depop"] [data-sortable-photo]').first().click();
+  await page.getByRole("dialog").getByRole("button", { name: "AI Studio" }).click();
+  await expect(page.getByRole("img", { name: "Photo 1 preview", exact: true })).toBeVisible();
+  const settled = page.waitForResponse((response) => response.url().endsWith(`/conversations/${id}/photos/studio`));
+  try {
+    await page.getByRole("button", { name: "Apply", exact: true }).click();
+    const leave = page.getByRole("button", { name: "Continue in background" });
+    await expect(leave).toBeEnabled();
+    await page.screenshot({ path: info.outputPath("ai-studio-background.png") });
+    await leave.click();
+    await expect(page.getByRole("dialog", { name: /^(Edit photo |Photo \d+ of )/ })).toHaveCount(0);
+    await expect(page.getByText("AI Studio is editing photos")).toBeVisible();
+    if (phone) await page.getByRole("banner").getByRole("button", { name: "Inventory", exact: true }).click();
+    await page.getByRole("searchbox", { name: /^Search listings/ }).fill(other);
+    await page.getByRole("list", { name: "Listings" }).getByRole("link", { name: other, exact: true }).click();
+  } finally {
+    release();
+  }
+  expect((await (await settled).json()).errors).toEqual([]);
+  await expect(page.getByText("AI Studio edits saved")).toBeVisible();
+  const saved = await (await request.get(`/api/conversations/${id}/photos`)).json();
+  expect(saved[0].edits.studio).toBeTruthy();
+});
+
 test("drawing on a photo never selects page text, so a quick second mark is not dragged away", async ({ page, phone, request, createConversation }) => {
   test.skip(phone, "A mouse drag; phones draw with touch.");
   const title = `Markup selection ${Date.now()}`;

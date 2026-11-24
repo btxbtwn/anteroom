@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { INVENTORY_REFRESH_MS, refreshInventory } from "./inventoryRefresh";
+import { refreshListingQueries } from "../components/chat/liveChatStore";
 
 afterEach(() => { vi.useRealTimers(); });
 
@@ -45,4 +46,19 @@ it("keeps each workspace's schedule separate", async () => {
   expect(first.read).toHaveBeenCalledTimes(2);
   expect(second.read).toHaveBeenCalledTimes(2);
   first.stop(); second.stop();
+});
+
+it("coalesces inventory reloads when 25 drafts finish close together", async () => {
+  vi.useFakeTimers();
+  const { client, read, stop } = watchedInventory();
+  await vi.advanceTimersByTimeAsync(0);
+  for (let index = 0; index < 25; index += 1) {
+    await refreshListingQueries(client, `draft-${index}`);
+    await vi.advanceTimersByTimeAsync(0);
+  }
+  expect(read).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(INVENTORY_REFRESH_MS);
+  expect(read).toHaveBeenCalledTimes(3);
+  stop();
+  client.clear();
 });

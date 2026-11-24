@@ -155,6 +155,7 @@ class SellerReadSnapshots:
         self.pending: dict[tuple[str, str], asyncio.Task] = {}
 
     async def read(self, name: str, load: Callable, *, refresh_seconds: float | None = None):
+        requested_at = perf_counter()
         context = current()
         if context is None:
             raise HTTPException(401, 'A verified seller session is required')
@@ -199,13 +200,19 @@ class SellerReadSnapshots:
                 if running is not None:
                     waited = perf_counter()
                     try:
-                        _result, phases = await asyncio.shield(running)
+                        result, phases = await asyncio.shield(running)
                     finally:
                         timing['waits'] += 1
                         seconds['wait'] += perf_counter() - waited
                     last_build = phases
                     if not phases['cached']:
                         timing['stale_peers'] += 1
+                    # A peer that started after our request or saw the same
+                    # version can answer it even if writes made its result
+                    # unsuitable for caching. Only an older build that missed
+                    # a version we observed requires another read.
+                    if phases['started'] >= requested_at or phases['version'] == version:
+                        return result
                     continue
 
                 async def build(snapshot_version=version):
@@ -223,7 +230,8 @@ class SellerReadSnapshots:
                             self.completed.move_to_end(key)
                             while len(self.completed) > 64:
                                 self.completed.popitem(last=False)
-                        phases.update(cached=cached, queue=queued, recheck=perf_counter() - rechecked,
+                        phases.update(cached=cached, version=snapshot_version, started=started,
+                                      queue=queued, recheck=perf_counter() - rechecked,
                                       total=perf_counter() - started, rows_le=_rows_at_most(result))
                         return result, phases
                     finally:

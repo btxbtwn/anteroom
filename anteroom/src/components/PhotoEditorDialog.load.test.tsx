@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { api } from "../api/client";
 import type { ListingPhoto } from "../api/types";
 import { PhotoEditorDialog } from "./PhotoEditorDialog";
+import { toastManager } from "./ui/toast";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -103,6 +104,58 @@ const buttonNamed = (name: string) => [...document.body.querySelectorAll("button
 const checkboxNamed = (name: string) => [...document.body.querySelectorAll("label")]
   .find((label) => label.textContent?.startsWith(name))?.querySelector<HTMLElement>("[role=checkbox]");
 const isChecked = (name: string) => checkboxNamed(name)?.getAttribute("aria-checked") === "true";
+
+it("lets the seller leave AI Studio while a photo is still editing", async () => {
+  vi.spyOn(api.conversations, "previewPhotoEdits").mockResolvedValue(new Blob(["jpeg"]));
+  vi.spyOn(api.settings, "photoroom").mockResolvedValue({ configured: true, masked_key: null, source: "seller", available: true });
+  const studio = vi.spyOn(api.conversations, "photoStudio");
+  let finish!: (result: Awaited<ReturnType<typeof api.conversations.photoStudio>>) => void;
+  const other = { ...second, conversation_id: "another-draft" };
+  studio.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }))
+    .mockResolvedValueOnce({ photos: [other], errors: [] });
+  const toast = vi.spyOn(toastManager, "add").mockReturnValue("studio-toast");
+  const onSaved = vi.fn();
+  const onClose = vi.fn();
+  const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+  const client = new QueryClient();
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  await act(async () => root.render(
+    <QueryClientProvider client={client}>
+      <PhotoEditorDialog key="item" convId="item" photo={photo} index={0} initialTab="studio" onSaved={onSaved} onClose={onClose} />
+    </QueryClientProvider>,
+  ));
+  try {
+    await act(async () => { buttonNamed("Apply")!.click(); });
+    expect(studio).toHaveBeenCalledTimes(1);
+    expect(toast).not.toHaveBeenCalled();
+    await act(async () => { buttonNamed("Continue in background")!.click(); });
+    expect(onClose).toHaveBeenCalledWith(true);
+    const onOtherSaved = vi.fn();
+    const onOtherClose = vi.fn();
+    await act(async () => root.render(
+      <QueryClientProvider client={client}>
+        <PhotoEditorDialog key="other" convId="another-draft" photo={other} index={0} initialTab="studio"
+          onSaved={onOtherSaved} onClose={onOtherClose} />
+      </QueryClientProvider>,
+    ));
+    expect(toast).toHaveBeenCalledWith(expect.objectContaining({ type: "loading" }));
+    await act(async () => { buttonNamed("Apply")!.click(); });
+    expect(studio.mock.calls.map(([id]) => id)).toEqual(["item", "another-draft"]);
+    expect(onOtherSaved).toHaveBeenCalledWith(other);
+    expect(onSaved).not.toHaveBeenCalled();
+    const saved = { ...photo, url: "/api/photos/p1?v=after" };
+    await act(async () => { finish({ photos: [saved], errors: [] }); });
+    expect(onSaved).toHaveBeenCalledWith(saved);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onOtherClose).toHaveBeenCalledTimes(1);
+    expect(toast).toHaveBeenCalledWith(expect.objectContaining({ type: "success" }));
+  } finally {
+    await act(async () => root.unmount());
+    client.clear();
+  }
+});
 
 it("applies AI Studio to the chosen photos and reports each photo that failed", async () => {
   vi.spyOn(api.conversations, "previewPhotoEdits").mockResolvedValue(new Blob(["jpeg"]));
