@@ -51,6 +51,11 @@ class SchedulePublishError(ValueError):
         self.detail = detail
 
 
+def scheduled_requester() -> str | None:
+    """The MCP agent that scheduled the publish running now (``requested_by``), if one did."""
+    return (_active_claim.get() or {}).get("requested_by")
+
+
 def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
@@ -463,6 +468,7 @@ def _clear_schedule(db: Session, listing: Listing, *, reason: str | None = None)
     listing.scheduled_status = None
     listing.scheduled_error = None
     listing.scheduled_content_digest = None
+    listing.scheduled_requested_by = None
     return was_scheduled
 
 
@@ -500,6 +506,7 @@ def schedule_draft(
     listing.scheduled_status = "scheduled"
     listing.scheduled_error = None
     listing.scheduled_content_digest = digest
+    listing.scheduled_requested_by = requested_by
     db.add(ScheduledPublishLog(
         id=new_id(),
         conversation_id=conv_id,
@@ -727,6 +734,7 @@ def _claim_due_drafts(db: Session, moment: datetime) -> list[dict[str, Any]]:
             "scheduled_confirmed_at": row.scheduled_confirmed_at,
             "pricing_rules": rules,
             "content_digest": digest,
+            "requested_by": row.scheduled_requested_by,
         })
         break
     db.commit()

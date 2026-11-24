@@ -4,6 +4,12 @@
 # release has time to be pulled before it is proposed. Dependabot PRs carry no
 # changelog.d/ note, so merging one ships without a version bump; add a note
 # to the PR when the update should appear in What's new.
+#
+# Every release commit bumps the version in anteroom/package.json,
+# package-lock.json, pyproject.toml and uv.lock, so the /anteroom npm and uv
+# PRs conflict after each release. Automatic rebasing reran CI on them all day;
+# they are rebased on request instead: comment `@dependabot rebase` on the PR
+# when you are ready to merge it. Claude conflict auto-fix leaves them alone.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -43,6 +49,7 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 3
+    rebase-strategy: disabled
     groups:
       python-minor-and-patch:
         update-types: [minor, patch]
@@ -58,6 +65,7 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 3
+    rebase-strategy: disabled
     groups:
       web-minor-and-patch:
         update-types: [minor, patch]

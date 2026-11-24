@@ -96,6 +96,7 @@ LISTING_SCHEDULE_DEFAULTS = {
     "scheduled_status": None,
     "scheduled_error": None,
     "scheduled_content_digest": None,
+    "scheduled_requested_by": None,
 }
 
 
