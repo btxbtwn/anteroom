@@ -295,8 +295,12 @@ def _poshmark_fields(out: dict, post: dict, category_id: str) -> None:
         {"size_id": _text(size.get("size_id"), 80), "size_set_tags": [_text(tag, 40) for tag in size.get("size_set_tags") or []],
          "size_system": _text(size.get("size_system"), 10) or "us", "quantity": _quantity(size.get("quantity")) or 0,
          "sku": _text(size.get("sku"), 80)} for size in sizes])
-    if rows:
+    if len(rows) == 1 and rows[0]["sizeSetId"] not in {"", "custom"} and not rows[0]["sku"]:
+        # One size keeps only the size, so its quantity follows General's (a sale elsewhere lowers it).
+        specifics["sizeSetId"], specifics["nativeSizeId"] = rows[0]["sizeSetId"], rows[0]["sizeId"]
+    elif rows:
         specifics["inventoryRows"] = rows
+    if rows:
         systems = {_text(size.get("size_system"), 10).lower() for size in sizes} - {""}
         if len(systems) == 1 and systems != {"us"}:
             specifics["sizeSystem"] = systems.pop()

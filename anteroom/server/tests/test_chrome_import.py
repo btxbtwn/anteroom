@@ -128,7 +128,7 @@ def poshmark_tab(snapshot):
 def test_poshmark_import_fills_every_field_of_its_poshmark_tab(chrome):
     from anteroom.services.listing_editor import prepared_listing
 
-    poshmark_everything(chrome, [{"size_id": "M", "size_set_tags": ["standard"], "size_system": "us", "quantity": 2, "sku": "JKT-1-M"}])
+    poshmark_everything(chrome, [{"size_id": "M", "size_set_tags": ["standard"], "size_system": "us", "quantity": 2, "sku": ""}])
     assert post(chrome, "poshmark", POST).status_code == 200
     snapshot = chrome.db.query(ListingRevision).one().listing_json
     assert snapshot["direct_category_ids"] == {"poshmark": JEAN_JACKETS}
@@ -136,7 +136,7 @@ def test_poshmark_import_fills_every_field_of_its_poshmark_tab(chrome):
     expected = {
         "poshmark_specifics.title": "Levi's denim jacket", "poshmark_specifics.description": "Classic fit",
         "direct_category_ids.poshmark": JEAN_JACKETS, "poshmark_specifics.multiItem": "true",
-        "poshmark_specifics.inventoryRows": [{"sizeSetId": STANDARD, "sizeId": "M", "quantity": 2, "sku": "JKT-1-M"}],
+        "poshmark_specifics.inventoryRows": [{"sizeSetId": STANDARD, "sizeId": "M", "quantity": 2, "sku": ""}],
         "poshmark_specifics.condition": "ug", "poshmark_specifics.brand": "Levi's", "poshmark_specifics.colors": ["Blue", "White"],
         "poshmark_specifics.styleTags": ["Denim", "Vintage"], "price": 45, "poshmark_specifics.smartSell.enabled": True,
         "poshmark_specifics.smartSell.minimumPrice": 30, "poshmark_specifics.shippingDiscountId": DISCOUNT,
@@ -153,6 +153,27 @@ def test_poshmark_import_fills_every_field_of_its_poshmark_tab(chrome):
     assert saved["poshmark_specifics"]["originalPrice"] == 98
     assert {path: value for path, value in poshmark_tab(saved).items() if path in expected and path != "poshmark_specifics.title"} == {
         path: value for path, value in expected.items() if path != "poshmark_specifics.title"}
+
+
+def test_poshmark_import_of_one_size_lets_its_quantity_follow_general(chrome):
+    from anteroom.services.listing_editor import prepared_listing
+
+    poshmark_everything(chrome, [{"size_id": "M", "size_set_tags": ["standard"], "size_system": "us", "quantity": 2, "sku": ""}])
+    assert post(chrome, "poshmark", POST).status_code == 200
+    snapshot = chrome.db.query(ListingRevision).one().listing_json
+    assert "inventoryRows" not in snapshot["poshmark_specifics"]
+    # One sells elsewhere: Poshmark's size row now offers the one left.
+    saved = prepared_listing(snapshot, {**snapshot, "quantity": 1})
+    assert poshmark_tab(saved)["poshmark_specifics.inventoryRows"] == [
+        {"sizeSetId": STANDARD, "sizeId": "M", "quantity": 1, "sku": ""}]
+
+
+def test_poshmark_import_keeps_a_single_size_row_with_its_own_sku(chrome):
+    poshmark_everything(chrome, [{"size_id": "M", "size_set_tags": ["standard"], "size_system": "us", "quantity": 2, "sku": "JKT-1-M"}])
+    assert post(chrome, "poshmark", POST).status_code == 200
+    snapshot = chrome.db.query(ListingRevision).one().listing_json
+    assert snapshot["poshmark_specifics"]["inventoryRows"] == [
+        {"sizeSetId": STANDARD, "sizeId": "M", "quantity": 2, "sku": "JKT-1-M"}]
 
 
 def test_poshmark_import_brings_a_listing_with_several_sizes(chrome):
