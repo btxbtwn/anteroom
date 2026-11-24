@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1240 — 2026-11-24
+
+- Refresh all five marketplace forms and get Mercari prepaid shipping quotes from connected agents.
+- Preview Auto-Relist rules, due listings, and readiness from connected agents without running relists.
+
 ## 0.1.1239 — 2026-11-24
 
 - Pull request checks run the long backend and browser tests once, when a change is queued to merge, instead of on every push.

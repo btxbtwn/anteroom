@@ -1,2 +1,0 @@
-- Refresh all five marketplace forms and get Mercari prepaid shipping quotes from connected agents.
-- Preview Auto-Relist rules, due listings, and readiness from connected agents without running relists.
