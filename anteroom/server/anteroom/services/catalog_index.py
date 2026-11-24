@@ -1294,17 +1294,28 @@ def relevant_skill_rules(db: Session | None, query: str, *, max_chars: int = 200
 FIELD_FILL_SECTION_CHARS = 8000
 
 
-def field_fill_rules(db: Session | None, query: str, *, etsy: bool = False) -> str:
+def field_fill_rules(db: Session | None, query: str, *, etsy: bool = False, ebay: bool = False) -> str:
     """Listing policy and the sections ranked for these form fields, without the copy formulas.
 
     A field fill never writes a title, description or price, so the title,
     description and pricing formulas stay out. The size rules are always in,
     since every form has size fields; the Etsy "when made" policy is included
-    only when an Etsy field is being filled.
+    only when an Etsy field is being filled, and the eBay Outer Shell Material
+    rule only when an eBay field is.
     """
-    from anteroom.services.skill_formulas import core_listing_rules, etsy_when_made_rules, size_rules
+    from anteroom.services.skill_formulas import (
+        core_listing_rules,
+        etsy_when_made_rules,
+        outer_shell_rules,
+        size_rules,
+    )
 
-    policy = "\n\n".join([*([etsy_when_made_rules()] if etsy else []), core_listing_rules(), size_rules()])
+    policy = "\n\n".join([
+        *([etsy_when_made_rules()] if etsy else []),
+        core_listing_rules(),
+        size_rules(),
+        *([outer_shell_rules()] if ebay else []),
+    ])
     sections = _ranked_sections(query, budget=FIELD_FILL_SECTION_CHARS)
     return policy + (f"\n\n--- Additional listing rules ---\n\n{sections}" if sections else "")
 

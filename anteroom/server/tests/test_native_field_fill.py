@@ -62,6 +62,17 @@ class FieldFillRulesTest(unittest.TestCase):
         self.assertLessEqual(len(retrieved), FIELD_FILL_SECTION_CHARS)
         self.assertIn(etsy_when_made_rules(), field_fill_rules(None, query, etsy=True))
 
+    def test_ebay_fill_keeps_the_outer_shell_material_rule(self):
+        from anteroom.services.catalog_index import field_fill_rules
+
+        query = "ebay_specifics.category_specifics.Outer Shell Material Men > Coats & Jackets"
+        rules = field_fill_rules(None, query, ebay=True)
+        self.assertIn("### eBay Jackets and Coats: Required Outer Shell Material", rules)
+        self.assertIn("Estimate the shell, not lining", rules)
+        self.assertNotIn("### Etsy Digital Download Description Formula", rules)
+        self.assertNotIn("### TITLE Formula", rules)
+        self.assertNotIn("Required Outer Shell Material", field_fill_rules(None, "depop_specifics.size Women > Skirts"))
+
 
 class FillableRowsTest(unittest.TestCase):
     def test_category_pass_uses_leaves_and_respects_saved_and_locked_choices(self):

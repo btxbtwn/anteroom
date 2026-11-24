@@ -551,7 +551,8 @@ async def _ask(conv_id: str, provider, rows_by_market: dict[str, list[dict]], fo
         "title", "description", "brand", "category_path", "department", "size", "primaryColor",
         "secondaryColor", "material", "condition") if not _empty(listing.get(key))}
     query = " ".join([*rows, str(summary.get("category_path") or "")])
-    rules = await asyncio.to_thread(field_fill_rules, None, query, etsy="etsy" in rows_by_market)
+    rules = await asyncio.to_thread(field_fill_rules, None, query, etsy="etsy" in rows_by_market,
+                                    ebay="ebay" in rows_by_market)
     shape = ('{"fields":{"<field path>":{"value":"<choice>","evidence":"<exact quote>"}}}'
              if strict else '{"fields":{"<field path>":"<choice>"}}')
     messages = [
