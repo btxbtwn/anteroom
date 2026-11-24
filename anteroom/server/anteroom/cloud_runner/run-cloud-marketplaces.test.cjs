@@ -87,6 +87,43 @@ test('Mercari cloud verification reports when initialize returns no signed-in us
   assert.match(result.error, /Sign in to Mercari in Chrome/);
 });
 
+for (const [body, format, marker, header] of [
+  ['<!doctype html><html>challenge-platform private-response</html>', 'html', 'cloudflare', 'challenge'],
+  ['<!doctype html><html>captcha private-response</html>', 'html', 'captcha', 'private-header'],
+  ['{"message":"captcha private-response"}', 'json', 'captcha', 'private-header'],
+]) {
+  test(`Mercari cloud offer review reports a blocked listing read with a ${format} ${marker} response`, async () => {
+    const calls = [];
+    const { result } = await executeMarketplaceOperation({
+      marketplace: 'mercari', cookies: [mercariCookie],
+      command: { type: 'marketplace.promotion_check', payload: {
+        marketplace: 'mercari', action: 'offer', listing_id: 'm123456', discount_percent: 15,
+      } },
+      httpFetch: async (url, options) => {
+        calls.push([url, options.method]);
+        if (url.endsWith('/initialize')) return json({ csrf: 'csrf', user: { userId: 42, name: 'Seller' } });
+        assert.equal(JSON.parse(options.body).operationName, 'sellFetchItemsDetails');
+        return new Response(body, {
+          status: 403, headers: {
+            'content-type': format === 'html' ? 'text/html' : 'application/json',
+            'cf-mitigated': header, 'cf-ray': 'private-id',
+          },
+        });
+      },
+    });
+    assert.deepEqual(calls, [
+      ['https://www.mercari.com/v1/initialize', 'GET'],
+      ['https://www.mercari.com/v1/api', 'POST'],
+    ]);
+    assert.deepEqual(structuredClone(result), {
+      ok: false, safe_to_retry: true, error_code: 'challenge', preview_step: 'mercari-item',
+      error: "Mercari blocked Anteroom's cloud request for listing details. The offer check stopped.",
+      marketplace_message: 'HTTP 403',
+      challenge_response: { status: 403, format, marker, cloudflare_challenge_header: header === 'challenge' },
+    });
+  });
+}
+
 test('Depop verifies the account and polls likes with its bearer', async () => {
   const execute = (type, httpFetch) => executeMarketplaceOperation({
     marketplace: 'depop', cookies: [depopCookie, mercariCookie],
@@ -127,4 +164,21 @@ test('Depop delists only after confirmation and verifies removal', async () => {
     ['DELETE', '/presentation/api/v1/products/12/'],
     ['GET', '/presentation/api/v1/products/by-slug/seller-coat/'],
   ]);
+});
+
+test('Depop cloud auto-relist keeps the old listing when its drafts session is refused', async () => {
+  const requests = [];
+  const { result } = await executeMarketplaceOperation({
+    marketplace: 'depop', cookies: [depopCookie],
+    command: {
+      type: 'marketplace.delete',
+      payload: { marketplace: 'depop', listing_id: 'seller-coat', confirm: true, action: 'relist' },
+    },
+    httpFetch: async (url, options) => {
+      requests.push([options.method, new URL(url).pathname]);
+      return json({ message: 'Unauthorized' }, 401);
+    },
+  });
+  assert.equal(result.error_code, 'signed_out');
+  assert.deepEqual(requests, [['GET', '/presentation/api/v1/drafts/']]);
 });

@@ -8,6 +8,7 @@ import { pollMs } from "../api/polling";
 import type { DelistMarketplace, MarketplaceListing, MarketplaceListings, MarketplaceMark, SaleMarketplace, SellerSale } from "../api/marketplaceListings";
 import type { NativeDraft, NativeDrafts, NativeMarketplace, PreflightCheck, PreflightGap } from "../api/nativeMarketplaces";
 import { EXTENSION_SESSION_MARKETS, type ExtensionSessionConnect, type ExtensionSessionMarket, type ExtensionSessions } from "../api/marketplaceSessions";
+import { fromAgent } from "../lib/agentAttribution";
 import { isBusyRefusal, useWaitlist, type WaitingAction } from "../lib/marketplaceWaitlist";
 import { cn } from "../lib/utils";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
@@ -175,10 +176,12 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
   if (live?.sold_here) return { tone: "sold", label: "Sold here", href: live.url ?? undefined, hrefLabel: "View" };
   const said = draft?.marketplace_message ? `${marketplaceName(marketplace)} said: ${draft.marketplace_message}` : null;
   if (draft && isRunning(draft)) {
-    return { tone: "busy", label: draft.state === "updating" ? "Updating…" : draft.action === "save_draft" ? "Saving draft…" : "Listing…", detail: draft.progress ? `${draft.progress.label}…` : null };
+    const detail = [draft.progress ? `${draft.progress.label}…` : null, fromAgent(draft.requested_by)].filter(Boolean).join(" · ");
+    return { tone: "busy", label: draft.state === "updating" ? "Updating…" : draft.action === "save_draft" ? "Saving draft…" : "Listing…", detail: detail || null };
   }
   if (draft && (draft.state === "unknown" || BUSY.has(draft.state))) {
-    return { tone: "attention", label: "Unconfirmed", detail: draft.error || "Check the result before trying again.", said };
+    const href = live?.state === "deleted" ? undefined : live?.url ?? undefined;
+    return { tone: "attention", label: "Unconfirmed", href, hrefLabel: "View", detail: draft.error || "Check the result before trying again.", said };
   }
   if (live?.state === "deleting") return { tone: "busy", label: "Delisting…" };
   if (live?.state === "deleted") {
@@ -877,7 +880,7 @@ export function MarketplacesLayout({
                 </span>
               )}
             </span>
-            <span className="ms-auto flex shrink-0 items-center gap-1.5">
+            <span className="ms-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1.5">
               {selectedStatus.href && (
                 <Button size="xs" variant="ghost" aria-label={`${selectedStatus.hrefLabel} on ${railLabel(selectedMarketplace)}`}
                   render={<a href={selectedStatus.href} target="_blank" rel="noopener noreferrer" />}>

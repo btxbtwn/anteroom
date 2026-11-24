@@ -65,6 +65,36 @@ def size_choice(size: Any, choices: Iterable[Any]) -> str | None:
     return None
 
 
+def title_names_size(title: Any, size: Any) -> bool:
+    """Whether ``title`` already names ``size`` somewhere, as written or another way.
+
+    ``Men's L``, ``Large`` and ``2X`` name L and 2XL; ``11/30`` is a more
+    specific 11, and ``(6-7)`` names 6-7. A waist-by-inseam ``34x32`` does not
+    name 34: a men's bottoms size is the waist alone.
+    """
+    words = [word.strip(",.;:!()[]") for word in str(title or "").split()]
+    words = [word.casefold() for word in words if word]
+    wanted = [part.casefold() for part in (part.strip("()") for part in str(size or "").split()) if part]
+    if not words or not wanted:
+        return False
+    if len(wanted) == 1 and re.fullmatch(r"\d{1,2}(?:\.5)?", wanted[0]):
+        # A bare number is a size only beside a size word (Size 11, W 32) or as
+        # 11/30, never Jordan 11 or 3/4 Sleeve.
+        number = wanted[0]
+        return any(
+            (word == number and index and words[index - 1].replace("\u2019", "'") in _SIZE_LEAD_WORDS)
+            or (word.startswith(number + "/") and word[len(number) + 1:] not in _FRACTION_DENOMINATORS)
+            for index, word in enumerate(words)
+        )
+    if any(words[i:i + len(wanted)] == wanted for i in range(len(words) - len(wanted) + 1)):
+        return True
+    key = size_key(size)
+    if not key:
+        return False
+    pairs = (a + b for a, b in zip(words, words[1:], strict=False))
+    return any(size_key(word) == key for word in (*words, *pairs))
+
+
 def _squashed(text: str) -> str:
     return re.sub(r"[\s.\-]+", "", text).casefold()
 
@@ -84,6 +114,13 @@ def _measured(text: str) -> str | None:
     return value if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", value) else None
 
 
+# Words that make the number after them a size: Size 11, W 32, Men's 10.
+_SIZE_LEAD_WORDS = frozenset({
+    "size", "sz", "us", "uk", "eu", "w", "waist", "men's", "mens", "women's", "womens",
+    "youth", "kids", "kid's", "girls", "girl's", "boys", "boy's", "juniors", "junior's", "toddler",
+})
+# 3/4 Sleeve and 1/2 Zip are fractions, not a size and its inseam or range.
+_FRACTION_DENOMINATORS = frozenset({"", "2", "3", "4", "8"})
 # A measurement's label and unit are how a marketplace writes the size, not a
 # different size: Depop's men's 36" is the 36 a tag reads.
 _MEASUREMENT_LABEL = re.compile(r"^(?:WAIST|NECK|CHEST|INSEAM|LENGTH|US)\s+", re.IGNORECASE)

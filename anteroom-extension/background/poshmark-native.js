@@ -477,8 +477,18 @@ function poshmarkInventory(category, listing) {
   return inventory;
 }
 
-function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {}) {
+function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [], draft = false } = {}) {
   const category = poshmarkCategory(catalog, listing);
+  const categoryIds = String(listing.direct_category_ids?.poshmark || '').split('/');
+  // Poshmark answers a post with no category with a bare ValidationError that
+  // names nothing, and the sizes come from the category. Stop before writing.
+  // A private draft may still be saved without one.
+  if (!draft && !category && !categoryIds[0]) {
+    throw marketplaceError('Poshmark needs a category from its own list. Choose one on the Poshmark tab.', {
+      code: 'missing_fields',
+      fields: [{ field: 'direct_category_ids.poshmark', message: 'Poshmark needs a category from its own list.' }],
+    });
+  }
   const sizes = poshmarkInventory(category, listing);
   const condition = poshmarkCondition(listing);
   const price = poshmarkPrice(listing);
@@ -499,7 +509,6 @@ function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {
   const colors = poshmarkColors(listing, catalog);
   const minimum = poshmarkSmartMinimum(listing);
   const smartEnabled = minimum > 0 || listing.poshmark_specifics?.smartSell?.enabled === true;
-  const categoryIds = String(listing.direct_category_ids?.poshmark || '').split('/');
   // The item's cost (Anteroom's share of the box price), in dollars and cents as Poshmark's editor keeps it.
   const currency = listing._seller_region === 'CA' ? 'CAD' : 'USD';
   const privateFields = {
@@ -528,11 +537,11 @@ function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {
 }
 
 // Every catalog read the post needs, before anything is written.
-async function poshmarkPreparedPost(listing, deadline, origin = POSHMARK) {
+async function poshmarkPreparedPost(listing, deadline, origin = POSHMARK, { draft = false } = {}) {
   const catalog = await poshmarkCatalogData(deadline, origin);
   const brand = await poshmarkBrand(listing, deadline, origin);
   const styleTags = poshmarkPostStyleTags(listing, await poshmarkStyleTags(deadline, origin));
-  const post = poshmarkPostFields(catalog, listing, { brand, styleTags });
+  const post = poshmarkPostFields(catalog, listing, { brand, styleTags, draft });
   const discountId = listing.poshmark_specifics?.shippingDiscountId;
   if (Object.hasOwn(listing.poshmark_specifics || {}, 'shippingDiscountId')) {
     const discounts = await poshmarkShippingDiscounts(deadline, origin);
@@ -662,7 +671,7 @@ async function runPoshmarkApi(msg, recovery = false) {
       const post = await client.call('GET', `/vm-rest/posts/${journal.poshmark_post_id}`, undefined, { step: 'recover' });
       if (draftOnly) {
         const account = await poshmarkAccount(origin);
-        const expected = await poshmarkPreparedPost(p.listing || {}, deadline, origin);
+        const expected = await poshmarkPreparedPost(p.listing || {}, deadline, origin, { draft: true });
         poshmarkExpectedVideo(expected, p, journal);
         if (String(post.creator_id) !== account.user_id || post.status !== 'user_draft'
             || poshmarkPostDifferences(post, expected, p.photos?.length ?? p.expected_photo_count).length) {
@@ -677,7 +686,7 @@ async function runPoshmarkApi(msg, recovery = false) {
     }
     if (!draftOnly && p.confirm !== true) return marketplaceFailure(marketplaceError('Confirm listing on Poshmark.'), true);
     const account = await poshmarkAccount(origin);
-    const post = await poshmarkPreparedPost(p.listing || {}, deadline, origin);
+    const post = await poshmarkPreparedPost(p.listing || {}, deadline, origin, { draft: draftOnly });
     poshmarkVideoData(p);
     client = poshmarkClient(deadline, await poshmarkCsrf(deadline, origin), origin);
 

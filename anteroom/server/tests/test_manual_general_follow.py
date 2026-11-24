@@ -94,3 +94,34 @@ def test_size_edit_still_puts_the_new_size_in_the_title():
     previous = {'title': 'Acme Wool Sweater Gray', 'brand': 'Acme', 'size': 'M'}
     resized = prepared_listing(previous, {**previous, 'size': 'L'})
     assert resized['title'] == 'Acme L Wool Sweater Gray'
+
+
+def test_a_save_that_leaves_title_size_and_brand_alone_never_changes_the_title():
+    # Seen on MCP saves that changed only a category (#1990): same-length rewrites.
+    for title, brand, size in (
+        ('REWASH 11/30 Distressed Denim Shorts Blue Raw Hem', 'Rewash', '11'),
+        ('ASTON 34 Vintage Cable Knit Sweater Cream Relaxed', 'Aston', 'S'),
+        ('dip S (6-7) Cozy Cardigan Pink Knit', 'dip', '6-7'),
+    ):
+        previous = {'title': title, 'brand': brand, 'size': size, 'direct_category_ids': {'ebay': '1'}}
+        saved = prepared_listing(previous, {**previous, 'direct_category_ids': {'ebay': '2'}})
+        assert saved['title'] == title
+
+
+def test_a_sellers_title_edit_is_kept_as_typed():
+    for title, brand, size in (
+        ('Marvel Mad Engine Skottie Young Chibi Venom vs Spider-Man Tee White Men’s L', 'Marvel', 'L'),
+        ('RAGS Large Casual Pocket Tee Gray Relaxed', 'RAGS', 'L'),
+        ('PacSun PAC Cares Graphic Tee Sage Green XS Y2K', 'Pac Sun', 'XS'),
+        ('Disney Youth XL (15-17) Classic Mickey Tee Red', 'Disney', 'XL'),
+        ('Acme Wool Sweater Gray', 'Acme', 'M'),
+    ):
+        previous = {'title': 'Old title words here', 'brand': brand, 'size': size}
+        saved = prepared_listing(previous, {**previous, 'title': title})
+        assert saved['title'] == title
+
+
+def test_a_size_edit_swaps_the_old_size_where_the_title_names_it():
+    previous = {'title': 'Marvel Venom Graphic Tee White Men’s M', 'brand': 'Marvel', 'size': 'M'}
+    resized = prepared_listing(previous, {**previous, 'size': 'L'})
+    assert resized['title'] == 'Marvel Venom Graphic Tee White Men’s L'

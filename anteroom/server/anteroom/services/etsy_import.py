@@ -8,10 +8,14 @@ import math
 from sqlalchemy.orm import Session
 
 from anteroom.database import in_worker_session
+from anteroom.models.schema import VALID_CONDITIONS, ListingSchema
 from anteroom.services import etsy_workspace, inventory_import
 from anteroom.services.etsy_workspace import EtsyClient, EtsyFailure
 
 PAGE_SIZE = 25
+# Etsy's package units, in ounces and inches.
+_OUNCES = {"oz": 1.0, "lb": 16.0, "g": 1 / 28.349523125, "kg": 1000 / 28.349523125}
+_INCHES = {"in": 1.0, "ft": 12.0, "yd": 36.0, "mm": 1 / 25.4, "cm": 1 / 2.54, "m": 100 / 2.54}
 
 
 def _money(raw) -> float:
@@ -36,6 +40,27 @@ def _count(value) -> int:
     if type(value) is not int or value < 0:
         raise EtsyFailure("Etsy did not return a reliable available quantity.", 409)
     return value
+
+
+def _package(item: dict) -> dict:
+    """Etsy's packed weight and size, as General keeps them: whole pounds and ounces, inches L×W×H."""
+    out: dict = {}
+    weight, unit = _float(item.get("item_weight")), _OUNCES.get(str(item.get("item_weight_unit") or ""))
+    if weight and weight > 0 and unit:
+        ounces = max(1, round(weight * unit))
+        out["weight_lb"], out["weight_oz"] = divmod(ounces, 16)
+    sides = [_float(item.get(key)) for key in ("item_length", "item_width", "item_height")]
+    scale = _INCHES.get(str(item.get("item_dimensions_unit") or ""))
+    if scale and all(side and side > 0 for side in sides):
+        out["package_dimensions_in"] = "x".join(f"{round(side * scale, 2):g}" for side in sides)  # type: ignore[operator]
+    return out
+
+
+def _category_path(taxonomy_id: int) -> str | None:
+    from anteroom.services.etsy_form import category_choices
+
+    wanted = str(taxonomy_id)
+    return next((path for path, value in category_choices()["option_values"].items() if value == wanted), None)
 
 
 async def active_listings(client: EtsyClient, page_number: int) -> dict:
@@ -123,12 +148,29 @@ def _snapshot(item: dict, sku: str | None, quantity: int, price: float, properti
             attributes[name] = [html.unescape(value) for value in values]
     details["category_specifics"] = attributes
     by_name = {name.casefold(): values for name, values in attributes.items()}
-    return {"title": html.unescape(item["title"]), "description": html.unescape(item.get("description") or ""),
-            "price": price, "quantity": quantity, "sku": sku,
-            "tags": tags, "material": ", ".join(materials),
-            "brand": next(iter(by_name.get("brand") or []), None), "size": next(iter(by_name.get("size") or []), None),
-            "marketplace_category_ids": {"etsy": str(item["taxonomy_id"])},
-            "direct_category_ids": {"etsy": str(item["taxonomy_id"])}, "etsy_specifics": details}
+
+    def first(name: str) -> str | None:
+        return next(iter(by_name.get(name) or []), None)
+
+    snapshot = {"title": html.unescape(item["title"]), "description": html.unescape(item.get("description") or ""),
+                "price": price, "quantity": quantity, "sku": sku,
+                "tags": tags, "material": ", ".join(materials),
+                "brand": first("brand"), "size": first("size"),
+                "marketplace_category_ids": {"etsy": str(item["taxonomy_id"])},
+                "direct_category_ids": {"etsy": str(item["taxonomy_id"])}, "etsy_specifics": details}
+    for key, name in (("primaryColor", "primary color"), ("secondaryColor", "secondary color")):
+        if first(name):
+            snapshot[key] = first(name)
+    if first("condition"):
+        condition = ListingSchema.validate_condition(first("condition"))
+        if condition in VALID_CONDITIONS:
+            snapshot["condition"] = condition
+    path = _category_path(item["taxonomy_id"])
+    if path:
+        snapshot["category_path"] = path
+        snapshot["marketplace_categories"] = {"etsy": path}
+    snapshot.update(_package(item))
+    return snapshot
 
 
 async def import_listing(client: EtsyClient, listing_id: str, *, unless_matched: bool = False) -> dict:

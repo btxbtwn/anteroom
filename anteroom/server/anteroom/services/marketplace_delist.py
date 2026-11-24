@@ -234,7 +234,8 @@ def known_listings(notes: dict, native: dict, sold: dict) -> dict:
             record = {}
         result[marketplace] = {"url": url or record.get("url"), "listing_id": item_id, "source": source,
                                "sold_here": sold_here, "state": record.get("state") or "live",
-                               "error": record.get("error"), "marketplace_message": record.get("marketplace_message"),
+                               "error": record.get("error"), "error_code": record.get("error_code"),
+                               "marketplace_message": record.get("marketplace_message"),
                                "at": record.get("at"), "attempts": record.get("attempts"),
                                "already_gone": record.get("already") is True}
     return result
@@ -471,7 +472,8 @@ def _failure_text(marketplace: str, exc: Exception) -> str:
 
 
 async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expected: dict[str, str] | None = None,
-                 sale_id: str | None = None, relist_rule_id: str | None = None) -> dict:
+                 sale_id: str | None = None, relist_rule_id: str | None = None,
+                 requested_by: str | None = None) -> dict:
     """Delete the named listings. Runs as a job holding the automation slot, so no Send starts into Chrome meanwhile.
 
     ``expected`` pins the listing ID to delete on each marketplace: when one names
@@ -481,6 +483,7 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
     next marketplace if automatic delisting is turned off.
 
     A relist rule must still be enabled when a delete is recorded as started.
+    ``requested_by`` names the agent the seller allowed to ask for it.
 
     Each database step runs on a worker thread with its own session; none is open while
     eBay, Etsy or Chrome answers.
@@ -491,7 +494,7 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
     from anteroom.services.sale_delist_followup import _enabled
 
     names, known, job_id, cloud_names = await in_worker_session(
-        _open_delist, conv_id, marketplaces, confirm, expected, sale_id
+        _open_delist, conv_id, marketplaces, confirm, expected, sale_id, requested_by
     )
     job = SimpleNamespace(id=job_id)
     failed = False
@@ -519,6 +522,8 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
                 skipped = names[index:]
                 break
             payload = {"marketplace": name, "listing_id": entry["listing_id"], "confirm": True}
+            if relist_rule_id is not None and name == "depop":
+                payload["action"] = "relist"
             # A saved listing keeps its original site when the seller moves.
             if name == "poshmark" and urlsplit(entry["url"]).hostname in {"poshmark.ca", "www.poshmark.ca"}:
                 payload["seller_region"] = "CA"
@@ -555,11 +560,13 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
                     await in_worker_session(_record, conv_id, name, {
                         **base, "state": "failed", "at": _now(),
                         "error": str(result.get("error") or "The marketplace did not confirm the delete.")[:300],
+                        "error_code": scrub(result.get("error_code")),
                         "marketplace_message": scrub(result.get("marketplace_message"))})
             except Exception as exc:  # noqa: BLE001 - recorded per marketplace for the seller
                 failed = True
                 await in_worker_session(_record, conv_id, name, {
                     **base, "state": "failed", "at": _now(), "error": _failure_text(name, exc)[:300],
+                    "error_code": "chrome_unavailable" if isinstance(exc, browser_bridge.BrowserBridgeError) else None,
                     "marketplace_message": _marketplace_message(name, exc)})
         await in_worker_session(lambda db: JobRepo(db).update_status(
             job_id, "failed" if failed else "completed", "native_delist",
@@ -598,7 +605,8 @@ def _mercari_gone(name: str, result: dict) -> bool:
 
 
 def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bool,
-                 expected: dict[str, str] | None = None, sale_id: str | None = None) -> tuple[list[str], dict, str, set[str]]:
+                 expected: dict[str, str] | None = None, sale_id: str | None = None,
+                 requested_by: str | None = None) -> tuple[list[str], dict, str, set[str]]:
     from anteroom.services.extension_connection import current_extension
 
     from anteroom.services import cloud_sessions, listing_mode
@@ -627,7 +635,7 @@ def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
         }
         chrome_needed = (BROWSER_MARKETPLACES & set(names)) - cloud_names
         if chrome_needed and not current_extension().connected:
-            raise DelistError(409, "Connect Chrome first.")
+            raise DelistError(409, "Connect Chrome first.", reason="chrome_unavailable")
         repo = JobRepo(db)
         listing = ListingRepo(db).get_current(conv_id)
         if sale_id is not None:
@@ -646,7 +654,7 @@ def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
         if repo.get_active() or has_active_account_send(db):
             raise DelistError(409, "Another automation job is queued or running. Wait for it to finish.")
         job = repo.create(conv_id, listing.current_revision_id if listing else "", {"delist": names},
-                          status="dispatched", current_step="native_delist")
+                          status="dispatched", current_step="native_delist", requested_by=requested_by)
         claim_api_job(db, job.id)
     return names, known, job.id, cloud_names
 

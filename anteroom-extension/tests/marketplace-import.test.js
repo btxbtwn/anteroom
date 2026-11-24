@@ -49,11 +49,21 @@ const POSH_FULL = {
   id: POSH_POST, creator_id: POSH_ME, title: 'Denim jacket', description: 'Classic fit.\nNo flaws.',
   price_amount: { val: '45', currency_code: 'USD' }, brand: 'Levi\'s', condition: 'not_nwt',
   catalog: { department: 'd1', category: 'c1', category_features: ['f1'] },
-  inventory: { status: 'available', size_quantities: [{ size_id: 'M', size_obj: { display: 'M' }, quantity_available: 2,
-    seller_inventory_private_info: { sku: 'JKT-1' } }] },
+  inventory: { status: 'available', multi_item: true, size_quantities: [{ size_id: 'M', size_obj: { display: 'M' }, quantity_available: 2,
+    size_set_tags: ['standard'], size_system: 'us', seller_inventory_private_info: { sku: 'JKT-1-M' } }] },
   cover_shot: { url_large: 'https://di2ponv0v5otw.cloudfront.net/posts/1.jpg' },
   pictures: [{ url_large: 'https://di2ponv0v5otw.cloudfront.net/posts/2.jpg' }, { url_large: 'http://insecure.example/3.jpg' }],
-  colors: [{ name: 'Blue' }],
+  colors: [{ name: 'Blue' }, { name: 'White' }],
+  original_price_amount: { val: '98', currency_code: 'USD' }, style_tags: ['Denim', { name: 'Vintage' }],
+  seller_shipping_discount: { id: 'cccccccccccccccccccccccc' },
+  seller_private_info: { sku: 'JKT-1', cost_price_amount: { val: '12.50', currency_code: 'USD' }, other_info: 'Bin 4' },
+  offer_auto_actions_v2_enabled: true, offer_auto_actions_min_price_amount: { val: '30', currency_code: 'USD' },
+};
+const POSH_FIELDS = {
+  availability: 'available', multi_item: true, condition: null, colors: ['Blue', 'White'], style_tags: ['Denim', 'Vintage'],
+  original_price: 98, shipping_discount_id: 'cccccccccccccccccccccccc', sku: 'JKT-1', cost: 12.5, other_info: 'Bin 4',
+  smart_sell: { enabled: true, minimum_price: 30 },
+  sizes: [{ size_id: 'M', size_set_tags: ['standard'], size_system: 'us', quantity: 2, sku: 'JKT-1-M' }],
 };
 
 test('Poshmark reads the signed-in closet a page at a time and only with GETs', async () => {
@@ -84,13 +94,32 @@ test('Poshmark returns a full listing with category names and https photos', asy
     account: 'aaaaaaaaaaaaaaaaaaaaaaaa',
     id: POSH_POST, url: `https://poshmark.com/listing/${POSH_POST}`, title: 'Denim jacket', description: 'Classic fit.\nNo flaws.',
     price: 45, currency: 'USD', quantity: 2, brand: 'Levi\'s', size: 'M', condition: 'not_nwt',
-    category_path: 'Women > Jackets & Coats > Jean Jackets', category_id: 'd1/c1/f1', sku: 'JKT-1', colors: ['Blue'],
+    category_path: 'Women > Jackets & Coats > Jean Jackets', category_id: 'd1/c1/f1', sku: 'JKT-1', colors: ['Blue', 'White'],
     photos: ['https://di2ponv0v5otw.cloudfront.net/posts/1.jpg', 'https://di2ponv0v5otw.cloudfront.net/posts/2.jpg'],
+    poshmark: POSH_FIELDS,
   });
   readOnly(requests);
 });
 
-test('Poshmark refuses another closet, sold listings and several sizes', async () => {
+test('Poshmark brings every size of a listing with several sizes', async () => {
+  const { c, requests } = worker({
+    [`/vm-rest/posts/${POSH_POST}`]: [200, { data: { ...POSH_FULL, condition: 'uln', inventory: { status: 'available', multi_item: true, size_quantities: [
+      { size_id: 'S', size_obj: { id: 'S', display: 'S' }, size_set_tags: ['standard'], quantity_available: 1 },
+      { size_id: '4P', size_set_tags: ['petite'], size_system: 'us', quantity_available: 3, seller_inventory_private_info: { sku: 'P-4' } },
+    ] } } }],
+    '/vm-rest/meta/catalog_v2': [200, POSH_CATALOG],
+  }, { cookies: { jwt: jwt({ user_id: POSH_ME }) } });
+  const result = (await listing(c, 'poshmark', POSH_POST)).listing;
+  assert.equal(result.quantity, 4);
+  assert.equal(result.size, null);
+  assert.equal(result.poshmark.condition, 'uln');
+  assert.deepEqual(result.poshmark.sizes, [
+    { size_id: 'S', size_set_tags: ['standard'], size_system: 'us', quantity: 1, sku: '' },
+    { size_id: '4P', size_set_tags: ['petite'], size_system: 'us', quantity: 3, sku: 'P-4' }]);
+  readOnly(requests);
+});
+
+test('Poshmark refuses another closet and sold listings', async () => {
   const run = async post => {
     const { c } = worker({ [`/vm-rest/posts/${POSH_POST}`]: [200, { data: { ...POSH_FULL, ...post } }], '/vm-rest/meta/catalog_v2': [200, POSH_CATALOG] },
       { cookies: { jwt: jwt({ user_id: POSH_ME }) } });
@@ -98,7 +127,6 @@ test('Poshmark refuses another closet, sold listings and several sizes', async (
   };
   assert.match((await run({ creator_id: 'cccccccccccccccccccccccc' })).error, /does not belong/);
   assert.match((await run({ inventory: { status: 'sold_out' } })).error, /not available/);
-  assert.match((await run({ inventory: { status: 'available', size_quantities: [{ size_id: 'S' }, { size_id: 'M' }] } })).error, /several sizes/);
   const { c } = worker({}, {});
   assert.equal((await listing(c, 'poshmark', POSH_POST)).error_code, 'signed_out');
 });

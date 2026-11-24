@@ -186,11 +186,12 @@ async def build_chat_messages(conv_id: str, user_message: str, option_catalog=No
             "```\n"
             "Save a category only when it is the last one in that branch. "
             "Anteroom stores each marketplace's own category id from that path, and the listing form updates. "
-            "You can set one marketplace yourself when you know its id: "
+            "For a Depop-only category change, look up the intended category on the Depop Category row "
+            "(direct_category_ids.depop). Save the returned value with a fields row using that path. "
+            "Keep the General category and other marketplaces as they are. "
+            "For other marketplaces, use their own category IDs when known: "
             "direct_category_ids.ebay together with direct_category_ids.ebay_path, "
-            "direct_category_ids.poshmark, direct_category_ids.depop, direct_category_ids.mercari, "
-            "or direct_category_ids.depop. "
-            "Use that marketplace's own id. "
+            "direct_category_ids.poshmark, or direct_category_ids.mercari. "
             "On Poshmark, None is the last step when you want a category that still has narrower choices.\n\n"
         )
 

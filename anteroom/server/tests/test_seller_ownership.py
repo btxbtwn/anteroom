@@ -82,7 +82,7 @@ def seed_previous_release(engine):
 
 
 # Columns a later revision added to jobs, as an upgraded row reads them.
-JOB_LEASE_DEFAULTS = {"lease_owner": None, "leased_until": None, "cancel_requested": False}
+JOB_LEASE_DEFAULTS = {"lease_owner": None, "leased_until": None, "cancel_requested": False, "requested_by": None}
 # Revision d0e4f3a92b68: Finished items from older builds stay the seller's decision.
 CONVERSATION_SETTLEMENT_DEFAULTS = {"settled_by_seller": True}
 # Revision c2d9f4a8e103: Draft scheduling is opt-in and off by default.

@@ -1,4 +1,4 @@
-"""Seller goals and Needs Attention dismissals for the Home dashboard."""
+"""Seller goals and Needs Attention snoozes and resolutions for the Home dashboard."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -39,5 +39,9 @@ class AttentionDismissal(SellerOwned, Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
     item_key: Mapped[str] = mapped_column(String(200), nullable=False)
     kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    # When the seller snoozed or resolved it.
     dismissed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
-    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    # Snooze: hidden until this time. Null on a resolved item.
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Resolve: hidden while the item's fingerprint stays this value. Null on a snooze.
+    fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)

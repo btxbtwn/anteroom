@@ -1,0 +1,96 @@
+name: Claude release auto-fix
+
+on:
+  workflow_run:
+    workflows: [Deploy hosted, Studio macOS]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  checks: read
+  pull-requests: read
+  id-token: write
+
+jobs:
+  review:
+    if: >-
+      (github.event.workflow_run.conclusion == 'failure' ||
+       github.event.workflow_run.conclusion == 'timed_out') &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      (github.event.workflow_run.event == 'workflow_run' ||
+       github.event.workflow_run.event == 'push' ||
+       github.event.workflow_run.event == 'workflow_dispatch')
+    # Serialize within each pipeline so two failures of the same revision
+    # cannot open competing repair PRs.
+    concurrency:
+      group: claude-release-autofix-${{ github.event.workflow_run.workflow_id }}
+      cancel-in-progress: false
+    runs-on: ${{ github.event.workflow_run.name == 'Studio macOS' && 'macos-15' || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    env:
+      SOURCE_RUN: ${{ github.event.workflow_run.id }}
+      SOURCE_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Collect failure evidence
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REVIEW_DIR: ${{ runner.temp }}/release-review
+        run: |
+          mkdir -p "$RELEASE_REVIEW_DIR/bot"
+          cp .github/review-bot/{release_autofix.py,review_bot.py} "$RELEASE_REVIEW_DIR/bot/"
+          echo "RELEASE_REVIEW_DIR=$RELEASE_REVIEW_DIR" >> "$GITHUB_ENV"
+          python3 "$RELEASE_REVIEW_DIR/bot/release_autofix.py" prepare
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        if: steps.prepare.outputs.can_repair == 'true'
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.prepare.outputs.can_repair == 'true'
+        with:
+          node-version: "22"
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        if: steps.prepare.outputs.can_repair == 'true'
+        with:
+          version: "0.12.13"
+      - name: Install test dependencies
+        if: steps.prepare.outputs.can_repair == 'true'
+        # A broken dependency install can itself be the failure under review.
+        continue-on-error: true
+        working-directory: anteroom
+        run: |
+          python -m venv .venv
+          ./scripts/install-locked.sh .venv/bin/python dev
+          npm ci --no-audit --no-fund
+      - name: Review and repair with Claude
+        if: steps.prepare.outputs.skip == 'false'
+        uses: anthropics/claude-code-action@acfe7992852970efb4fee683d63d628e3e52df67 # v1.0.286
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: "github-actions[bot],claude[bot],dependabot[bot]"
+          allow_fork_prs: "false"
+          display_report: "false"
+          additional_permissions: |
+            actions: read
+          prompt: |
+            Follow .github/review-bot/release-autofix-prompt.md.
+            Read ${{ env.RELEASE_REVIEW_DIR }}/context.json and failed.log.
+            Write the diagnosis to ${{ env.RELEASE_REVIEW_DIR }}/report.md.
+            If you reproduced and verified a source fix, publish it with exactly:
+            python3 ${{ env.RELEASE_REVIEW_DIR }}/bot/release_autofix.py publish
+          claude_args: >-
+            --model opus
+            --permission-mode acceptEdits
+            --add-dir ${{ env.RELEASE_REVIEW_DIR }}
+            --allowedTools "Read,Glob,Grep,Edit,Write,Bash(cd:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(./check.sh --fast),Bash(anteroom/.venv/bin/python -m pytest:*),Bash(.venv/bin/python -m pytest:*),Bash(python3 -m unittest:*),Bash(node --test:*),Bash(npm test:*),Bash(npm run build:*),Bash(python3 ${{ env.RELEASE_REVIEW_DIR }}/bot/release_autofix.py publish)"
+            --disallowedTools "Edit(.github/**),Write(.github/**),Edit(${{ env.RELEASE_REVIEW_DIR }}/bot/**),Write(${{ env.RELEASE_REVIEW_DIR }}/bot/**),Edit(${{ env.RELEASE_REVIEW_DIR }}/context.json),Write(${{ env.RELEASE_REVIEW_DIR }}/context.json),Edit(anteroom/VERSION),Write(anteroom/VERSION),Edit(CHANGELOG.md),Write(CHANGELOG.md)"
+      - name: Summarize the review
+        if: ${{ !cancelled() && steps.prepare.outputs.skip == 'false' }}
+        run: python3 "$RELEASE_REVIEW_DIR/bot/release_autofix.py" summarize

@@ -55,9 +55,19 @@ struct NativeDraftState: Decodable, Equatable {
     var marketplaceMessage: String? = nil
     var retryAfter: String? = nil
     var progress: Progress? = nil
+    /// The AI agent that started a running action ("mcp:<name>"); nil for the seller's own.
+    var requestedBy: String? = nil
+
+    /// Who started a running action, when it was an AI agent the seller allowed.
+    var fromAgent: String? {
+        guard let requestedBy, requestedBy.hasPrefix("mcp:") else { return nil }
+        let name = requestedBy.dropFirst(4).trimmingCharacters(in: .whitespaces)
+        return name.isEmpty ? "From your AI assistant" : "From \(name) (AI assistant)"
+    }
 
     enum CodingKeys: String, CodingKey {
         case state, running, action, error, progress
+        case requestedBy = "requested_by"
         case draftURL = "draft_url"
         case listingURL = "listing_url"
         case revisionID = "revision_id"

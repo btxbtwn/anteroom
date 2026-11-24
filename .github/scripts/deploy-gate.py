@@ -111,6 +111,7 @@ def main() -> int:
             version_file = root / "vendoo-studio" / "VERSION"
         lines.append(f"version={version_file.read_text().strip()}")
         print(f"Deploying {target[:8]}, the newest tested commit on main from {trigger[:8]} on.")
+        print(f"::notice title=Deploy target::{target}")
     else:
         print(f"::notice::Nothing to deploy from {trigger[:8]} on; a newer commit's own run ships it.")
     output = os.environ.get("GITHUB_OUTPUT")

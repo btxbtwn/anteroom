@@ -21,7 +21,7 @@ MAX_RESULT_CHARS = 12000
 MAX_TARGET_REPLIES = 4
 
 TOOL_RULES = (
-    '\n\nNative dropdown lookup is available. For a field marked options_lookup, request choices '
+    '\n\nFor an edit to a field marked options_lookup, look up the intended choice before saving it '
     'by replying ONLY with {"_option_search":[{"marketplace":"ebay",'
     '"field":"ebay_specifics.brand","query":"Chase Authentics","offset":0}]}. '
     'This is an intermediate read-only tool request, not your final answer. '
@@ -250,8 +250,8 @@ async def chat_with_options(provider, messages: list[dict], catalog: OptionCatal
                     "\nField targets have been acknowledged. Do not declare _field_targets again. "
                     "Complete the request, modifying only the acknowledged fields. Your final answer must "
                     "include the fenced JSON that saves them.\n")
-                target_reply(text, 'Field targets acknowledged. Now give your final answer: a short confirmation '
-                                   'and the fenced JSON that saves these fields.')
+                target_reply(text, 'Field targets acknowledged. Look up any choices needed for these fields first. '
+                                   'Then reply with a short confirmation and the fenced JSON that saves the changes.')
                 continue
             target_reply(text, 'Invalid field targets' + (f": {json.dumps(rejected, ensure_ascii=False)}" if rejected else "")
                          + '. Declare exact editable path values from the current forms rows, or [] for no changes.')

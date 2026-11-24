@@ -108,6 +108,427 @@
         "title": "Annotation",
         "type": "object"
       },
+      "AttentionCounts": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "integer"
+          },
+          "by_kind": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Kind",
+            "type": "object"
+          },
+          "dismissed": {
+            "title": "Dismissed",
+            "type": "integer"
+          },
+          "resolved": {
+            "title": "Resolved",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "active",
+          "dismissed",
+          "resolved"
+        ],
+        "title": "AttentionCounts",
+        "type": "object"
+      },
+      "AttentionInbox": {
+        "description": "Needs Attention: what shows, what is snoozed, and what is resolved.",
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/AttentionCounts"
+          },
+          "dismissed": {
+            "description": "Snoozed items, back after 7 days if they still apply.",
+            "items": {
+              "$ref": "#/components/schemas/AttentionItem"
+            },
+            "title": "Dismissed",
+            "type": "array"
+          },
+          "needs_attention": {
+            "items": {
+              "$ref": "#/components/schemas/AttentionItem"
+            },
+            "title": "Needs Attention",
+            "type": "array"
+          },
+          "resolved": {
+            "description": "Resolved items. A duplicate pair stays resolved; anything else shows again when its state changes.",
+            "items": {
+              "$ref": "#/components/schemas/AttentionItem"
+            },
+            "title": "Resolved",
+            "type": "array"
+          }
+        },
+        "required": [
+          "needs_attention",
+          "dismissed",
+          "resolved",
+          "counts"
+        ],
+        "title": "AttentionInbox",
+        "type": "object"
+      },
+      "AttentionItem": {
+        "description": "One Needs Attention alert. Snoozing or resolving it only hides it in Anteroom.",
+        "properties": {
+          "action_label": {
+            "title": "Action Label",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "dismissed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set on a snoozed item.",
+            "title": "Dismissed At"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When a snoozed item shows again if it still applies.",
+            "title": "Expires At"
+          },
+          "fingerprint": {
+            "default": "",
+            "description": "The state the alert reports. Resolve keeps it hidden only while this stays the same.",
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "still_listed",
+              "expired_session",
+              "failed_job",
+              "unsent_edits",
+              "pending_approval",
+              "relist_gap",
+              "duplicate_listing"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "priority": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "title": "Priority",
+            "type": "string"
+          },
+          "reappears_in_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reappears In Days"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set on a resolved item.",
+            "title": "Resolved At"
+          },
+          "target": {
+            "$ref": "#/components/schemas/AttentionTarget"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "priority",
+          "title",
+          "detail",
+          "action_label",
+          "target"
+        ],
+        "title": "AttentionItem",
+        "type": "object"
+      },
+      "AttentionResolution": {
+        "properties": {
+          "item_key": {
+            "title": "Item Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "resolved_at": {
+            "title": "Resolved At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_key",
+          "kind",
+          "resolved_at"
+        ],
+        "title": "AttentionResolution",
+        "type": "object"
+      },
+      "AttentionResolveInput": {
+        "additionalProperties": false,
+        "properties": {
+          "fingerprint": {
+            "default": "",
+            "description": "The item's fingerprint as shown; required for every kind but a duplicate pair.",
+            "maxLength": 64,
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "item_key": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Item Key",
+            "type": "string"
+          },
+          "kind": {
+            "default": "general",
+            "maxLength": 40,
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_key"
+        ],
+        "title": "AttentionResolveInput",
+        "type": "object"
+      },
+      "AttentionResolveResult": {
+        "properties": {
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "resolution": {
+            "$ref": "#/components/schemas/AttentionResolution"
+          }
+        },
+        "required": [
+          "ok",
+          "resolution"
+        ],
+        "title": "AttentionResolveResult",
+        "type": "object"
+      },
+      "AttentionRestoreInput": {
+        "additionalProperties": false,
+        "properties": {
+          "item_key": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Item Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_key"
+        ],
+        "title": "AttentionRestoreInput",
+        "type": "object"
+      },
+      "AttentionRestoreResult": {
+        "properties": {
+          "item_key": {
+            "title": "Item Key",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "restored": {
+            "title": "Restored",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "restored",
+          "item_key"
+        ],
+        "title": "AttentionRestoreResult",
+        "type": "object"
+      },
+      "AttentionSnooze": {
+        "properties": {
+          "dismissed_at": {
+            "title": "Dismissed At",
+            "type": "string"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          },
+          "item_key": {
+            "title": "Item Key",
+            "type": "string"
+          },
+          "reappears_in_days": {
+            "title": "Reappears In Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "item_key",
+          "dismissed_at",
+          "expires_at",
+          "reappears_in_days"
+        ],
+        "title": "AttentionSnooze",
+        "type": "object"
+      },
+      "AttentionSnoozeInput": {
+        "additionalProperties": false,
+        "properties": {
+          "item_key": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Item Key",
+            "type": "string"
+          },
+          "kind": {
+            "default": "general",
+            "maxLength": 40,
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_key"
+        ],
+        "title": "AttentionSnoozeInput",
+        "type": "object"
+      },
+      "AttentionSnoozeResult": {
+        "properties": {
+          "dismissal": {
+            "$ref": "#/components/schemas/AttentionSnooze"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "dismissal"
+        ],
+        "title": "AttentionSnoozeResult",
+        "type": "object"
+      },
+      "AttentionTarget": {
+        "description": "Where the item's action opens.",
+        "properties": {
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "settings_section": {
+            "anyOf": [
+              {
+                "enum": [
+                  "connections",
+                  "listings"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings Section"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          },
+          "view": {
+            "enum": [
+              "listings",
+              "settings",
+              "automations"
+            ],
+            "title": "View",
+            "type": "string"
+          }
+        },
+        "required": [
+          "view"
+        ],
+        "title": "AttentionTarget",
+        "type": "object"
+      },
       "Body_read_size_tags_api_size_tags_read_post": {
         "properties": {
           "files": {
@@ -4654,6 +5075,155 @@
           }
         },
         "summary": "Photos"
+      }
+    },
+    "/api/home/attention": {
+      "get": {
+        "description": "Needs Attention alone, without Today and goals, for the iPhone app.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttentionInbox"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Attention"
+      }
+    },
+    "/api/home/attention/dismiss": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttentionSnoozeInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttentionSnoozeResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dismiss Attention"
+      }
+    },
+    "/api/home/attention/resolve": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttentionResolveInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttentionResolveResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The listing does not exist for this seller."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The listing changed elsewhere or is busy."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Attention"
+      }
+    },
+    "/api/home/attention/restore": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttentionRestoreInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttentionRestoreResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore Attention"
       }
     },
     "/api/listing-sheet": {

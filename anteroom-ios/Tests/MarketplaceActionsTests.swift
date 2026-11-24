@@ -35,10 +35,23 @@ struct MarketplaceActionsTests {
         let poshmark = rows["poshmark"]!
         precondition(poshmark.label == "Listing…" && poshmark.running && !poshmark.canList && !poshmark.canDelist)
         precondition(poshmark.detail == "Uploading photos…")
+        // One an AI assistant started says which.
+        let byAgent = try JSONDecoder().decode(NativeDraftState.self, from: Data(#"""
+        {"state":"publishing","action":"list","running":true,"progress":{"label":"Listing"},"requested_by":"mcp:Claude"}
+        """#.utf8))
+        precondition(MarketplaceActions.status("poshmark", live: nil, draft: byAgent, revisionID: "r2").detail
+            == "Listing… · From Claude (AI assistant)")
 
         // An outcome nobody confirmed must be checked before acting again.
         let mercari = rows["mercari"]!
         precondition(mercari.label == "Unconfirmed" && mercari.unconfirmed && !mercari.canList)
+        precondition(mercari.link == nil)
+        let original = try JSONDecoder().decode(MarketplaceLiveListing.self, from: Data(#"""
+        {"url":"https://www.mercari.com/us/item/m1","listing_id":"m1","sold_here":false,"state":"failed"}
+        """#.utf8))
+        let unconfirmedDelist = MarketplaceActions.status("mercari", live: original, draft: drafts["mercari"], revisionID: "r2")
+        precondition(unconfirmedDelist.label == "Unconfirmed")
+        precondition(unconfirmedDelist.link?.absoluteString == original.url && unconfirmedDelist.linkLabel == "View")
 
         // A refused List can be tried again; never listed anywhere can be listed.
         precondition(rows["depop"]!.label == "Not listed" && rows["depop"]!.tone == .failed && rows["depop"]!.canList)
@@ -84,6 +97,7 @@ struct MarketplaceActionsTests {
         let delisted = try JSONDecoder().decode([String: MarketplaceLiveListing].self, from: Data(#"""
         {"mercari": {"url":"https://www.mercari.com/us/item/m1","listing_id":"m1","sold_here":false,"state":"deleted"}}
         """#.utf8))
+        precondition(MarketplaceActions.status("mercari", live: delisted["mercari"], draft: drafts["mercari"], revisionID: "r2").link == nil)
         let stale = try JSONDecoder().decode([String: NativeDraftState].self, from: Data(#"""
         {"mercari": {"state":"published","revision_id":"r2","listing_url":"https://www.mercari.com/us/item/m1"}}
         """#.utf8))

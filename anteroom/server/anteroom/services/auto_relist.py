@@ -57,6 +57,7 @@ BACKOFF_STATUSES = (
     "down_needs_relist",
 )
 CAP_COUNTED_STATUSES = ("completed", "relist_pending", "failed", "down_needs_relist")
+DELIST_BLOCKERS = ("signed_out", "challenge", "chrome_unavailable", "rate_limited")
 RULE_DISABLED_AFTER_DELETE = "The relist rule was turned off after deletion. Review the listing before recreating it."
 
 
@@ -1077,9 +1078,13 @@ async def run_auto_relist(
         except DelistError as exc:
             if exc.reason == "relist_rule_disabled":
                 return {"ok": False, "skipped": True, "error": str(exc)}
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": str(exc), "error_code": exc.reason}
         entry_res = res.get(marketplace) or {}
-        return {"ok": entry_res.get("state") == "deleted", "error": entry_res.get("error"), "detail": entry_res}
+        return {
+            "ok": entry_res.get("state") == "deleted",
+            "error": entry_res.get("error"),
+            "error_code": entry_res.get("error_code"),
+        }
 
     async def _run_list(
         conv_id: str, marketplace: str, revision_id: str, attempt_id: str, rule_id: str
@@ -1129,6 +1134,7 @@ async def run_auto_relist(
         }
 
     outcomes: list[dict[str, Any]] = []
+    blocked_markets: set[str] = set()
     started = time.monotonic()
     for index, entry in enumerate(plan):
         if time_budget is not None and index and time.monotonic() - started >= time_budget.total_seconds():
@@ -1136,6 +1142,8 @@ async def run_auto_relist(
             break
         conv_id = entry["conversation_id"]
         market = entry["marketplace"]
+        if market in blocked_markets:
+            continue
         old_id = entry["listing_id"]
         rule_id = entry["rule_id"]
         step_now = moment if now is not None else _now()
@@ -1153,6 +1161,8 @@ async def run_auto_relist(
 
         delist_res = await _run_delist(conv_id, market, old_id, rule_id)
         if not delist_res.get("ok"):
+            if delist_res.get("error_code") in DELIST_BLOCKERS:
+                blocked_markets.add(market)
             # Nothing was relisted, so the relist price must not stay saved.
             try:
                 await in_worker_session(
@@ -1184,6 +1194,9 @@ async def run_auto_relist(
         list_res = await _run_list(conv_id, market, revision_id, attempt_id, rule_id)
         new_id_val = list_res.get("listing_id") or extract_listing_id(market, list_res.get("listing_url"))
         if not list_res.get("ok") or not new_id_val:
+            # The old listing is already gone. Leave the next listing live if
+            # this replacement could not be confirmed.
+            blocked_markets.add(market)
             error_msg = str(list_res.get("error") or "Old listing was delisted, but relist did not confirm.")
             if list_res.get("skipped"):
                 status = "skipped_rule_disabled"

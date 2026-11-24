@@ -230,7 +230,21 @@ describe("marketplaces section", () => {
     expect(row(html, "Mercari")).not.toContain('role="status"');
     expect(row(html, "Mercari")).toContain("focus-visible:ring-2 focus-visible:ring-ring");
     expect(html).toContain("Check result");
+    expect(html).not.toContain('aria-label="View on Mercari"');
     expect(html).not.toContain("Publish…");
+  });
+
+  it("links to the original listing while a delist is unconfirmed", () => {
+    const url = "https://www.depop.com/products/shop-original-tee/";
+    const drafts: NativeDrafts = { depop: { state: "unknown", running: false } };
+    const original = { ...live, url, listing_id: "shop-original-tee", state: "failed" } as const;
+    const html = render(drafts, { depop: original }, { selected: "depop" });
+    expect(row(html, "Depop")).toContain("Unconfirmed");
+    expect(html).toContain('aria-label="View on Depop"');
+    expect(html).toContain(`href="${url}"`);
+    expect(enabledButton(html, "Check result")).toBe(true);
+    const deleted = render(drafts, { depop: { ...original, state: "deleted" } }, { selected: "depop" });
+    expect(deleted).not.toContain(`href="${url}"`);
   });
 
 
@@ -511,6 +525,13 @@ describe("marketplaces section", () => {
     expect(row(html, "Mercari")).toContain("Listed");
     expect(row(html, "Mercari")).not.toContain("Ready");
     expect(render({}, {}, { preflightPlaceholder: true, preflight: { marketplaces: { depop: { ready: true, gaps: [] } } } })).not.toContain("Ready");
+  });
+
+  it("says which AI assistant started a running action", () => {
+    const running = { state: "publishing", running: true, action: "list", progress: { step: "list", label: "Listing", index: 0, total: 1 } };
+    expect(rowStatus("poshmark", undefined, { ...running, requested_by: "mcp:Claude" } as NativeDraft, "current", true))
+      .toMatchObject({ tone: "busy", label: "Listing…", detail: "Listing… · From Claude (AI assistant)" });
+    expect(rowStatus("poshmark", undefined, running as NativeDraft, "current", true)).toMatchObject({ detail: "Listing…" });
   });
 
   it("describes each marketplace in List everywhere's picker, and only ready ones are picked by Select all ready", () => {

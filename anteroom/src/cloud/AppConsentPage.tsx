@@ -73,7 +73,7 @@ export function AppConsentPage({ client, email }: { client: SupabaseClient; emai
     {details ? <>
       <SettingsSection title="What it can do">
         <SettingsRow title={details.name}
-          description="Uses Anteroom's tools on your account as far as you allow here. It can never publish, update live listings or delist. You can change this or disconnect it in Settings → Agents.">
+          description="Uses Anteroom's tools on your account as far as you allow here. It acts on your marketplaces only if you choose that under Marketplaces, which starts at No access. You can change this or disconnect it in Settings → Agents.">
           <PermissionSelects permissions={permissions} labelPrefix={details.name} disabled={busy !== null}
             onChange={(area, level) => setPermissions(current => ({ ...current, [area]: level }))} />
         </SettingsRow>

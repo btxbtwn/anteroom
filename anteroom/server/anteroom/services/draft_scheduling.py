@@ -474,8 +474,12 @@ def schedule_draft(
     marketplaces: list[str],
     confirm: bool,
     now: datetime | None = None,
+    requested_by: str | None = None,
 ) -> dict[str, Any]:
-    """Schedule a validated draft for future publishing to named marketplaces."""
+    """Schedule a validated draft for future publishing to named marketplaces.
+
+    ``requested_by`` names the agent the seller allowed to schedule it; the log keeps it.
+    """
     if confirm is not True:
         raise SchedulePublishError("Confirm the marketplaces and publish time to schedule this draft.")
     markets = _normalize_marketplaces(marketplaces)
@@ -503,6 +507,7 @@ def schedule_draft(
         marketplaces=markets,
         scheduled_for=when,
         status="scheduled",
+        results={"requested_by": requested_by} if requested_by else None,
         created_at=moment,
     ))
     db.commit()

@@ -4,9 +4,12 @@ Works identically on both hosted ``myanteroom.com`` (authenticated per seller
 via personal access token or seller session with PostgreSQL RLS) and local
 Mac desktop.
 
-Safety invariant (AGENTS.md): MCP tools NEVER publish listings, push live
-updates to marketplaces, or delist items. All writes remain local drafts or
-local saved edits awaiting explicit seller confirmation inside Anteroom.
+Safety invariant (AGENTS.md): the tools here only read, or change Anteroom's
+own drafts, saved edits and alerts. Saving marketplace drafts, publishing,
+updating live listings and delisting live in ``mcp_marketplace_tools`` and reach
+only an access token or connected app the seller granted the ``marketplaces``
+permission (off by default), each call naming its marketplaces and carrying
+``confirm`` (approved by the seller 2026-11-24).
 """
 from __future__ import annotations
 
@@ -30,7 +33,7 @@ from anteroom.models.marketplace_listing import LIVE_STATES, MarketplaceListing
 from anteroom.models.marketplace_sale import MarketplaceSale
 from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
 from anteroom.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
-from anteroom.services import boxes, home_dashboard, listing_editor, mcp_tokens
+from anteroom.services import boxes, home_dashboard, listing_editor, mcp_catalog_tools, mcp_marketplace_tools, mcp_tokens
 from anteroom.services.background_tasks import ACTIVE as ACTIVE_TASK_STATUSES
 from anteroom.services.etsy_audit import etsy_not_allowed_live
 from anteroom.services.etsy_fields import etsy_eligible
@@ -55,10 +58,16 @@ LATEST_PROTOCOL_VERSION = "2025-06-18"
 
 SERVER_INSTRUCTIONS = (
     "Anteroom MCP server for reselling inventory, analytics, sourcing ROI, "
-    "Needs Attention triage, and safe local draft editing. "
-    "IMPORTANT: Never claim an edit was pushed live. All write tools modify "
-    "local Anteroom drafts or stage local unsent edits only; the seller "
-    "reviews and publishes or delists inside Anteroom."
+    "Needs Attention triage, and local draft editing. "
+    "create_draft_listing, edit_listing and the other listing tools change only "
+    "Anteroom's own drafts and stage unsent edits; they never reach a marketplace. "
+    "Only when the seller has allowed it for this connection, save_marketplace_draft, "
+    "publish_listing, send_unsent_edits and delist_listing act on the marketplaces you "
+    "name: use them only for the item and marketplaces the seller asked for, with "
+    "confirm=true only after the seller confirmed. They return once the action has "
+    "started; never tell the seller something is live, updated or delisted until "
+    "get_action_status reports it. If it reports uncertain, pass on what to check "
+    "and do not try again."
 )
 
 _SPECIFICS_KEYS = frozenset(f"{market}_specifics" for market in MARKETS)
@@ -100,7 +109,10 @@ TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
     "run_etsy_audit": ("analytics", "read"),
     "get_needs_attention": ("attention", "read"),
     "dismiss_attention_items": ("attention", "write"),
+    "resolve_attention_items": ("attention", "write"),
     "restore_attention_items": ("attention", "write"),
+    **mcp_catalog_tools.PERMISSIONS,
+    **mcp_marketplace_tools.PERMISSIONS,
 }
 
 MAX_ATTENTION_KEYS = 100
@@ -113,16 +125,36 @@ MAX_PHOTO_SIDE = 1600
 # Marks an image item whose bytes are read after the call's database session closes.
 _PHOTO_PLACEHOLDER = "_anteroom_photo"
 
-_AREA_NAMES = {"listings": "Listings", "analytics": "Analytics", "attention": "Needs Attention"}
-_LEVEL_NAMES = {"read": "Read", "write": "Read and write"}
+_AREA_NAMES = {"listings": "Listings", "analytics": "Analytics", "attention": "Needs Attention",
+               "marketplaces": "Marketplaces"}
+_LEVEL_NAMES = {"read": "Read", "write": "Read and write", "draft": "Save drafts on marketplaces",
+                "publish": "Publish, update and delist"}
 
 
 def _tool_allowed(name: str, permissions: dict[str, str] | None) -> bool:
-    """``permissions`` is None for the seller's own session, which reaches every tool."""
-    if permissions is None:
-        return True
+    """``permissions`` is None for the seller's own session (or the Mac without a token).
+
+    That reaches every tool except marketplace actions, which only a token or
+    app the seller granted them reaches.
+    """
     area, level = TOOL_PERMISSIONS[name]
+    if permissions is None:
+        return area not in mcp_marketplace_tools.GRANTED_ONLY_AREAS
     return mcp_tokens.allows(permissions, area, level)
+
+
+def _refusal(name: str, permissions: dict[str, str] | None) -> str:
+    area, level = TOOL_PERMISSIONS[name]
+    if permissions is None:
+        return (
+            f"{name} needs an MCP access token or connected app that the seller allowed to act on "
+            f"marketplaces. In Anteroom Settings → Agents, set its Marketplaces access to {_LEVEL_NAMES[level]}."
+        )
+    return (
+        f"This access token is not allowed to use {name}. To allow it, set "
+        f"{_AREA_NAMES[area]} to {_LEVEL_NAMES[level]} for this token in "
+        "Anteroom Settings → Agents."
+    )
 
 
 class McpToolError(Exception):
@@ -296,10 +328,10 @@ def tool_definitions() -> list[dict[str, Any]]:
         },
         {
             "name": "dismiss_attention_items",
-            "title": "Dismiss attention items",
+            "title": "Snooze attention items",
             "description": (
-                "Dismiss Needs Attention items by their key (from get_needs_attention). "
-                f"A dismissed item comes back after {home_dashboard.DISMISS_TTL_DAYS} days if it "
+                "Snooze Needs Attention items by their key (from get_needs_attention). "
+                f"A snoozed item comes back after {home_dashboard.DISMISS_TTL_DAYS} days if it "
                 "still applies. Only hides the alert in Anteroom: it never changes a listing "
                 "or anything on a marketplace."
             ),
@@ -319,9 +351,35 @@ def tool_definitions() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "resolve_attention_items",
+            "title": "Resolve attention items",
+            "description": (
+                "Resolve Needs Attention items by their key (from get_needs_attention) once the "
+                "seller has dealt with them. A possible-duplicate pair is marked not duplicates and "
+                "never flagged again; either listing can still be flagged against another one. Any "
+                "other item stays hidden until its situation changes (another sale, a new failure, "
+                "a new expiry), then shows again. Only hides the alert in Anteroom: it never "
+                "changes a listing or anything on a marketplace."
+            ),
+            "annotations": {**_WRITE_ANNOTATIONS, "idempotentHint": True},
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "item_keys": {
+                        "type": "array",
+                        "items": {"type": "string", "maxLength": 200},
+                        "minItems": 1,
+                        "maxItems": MAX_ATTENTION_KEYS,
+                    },
+                },
+                "required": ["item_keys"],
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "restore_attention_items",
             "title": "Restore attention items",
-            "description": "Bring dismissed Needs Attention items back into the inbox by their key.",
+            "description": "Bring snoozed or resolved Needs Attention items back into the inbox by their key.",
             "annotations": {**_WRITE_ANNOTATIONS, "idempotentHint": True},
             "inputSchema": {
                 "type": "object",
@@ -342,7 +400,8 @@ def tool_definitions() -> list[dict[str, Any]]:
             "title": "Create draft listing",
             "description": (
                 "Create a new local draft listing in Anteroom. Does NOT publish to any "
-                "marketplace; the seller reviews and sends it in Anteroom."
+                "marketplace; publishing is publish_listing, and only when the seller allows it."
+                + mcp_catalog_tools.WRITE_GUIDANCE
             ),
             "annotations": _WRITE_ANNOTATIONS,
             "inputSchema": {
@@ -388,7 +447,8 @@ def tool_definitions() -> list[dict[str, Any]]:
                 "Stage local field edits on an existing listing (title, description, "
                 "condition, price, quantity, cost, SKU, category, marketplace attributes). "
                 "NEVER pushes to live marketplaces; edits on live listings stay as local "
-                "unsent edits for the seller to confirm in Anteroom."
+                "unsent edits until they are sent (send_unsent_edits, or the seller in Anteroom)."
+                + mcp_catalog_tools.WRITE_GUIDANCE
             ),
             "annotations": _WRITE_ANNOTATIONS,
             "inputSchema": {
@@ -480,6 +540,8 @@ def tool_definitions() -> list[dict[str, Any]]:
             },
         },
     ]
+    tools.extend(mcp_catalog_tools.TOOLS)
+    tools.extend(mcp_marketplace_tools.TOOLS)
     return [{**tool, "annotations": {**tool["annotations"], "title": tool["title"]}} for tool in tools]
 
 
@@ -496,11 +558,13 @@ def handle_rpc_payload(
     permissions: dict[str, str] | None = None,
     deferred_deletes: list[str] | None = None,
     expired: Callable[[], bool] | None = None,
+    agent: str | None = None,
 ) -> tuple[Any | None, int, dict[str, str]]:
     """Process a JSON-RPC 2.0 request object or batch.
 
     ``permissions`` are the calling token's; None means the seller's own
-    session (or loopback on the Mac), which reaches every tool.
+    session (or loopback on the Mac), which reaches every tool but marketplace
+    actions. ``agent`` names the token or app, for the jobs it starts.
 
     Returns ``(response_body_or_none, http_status, extra_headers)``.
     When ``response_body_or_none`` is None (notifications only), HTTP 202 is returned.
@@ -532,6 +596,7 @@ def handle_rpc_payload(
                 bearer_token=bearer_token,
                 permissions=permissions,
                 deferred_deletes=deferred_deletes,
+                agent=agent,
             )
             if negotiated:
                 headers["MCP-Protocol-Version"] = negotiated
@@ -553,6 +618,7 @@ def handle_rpc_payload(
         bearer_token=bearer_token,
         permissions=permissions,
         deferred_deletes=deferred_deletes,
+        agent=agent,
     )
     if negotiated:
         headers["MCP-Protocol-Version"] = negotiated
@@ -569,6 +635,7 @@ def _handle_single(
     bearer_token: str | None,
     permissions: dict[str, str] | None,
     deferred_deletes: list[str] | None = None,
+    agent: str | None = None,
 ) -> tuple[dict[str, Any] | None, str | None]:
     if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
         return _rpc_error(None, -32600, "Invalid Request: jsonrpc must be '2.0'"), None
@@ -632,12 +699,7 @@ def _handle_single(
         if not isinstance(arguments, dict):
             return _rpc_error(msg_id, -32602, "Invalid params: arguments must be an object"), None
         if name in TOOL_PERMISSIONS and not _tool_allowed(name, permissions):
-            area, level = TOOL_PERMISSIONS[name]
-            return _rpc_result(msg_id, _tool_error_result(
-                f"This access token is not allowed to use {name}. To allow it, set "
-                f"{_AREA_NAMES[area]} to {_LEVEL_NAMES[level]} for this token in "
-                "Anteroom Settings → Agents."
-            )), None
+            return _rpc_result(msg_id, _tool_error_result(_refusal(name, permissions))), None
         try:
             result_data = _dispatch_tool(
                 db,
@@ -645,6 +707,7 @@ def _handle_single(
                 arguments,
                 bearer_token=bearer_token,
                 deferred_deletes=deferred_deletes,
+                agent=agent,
             )
         except KeyError:
             db.rollback()
@@ -670,6 +733,10 @@ def _rpc_error(msg_id: Any, code: int, message: str) -> dict[str, Any]:
 
 
 def _tool_success_result(data: dict[str, Any]) -> dict[str, Any]:
+    pending = data.pop(mcp_marketplace_tools.PENDING_KEY, None)
+    if pending is not None:
+        # Marketplace work runs once the call's session has closed (routes/mcp.py).
+        return mcp_marketplace_tools.pending_result(pending)
     images = data.pop("_images", [])
     return {
         "content": [{"type": "text", "text": json.dumps(data, indent=2, default=str)}, *images],
@@ -691,7 +758,11 @@ def _dispatch_tool(
     *,
     bearer_token: str | None,
     deferred_deletes: list[str] | None = None,
+    agent: str | None = None,
 ) -> dict[str, Any]:
+    marketplace_handler = mcp_marketplace_tools.HANDLERS.get(name)
+    if marketplace_handler is not None:
+        return marketplace_handler(db, args, agent=agent)
     handlers = {
         "search_inventory": _tool_search_inventory,
         "get_listing": _tool_get_listing,
@@ -702,12 +773,14 @@ def _dispatch_tool(
         "run_etsy_audit": _tool_run_etsy_audit,
         "get_needs_attention": _tool_get_needs_attention,
         "dismiss_attention_items": _tool_dismiss_attention_items,
+        "resolve_attention_items": _tool_resolve_attention_items,
         "restore_attention_items": _tool_restore_attention_items,
         "create_draft_listing": _tool_create_draft_listing,
         "edit_listing": _tool_edit_listing,
         "manage_listing_photos": _tool_manage_listing_photos,
         "manage_labels_and_notes": _tool_manage_labels_and_notes,
         "delete_draft_listing": _tool_delete_draft_listing,
+        **mcp_catalog_tools.HANDLERS,
     }
     handler = handlers.get(name)
     if handler is None:
@@ -1073,25 +1146,46 @@ def _attention_keys(args: dict[str, Any]) -> list[str]:
 
 def _tool_dismiss_attention_items(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str, Any]:
     keys = _attention_keys(args)
-    kinds = home_dashboard.attention_item_kinds(db)
+    items = home_dashboard.attention_items(db)
     dismissed: list[dict[str, Any]] = []
     not_found: list[str] = []
     for key in keys:
-        if key not in kinds:
+        if key not in items:
             not_found.append(key)
             continue
-        dismissed.append(home_dashboard.dismiss_attention_item(db, item_key=key, kind=kinds[key]))
+        dismissed.append(home_dashboard.dismiss_attention_item(db, item_key=key, kind=items[key]["kind"]))
     return {"dismissed": dismissed, "not_found": not_found}
+
+
+def _tool_resolve_attention_items(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str, Any]:
+    from anteroom.services import similar_items
+
+    keys = _attention_keys(args)
+    items = home_dashboard.attention_items(db)
+    resolved: list[dict[str, Any]] = []
+    not_found: list[str] = []
+    for key in keys:
+        item = items.get(key)
+        if item is None:
+            not_found.append(key)
+            continue
+        try:
+            resolved.append(home_dashboard.resolve_attention_item(
+                db, item_key=key, kind=item["kind"], fingerprint=item["fingerprint"],
+            ))
+        except similar_items.MergeError:
+            not_found.append(key)
+    return {"resolved": resolved, "not_found": not_found}
 
 
 def _tool_restore_attention_items(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str, Any]:
     keys = _attention_keys(args)
     restored = [key for key in keys if home_dashboard.restore_attention_item(db, item_key=key)]
-    return {"restored": restored, "not_dismissed": [key for key in keys if key not in restored]}
+    return {"restored": restored, "not_hidden": [key for key in keys if key not in restored]}
 
 
 # ---------------------------------------------------------------------------
-# Safe local write tools (NEVER publish, update live marketplaces, or delist)
+# Local write tools: they change only Anteroom's drafts and saved edits, never a marketplace
 # ---------------------------------------------------------------------------
 
 
