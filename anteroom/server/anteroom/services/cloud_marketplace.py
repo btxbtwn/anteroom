@@ -173,19 +173,15 @@ def _prepare_photos(marketplace: str, photos: list[dict[str, str]]) -> list[dict
                 raise ValueError("Listing photo exceeds 20 MB limit.")
             with Image.open(BytesIO(raw)) as source:
                 image = ImageOps.exif_transpose(source).convert("RGBA")
-                if marketplace == "depop":
-                    width, height = image.size
-                    if width > height:
-                        size = (1280, max(1, round(height / width * 1280)))
-                    else:
-                        size = (max(1, round(width / height * 1280)), 1280)
-                    image = image.resize(size, Image.Resampling.LANCZOS)
-                    canvas = Image.new("RGB", (1280, 1280), "white")
-                    offset = ((1280 - image.width) // 2, (1280 - image.height) // 2)
+                # Depop's square 1280 px frame.
+                width, height = image.size
+                if width > height:
+                    size = (1280, max(1, round(height / width * 1280)))
                 else:
-                    image.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
-                    canvas = Image.new("RGB", image.size, "white")
-                    offset = (0, 0)
+                    size = (max(1, round(width / height * 1280)), 1280)
+                image = image.resize(size, Image.Resampling.LANCZOS)
+                canvas = Image.new("RGB", (1280, 1280), "white")
+                offset = ((1280 - image.width) // 2, (1280 - image.height) // 2)
                 canvas.paste(image, offset, image.getchannel("A"))
                 encoded = BytesIO()
                 canvas.save(encoded, format="JPEG", quality=95 if marketplace == "depop" else 92)

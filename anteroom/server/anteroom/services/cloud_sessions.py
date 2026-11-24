@@ -34,7 +34,8 @@ from anteroom.services.service_context import current
 
 log = logging.getLogger("anteroom.cloud_sessions")
 
-SUPPORTED_CLOUD_MARKETPLACES = frozenset({"poshmark", "mercari", "depop"})
+# Not Mercari: its edge answers server requests with a Cloudflare challenge, so it runs only in Chrome (#2029).
+SUPPORTED_CLOUD_MARKETPLACES = frozenset({"poshmark", "depop"})
 _COOKIE_NAMES = {"poshmark": "jwt", "depop": "access_token"}
 UPLOAD_TOKEN_TTL_S = 180
 SESSION_EXPIRING_S = 24 * 60 * 60
@@ -200,8 +201,6 @@ def validate_and_normalize_cookies(
         exp_ts: int | None = None
         if not session_cookie and isinstance(exp_raw, (int, float)) and 0 < exp_raw <= 253402300799:
             exp_ts = int(exp_raw)
-            if market == "mercari" and exp_ts <= now_ts:
-                continue
         item: dict[str, Any] = {
             "name": name,
             "value": value,
@@ -220,9 +219,6 @@ def validate_and_normalize_cookies(
         if name == _COOKIE_NAMES.get(market) and value:
             jwt_cookie = item
 
-    # Mercari starts its authenticated session via /v1/initialize rather than a JWT.
-    if market == "mercari" and normalized:
-        return normalized, None, None, _sanitize_user_agent(user_agent)
     if jwt_cookie is None:
         raise CloudSessionError(f"Sign in to {market.title()} in Chrome first, then try again.")
 

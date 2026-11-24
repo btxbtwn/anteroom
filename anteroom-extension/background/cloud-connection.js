@@ -10,7 +10,8 @@
   const APPROVAL_TTL = 30 * 24 * 60 * 60 * 1000;
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const UPLOAD_TOKEN_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[A-Za-z0-9_-]{20,200}$/i;
-  const CLOUD_SESSION_MARKETS = new Set(['poshmark', 'mercari', 'depop']);
+  // Not Mercari: its edge answers server requests with a Cloudflare challenge, so it runs only in Chrome.
+  const CLOUD_SESSION_MARKETS = new Set(['poshmark', 'depop']);
   const TOKEN_COOKIES = { poshmark: 'jwt', depop: 'access_token' };
   const PAGE_ACTIONS = new Set(['status', 'connect', 'disconnect']);
   const APPROVAL_ACTIONS = new Set(['details', 'approve', 'deny']);

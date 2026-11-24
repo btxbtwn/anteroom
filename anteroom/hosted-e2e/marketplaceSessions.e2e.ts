@@ -21,28 +21,34 @@ async function openConnections(page: Page, phone: boolean) {
 
 test("cloud connections can be checked with Chrome closed", async ({ page }, info) => {
   test.setTimeout(90_000);
-  const sessions = Object.fromEntries(["poshmark", "mercari", "depop"].map(market => [market, {
-    state: market === "mercari" ? "signed_in" : market === "depop" ? "expired" : "signed_out",
-    mode: "cloud", cloud_connected: market === "mercari", cloud_available: true,
-    cloud_state: market === "depop" ? "expired" : "signed_out",
-    expiring: false, expires_at: null, label: null,
-  }]));
+  const cloud = (connected: boolean, state: string) => ({
+    state, mode: "cloud", cloud_connected: connected, cloud_available: true,
+    cloud_state: state === "expired" ? "expired" : "signed_out", expiring: false, expires_at: null, label: null,
+  });
+  // Mercari is never a cloud marketplace: the server reports it as a Chrome sign-in (#2029).
+  const sessions = {
+    poshmark: cloud(true, "signed_in"),
+    depop: cloud(false, "expired"),
+    mercari: { state: "signed_out", expiring: false, expires_at: null, label: null },
+  };
   await page.route("**/api/marketplaces/sessions", route => route.fulfill({ json: { sessions, chrome_connected: false } }));
-  await page.route("**/api/cloud-sessions/mercari/verify", route => route.fulfill({ json: { ok: true } }));
+  await page.route("**/api/cloud-sessions/poshmark/verify", route => route.fulfill({ json: { ok: true } }));
   await page.goto("/?sign-in");
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByRole("button", { name: "Account", exact: true })).toBeVisible({ timeout: 20_000 });
   await openConnections(page, info.project.name === "phone");
-  const mercari = page.locator("#chrome-mercari");
-  await mercari.getByRole("button", { name: "Test Cloud" }).click();
-  await expect(mercari.getByText("Mercari cloud sign-in verified.")).toBeVisible();
-  await expect(mercari.getByRole("button", { name: "Disconnect Cloud" })).toBeVisible();
+  const poshmark = page.locator("#chrome-poshmark");
+  await poshmark.getByRole("button", { name: "Test Cloud" }).click();
+  await expect(poshmark.getByText("Poshmark cloud sign-in verified.")).toBeVisible();
+  await expect(poshmark.getByRole("button", { name: "Disconnect Cloud" })).toBeVisible();
   const depop = page.locator("#chrome-depop");
   await expect(depop.getByRole("button", { name: "Reconnect in Cloud" })).toBeVisible();
   await expect(depop.getByRole("button", { name: "Disconnect Cloud" })).toBeVisible();
-  await expect(page.locator("#chrome-poshmark").getByRole("button", { name: "Connect in Cloud" })).toBeVisible();
+  const mercari = page.locator("#chrome-mercari");
+  await expect(mercari).toBeVisible();
+  await expect(mercari.getByRole("button", { name: /Cloud/ })).toHaveCount(0);
   await mercari.scrollIntoViewIfNeeded();
   await page.screenshot({ path: `e2e/results/hosted/session-cloud-connections-${info.project.name}.png`, fullPage: true });
 });
