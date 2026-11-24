@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1191 — 2026-11-24
+
+- In AI Studio, optionally tell Photoroom what to keep and what to leave out (for example keep the shirt, leave out a ruler or mannequin stand) when removing the background.
+
 ## 0.1.1190 — 2026-11-24
 
 - Load photo previews as you scroll through a large folder upload.
