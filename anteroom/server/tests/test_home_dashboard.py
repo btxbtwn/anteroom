@@ -835,6 +835,28 @@ def test_not_duplicates_stays_resolved_and_other_pairs_still_show():
     assert gone.status_code == 404
 
 
+def test_not_duplicates_from_a_stale_screen_keeps_a_merge():
+    from anteroom.models.similar_item import SimilarItemReview
+
+    client = TestClient(app)
+    with SessionLocal() as db:
+        for conv_id in ("merged-a", "merged-b"):
+            db.add(Conversation(id=conv_id, title="Graphic Band Tee", status="draft"))
+        db.add(SimilarItemReview(first_id="merged-a", second_id="merged-b", decision="merged", kept_id="merged-a"))
+        db.commit()
+
+    key = "duplicate:merged-a:merged-b"
+    refused = client.post("/api/home/attention/resolve", json={"item_key": key, "kind": "duplicate_listing"})
+    assert refused.status_code == 409, refused.text
+    assert client.post("/api/similar-items/dismiss", json={
+        "first_id": "merged-a", "second_id": "merged-b",
+    }).status_code == 409
+    assert client.post("/api/home/attention/restore", json={"item_key": key}).json()["restored"] is False
+    with SessionLocal() as db:
+        row = db.query(SimilarItemReview).filter_by(first_id="merged-a", second_id="merged-b").one()
+        assert (row.decision, row.kept_id) == ("merged", "merged-a")
+
+
 def test_resolved_duplicates_do_not_crowd_out_the_pair_limit():
     from anteroom.services import similar_items
 

@@ -285,6 +285,14 @@ def find_similar(
     }
 
 
+def _decision(db: Session, a: str, b: str) -> str | None:
+    from anteroom.models.similar_item import SimilarItemReview
+
+    first, second = _pair(a, b)
+    row = db.query(SimilarItemReview).filter_by(first_id=first, second_id=second).one_or_none()
+    return row.decision if row is not None else None
+
+
 def _record(db: Session, a: str, b: str, decision: str, kept_id: str | None = None) -> None:
     from anteroom.models.similar_item import SimilarItemReview
 
@@ -302,6 +310,9 @@ def dismiss(db: Session, first_id: str, second_id: str) -> None:
 
     if first_id == second_id or db.get(Conversation, first_id) is None or db.get(Conversation, second_id) is None:
         raise MergeError(404, "One of these items no longer exists.")
+    if _decision(db, first_id, second_id) == "merged":
+        # A stale screen must not turn a merge into "not duplicates".
+        raise MergeError(409, "These items were already merged.")
     _record(db, first_id, second_id, "dismissed")
     db.commit()
 
