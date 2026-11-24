@@ -534,9 +534,12 @@ async def marketplace_sessions():
     if not isinstance(sessions, dict):
         raise HTTPException(502, "Chrome did not report marketplace sign-in.")
 
+    chrome_sessions = {
+        name: _public_session(sessions.get(name) if chrome_connected else None)
+        for name in _SESSION_MARKETS
+    }
     result_sessions: dict[str, dict] = {}
-    for name in _SESSION_MARKETS:
-        chrome_summary = _public_session(sessions.get(name)) if chrome_connected else _public_session(None)
+    for name, chrome_summary in chrome_sessions.items():
         if name in cloud_map:
             cloud_meta = cloud_map[name]
             if cloud_meta.get("cloud_connected"):
@@ -566,6 +569,7 @@ async def marketplace_sessions():
 
     response: dict = {"sessions": result_sessions}
     if cloud_enabled:
+        response["chrome_sessions"] = chrome_sessions
         response["chrome_connected"] = chrome_connected
         response["cloud_available"] = sorted(cloud_enabled)
     return response

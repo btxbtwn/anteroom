@@ -21,6 +21,8 @@ export interface ExtensionSession extends Partial<Pick<MarketplaceCloudSessions[
 
 export interface ExtensionSessions {
   sessions: Record<ExtensionSessionMarket, ExtensionSession>;
+  /** Chrome sign-ins before cloud status is applied to the effective sessions. */
+  chrome_sessions?: Record<ExtensionSessionMarket, ExtensionSession>;
   chrome_connected?: boolean;
 }
 

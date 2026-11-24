@@ -6,10 +6,12 @@ import { StatusDot } from "../StatusDot";
 import { CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
 import { CHROME_WEB_STORE_URL } from "../../api/chromeBridge";
 import { api } from "../../api/client";
+import type { MarketplaceCloudResult, MarketplaceCloudSessions, MarketplaceCloudStatus } from "../../api/contract.gen";
 import type { DirectAccountStatus, DirectMarketplace } from "../../api/directConnections";
 import {
   EXTENSION_SESSION_NAMES,
   chromeSessionPresentation,
+  type ExtensionSession,
   type ExtensionSessionMarket,
 } from "../../api/marketplaceSessions";
 import { ConnectChromeButton } from "../ConnectChromeButton";
@@ -291,221 +293,280 @@ function EbayListingDefaults({ reconnecting, onReconnect }: { reconnecting: bool
 const CHROME_SESSION_DETAILS: Record<ExtensionSessionMarket, string> = {
   depop: "Lists on Depop with the account signed in to Chrome.",
   poshmark: "Lists on Poshmark with the account signed in to Chrome.",
-  mercari: "Saves the Mercari sign-in in Anteroom Bridge so listing keeps working after Chrome restarts.",
+  mercari: "Keep desktop Chrome open for Mercari listing actions and sales checks. Anteroom Bridge remembers your sign-in after Chrome restarts.",
 };
+
+function SignInStatus({ state }: { state: ReturnType<typeof chromeSessionPresentation> }) {
+  return (
+    <span role="status" className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <StatusDot tone={state.tone} />
+      {state.label}
+    </span>
+  );
+}
 
 function ChromeSessionRow({
   marketplace,
   chromeReady,
+  session,
+  checking,
   unavailable,
   salesSwitch,
   checkError,
+  cloud,
+  cloudConnected = false,
   hosted = false,
 }: {
   marketplace: ExtensionSessionMarket;
   chromeReady: boolean;
+  session?: ExtensionSession;
+  checking?: boolean;
   unavailable?: string | null;
   salesSwitch?: SalesSwitch;
   checkError?: string | null;
+  cloud?: ReactNode;
+  cloudConnected?: boolean;
   hosted?: boolean;
 }) {
   const queryClient = useQueryClient();
-  const { account } = useWorkspaceRuntime();
   const name = EXTENSION_SESSION_NAMES[marketplace];
-  const [hint, setHint] = useState<string | null>(null);
-  const [cloudPendingUntil, setCloudPendingUntil] = useState(0);
-  const sessions = useQuery({
-    queryKey: ["marketplace-sessions"],
-    queryFn: api.marketplaceSessions.status,
-    enabled: chromeReady || hosted,
-    retry: false,
-    refetchInterval: (query) => {
-      if (Date.now() < cloudPendingUntil && !query.state.data?.sessions[marketplace]?.cloud_connected) return pollMs(2_000);
-      return chromeReady || hosted ? pollMs(60_000) : false;
-    },
-  });
-  const session = sessions.data?.sessions[marketplace];
-  const cloudAvailable = hosted && Boolean(session?.cloud_available);
-  const cloudConnected = cloudAvailable && Boolean(session?.cloud_connected);
+  const helpId = `${marketplace}-chrome-sign-in-help`;
+  const help = cloud
+    ? "Keep your sign-in in your browser. Leave Chrome open for listing actions and sales checks."
+    : CHROME_SESSION_DETAILS[marketplace];
+  const label = hosted || (session?.state !== "signed_in" && session?.state !== "expired") ? "Sign in" : "Sign in again";
   const connect = useMutation({
     mutationFn: async () => {
       const result = await api.marketplaceSessions.connect(marketplace);
       if (!result.ok) throw new Error(result.error || "Chrome could not confirm the sign-in. Try again.");
       return result;
     },
-    onSuccess: (result) => {
-      setHint(result.signed_in ? null : "Finish signing in in the Chrome tab, then choose Sign in again.");
-      void queryClient.invalidateQueries({ queryKey: ["marketplace-sessions"] });
-    },
-    onError: () => setHint(null),
+    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ["marketplace-sessions"] }); },
   });
-  const cloudConnect = useMutation({
-    mutationFn: async () => {
-      if (!account) throw new Error("Sign in to your Anteroom account first.");
-      const { token, seller_region } = await api.cloudSessions.connectToken(marketplace);
-      const { cloudExtension } = await import("../../api/cloudExtension");
-      const response = await cloudExtension(account).connectCloudSession(marketplace, token, seller_region);
-      if (!response.ok) {
-        throw new Error(
-          response.error || `Update Anteroom Bridge in desktop Chrome, sign in to ${name}, then choose Connect in Cloud.`,
-        );
-      }
-      return response;
-    },
-    onSuccess: () => {
-      setCloudPendingUntil(Date.now() + 180_000);
-      setHint(`Confirm the ${name} connection in the Anteroom Bridge popup.`);
-      void queryClient.invalidateQueries({ queryKey: ["marketplace-sessions"] });
-    },
-    onError: () => {
-      setCloudPendingUntil(0);
-      setHint(null);
-    },
-  });
-  const cloudDisconnect = useMutation({
-    mutationFn: () => api.cloudSessions.disconnect(marketplace),
-    onSuccess: () => {
-      setCloudPendingUntil(0);
-      setHint(null);
-      void queryClient.invalidateQueries({ queryKey: ["marketplace-sessions"] });
-    },
-  });
-  const cloudVerify = useMutation({
-    mutationFn: async () => {
-      const result = await api.cloudSessions.verify(marketplace);
-      if (!result.ok) throw new Error(result.error || `Could not verify the ${name} cloud sign-in.`);
-    },
-    onMutate: () => setHint(null),
-    onSuccess: () => setHint(`${name} cloud sign-in verified.`),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["marketplace-sessions"] }),
-  });
-  const state = connect.isPending || connect.error || (connect.data && !connect.data.signed_in)
+  const waiting = connect.data && !connect.data.signed_in;
+  const state = connect.isPending || connect.error || waiting
     ? { tone: "warning" as const, label: "Sign-in not confirmed" }
-    : chromeSessionPresentation(session, chromeReady, undefined, unavailable);
-  const error = connect.error?.message || cloudConnect.error?.message || cloudDisconnect.error?.message || cloudVerify.error?.message || null;
+    : checking
+      ? { tone: "muted" as const, label: "Checking Chrome…" }
+      : chromeSessionPresentation(session, chromeReady, undefined, unavailable);
   const effectiveSignedIn = cloudConnected || (chromeReady && session?.state === "signed_in");
-  const salesBlocked = effectiveSignedIn
-    ? null
-    : cloudAvailable
-      ? "Connect to detect sales"
-      : !chromeReady
-        ? "Connect Chrome to detect sales"
-        : "Sign in to detect sales";
-  const description = cloudAvailable
-    ? "Run listing actions, sales checks, and enabled automations while Chrome is closed."
-    : CHROME_SESSION_DETAILS[marketplace];
-  const busy = connect.isPending || cloudConnect.isPending || cloudDisconnect.isPending || cloudVerify.isPending;
+  const salesBlocked = effectiveSignedIn ? null : !chromeReady && !cloud ? "Connect Chrome to detect sales" : "Sign in to detect sales";
+  const signIn = (
+    <Button size="xs" variant="outline" className={hosted ? "pointer-coarse:h-11" : undefined}
+      disabled={!chromeReady || connect.isPending}
+      aria-label={hosted ? `Sign in to ${name} in Chrome` : undefined}
+      aria-describedby={hosted ? helpId : undefined} onClick={() => connect.mutate()}>
+      {connect.isPending ? <Spinner /> : null}
+      {label}
+    </Button>
+  );
+  const chromeFeedback = connect.error
+    ? <SettingsNote tone="error">{connect.error.message}</SettingsNote>
+    : waiting
+      ? <SettingsNote role="status">Finish signing in in Chrome, then choose {label}.</SettingsNote>
+      : null;
 
   return (
     <SettingsRow
       id={`chrome-${marketplace}`}
-      title={
-        <span className="flex items-center gap-2">
-          <MarketplaceLogo id={marketplace} label={name} size={16} />
-          {name}
-        </span>
-      }
-      description={description}
-      status={
-        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <StatusDot tone={state.tone} />
-          {state.label}
-        </span>
-      }
+      title={<span className="flex items-center gap-2"><MarketplaceLogo id={marketplace} label={name} size={16} />{name}</span>}
+      description={hosted ? undefined : help}
+      status={hosted ? undefined : <SignInStatus state={state} />}
       control={
-        <span className="flex flex-wrap items-center justify-end gap-2">
+        <span className="flex flex-wrap items-center gap-2">
           {salesSwitch?.(salesBlocked)}
-          {cloudAvailable ? (
-            cloudConnected ? (
-              <>
-                <Button size="xs" variant="outline" disabled={busy} onClick={() => cloudVerify.mutate()}>
-                  {cloudVerify.isPending ? <Spinner /> : null}
-                  Test Cloud
-                </Button>
-                <Button size="xs" variant="outline" disabled={busy} onClick={() => cloudConnect.mutate()}>
-                  {cloudConnect.isPending ? <Spinner /> : null}
-                  Reconnect in Cloud
-                </Button>
-                <Button size="xs" variant="outline" disabled={busy} onClick={() => cloudDisconnect.mutate()}>
-                  {cloudDisconnect.isPending ? <Spinner /> : null}
-                  Disconnect Cloud
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button size="xs" variant="outline" disabled={busy} onClick={() => cloudConnect.mutate()}>
-                  {cloudConnect.isPending ? <Spinner /> : null}
-                  {session?.cloud_state === "expired" ? "Reconnect in Cloud" : "Connect in Cloud"}
-                </Button>
-                {session?.cloud_state === "expired" ? (
-                  <Button size="xs" variant="outline" disabled={busy} onClick={() => cloudDisconnect.mutate()}>
-                    {cloudDisconnect.isPending ? <Spinner /> : null}
-                    Disconnect Cloud
-                  </Button>
-                ) : null}
-                {chromeReady ? (
-                  <Button size="xs" variant="ghost" disabled={busy} onClick={() => connect.mutate()}>
-                    {connect.isPending ? <Spinner /> : null}
-                    {session?.state === "signed_in" ? "Sign in again" : "Use Chrome only"}
-                  </Button>
-                ) : null}
-              </>
-            )
-          ) : (
-            <Button size="xs" variant="outline" disabled={!chromeReady || busy} onClick={() => connect.mutate()}>
-              {connect.isPending ? <Spinner /> : null}
-              {session?.state === "signed_in" || session?.state === "expired" ? "Sign in again" : "Sign in"}
-            </Button>
-          )}
+          {hosted ? null : signIn}
         </span>
       }
     >
-      {hint && (!cloudConnected || cloudVerify.isSuccess) ? <SettingsNote>{hint}</SettingsNote> : null}
-      {error ? <SettingsNote tone="error">{error}</SettingsNote> : null}
-      {session?.mode === "cloud" && session.last_error && !cloudConnected ? <SettingsNote tone="error">{session.last_error}</SettingsNote> : null}
+      {hosted ? (
+        <div className="grid gap-3 border-t border-border/50 pt-3 sm:grid-flow-col sm:auto-cols-fr">
+          <div role="group" aria-label="Chrome" className="min-w-0 space-y-2">
+            <p className="text-xs font-medium text-foreground">Chrome</p>
+            <SettingsNote id={helpId}>{help}</SettingsNote>
+            <SignInStatus state={state} />
+            {signIn}
+            {chromeFeedback}
+          </div>
+          {cloud}
+        </div>
+      ) : chromeFeedback}
       {effectiveSignedIn && checkError ? <SettingsNote tone="error">Sale check failed: {checkError}</SettingsNote> : null}
     </SettingsRow>
   );
 }
 
-/** On the web, Chrome's marketplace sign-ins are read through this seller's connected Anteroom tab, and enabled cloud sessions run without Chrome. */
+const CLOUD_SESSIONS_KEY = ["cloud-sessions"] as const;
+type CloudSignInPending = { until: number; previousConnection?: string | null };
+
+function awaitingCloudSignIn(pending: CloudSignInPending | undefined, session: MarketplaceCloudStatus | undefined) {
+  return Boolean(pending && pending.until > Date.now()
+    && (!session?.cloud_connected || session.connected_at === pending.previousConnection));
+}
+
+function CloudSignIn({
+  marketplace, session, statusError, checkedAt, pending, setPending,
+}: {
+  marketplace: ExtensionSessionMarket;
+  session?: MarketplaceCloudStatus;
+  statusError: boolean;
+  checkedAt: number;
+  pending?: CloudSignInPending;
+  setPending: (pending?: CloudSignInPending) => void;
+}) {
+  const queryClient = useQueryClient();
+  const { account } = useWorkspaceRuntime();
+  const name = EXTENSION_SESSION_NAMES[marketplace];
+  const helpId = `${marketplace}-cloud-sign-in-help`;
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: CLOUD_SESSIONS_KEY });
+    void queryClient.invalidateQueries({ queryKey: ["marketplace-sessions"] });
+  };
+  const acceptStatus = async (result: MarketplaceCloudResult) => {
+    const confirmed = result.session;
+    if (confirmed) {
+      // A GET started before Test or Disconnect may still carry the previous status.
+      await queryClient.cancelQueries({ queryKey: CLOUD_SESSIONS_KEY });
+      queryClient.setQueryData<MarketplaceCloudSessions>(CLOUD_SESSIONS_KEY, (old) => old && ({
+        ...old, sessions: { ...old.sessions, [marketplace]: confirmed },
+      }), { updatedAt: queryClient.getQueryState(CLOUD_SESSIONS_KEY)?.dataUpdatedAt });
+    }
+    refresh();
+  };
+  const signIn = useMutation({
+    mutationFn: async () => {
+      if (!account) throw new Error("Sign in to Anteroom first.");
+      const { token, seller_region } = await api.cloudSessions.connectToken(marketplace);
+      const { cloudExtension } = await import("../../api/cloudExtension");
+      const result = await cloudExtension(account).connectCloudSession(marketplace, token, seller_region);
+      if (!result.ok) throw new Error(result.error || `Open Anteroom in desktop Chrome with Anteroom Bridge to sign in to ${name} in Cloud.`);
+    },
+    onSuccess: () => {
+      setPending({ until: Date.now() + 180_000, previousConnection: session?.connected_at });
+      refresh();
+    },
+    onError: () => setPending(),
+  });
+  const verify = useMutation({ mutationFn: () => api.cloudSessions.verify(marketplace), onSuccess: acceptStatus, onError: refresh });
+  const disconnect = useMutation({
+    mutationFn: () => api.cloudSessions.disconnect(marketplace),
+    onSuccess: (result) => { setPending(); return acceptStatus(result); },
+    onError: refresh,
+  });
+  const waiting = awaitingCloudSignIn(pending, session);
+  const testUnconfirmed = Boolean(verify.error || (verify.data && !verify.data.ok));
+  let state: ReturnType<typeof chromeSessionPresentation>;
+  if (statusError) state = { tone: "muted", label: "Could not check Cloud" };
+  else if (!session) state = { tone: "muted", label: "Checking Cloud…" };
+  else if (session.cloud_connected && testUnconfirmed) state = { tone: "warning", label: "Sign-in not verified" };
+  else state = chromeSessionPresentation({
+    state: session.cloud_connected ? "signed_in" : session.state === "expired" ? "expired" : "signed_out",
+    expires_at: session.expires_at ?? null,
+    label: session.label ?? null,
+    expiring: session.expiring,
+  }, true);
+  const busy = signIn.isPending || verify.isPending || disconnect.isPending;
+  const error = signIn.error?.message || verify.error?.message || verify.data?.error
+    || disconnect.error?.message || disconnect.data?.error || session?.last_error;
+  const verified = verify.data?.ok && session?.cloud_connected && !statusError
+    && verify.data.session?.connected_at === session.connected_at;
+  return (
+    <div role="group" aria-label="Cloud" className="min-w-0 space-y-2 border-t border-border/50 pt-3 sm:border-t-0 sm:border-l sm:pt-0 sm:pl-3">
+      <p className="text-xs font-medium text-foreground">Cloud</p>
+      <SettingsNote id={helpId}>
+        Anteroom saves an encrypted sign-in so listing actions, sales checks, and enabled automations can run with Chrome closed.
+      </SettingsNote>
+      <SignInStatus state={state} />
+      {checkedAt && !statusError ? (
+        <SettingsNote>Checked {new Date(checkedAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</SettingsNote>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        <Button size="xs" variant="outline" className="pointer-coarse:h-11"
+          disabled={busy} aria-label={`Sign in to ${name} in Cloud`} aria-describedby={helpId}
+          onClick={() => { verify.reset(); disconnect.reset(); signIn.mutate(); }}>
+          {signIn.isPending || waiting ? <Spinner /> : null}
+          Sign in
+        </Button>
+        {session?.cloud_connected ? (
+          <Button size="xs" variant="ghost" className="pointer-coarse:h-11"
+            disabled={busy} aria-label={`Test ${name} cloud connection`}
+            onClick={() => { signIn.reset(); disconnect.reset(); verify.mutate(); }}>
+            {verify.isPending ? <Spinner /> : null}
+            Test connection
+          </Button>
+        ) : null}
+        {session?.cloud_connected || session?.state === "expired" ? (
+          <Button size="xs" variant="ghost" className="pointer-coarse:h-11"
+            disabled={busy} aria-label={`Disconnect ${name} from Cloud`}
+            onClick={() => { signIn.reset(); verify.reset(); disconnect.mutate(); }}>
+            {disconnect.isPending ? <Spinner /> : null}
+            Disconnect
+          </Button>
+        ) : null}
+      </div>
+      {waiting ? <SettingsNote role="status">Confirm the cloud sign-in in the Anteroom Bridge popup.</SettingsNote> : null}
+      {verify.isPending ? <SettingsNote role="status">Testing connection…</SettingsNote> : null}
+      {verified ? <SettingsNote role="status">Cloud sign-in verified.</SettingsNote> : null}
+      {error ? <SettingsNote tone="error">{error}</SettingsNote> : null}
+    </div>
+  );
+}
+
 function HostedChromeSessions({ salesSwitch, checks }: {
   salesSwitch?: (marketplace: string, name: string) => SalesSwitch;
   checks?: Record<string, string>;
 }) {
-  const sessions = useQuery({
+  const [pending, setPending] = useState<Partial<Record<ExtensionSessionMarket, CloudSignInPending>>>({});
+  const chrome = useQuery({
     queryKey: ["marketplace-sessions"],
     queryFn: api.marketplaceSessions.status,
     retry: false,
     refetchInterval: (query) => pollMs(query.state.status === "error" ? 15_000 : 60_000),
   });
-  const chromeReady = sessions.isSuccess && sessions.data?.chrome_connected !== false;
-  const anyCloudAvailable = Boolean(
-    sessions.data && Object.values(sessions.data.sessions).some((entry) => entry?.cloud_available),
-  );
+  const chromeReady = chrome.isSuccess && chrome.data?.chrome_connected !== false;
+  const chromeSessions = chrome.data?.chrome_sessions ?? chrome.data?.sessions;
+  const cloud = useQuery({
+    queryKey: CLOUD_SESSIONS_KEY,
+    queryFn: ({ signal }) => api.cloudSessions.status({ signal }),
+    retry: false,
+    refetchOnWindowFocus: "always",
+    refetchInterval: (query) => pollMs(CHROME_MARKET_ORDER.some(
+      (market) => awaitingCloudSignIn(pending[market], query.state.data?.sessions[market]),
+    ) ? BUSY_POLL_MS : IDLE_POLL_MS),
+  });
+
   return (
     <>
-      {CHROME_MARKET_ORDER.map((marketplace) => (
-        <ChromeSessionRow key={marketplace} marketplace={marketplace} chromeReady={chromeReady} unavailable={sessions.error?.message}
-          salesSwitch={salesSwitch?.(marketplace, EXTENSION_SESSION_NAMES[marketplace])} checkError={checks?.[marketplace]} hosted />
-      ))}
+      {CHROME_MARKET_ORDER.map((marketplace) => {
+        const chromeSession = chromeSessions?.[marketplace];
+        const cloudSession = cloud.data?.sessions[marketplace];
+        return (
+          <ChromeSessionRow key={marketplace} marketplace={marketplace} chromeReady={chromeReady}
+            session={chromeSession?.mode === "cloud" ? undefined : chromeSession}
+            checking={chrome.isPending} unavailable={chrome.error?.message}
+            salesSwitch={salesSwitch?.(marketplace, EXTENSION_SESSION_NAMES[marketplace])} checkError={checks?.[marketplace]} hosted
+            cloudConnected={cloudSession?.cloud_connected}
+            cloud={cloud.data?.enabled.includes(marketplace) ? (
+              <CloudSignIn marketplace={marketplace} session={cloudSession} statusError={cloud.isError}
+                checkedAt={cloud.dataUpdatedAt} pending={pending[marketplace]}
+                setPending={(attempt) => setPending((current) => ({ ...current, [marketplace]: attempt }))} />
+            ) : null} />
+        );
+      })}
       <SettingsRow
-        title="Where the sign-in lives"
-        description={anyCloudAvailable
-          ? "Connect in desktop Chrome with Anteroom Bridge. Anteroom encrypts cloud sign-ins and you can disconnect them anytime."
-          : "Depop, Poshmark, and Mercari use the sign-ins in your Chrome profile."}
+        title="Sign-in setup"
+        description={cloud.data?.enabled.length
+          ? "Start either sign-in in desktop Chrome with Anteroom Bridge. One connection per marketplace is enough. When both are active, Anteroom uses Cloud."
+          : "Start the sign-in in desktop Chrome with Anteroom Bridge."}
         control={
-          <Button
-            size="xs"
-            variant="outline"
-            render={<a href={CHROME_WEB_STORE_URL} target="_blank" rel="noopener noreferrer" />}
-          >
+          <Button size="xs" variant="outline" render={<a href={CHROME_WEB_STORE_URL} target="_blank" rel="noopener noreferrer" />}>
             <ExternalLinkIcon />
             Chrome Web Store
           </Button>
         }
       >
-        {sessions.isError ? <SettingsNote>{sessions.error.message}</SettingsNote> : null}
+        {cloud.isError ? <SettingsNote tone="error">Cloud status is unavailable. {cloud.error.message}</SettingsNote> : null}
+        {chrome.isError ? <SettingsNote>{chrome.error.message}</SettingsNote> : null}
       </SettingsRow>
     </>
   );
@@ -550,6 +611,13 @@ function MarketplaceSection() {
     onSuccess: (data) => queryClient.setQueryData(["sale-detection"], data),
   });
   const chromeReady = Boolean(extension.data?.connected);
+  const chromeSessions = useQuery({
+    queryKey: ["marketplace-sessions"],
+    queryFn: api.marketplaceSessions.status,
+    enabled: !hosted && chromeReady,
+    retry: false,
+    refetchInterval: !hosted && chromeReady ? () => pollMs(60_000) : false,
+  });
   const accounts = direct.data?.accounts;
   const relay = direct.data?.relay;
   const enabled = (marketplace: string) => detection.data?.enabled?.[marketplace] !== false;
@@ -640,7 +708,7 @@ function MarketplaceSection() {
           {sessionWorkflows ? (
             <>
               <SettingsRow id="sale-detection" title="Sale detection"
-                description="Chrome checks for sales while this browser is connected, and saved sales stay if orders can’t be read; nothing comes down unless Delist the other marketplaces is on.">
+                description="Anteroom checks for sales through each marketplace’s active connection. Saved sales stay if orders can’t be read. With Delist the other marketplaces enabled, Anteroom can remove sold items from other marketplaces.">
                 {saveDetection.error ? <SettingsNote tone="error">{saveDetection.error.message}</SettingsNote> : null}
               </SettingsRow>
               {autodelistRow}
@@ -669,6 +737,9 @@ function MarketplaceSection() {
             key={marketplace}
             marketplace={marketplace}
             chromeReady={chromeReady}
+            session={chromeSessions.data?.sessions[marketplace]}
+            checking={chromeReady && chromeSessions.isPending}
+            unavailable={chromeSessions.error?.message}
             salesSwitch={salesSwitch(marketplace, EXTENSION_SESSION_NAMES[marketplace])}
             checkError={detection.data?.checks?.[marketplace]}
           />

@@ -140,14 +140,51 @@ describe("Connections settings", () => {
     expect(html).not.toContain("Facebook");
     expect(html).toContain("Signed in as ada");
     expect(html).toContain("Not signed in");
-    expect(html).toContain("Sign in again");
-    expect(html).toContain("Where the sign-in lives");
+    expect(html).toContain("Sign in</button>");
+    expect(html).toContain("Sign-in setup");
     expect(html).toContain("Detect sales");
     expect(html).toContain("Sale detection for Poshmark");
     expect(html).toContain('id="sale-autodelist"');
     expect(html).toContain("Delist the other marketplaces");
     expect(html).toContain('aria-label="Delist the other marketplaces when something sells"');
     expect(html).not.toContain("this Mac");
+  });
+
+  it("on the web, explains each marketplace's available sign-ins and shows their own status", () => {
+    const base = useQuery.getMockImplementation()!;
+    useQuery.mockImplementation((options) => {
+      if (options.queryKey[0] === "marketplace-sessions") {
+        const browser = { state: "signed_in", expires_at: null, label: "browser-account", expiring: false };
+        return { isSuccess: true, data: {
+          chrome_connected: true,
+          chrome_sessions: { depop: browser },
+          sessions: { depop: { ...browser, mode: "cloud", label: "old-cloud-account" } },
+        } };
+      }
+      if (options.queryKey[0] === "cloud-sessions") {
+        return { data: { enabled: ["poshmark", "depop"], sessions: {
+          poshmark: { state: "signed_in", cloud_connected: true, label: "poshmark-cloud", expires_at: null, expiring: false },
+          depop: { state: "expired", cloud_connected: false, expires_at: null, expiring: false },
+        } } };
+      }
+      return base(options);
+    });
+    const html = renderToStaticMarkup(
+      <WorkspaceRuntimeProvider value={{ ...desktopRuntime, hosted: true }}><ConnectionsSettings /></WorkspaceRuntimeProvider>,
+    );
+    expect(html).toContain("Signed in as browser-account");
+    expect(html).toContain("Sign-in expired");
+    expect(html).toContain('aria-label="Sign in to Depop in Chrome"');
+    expect(html).toContain('aria-label="Sign in to Depop in Cloud"');
+    expect(html).toContain('aria-label="Sign in to Poshmark in Chrome"');
+    expect(html).toContain('aria-label="Sign in to Poshmark in Cloud"');
+    expect(html).toContain('aria-label="Sign in to Mercari in Chrome"');
+    expect(html).toContain('aria-describedby="mercari-chrome-sign-in-help"');
+    expect(html).not.toContain('aria-label="Sign in to Mercari in Cloud"');
+    expect(html).toContain("Keep your sign-in in your browser. Leave Chrome open for listing actions and sales checks.");
+    expect(html).toContain("Anteroom saves an encrypted sign-in so listing actions, sales checks, and enabled automations can run with Chrome closed.");
+    expect(html).toContain("One connection per marketplace is enough.");
+    expect(html).not.toContain("old-cloud-account");
   });
 
   it("on the web, says why Chrome's sign-ins cannot be read", () => {
