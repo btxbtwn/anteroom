@@ -1,7 +1,7 @@
 """Remember which Item Details a photo reading was given, so retries reuse it
 
 Revision ID: e3b71c5a90d4
-Revises: d7e2a9c4b815
+Revises: e5c2a8f4d1b7
 Create Date: 2026-11-24 12:00:00.000000
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = 'e3b71c5a90d4'
-down_revision = 'd7e2a9c4b815'
+down_revision = 'e5c2a8f4d1b7'
 branch_labels = None
 depends_on = None
 
