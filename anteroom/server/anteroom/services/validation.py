@@ -549,6 +549,7 @@ def validate_listing(
     *,
     require_photos: bool = True,
     selected_marketplaces: list[str] | None = None,
+    include_formula_details: bool = True,
 ) -> ValidationResult:
     result = ValidationResult(valid=True)
     payload = data if isinstance(data, dict) else {}
@@ -604,21 +605,25 @@ def validate_listing(
         add_issue(result, "title", "Title must be 80 characters or less")
     if not digital_listing:
         if title and brand and not _title_follows_formula(title, brand, size):
-            add_issue(result, "title", "Title must follow Brand Size Vibe Item Color Fit")
-        if description and not _description_follows_formula(description):
-            from anteroom.services.skill_formulas import (
-                description_formula_markers,
-                description_lists_flaws,
+            message = (
+                "Title must follow Brand Size Vibe Item Color Fit" if include_formula_details
+                else "Title must follow the seller's title formula"
             )
+            add_issue(result, "title", message)
+        if description and not _description_follows_formula(description):
+            message = "Description must follow your description formula"
+            if include_formula_details:
+                from anteroom.services.skill_formulas import (
+                    description_formula_markers,
+                    description_lists_flaws,
+                )
 
-            markers = description_formula_markers()
-            if markers == ("measurements:",) and description_lists_flaws():
-                message = "Description must use the physical-item formula, including Flaws and Measurements"
-            elif markers:
-                names = ", ".join(marker[:-1].title() for marker in markers)
-                message = f"Description must follow your description formula, including {names}"
-            else:
-                message = "Description must follow your description formula"
+                markers = description_formula_markers()
+                if markers == ("measurements:",) and description_lists_flaws():
+                    message = "Description must use the physical-item formula, including Flaws and Measurements"
+                elif markers:
+                    names = ", ".join(marker[:-1].title() for marker in markers)
+                    message = f"Description must follow your description formula, including {names}"
             add_issue(result, "description", message)
     elif description and "instant download" not in description.lower() and "no physical item" not in description.lower():
         add_issue(

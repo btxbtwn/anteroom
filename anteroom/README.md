@@ -435,7 +435,7 @@ A database from before migrations existed is brought up to the current schema, c
 ```
 
 
-Category leaves, observed schemas, skill dropdown options, listing-rule chunks, and extension fill helpers are materialized under `catalog-index/` in the same data directory and searched with Semble (`GET /api/catalog/search`). First launch may download the local embedding model once.
+Anteroom indexes category leaves, observed schemas, dropdown options, and extension fill helpers under `catalog-index/` and searches them with Semble (`GET /api/catalog/search`). Listing generation loads its writing rules internally. First launch may download the local embedding model.
 
 ### Category tree seed
 

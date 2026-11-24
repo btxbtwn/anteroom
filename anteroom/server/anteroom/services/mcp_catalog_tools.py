@@ -1,8 +1,8 @@
 """MCP reads an agent needs before it fills a marketplace's fields.
 
 Categories, the fields a category asks for and the values each accepts, the
-form a listing shows for one marketplace, the seller's region and connections,
-and the list-this rules. Each comes from what Anteroom already keeps: the
+form a listing shows for one marketplace, and the seller's region and connections.
+Each comes from what Anteroom already keeps: the
 bundled marketplace catalogs, the synced category trees, and the eBay and Etsy
 category fields Anteroom saved when it last read them. None of them waits on
 Chrome or a marketplace (they run inside the MCP call's database session), and
@@ -34,11 +34,9 @@ NAMES = {"ebay": "eBay", "poshmark": "Poshmark", "mercari": "Mercari", "depop": 
 _CATEGORY_MARKETS: tuple[str, ...] = ("general", *sorted(MARKETS))
 # Longer option lists are left out of a field summary: the agent asks for the ones it needs.
 MAX_INLINE_OPTIONS = 50
-MAX_GUIDELINE_CHARS = 20000
 # eBay and Etsy sign-ins live in the Keychain on the Mac. Its own deadline is as long as the
 # whole MCP call, so the settings tool stops waiting sooner and says the state is unknown.
 CONNECTIONS_READ_TIMEOUT_S = 5.0
-_DEFAULT_GUIDELINE_CHARS = 12000
 _FORM_SOURCES = {
     "catalog": "Built from the marketplace's form as Anteroom's bundled catalog records it",
     "saved": "The form Anteroom saved the last time it read this marketplace's fields for this listing",
@@ -141,28 +139,6 @@ TOOLS: list[dict[str, Any]] = [
         "annotations": _READ_ANNOTATIONS,
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
-    {
-        "name": "get_listing_guidelines",
-        "title": "Get listing guidelines",
-        "description": (
-            "Read the rules Anteroom follows when it writes a listing: the title, description and "
-            "pricing formulas (including the seller's own), evidence rules, and the sections most "
-            "relevant to a marketplace, category or field. Read before writing or editing a "
-            "listing's text. Read-only."
-        ),
-        "annotations": _READ_ANNOTATIONS,
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "marketplace": {"type": "string", "enum": sorted(MARKETS)},
-                "category": {"type": "string", "maxLength": 300, "description": "Optional category path or words."},
-                "field": {"type": "string", "maxLength": 200, "description": "Optional field, such as title or size."},
-                "max_chars": {"type": "integer", "minimum": 1000, "maximum": MAX_GUIDELINE_CHARS,
-                              "default": _DEFAULT_GUIDELINE_CHARS},
-            },
-            "additionalProperties": False,
-        },
-    },
 ]
 
 PERMISSIONS: dict[str, tuple[str, str]] = {tool["name"]: ("listings", "read") for tool in TOOLS}
@@ -171,7 +147,7 @@ PERMISSIONS: dict[str, tuple[str, str]] = {tool["name"]: ("listings", "read") fo
 WRITE_GUIDANCE = (
     " Before filling categories or <marketplace>_specifics, look them up: search_categories, "
     "get_category_attributes and search_attribute_options give each marketplace's categories, "
-    "fields and allowed values, and get_listing_guidelines how to write the title and description."
+    "fields and allowed values."
 )
 
 
@@ -621,33 +597,10 @@ def _tool_get_account_settings(db: Session, _args: dict[str, Any], **_kw: Any) -
     return out
 
 
-def _tool_get_listing_guidelines(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str, Any]:
-    from anteroom.services.catalog_index import relevant_skill_rules
-
-    market = _text(args, "marketplace", required=False, max_len=20).lower()
-    if market and market not in MARKETS:
-        raise ValueError(f"marketplace must be one of: {', '.join(sorted(MARKETS))}.")
-    category = _text(args, "category", required=False, max_len=300)
-    field = _text(args, "field", required=False, max_len=200)
-    try:
-        max_chars = int(args.get("max_chars") or _DEFAULT_GUIDELINE_CHARS)
-    except (TypeError, ValueError):
-        max_chars = _DEFAULT_GUIDELINE_CHARS
-    max_chars = max(1000, min(max_chars, MAX_GUIDELINE_CHARS))
-    query = " ".join(part for part in (NAMES.get(market, ""), category, field, "listing") if part)
-    return {
-        "marketplace": market or None,
-        "category": category or None,
-        "field": field or None,
-        "guidelines": relevant_skill_rules(db, query, max_chars=max_chars),
-    }
-
-
 HANDLERS: dict[str, Callable[..., dict[str, Any]]] = {
     "search_categories": _tool_search_categories,
     "get_category_attributes": _tool_get_category_attributes,
     "search_attribute_options": _tool_search_attribute_options,
     "get_marketplace_form": _tool_get_marketplace_form,
     "get_account_settings": _tool_get_account_settings,
-    "get_listing_guidelines": _tool_get_listing_guidelines,
 }
