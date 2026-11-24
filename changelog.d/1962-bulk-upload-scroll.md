@@ -1,1 +1,0 @@
-- Load photo previews as you scroll through a large folder upload.

@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1190 — 2026-11-24
+
+- Load photo previews as you scroll through a large folder upload.
+
+## 0.1.1189 — 2026-11-24
+
+- Auto-relist no longer skips listings with open or unconfirmed buyer offers, so due listings relist again (including on Mercari). An open offer on a relisted listing ends with the old listing.
+
 ## 0.1.1188 — 2026-11-24
 
 - Claude and ChatGPT now show Anteroom's tools by plain names, like "Search inventory" or "Delete draft listing", when they ask before running one.
