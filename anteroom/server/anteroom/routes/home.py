@@ -9,7 +9,17 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from anteroom.database import get_db
-from anteroom.services import home_dashboard
+from anteroom.routes.api_contract import (
+    NOT_FOUND,
+    AttentionInbox,
+    AttentionResolveInput,
+    AttentionResolveResult,
+    AttentionRestoreInput,
+    AttentionRestoreResult,
+    AttentionSnoozeInput,
+    AttentionSnoozeResult,
+)
+from anteroom.services import home_dashboard, similar_items
 
 router = APIRouter(prefix="/api/home", tags=["home"])
 
@@ -39,17 +49,6 @@ class GoalUpdateInput(BaseModel):
     metric: Literal["profit", "sales", "listings", "sell_through_rate"] | None = None
     target: float | None = Field(default=None, gt=0, le=100_000_000)
     label: str | None = Field(default=None, max_length=80)
-
-
-class AttentionDismissInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    item_key: str = Field(min_length=1, max_length=200)
-    kind: str = Field(default="general", max_length=40)
-
-
-class AttentionRestoreInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    item_key: str = Field(min_length=1, max_length=200)
 
 
 @router.get("")
@@ -117,23 +116,45 @@ def delete_goal(
     return _mutation_result(db, timezone)
 
 
-@router.post("/attention/dismiss")
+@router.get("/attention", response_model=AttentionInbox)
+def get_attention(response: Response, db: Session = Depends(get_db, scope="function")):
+    """Needs Attention alone, without Today and goals, for the iPhone app."""
+    response.headers["Cache-Control"] = "no-store"
+    return home_dashboard.attention_inbox(db)
+
+
+# Snooze, resolve and restore skip home_summary: rebuilding Today scans every
+# listing and job and stalls the action on large inventories. The client
+# patches its copy from the answer.
+@router.post("/attention/dismiss", response_model=AttentionSnoozeResult)
 def dismiss_attention(
-    body: AttentionDismissInput,
+    body: AttentionSnoozeInput,
     db: Session = Depends(get_db, scope="function"),
 ):
-    # Skip home_summary: rebuilding Today scans every listing/job and stalls
-    # dismiss on large inventories. The client patches from `dismissal`.
     try:
-        dismissal = home_dashboard.dismiss_attention_item(
-            db, item_key=body.item_key, kind=body.kind,
-        )
+        dismissal = home_dashboard.dismiss_attention_item(db, item_key=body.item_key, kind=body.kind)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     return {"ok": True, "dismissal": dismissal}
 
 
-@router.post("/attention/restore")
+@router.post("/attention/resolve", response_model=AttentionResolveResult, responses=NOT_FOUND)
+def resolve_attention(
+    body: AttentionResolveInput,
+    db: Session = Depends(get_db, scope="function"),
+):
+    try:
+        resolution = home_dashboard.resolve_attention_item(
+            db, item_key=body.item_key, kind=body.kind, fingerprint=body.fingerprint,
+        )
+    except similar_items.MergeError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"ok": True, "resolution": resolution}
+
+
+@router.post("/attention/restore", response_model=AttentionRestoreResult)
 def restore_attention(
     body: AttentionRestoreInput,
     db: Session = Depends(get_db, scope="function"),
