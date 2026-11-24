@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1199 — 2026-11-24
+
+- Keep active Poshmark listings from showing up as sold comps when a search result includes the seller’s Sold Listings count.
+
+## 0.1.1198 — 2026-11-24
+
+- Open the original listing with View when Anteroom cannot confirm that it was delisted.
+
 ## 0.1.1197 — 2026-11-24
 
 - Edit photos across selected drafts with Photoroom. Review cover photos or pick individual photos, then apply the same edit in one batch.
