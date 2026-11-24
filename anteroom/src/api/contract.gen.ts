@@ -592,6 +592,8 @@ export interface StudioOptions {
   ghost_mannequin?: boolean;
   flat_lay?: boolean;
   shadow?: boolean;
+  keep?: string;
+  exclude?: string;
   virtual_model?: VirtualModel | null;
 }
 

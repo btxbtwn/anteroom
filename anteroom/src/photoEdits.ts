@@ -140,6 +140,11 @@ export function markFromDrag(tool: MarkTool, x1: number, y1: number, x2: number,
   return { annotation: { kind: tool, x1: ax, y1: ay, x2: bx, y2: by, color } };
 }
 
+/** Trim and collapse whitespace the way the server does for Photoroom prompts. */
+function studioWords(value: string | undefined): string {
+  return (value ?? "").trim().replace(/\s+/g, " ");
+}
+
 /** The AI Studio choices the server accepts, made consistent the way it makes them. */
 export function normalizeStudio(options: StudioOptions): StudioOptions {
   if (options.virtual_model) {
@@ -147,19 +152,24 @@ export function normalizeStudio(options: StudioOptions): StudioOptions {
   }
   const flatLay = Boolean(options.flat_lay) && !options.ghost_mannequin;
   const generative = Boolean(options.ghost_mannequin || flatLay || options.shadow);
+  const keep = studioWords(options.keep);
+  const exclude = studioWords(options.exclude);
   return {
     remove_background: Boolean(options.remove_background) || generative,
     background: options.background,
     ghost_mannequin: Boolean(options.ghost_mannequin),
     flat_lay: flatLay,
     shadow: Boolean(options.shadow),
+    ...(keep ? { keep } : {}),
+    ...(exclude ? { exclude } : {}),
   };
 }
 
 /** Why these AI Studio options cannot run, or null; mirrors `StudioOptions` on the server. */
 export function studioProblem(options: StudioOptions): string | null {
   if (options.ghost_mannequin && options.flat_lay) return "Choose Ghost mannequin or Flat lay, not both.";
-  if (options.virtual_model && (options.remove_background || options.ghost_mannequin || options.flat_lay || options.shadow)) {
+  if (options.virtual_model && (options.remove_background || options.ghost_mannequin || options.flat_lay || options.shadow
+    || studioWords(options.keep) || studioWords(options.exclude))) {
     return "A virtual model makes its own scene, so it cannot be combined with other AI Studio edits.";
   }
   if (!options.remove_background && !options.ghost_mannequin && !options.flat_lay && !options.shadow && !options.virtual_model) {

@@ -1124,10 +1124,12 @@ struct StudioOptions: Codable, Hashable, Sendable {
     var ghostMannequin: Bool = false
     var flatLay: Bool = false
     var shadow: Bool = false
+    var keep: String = ""
+    var exclude: String = ""
     var virtualModel: VirtualModel?
 
     enum CodingKeys: String, CodingKey {
-        case background, shadow
+        case background, shadow, keep, exclude
         case removeBackground = "remove_background"
         case ghostMannequin = "ghost_mannequin"
         case flatLay = "flat_lay"
@@ -1143,6 +1145,8 @@ extension StudioOptions {
         ghostMannequin = try values.decodeIfPresent(Bool.self, forKey: .ghostMannequin) ?? false
         flatLay = try values.decodeIfPresent(Bool.self, forKey: .flatLay) ?? false
         shadow = try values.decodeIfPresent(Bool.self, forKey: .shadow) ?? false
+        keep = try values.decodeIfPresent(String.self, forKey: .keep) ?? ""
+        exclude = try values.decodeIfPresent(String.self, forKey: .exclude) ?? ""
         virtualModel = try values.decodeIfPresent(VirtualModel.self, forKey: .virtualModel)
     }
 }

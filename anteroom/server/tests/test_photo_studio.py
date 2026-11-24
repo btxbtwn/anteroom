@@ -113,6 +113,14 @@ def test_studio_options_become_photoroom_form_fields():
     chosen = StudioOptions(virtual_model=VirtualModel(model="maya", scene="beach", pose="seated")).form()
     assert chosen["virtualModel.model.preset.name"] == "maya"
     assert chosen["virtualModel.scene.preset.name"] == "beach" and chosen["virtualModel.pose"] == "seated"
+    # Text-guided segmentation: optional keep/leave-out words Photoroom's preview API accepts.
+    guided = StudioOptions(remove_background=True, keep="shirt", exclude="ruler, stand").form()
+    assert guided["segmentation.prompt"] == "shirt"
+    assert guided["segmentation.negativePrompt"] == "ruler, stand"
+    blank = StudioOptions(remove_background=True, keep="  ", exclude="").form()
+    assert "segmentation.prompt" not in blank and "segmentation.negativePrompt" not in blank
+    with pytest.raises(ValidationError, match="virtual model makes its own scene"):
+        StudioOptions(virtual_model=VirtualModel(), keep="shirt")
 
 
 def test_studio_route_refuses_invalid_combinations(env):
