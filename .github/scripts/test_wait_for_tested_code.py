@@ -61,11 +61,20 @@ class FakeHealthResponse:
 class WaitForTestedCodeRecoveryTests(unittest.TestCase):
     def setUp(self):
         self.gate = _load_wait_gate()
+        self.committed_correction = self.gate.HISTORICAL_RECOVERY_CORRECTION
+        self.committed_failures = self.gate.HISTORICAL_RECOVERY_FAILURES
         self.repo = "example/project"
         self.prod = "1" * 40
         self.before_hist = "2" * 40
         self.hist = verification.HISTORICAL
+        self.second_hist = "ab" * 20
         self.corr = verification.CORRECTED
+        patcher = patch.multiple(
+            self.gate, HISTORICAL_RECOVERY_CORRECTION=self.corr,
+            HISTORICAL_RECOVERY_FAILURES=frozenset({self.hist, self.second_hist}),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.target = "3" * 40
         self.post_merge = "4" * 40
         self.head = "5" * 40
@@ -74,7 +83,7 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
         self.wf_blob = "8" * 40
         self.ci_blob = "9" * 40
 
-        self.span_to_target = [self.before_hist, self.hist, self.corr, self.target]
+        self.span_to_target = [self.before_hist, self.hist, self.second_hist, self.corr, self.target]
         self.span_to_head = [*self.span_to_target, self.post_merge, self.head]
         self.main_newest_first = list(reversed([self.prod, *self.span_to_head]))
 
@@ -89,7 +98,7 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
             ("rev-list", "--first-parent", "--reverse", f"{self.prod}..{self.head}"): "\n".join(self.span_to_head),
             ("rev-list", "--first-parent", "--reverse", f"{self.prod}..{self.target}"): "\n".join(self.span_to_target),
             ("rev-list", "--first-parent", "--reverse", f"{self.prod}..{self.corr}"): "\n".join(
-                [self.before_hist, self.hist, self.corr]
+                [self.before_hist, self.hist, self.second_hist, self.corr]
             ),
             ("rev-parse", self.target + "^{tree}"): self.tree,
             ("rev-parse", self.target + ":" + verification.WORKFLOW): self.wf_blob,
@@ -220,29 +229,24 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
             return {"total_count": len(self.artifacts), "artifacts": copy.deepcopy(self.artifacts)}
         raise AssertionError(f"Unexpected API path: {path}")
 
-    def test_committed_pin_matches_exact_documented_receipt(self):
-        pin = self.gate.HISTORICAL_RECOVERY_CHECKPOINT
-        self.assertIsNotNone(pin)
-        assert pin is not None
-        self.assertEqual(pin.repository, "btxbtwn/anteroom")
-        self.assertEqual(pin.repository_id, 1183824317)
-        self.assertEqual(pin.workflow_id, 422931456)
-        self.assertEqual(pin.target, "bbb4c8fc560da5f81bedfd349714ff30a4c28a1d")
-        self.assertEqual(pin.production_base, "a1a55df0789371ad271e443897b72c2fd6ff0c3e")
-        self.assertEqual(pin.historical_failure, verification.HISTORICAL)
-        self.assertEqual(pin.correcting_merge, verification.CORRECTED)
-        self.assertEqual(pin.run_id, 44992383513)
-        self.assertEqual(pin.attempt, 1)
-        self.assertEqual(pin.receipt_artifact_id, 14743680528)
-        self.assertEqual(
-            pin.receipt_digest,
-            "sha256:b6f32050e79a324cdc27c0d0adad164cb573a8eb229c22b0bf6d0c6cf980ce31",
-        )
+    def test_committed_recovery_targets_match_documented_pair(self):
+        # Pin is unset until a Descendant verification receipt is recorded in a
+        # follow-up PR; the diagnosed failures and live base facts are fixed here.
+        self.assertIsNone(self.gate.HISTORICAL_RECOVERY_CHECKPOINT)
+        self.assertEqual(verification.HISTORICAL, "99c3b7003d1d79cfc20cea283bebde7e54572081")
+        self.assertEqual(verification.CORRECTED, "afc3c2dbde647b59203c0b761c8c0dfb2b697264")
+        self.assertEqual(self.committed_correction, "afc3c2dbde647b59203c0b761c8c0dfb2b697264")
+        self.assertEqual(self.committed_failures, {
+            "99c3b7003d1d79cfc20cea283bebde7e54572081",
+            "08b97e99edaa02f021bc7bcf876d2fd2ade83c69",
+            "fb7d5c076cce6021b48240014ba6fb0e71256300",
+        })
         self.assertEqual(
             self.gate.HISTORICAL_BASE_IMAGE_DIGEST,
-            "sha256:cdc7323a7eb2f8ac00f2a9f3e96bd737abec9ce16c0aa2de7cdb3a77e14ebd7e",
+            "sha256:22df137ee877807504d7223d6aff53e8cee6777cf2ddfd70838a14a822641591",
         )
-        self.assertEqual(self.gate.HISTORICAL_BASE_DB_REVISION, "85dab8d3327c")
+        self.assertEqual(self.gate.HISTORICAL_BASE_DB_REVISION, "e3b7a1c9d402")
+        self.assertEqual(self.gate.HISTORICAL_BASE_FLY_APP, "peaceful-meadowstone-6944")
 
     def test_valid_checkpoint_passes_when_base_live_version_and_receipt_match(self):
         report = self.gate.verify_historical_checkpoint(
@@ -309,6 +313,14 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
             self.repo, self.head, None, self.hist, pin=self.pin, git_fn=self.fake_git
         )
         self.assertFalse(eligible)
+
+    def test_allowlisted_failures_must_all_precede_the_correction(self):
+        with patch.object(self.gate, "HISTORICAL_RECOVERY_FAILURES", {self.hist, self.post_merge}):
+            eligible, reason = self.gate.checkpoint_eligible(
+                self.repo, self.head, self.prod, self.hist, pin=self.pin, git_fn=self.fake_git
+            )
+        self.assertFalse(eligible)
+        self.assertIn("must precede the correcting merge", reason)
 
     def test_stale_evidence_and_live_version_drift_fail_closed(self):
         # Expired receipt artifact fails closed.
@@ -404,7 +416,7 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
         poll_count = {"post": 0}
 
         def fake_ci_state(repo, sha):
-            if sha == self.hist:
+            if sha in (self.hist, self.second_hist):
                 return ("completed", "failure")
             if sha == self.post_merge:
                 poll_count["post"] += 1
@@ -431,7 +443,7 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
             patch.object(self.gate, "production_commit", return_value=self.prod),
             patch.object(
                 self.gate, "commits_to_check",
-                return_value=([self.before_hist, self.hist, self.corr, self.post_merge], "span"),
+                return_value=([self.before_hist, self.hist, self.second_hist, self.corr, self.post_merge], "span"),
             ),
             patch.object(self.gate, "ci_state", side_effect=fake_ci_state),
             patch.object(self.gate, "verify_historical_checkpoint", side_effect=fake_verify),
