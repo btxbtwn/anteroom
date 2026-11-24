@@ -670,6 +670,21 @@ dies during SMTP, its reservation remains charged; a 120-second lease prevents
 another sender from immediately repeating it. An uncertain delivery can be
 repeated after lease expiry, still charged against the budget.
 
+**Seller feedback:** the MCP tool `send_feedback` (`services/mcp_feedback_tools.py`)
+saves each item to the seller's `mcp_feedback` table (row security on), then,
+on hosted with `ANTEROOM_ERROR_EMAIL = '1'` and outside a sandbox, emails it
+to the same operator inbox as "Anteroom Feedback". It takes one slot from the
+same rolling budget, leaves the quarter kept for errors, waits while the relay
+is paused, and a relay refusal pauses every sender the same way. The send runs
+after the call's database session closes, waits at most 15 seconds (10 per
+SMTP step) and records `sent`, `failed` or `not_sent` on the row; a send that
+finishes after the call answered is still recorded. Feedback is never retried.
+Items with `delivery <> 'sent'` are read from Supabase when the relay is back.
+The email holds the masked message, kind, seller id, token or app name, release,
+environment and listing ID: no listing contents, photos, buyer data or tokens.
+Each seller can send five an hour. The Mac app never sends: it saves the item
+and gives the assistant a `mailto:` link to `support@myanteroom.com`.
+
 **Operator status:** set `ANTEROOM_OPERATOR_USER_ID` to the operator's verified
 Supabase user UUID. Only that signed-in seller sees Settings → General → Error
 emails, showing budget use, pending occurrence count, the safe delivery failure,

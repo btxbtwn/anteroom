@@ -696,7 +696,9 @@ LISTING_WRITE_TOOLS = {
     "manage_labels_and_notes", "delete_draft_listing", "set_favorite", "confirm_import_match", "reject_import_match",
 }
 ATTENTION_WRITE_TOOLS = {"dismiss_attention_items", "resolve_attention_items", "restore_attention_items"}
-ALL_TOOLS = READ_TOOLS | LISTING_WRITE_TOOLS | ATTENTION_WRITE_TOOLS
+# Reaches any token or app with some access to at least one area.
+FEEDBACK_TOOLS = {"send_feedback"}
+ALL_TOOLS = READ_TOOLS | LISTING_WRITE_TOOLS | ATTENTION_WRITE_TOOLS | FEEDBACK_TOOLS
 
 
 def _tool_names(client: TestClient, extra_headers: dict | None = None) -> set[str]:
@@ -719,7 +721,7 @@ def test_desktop_mcp_token_permissions_limit_tools_and_apply_on_the_next_call():
     bearer = {"Authorization": f"Bearer {token['token']}"}
 
     # A new token reads but cannot change anything.
-    assert _tool_names(client, bearer) == READ_TOOLS
+    assert _tool_names(client, bearer) == READ_TOOLS | FEEDBACK_TOOLS
     refused, is_error = _call_tool(client, "create_draft_listing", {"title": "Blocked draft"}, extra_headers=bearer)
     assert is_error
     assert "not allowed to use create_draft_listing" in refused["error"]
@@ -731,7 +733,7 @@ def test_desktop_mcp_token_permissions_limit_tools_and_apply_on_the_next_call():
     patched = client.patch(f"/api/settings/mcp-tokens/{token['id']}", json={"permissions": {"listings": "write"}})
     assert patched.status_code == 200, patched.text
     assert patched.json()["permissions"] == {"listings": "write", "analytics": "read", "attention": "read", "marketplaces": "none"}
-    assert _tool_names(client, bearer) == READ_TOOLS | LISTING_WRITE_TOOLS
+    assert _tool_names(client, bearer) == READ_TOOLS | LISTING_WRITE_TOOLS | FEEDBACK_TOOLS
     draft, is_error = _call_tool(client, "create_draft_listing", {"title": "Allowed draft"}, extra_headers=bearer)
     assert not is_error, draft
 
@@ -773,7 +775,7 @@ def test_mcp_token_created_with_chosen_permissions():
     bearer = {"Authorization": f"Bearer {created.json()['token']}"}
     assert _tool_names(client, bearer) == {
         "get_sales_analytics", "get_offer_activity", "get_sourcing_roi", "run_etsy_audit",
-        "search_orders", "get_profit_and_loss", "search_expenses", "get_inventory_summary",
+        "search_orders", "get_profit_and_loss", "search_expenses", "get_inventory_summary", "send_feedback",
     }
     listed = client.get("/api/settings/mcp-tokens").json()["tokens"][0]
     assert listed["permissions"] == {"listings": "none", "analytics": "read", "attention": "none", "marketplaces": "none"}
@@ -790,7 +792,7 @@ def test_hosted_mcp_token_permissions_are_enforced_and_seller_scoped(cloud, sign
     token = created.json()
     bearer = {"Authorization": f"Bearer {token['token']}"}
 
-    assert _tool_names(client, bearer) == READ_TOOLS
+    assert _tool_names(client, bearer) == READ_TOOLS | FEEDBACK_TOOLS
     _, is_error = _call_tool(client, "create_draft_listing", {"title": "Blocked"}, extra_headers=bearer)
     assert is_error
 
@@ -798,7 +800,7 @@ def test_hosted_mcp_token_permissions_are_enforced_and_seller_scoped(cloud, sign
     assert client.patch(
         f"/api/settings/mcp-tokens/{token['id']}", headers=bob, json={"permissions": {"listings": "write"}},
     ).status_code == 404
-    assert _tool_names(client, bearer) == READ_TOOLS
+    assert _tool_names(client, bearer) == READ_TOOLS | FEEDBACK_TOOLS
     assert client.patch(
         f"/api/settings/mcp-tokens/{token['id']}", headers=alice, json={"permissions": {"listings": "write"}},
     ).status_code == 200
@@ -822,7 +824,7 @@ def test_hosted_connected_app_permissions_are_seller_scoped_and_can_be_turned_of
     bob_app = {"Authorization": "Bearer " + session_token(signing_keys, sub=BOB, client_id=app_id)}
 
     # Connected before Anteroom saw its approval: read-only until the seller chooses more.
-    assert _tool_names(client, alice_app) == READ_TOOLS
+    assert _tool_names(client, alice_app) == READ_TOOLS | FEEDBACK_TOOLS
     _, is_error = _call_tool(client, "create_draft_listing", {"title": "Blocked"}, extra_headers=alice_app)
     assert is_error
 
@@ -834,7 +836,7 @@ def test_hosted_connected_app_permissions_are_seller_scoped_and_can_be_turned_of
     assert not is_error, draft
 
     # Bob's grant of the same app is his own; he cannot see or change Alice's.
-    assert _tool_names(client, bob_app) == READ_TOOLS
+    assert _tool_names(client, bob_app) == READ_TOOLS | FEEDBACK_TOOLS
     assert [c["client_name"] for c in client.get("/api/settings/mcp-connections", headers=bob).json()["connections"]] == [None]
     assert client.get("/api/settings/mcp-connections", headers=alice).json()["connections"][0]["permissions"]["listings"] == "write"
 
@@ -854,13 +856,13 @@ def test_hosted_connected_app_permissions_are_seller_scoped_and_can_be_turned_of
     assert ended == [(alice["Authorization"], app_id)]
     refused = _rpc(client, "tools/list", extra_headers=alice_app)
     assert refused.status_code == 403
-    assert _tool_names(client, bob_app) == READ_TOOLS
+    assert _tool_names(client, bob_app) == READ_TOOLS | FEEDBACK_TOOLS
     # Saving its permissions on the approval page does not turn it back on; only
     # the approval Supabase accepted does.
     assert client.put(f"/api/settings/mcp-connections/{app_id}", headers=alice, json={}).status_code == 200
     assert _rpc(client, "tools/list", extra_headers=alice_app).status_code == 403
     assert client.put(f"/api/settings/mcp-connections/{app_id}", headers=alice, json={"enable": True}).status_code == 200
-    assert _tool_names(client, alice_app) == READ_TOOLS
+    assert _tool_names(client, alice_app) == READ_TOOLS | FEEDBACK_TOOLS
 
 
 def test_existing_mcp_tokens_keep_full_access_after_migration(migration_engine):  # noqa: F811

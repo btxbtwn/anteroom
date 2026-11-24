@@ -1,7 +1,7 @@
 """The seller can star an item
 
 Revision ID: e5c2a8f4d1b7
-Revises: b0731d829c7b
+Revises: 08af599e4da9
 Create Date: 2026-11-24 12:00:00.000000
 
 Every existing item starts unstarred. Row security on ``conversations`` is
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 
 
 revision = 'e5c2a8f4d1b7'
-down_revision = 'b0731d829c7b'
+down_revision = '08af599e4da9'
 branch_labels = None
 depends_on = None
 

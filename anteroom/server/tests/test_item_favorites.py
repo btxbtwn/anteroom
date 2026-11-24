@@ -16,7 +16,7 @@ from anteroom.database import SessionLocal
 from anteroom.main import app
 from anteroom.models.conversation import Conversation
 
-PREVIOUS_HEAD = "b0731d829c7b"
+PREVIOUS_HEAD = "08af599e4da9"
 
 
 def _create(title: str) -> str:
