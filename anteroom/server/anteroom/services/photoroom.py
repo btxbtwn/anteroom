@@ -77,14 +77,20 @@ class StudioOptions(BaseModel):
     ghost_mannequin: bool = False
     flat_lay: bool = False
     shadow: bool = False
+    keep: str = Field(default="", max_length=200)
+    """Optional Photoroom text-guided keep prompt (``segmentation.prompt``); singular terms."""
+    exclude: str = Field(default="", max_length=200)
+    """Optional Photoroom text-guided leave-out prompt (``segmentation.negativePrompt``)."""
     virtual_model: VirtualModel | None = None
 
     @model_validator(mode="after")
     def _valid_combination(self) -> StudioOptions:
+        self.keep = " ".join(self.keep.split())
+        self.exclude = " ".join(self.exclude.split())
         if self.ghost_mannequin and self.flat_lay:
             raise ValueError("Choose Ghost mannequin or Flat lay, not both.")
         if self.virtual_model is not None and (self.remove_background or self.ghost_mannequin
-                                               or self.flat_lay or self.shadow):
+                                               or self.flat_lay or self.shadow or self.keep or self.exclude):
             raise ValueError("A virtual model makes its own scene, so it cannot be combined with other AI Studio edits.")
         if self.ghost_mannequin or self.flat_lay or self.shadow:
             # These all cut the item out first.
@@ -116,6 +122,11 @@ class StudioOptions(BaseModel):
             fields["outputSize"] = "originalImage"
         if self.shadow:
             fields["shadow.mode"] = "ai.soft"
+        # Photoroom preview: text-guided segmentation when the seller names keep / leave-out.
+        if self.keep:
+            fields["segmentation.prompt"] = self.keep
+        if self.exclude:
+            fields["segmentation.negativePrompt"] = self.exclude
         return fields
 
     def label(self) -> str:

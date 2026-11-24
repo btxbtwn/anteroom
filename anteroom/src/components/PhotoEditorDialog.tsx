@@ -682,6 +682,8 @@ interface StudioChoice {
   background: string;
   effect: Effect;
   shadow: boolean;
+  keep: string;
+  exclude: string;
   model: VirtualModel;
 }
 
@@ -693,6 +695,8 @@ export function studioRequest(choice: StudioChoice): StudioOptions {
     ghost_mannequin: choice.effect === "ghost_mannequin",
     flat_lay: choice.effect === "flat_lay",
     shadow: choice.shadow,
+    keep: choice.keep,
+    exclude: choice.exclude,
   });
 }
 
@@ -718,6 +722,7 @@ function StudioTools({ convId, photo, photos, unsaved, onSaved, onRunning, onReb
   const { data: key } = useQuery({ queryKey: ["settings-photoroom"], queryFn: api.settings.photoroom, staleTime: 60_000 });
   const [choice, setChoice] = useState<StudioChoice>({
     removeBackground: true, background: DEFAULT_BACKDROP, effect: "none", shadow: false,
+    keep: "", exclude: "",
     model: { model: "auto", scene: "auto", pose: "auto" },
   });
   const [selected, setSelected] = useState<Set<string>>(() => new Set([photo.id]));
@@ -728,6 +733,7 @@ function StudioTools({ convId, photo, photos, unsaved, onSaved, onRunning, onReb
   const problem = studioProblem(options);
   const modelScene = choice.effect === "virtual_model";
   const cutsOut = choice.effect === "ghost_mannequin" || choice.effect === "flat_lay" || choice.shadow;
+  const guidesCutout = (choice.removeBackground || cutsOut) && !modelScene;
   const update = (change: Partial<StudioChoice>) => setChoice((current) => ({ ...current, ...change }));
   const ids = photos.filter((item) => selected.has(item.id)).map((item) => item.id);
 
@@ -773,6 +779,25 @@ function StudioTools({ convId, photo, photos, unsaved, onSaved, onRunning, onReb
             onChange={(background) => update({ background })} />
         ) : null}
       </ToolGroup>
+      {guidesCutout ? (
+        <ToolGroup label="Subject">
+          <p className="text-muted-foreground text-xs">
+            Optional. Singular words Photoroom should keep or leave out (shirt, ruler, stand).
+          </p>
+          <label className="flex flex-col gap-1 text-xs">
+            Keep
+            <Input aria-label="Keep in cutout" value={choice.keep} maxLength={200} placeholder="shirt"
+              disabled={running}
+              onChange={(event) => update({ keep: event.target.value })} />
+          </label>
+          <label className="flex flex-col gap-1 text-xs">
+            Leave out
+            <Input aria-label="Leave out of cutout" value={choice.exclude} maxLength={200}
+              placeholder="ruler, stand, hanger" disabled={running}
+              onChange={(event) => update({ exclude: event.target.value })} />
+          </label>
+        </ToolGroup>
+      ) : null}
       <ToolGroup label="AI restyle">
         {([
           ["ghost_mannequin", "Ghost mannequin", "Shows clothing as if worn, with no mannequin."],
@@ -782,7 +807,8 @@ function StudioTools({ convId, photo, photos, unsaved, onSaved, onRunning, onReb
           <label key={effect} className="flex items-start gap-2 text-sm">
             <Checkbox className="mt-0.5" checked={choice.effect === effect}
               onCheckedChange={(checked) => update(checked === true
-                ? { effect, ...(effect === "virtual_model" ? { shadow: false, removeBackground: false } : {}) }
+                ? { effect, ...(effect === "virtual_model"
+                  ? { shadow: false, removeBackground: false, keep: "", exclude: "" } : {}) }
                 : { effect: "none" })} />
             <span className="flex flex-col">
               {label}

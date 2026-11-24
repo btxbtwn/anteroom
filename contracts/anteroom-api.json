@@ -2967,6 +2967,12 @@
             "title": "Background",
             "type": "string"
           },
+          "exclude": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Exclude",
+            "type": "string"
+          },
           "flat_lay": {
             "default": false,
             "title": "Flat Lay",
@@ -2976,6 +2982,12 @@
             "default": false,
             "title": "Ghost Mannequin",
             "type": "boolean"
+          },
+          "keep": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Keep",
+            "type": "string"
           },
           "remove_background": {
             "default": false,

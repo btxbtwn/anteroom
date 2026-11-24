@@ -1,0 +1,1 @@
+- In AI Studio, optionally tell Photoroom what to keep and what to leave out (for example keep the shirt, leave out a ruler or mannequin stand) when removing the background.

@@ -69,8 +69,13 @@ describe("flip, marks and AI Studio rules", () => {
     expect(normalizeStudio({ ghost_mannequin: true }).remove_background).toBe(true);
     expect(normalizeStudio({ ghost_mannequin: true, flat_lay: true }).flat_lay).toBe(false);
     expect(normalizeStudio({ shadow: true, virtual_model: { model: "auto" } })).toEqual({ virtual_model: { model: "auto" } });
+    expect(normalizeStudio({ remove_background: true, keep: "  shirt  ", exclude: "ruler" })).toMatchObject({
+      keep: "shirt", exclude: "ruler",
+    });
+    expect(normalizeStudio({ remove_background: true, keep: "  ", exclude: "" }).keep).toBeUndefined();
     expect(studioProblem({ ghost_mannequin: true, flat_lay: true })).toMatch(/not both/);
     expect(studioProblem({ virtual_model: {}, shadow: true })).toMatch(/own scene/);
+    expect(studioProblem({ virtual_model: {}, keep: "shirt" })).toMatch(/own scene/);
     expect(studioProblem({})).toMatch(/Choose an AI Studio edit/);
     expect(studioProblem({ remove_background: true })).toBeNull();
   });
