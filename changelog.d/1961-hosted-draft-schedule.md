@@ -1,0 +1,1 @@
+- On myanteroom.com, a draft's General view now shows Ready to list & schedule publish, so you can schedule a listing from the listing itself.

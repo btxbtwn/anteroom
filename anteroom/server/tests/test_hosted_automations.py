@@ -134,3 +134,24 @@ def test_web_run_due_relists_uses_the_signed_in_sellers_opt_in_rules(cloud, sign
     other_seller = client.post(run_path, headers=bob)
     assert other_seller.status_code == 200, other_seller.text
     assert other_seller.json()['outcomes'] == []
+
+
+def test_web_draft_schedule_routes_are_served_and_seller_scoped(cloud, signing_keys):  # noqa: F811
+    client, _engine = cloud
+    alice, bob = headers(signing_keys), headers(signing_keys, BOB)
+    coat = item(client, alice, 'Alice coat', 100)
+    path = '/api/conversations/' + coat + '/schedule'
+    assert client.get(path).status_code == 401
+    state = client.get(path, headers=alice)
+    assert state.status_code == 200, state.text
+    assert state.json()['ready_to_list'] is False
+    # Another seller cannot see or change it.
+    assert client.get(path, headers=bob).status_code == 404
+    assert client.put(path + '/ready', headers=bob, json={'ready_to_list': True}).status_code == 404
+    # A draft without photos is refused with the reason, not a missing route.
+    refused = client.put(path + '/ready', headers=alice, json={'ready_to_list': True})
+    assert refused.status_code == 400, refused.text
+    assert 'not valid yet' in refused.json()['detail']
+    unconfirmed = client.post(path, headers=alice, json={'publish_at': '2099-01-01T00:00:00Z', 'marketplaces': ['ebay']})
+    assert unconfirmed.status_code == 400, unconfirmed.text
+    assert client.delete(path, headers=alice).status_code == 200
