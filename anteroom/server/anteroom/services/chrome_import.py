@@ -143,7 +143,7 @@ def match_candidates(db: Session) -> list[tuple[str, str, set[str]]]:
     return [(conv_id, title, title_tokens(title)) for conv_id, title in rows if title and title.strip()]
 
 
-def _local_price(db: Session, conv_id: str) -> float | None:
+def local_price(db: Session, conv_id: str) -> float | None:
     from anteroom.models.listing import ListingRevision
     from anteroom.repositories.queries import ListingRepo
 
@@ -160,21 +160,24 @@ def close_titles(title: str, items: list[tuple[str, str, set[str]]]) -> list[tup
     return [entry for entry in scored if entry[0] >= MATCH_THRESHOLD]
 
 
-def suggested_match(db: Session, marketplace: str, title: str, price: float | None,
+def suggested_match(db: Session, marketplace: str, listing_id: str, title: str, price: float | None,
                     items: list[tuple[str, str, set[str]]]) -> dict | None:
     """The local item that looks most like this listing and has no listing on that marketplace yet.
 
     Only a suggestion: the seller decides whether to link it or import a new item.
+    An item the seller said is a different product than this listing is never suggested for it.
     """
+    from anteroom.services import import_reviews
     from anteroom.services.marketplace_delist import listings
 
+    rejected = import_reviews.rejected_items(db, marketplace, listing_id)
     # Items already on this marketplace are passed over, so they never hide one that is not.
     for score, conv_id, local in close_titles(title, items):
-        if marketplace in listings(db, conv_id):
+        if conv_id in rejected or marketplace in listings(db, conv_id):
             continue
-        local_price = _local_price(db, conv_id)
-        return {"conversation_id": conv_id, "title": local, "score": round(score, 2), "price": local_price,
-                "price_differs": bool(price and local_price and abs(local_price - price) > max(1.0, price * 0.1))}
+        item_price = local_price(db, conv_id)
+        return {"conversation_id": conv_id, "title": local, "score": round(score, 2), "price": item_price,
+                "price_differs": bool(price and item_price and abs(item_price - price) > max(1.0, price * 0.1))}
     return None
 
 
@@ -204,7 +207,7 @@ def _page(db: Session, marketplace: str, reply: dict, raw: list) -> dict:
         if price is None and not reason:
             reason = "This import supports listings priced in USD."
         if not existing and not reason:
-            match = suggested_match(db, marketplace, title, price, items)
+            match = suggested_match(db, marketplace, listing_id, title, price, items)
         rows.append({"id": listing_id, "title": title, "url": public_listing_url(marketplace, listing_id),
                      "price": f"{price:.2f}" if price is not None else None, "quantity": _quantity(entry.get("quantity")),
                      "reason": reason, "conversation_id": existing.id if existing else None, "match": match})
@@ -425,7 +428,8 @@ async def import_listing(marketplace: str, listing: str, *, unless_matched: bool
     return {**result, "linked": False}
 
 
-async def link_listing(marketplace: str, listing: str, conversation_id: str) -> dict:
+async def link_listing(marketplace: str, listing: str, conversation_id: str, *,
+                       deadline: float | None = None) -> dict:
     """Link a listing to an item the seller chose. The item's own edits and photos stay as they are."""
     listing_id = listing_id_from(marketplace, listing)
 
@@ -434,6 +438,6 @@ async def link_listing(marketplace: str, listing: str, conversation_id: str) -> 
         await _read(marketplace, listing_id)
 
     try:
-        return await inventory_import.link_owned_listing(marketplace, listing_id, conversation_id, verify)
+        return await inventory_import.link_owned_listing(marketplace, listing_id, conversation_id, verify, deadline=deadline)
     except inventory_import.LinkError as exc:
         raise ChromeImportError(exc.status_code, str(exc)) from exc

@@ -33,8 +33,16 @@ from anteroom.models.marketplace_listing import LIVE_STATES, MarketplaceListing
 from anteroom.models.marketplace_sale import MarketplaceSale
 from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
 from anteroom.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
-from anteroom.services import boxes, home_dashboard, listing_editor, mcp_catalog_tools, mcp_marketplace_tools, mcp_tokens
-from anteroom.services import mcp_finance_tools
+from anteroom.services import (
+    boxes,
+    home_dashboard,
+    listing_editor,
+    mcp_catalog_tools,
+    mcp_finance_tools,
+    mcp_import_match_tools,
+    mcp_marketplace_tools,
+    mcp_tokens,
+)
 from anteroom.services.background_tasks import ACTIVE as ACTIVE_TASK_STATUSES
 from anteroom.services.etsy_audit import etsy_not_allowed_live
 from anteroom.services.etsy_fields import etsy_eligible
@@ -113,6 +121,7 @@ TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
     "resolve_attention_items": ("attention", "write"),
     "restore_attention_items": ("attention", "write"),
     **mcp_catalog_tools.PERMISSIONS,
+    **mcp_import_match_tools.PERMISSIONS,
     **mcp_marketplace_tools.PERMISSIONS,
     **mcp_finance_tools.PERMISSIONS,
 }
@@ -543,6 +552,7 @@ def tool_definitions() -> list[dict[str, Any]]:
         },
     ]
     tools.extend(mcp_catalog_tools.TOOLS)
+    tools.extend(mcp_import_match_tools.TOOLS)
     tools.extend(mcp_marketplace_tools.TOOLS)
     tools.extend(mcp_finance_tools.TOOLS)
     return [{**tool, "annotations": {**tool["annotations"], "title": tool["title"]}} for tool in tools]
@@ -740,7 +750,8 @@ def _tool_success_result(data: dict[str, Any]) -> dict[str, Any]:
     if pending is not None:
         # Marketplace work runs once the call's session has closed (routes/mcp.py).
         return mcp_marketplace_tools.pending_result(pending)
-    images = data.pop("_images", [])
+    # Content filled in once the session is closed: photos, and import links to check.
+    images = [*data.pop("_images", []), *data.pop("_after", [])]
     return {
         "content": [{"type": "text", "text": json.dumps(data, indent=2, default=str)}, *images],
         "isError": False,
@@ -784,6 +795,7 @@ def _dispatch_tool(
         "manage_labels_and_notes": _tool_manage_labels_and_notes,
         "delete_draft_listing": _tool_delete_draft_listing,
         **mcp_catalog_tools.HANDLERS,
+        **mcp_import_match_tools.HANDLERS,
         **mcp_finance_tools.HANDLERS,
     }
     handler = handlers.get(name)
