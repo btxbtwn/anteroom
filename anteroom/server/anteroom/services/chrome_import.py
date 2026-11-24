@@ -286,7 +286,9 @@ def _poshmark_fields(out: dict, post: dict, category_id: str) -> None:
     specifics["shippingDiscountId"] = discount if isinstance(discount, str) and re.fullmatch(r"[a-f0-9]{24}", discount) else ""
     specifics["poshmarkSku"] = _text(post.get("sku"), 80)
     specifics["sellerNotes"] = _text(post.get("other_info"), 2000)
-    smart = post.get("smart_sell") if isinstance(post.get("smart_sell"), dict) else {}
+    smart = post.get("smart_sell")
+    if not isinstance(smart, dict):
+        smart = {}
     minimum = _price(smart.get("minimum_price"))
     specifics["smartSell"] = {"enabled": smart.get("enabled") is True and minimum is not None,
                               **({"minimumPrice": minimum} if minimum is not None else {})}

@@ -124,6 +124,9 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
     scope = activity.edit_fields.get()
     if scope is not None and source in FILL_ON_SOURCES:
         listing_json = activity.scoped_listing(before, listing_json, scope)
+    from anteroom.services.poshmark_form import follow_general_quantity
+
+    listing_json = follow_general_quantity(before, listing_json)
     from anteroom.services import choice_lists, native_contract
 
     # Auto-relist saves the previous revision with one marketplace price changed

@@ -180,6 +180,26 @@ def imported_inventory(category_id: str, sizes: list[dict]) -> list[dict]:
     return rows
 
 
+def follow_general_quantity(before: dict, listing: dict) -> dict:
+    """A lone Size row that offered General's quantity keeps offering it when General's changes.
+
+    A one-size listing kept as a row (it has its own SKU) would otherwise send
+    Poshmark its old quantity after a sale elsewhere lowered General's.
+    """
+    rows = (listing.get("poshmark_specifics") or {}).get("inventoryRows")
+    old, new = before.get("quantity"), listing.get("quantity")
+    if not (isinstance(rows, list) and len(rows) == 1 and isinstance(rows[0], dict)) or old is None or new is None:
+        return listing
+    try:
+        follows = float(rows[0].get("quantity")) == float(old) and float(new) != float(old)
+    except (TypeError, ValueError):
+        return listing
+    if not follows:
+        return listing
+    listing = {**listing, "poshmark_specifics": {**listing["poshmark_specifics"], "inventoryRows": [{**rows[0], "quantity": new}]}}
+    return listing
+
+
 def form(listing: dict) -> dict:
     data = catalog()
     rows = [dict(row) for row in data["fields"]]

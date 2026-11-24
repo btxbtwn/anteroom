@@ -174,6 +174,15 @@ def test_poshmark_import_keeps_a_single_size_row_with_its_own_sku(chrome):
     snapshot = chrome.db.query(ListingRevision).one().listing_json
     assert snapshot["poshmark_specifics"]["inventoryRows"] == [
         {"sizeSetId": STANDARD, "sizeId": "M", "quantity": 2, "sku": "JKT-1-M"}]
+    # One sells elsewhere and General's quantity drops: the row offers the one left, keeping its SKU.
+    from anteroom.services import listing_persistence
+
+    revision = chrome.db.query(ListingRevision).one()
+    saved = listing_persistence.save_revision(chrome.db, revision.conversation_id, {**snapshot, "quantity": 1},
+                                              source="sale_quantity_sync", parent_revision_id=revision.id,
+                                              expected_revision_id=revision.id)
+    assert poshmark_tab(saved.listing_json)["poshmark_specifics.inventoryRows"] == [
+        {"sizeSetId": STANDARD, "sizeId": "M", "quantity": 1, "sku": "JKT-1-M"}]
 
 
 def test_poshmark_import_brings_a_listing_with_several_sizes(chrome):
