@@ -9,6 +9,7 @@ import hashlib
 import gzip
 import json
 from datetime import datetime, UTC
+from functools import lru_cache
 from pathlib import Path
 from typing import cast
 
@@ -29,6 +30,20 @@ def default_seed_path() -> Path:
     if bundled.is_file():
         return bundled
     return Path(__file__).resolve().parents[3] / "data" / SEED_NAME
+
+
+@lru_cache(maxsize=1)
+def general_category_paths() -> dict[str, bool]:
+    """Every General category path, case-folded, mapped to whether it is final (no subcategories).
+
+    Read once from the seed the trees are loaded from.
+    """
+    payload = _read_seed(default_seed_path())
+    return {
+        node["path"].casefold(): bool(node.get("is_leaf")) and not node.get("has_children")
+        for node in payload["category_tree_nodes"]
+        if node["marketplace"] == "general"
+    }
 
 
 def default_db_path() -> Path:

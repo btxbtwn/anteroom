@@ -238,7 +238,7 @@ class ValidationCasesTest(unittest.TestCase):
             "price": 4.99,
             "brand": "List This Audit",
             "sku": "AUDIT-ETSY-DIGITAL-001",
-            "category_path": "Craft Supplies & Tools > Patterns & How To > Digital > Prints",
+            "category_path": "Art > Art Prints",
             "etsy_specifics": {
                 "who_made": "I did",
                 "what_is": "A finished product",

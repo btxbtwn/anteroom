@@ -1,0 +1,1 @@
+- Jewelry and other items in a correct three-level category no longer show a category error; a category that still has subcategories is flagged instead.
