@@ -34,6 +34,7 @@ from anteroom.models.marketplace_sale import MarketplaceSale
 from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
 from anteroom.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
 from anteroom.services import boxes, home_dashboard, listing_editor, mcp_catalog_tools, mcp_marketplace_tools, mcp_tokens
+from anteroom.services import mcp_finance_tools
 from anteroom.services.background_tasks import ACTIVE as ACTIVE_TASK_STATUSES
 from anteroom.services.etsy_audit import etsy_not_allowed_live
 from anteroom.services.etsy_fields import etsy_eligible
@@ -113,6 +114,7 @@ TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
     "restore_attention_items": ("attention", "write"),
     **mcp_catalog_tools.PERMISSIONS,
     **mcp_marketplace_tools.PERMISSIONS,
+    **mcp_finance_tools.PERMISSIONS,
 }
 
 MAX_ATTENTION_KEYS = 100
@@ -542,6 +544,7 @@ def tool_definitions() -> list[dict[str, Any]]:
     ]
     tools.extend(mcp_catalog_tools.TOOLS)
     tools.extend(mcp_marketplace_tools.TOOLS)
+    tools.extend(mcp_finance_tools.TOOLS)
     return [{**tool, "annotations": {**tool["annotations"], "title": tool["title"]}} for tool in tools]
 
 
@@ -781,6 +784,7 @@ def _dispatch_tool(
         "manage_labels_and_notes": _tool_manage_labels_and_notes,
         "delete_draft_listing": _tool_delete_draft_listing,
         **mcp_catalog_tools.HANDLERS,
+        **mcp_finance_tools.HANDLERS,
     }
     handler = handlers.get(name)
     if handler is None:
