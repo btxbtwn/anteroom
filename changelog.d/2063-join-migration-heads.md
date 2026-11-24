@@ -1,0 +1,1 @@
+- Fix Anteroom updates failing to start after another pair of changes each added a database step at the same time.
