@@ -1,1 +1,0 @@
-- Edit photos across selected drafts with Photoroom. Review cover photos or pick individual photos, then apply the same edit in one batch.

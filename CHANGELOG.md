@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1197 — 2026-11-24
+
+- Edit photos across selected drafts with Photoroom. Review cover photos or pick individual photos, then apply the same edit in one batch.
+
 ## 0.1.1196 — 2026-11-24
 
 - Bulk drafts keep their place in line while the worker is processing your drafts.
