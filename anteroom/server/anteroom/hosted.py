@@ -233,6 +233,12 @@ class SellerSessionMiddleware:
                 and scope["path"].endswith("/upload")
                 and scope["path"].count("/") == 4
             )
+            # A single-use photo upload link authenticates itself (routes/mcp_photo_uploads.py).
+            or (
+                scope["method"] == "POST"
+                and scope["path"].startswith("/api/mcp/photo-uploads/")
+                and scope["path"].count("/") == 4
+            )
             or scope["path"].startswith("/internal/")
             or (scope["method"] in {"GET", "HEAD"} and scope["app"].state.web_dir is not None
                 and (scope["path"] in {"/", OAUTH_CONSENT_PATH, "/favicon.png", "/privacy", "/terms", "/robots.txt"} or scope["path"].startswith("/assets/")))

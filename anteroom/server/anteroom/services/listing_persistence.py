@@ -251,6 +251,25 @@ def add_photo(db: Session, conv_id: str, original_filename: str, stored_filename
     return photo
 
 
+def add_photos(db: Session, conv_id: str, stored: list[dict]) -> list[Photo]:
+    """Add several stored item photos, in order, in one commit (``process_bytes`` results)."""
+    from anteroom.services.draft_scheduling import unschedule_on_edit
+
+    repo = ConversationRepo(db)
+    photos = []
+    for meta in stored:
+        photos.append(repo.insert_photo(
+            conv_id, meta["original_filename"], meta["stored_filename"], meta["mime_type"], meta["size_bytes"],
+            checksum=meta["checksum"], width=meta["width"], height=meta["height"],
+        ))
+        # The next photo's position is one past this one's.
+        db.flush()
+    unschedule_on_edit(db, conv_id, reason="Photos changed after scheduling; review and reschedule before publishing.")
+    _recheck_error_flag(db, conv_id)
+    db.commit()
+    return photos
+
+
 def delete_photo(db: Session, conv_id: str, photo_id: str) -> bool:
     from anteroom.services.draft_scheduling import unschedule_on_edit
 

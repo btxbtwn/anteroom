@@ -47,6 +47,7 @@ TOPIC_BY_TABLE: dict[str, str | None] = {
     "mcp_access_tokens": "settings",
     "mcp_oauth_connections": "settings",
     "mcp_feedback": None,
+    "mcp_photo_uploads": None,
     "seller_goals": "settings",
     "attention_dismissals": "settings",
     "listing_templates": "settings",
