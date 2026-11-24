@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1235 — 2026-11-24
+
+- Jewelry and other items in a correct three-level category no longer show a category error; a category that still has subcategories is flagged instead.
+
 ## 0.1.1234 — 2026-11-24
 
 - See marketplace validation issues at the top of the listing editor and use Fix to jump straight to the field.
