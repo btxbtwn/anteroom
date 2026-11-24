@@ -191,7 +191,8 @@ def test_full_editor_saves_history_and_preserves_existing_draft(cloud, signing_k
     assert summary['quantity'] == 2
     assert 'notes' not in summary
     first = saved.json()['revision_id']
-    assert saved.json()['listing'] == fields
+    # The values the seller just set come back as theirs, so the editor keeps them apart from followers (#2007).
+    assert saved.json()['listing'] == {**fields, 'seller_fields': ['brand', 'description', 'price', 'title']}
     assert client.put(path + '/listing', headers=alice, json={'listing': fields, 'expected_revision_id': ''}).status_code == 409
     second = client.put(path + '/listing', headers=alice, json={'listing': {**fields, 'price': 44}, 'expected_revision_id': first}).json()['revision_id']
     history = client.get(path + '/revisions', headers=alice).json()
@@ -798,3 +799,29 @@ def test_delete_draft_photo_removes_source_object_too(monkeypatch):
 
     assert set(deleted) == {stored_key, source_key}
 
+
+
+def test_a_marketplace_price_the_seller_set_stays_theirs_on_the_website(cloud, signing_keys):  # noqa: F811
+    """The editor tells a price the seller set on Depop from one following General by
+    the saved locks, so the website must read them back and accept them on save (#2007)."""
+    client, _engine = cloud
+    auth = headers(signing_keys)
+    identity = client.post('/api/conversations', headers=auth, json={'title': 'Tee'}).json()['id']
+    path = f'/api/conversations/{identity}/listing'
+    first = client.put(path, headers=auth, json={'expected_revision_id': '', 'listing': {'title': 'Tee', 'price': 12}})
+    assert first.status_code == 200, first.text
+    own = {'title': 'Tee', 'price': 12, 'depop_specifics': {'price': 10.8}}
+    second = client.put(path, headers=auth, json={'expected_revision_id': first.json()['revision_id'], 'listing': own})
+    assert second.status_code == 200, second.text
+    assert 'depop_specifics.price' in second.json()['listing']['seller_fields']
+    read = client.get(path, headers=auth).json()['listing']
+    assert 'depop_specifics.price' in read['seller_fields']
+    # The editor sends the listing back as it read it.
+    again = client.put(path, headers=auth, json={'expected_revision_id': second.json()['revision_id'],
+                                                  'listing': {**read, 'title': 'Graphic tee'}})
+    assert again.status_code == 200, again.text
+    assert client.get(path, headers=auth).json()['listing']['depop_specifics']['price'] == 10.8
+    for bad in ('depop_specifics.price', [1], ['x' * 300]):
+        refused = client.put(path, headers=auth, json={'expected_revision_id': again.json()['revision_id'],
+                                                       'listing': {**read, 'seller_fields': bad}})
+        assert refused.status_code == 422, bad
