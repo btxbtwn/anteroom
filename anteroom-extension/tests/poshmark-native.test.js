@@ -500,7 +500,8 @@ test('big sizes are found in the Big & Tall set', () => {
 });
 
 test('field warnings reach Poshmark but confirmation is still required', async () => {
-  for (const change of [{ direct_category_ids: {} }, { size: '40R' }, { price: 2 }, { description: '' }, { condition: '' }]) {
+  // A listing with no category at all never reaches Poshmark: see the #1989 test.
+  for (const change of [{ size: '40R' }, { price: 2 }, { description: '' }, { condition: '' }]) {
     const { c, msg, requests } = setup();
     msg.payload.listing = { ...LISTING, ...change };
     rejectPost(c, requests);
@@ -816,4 +817,30 @@ test('the Poshmark tab\'s condition, colors and sub-category win over the shared
   assert.deepEqual(JSON.parse(JSON.stringify(none.catalog.category_features)), []);
   const unknown = c.poshmarkCategory(catalog, { ...listing, poshmark_specifics: { subcategory: 'Polos' } });
   assert.equal(unknown.leaf, SHIRTS);
+});
+
+test('a listing with no Poshmark category stops before anything is written and names the field (#1989)', async () => {
+  const { direct_category_ids: _dropped, ...rest } = LISTING;
+  const listing = { ...rest, poshmark_specifics: { ...LISTING.poshmark_specifics, categoryV2: 'Tees - Short Sleeve' } };
+  for (const action of ['list', 'update']) {
+    const { c, msg, requests } = setup({ status: 'published' });
+    msg.payload = { ...msg.payload, action, listing, ...(action === 'update' ? { listing_id: POST } : {}) };
+    const result = JSON.parse(JSON.stringify(await c.runPoshmarkApi(msg)));
+    assert.equal(result.ok, false, action);
+    assert.equal(result.error_code, 'missing_fields', action);
+    assert.equal(result.safe_to_retry, true, action);
+    assert.match(result.error, /Poshmark needs a category from its own list/);
+    assert.deepEqual(result.fields.map(row => row.field), ['direct_category_ids.poshmark']);
+    assert.deepEqual(requests.filter(r => r.method !== 'GET').map(r => r.path), [], `nothing may be written to Poshmark (${action})`);
+  }
+});
+
+test('a private Poshmark draft may still be saved without a category (#1989)', async () => {
+  const { c, msg, requests } = setup({ status: 'user_draft' });
+  const { direct_category_ids: _dropped, ...listing } = LISTING;
+  msg.payload = { ...msg.payload, action: 'save_draft', confirm: false, listing };
+  const result = JSON.parse(JSON.stringify(await c.runPoshmarkApi(msg)));
+  assert.equal(result.ok, true);
+  assert.equal(result.state, 'draft');
+  assert.ok(!requests.some(r => r.path.endsWith('/status/published')));
 });
