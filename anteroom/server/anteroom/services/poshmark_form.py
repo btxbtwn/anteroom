@@ -9,7 +9,7 @@ from functools import lru_cache
 
 from anteroom.config import skills_dir
 from anteroom.models.sizes import size_choice
-from anteroom.services.chrome_listing import poshmark_color_name
+from anteroom.services.chrome_listing import poshmark_color_name, poshmark_fee_cents
 from anteroom.services.seller_overrides import get_path, marketplace_text, price_for
 from anteroom.services.vendoo_encodings import marketplace_condition
 
@@ -220,7 +220,7 @@ def form(listing: dict) -> dict:
         known_discount = not discount_id or str(discount_id) in amounts
         if math.isfinite(price) and price > 0 and known_discount:
             cents = math.floor(price * 100 + 0.5)
-            fee = 295 if price < 15 else math.floor(price * 20 + 0.5)
+            fee = poshmark_fee_cents(cents)
             shipping = math.floor(float(amounts.get(str(discount_id), 0)) * 100 + 0.5)
             by_path["poshmark_specifics.earnings"]["value"] = f"${max(0, cents - fee - shipping) / 100:.2f}"
     except (TypeError, ValueError):

@@ -317,7 +317,7 @@ Ceiling       = median asking price of 3+ similar live listings; price at or
 Auto-accept   = Listing Price - $2
 Minimum       = Listing Price - $4
 ```
-Anteroom fills Auto-accept and Minimum into eBay's Best Offer (auto-accept / decline below) and Minimum into the Poshmark Smart Sell floor. Under $5 there is no floor and offers wait for the seller.
+Anteroom fills Auto-accept and Minimum into eBay's Best Offer (auto-accept / decline below) and Minimum into the Poshmark Smart Sell floor. Under $5 there is no floor and offers wait for the seller. Poshmark refuses a Smart Sell Lowest Price that does not cover its fee ($2.95 under $15, 20% from $15), so when Minimum is below $3 leave Poshmark Smart Sell off (`smartSell.enabled: false`).
 
 ### Seller History During Generation
 - Use recent recorded sales from the seller's own inventory alongside current outside sold comps when Anteroom supplies seller history. Candidate matches share brand, full general category and condition when known; check item type, model, era, size and visible details before treating them as comparable. A category such as women's Tops can contain both tees and blouses.

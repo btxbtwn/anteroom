@@ -1,0 +1,1 @@
+- Cheap items no longer fail to list on Poshmark because Smart Sell's Lowest Price was below Poshmark's fee. Anteroom leaves Smart Sell off when the lowest offer wouldn't cover the fee, and the Poshmark tab tells you before you list when a Lowest Price you set doesn't cover Poshmark's fee and your shipping discount.

@@ -33,8 +33,63 @@ def _money(value) -> Decimal | None:
     return amount if amount.is_finite() else None
 
 
+def _dict(value) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
 def _whole_dollars(amount: Decimal) -> int:
     return int(amount.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def poshmark_fee_cents(sale_cents: int) -> int:
+    """Poshmark's cut of a sale: $2.95 under $15, 20% from $15."""
+    return 295 if sale_cents < 1500 else math.floor(sale_cents / 5 + 0.5)
+
+
+def poshmark_lowest_smart_floor(shipping_discount_cents: int = 0) -> int:
+    """The lowest whole-dollar Smart Sell price that covers Poshmark's fee and the
+    seller's shipping discount. Poshmark refuses the listing below it."""
+    floor = 3  # Poshmark's lowest listing price
+    while floor * 100 - poshmark_fee_cents(floor * 100) - shipping_discount_cents <= 0:
+        floor += 1
+    return floor
+
+
+def poshmark_smart_minimum(snapshot: dict) -> int:
+    """The Smart Sell lowest price a direct List sends, in whole dollars, or 0 for off.
+
+    Mirrors the extension's ``poshmarkSmartMinimum``: the Poshmark tab's own
+    setting decides when it has one, then the prepared form's.
+    """
+    specifics = _dict(snapshot.get("poshmark_specifics"))
+    if specifics.get("availability") == "not_for_sale":
+        return 0
+    direct = _dict(specifics.get("smartSell"))
+    form_smart = _dict(snapshot.get("form")).get("specifics")
+    form_smart = form_smart.get("smartSell") if isinstance(form_smart, dict) else None
+    if isinstance(direct.get("enabled"), bool):
+        raw = direct.get("minimumPrice") if direct["enabled"] else None
+    elif isinstance(form_smart, dict):
+        raw = form_smart.get("minPrice") if form_smart.get("enabled") else None
+    else:
+        raw = specifics.get("smartSellMinimumPrice") or direct.get("minimumPrice")
+    amount = _money(raw)
+    return _whole_dollars(amount) if amount is not None and amount > 0 else 0
+
+
+def poshmark_shipping_discount_cents(snapshot: dict) -> int:
+    """The shipping discount the seller chose for this listing, in cents, from
+    the amounts their saved Poshmark form read from the account. 0 when none
+    is chosen or its amount is not known."""
+    chosen = str(_dict(snapshot.get("poshmark_specifics")).get("shippingDiscountId") or "")
+    if not chosen:
+        return 0
+    saved = _dict(_dict(snapshot.get("_native_forms")).get("poshmark"))
+    for row in saved.get("fields") or []:
+        if isinstance(row, dict) and row.get("path") == "poshmark_specifics.shippingDiscountId":
+            amount = _money(_dict(row.get("option_amounts")).get(chosen))
+            return max(0, int(amount * 100 + Decimal("0.5"))) if amount is not None else 0
+    return 0
 
 
 def poshmark_color_name(value: str) -> str | None:
@@ -73,6 +128,14 @@ def poshmark_requirements(snapshot: dict, context: Context) -> list[dict]:
             found.append(gap("price", f"Poshmark lists this at ${whole}.", blocking=False))
         if whole < 3:
             found.append(gap("price", "Poshmark needs a price of $3 or more."))
+    smart = poshmark_smart_minimum(snapshot)
+    shipping = poshmark_shipping_discount_cents(snapshot)
+    lowest = poshmark_lowest_smart_floor(shipping)
+    if 0 < smart < lowest:
+        covers = "Poshmark's fee and your shipping discount" if shipping else "Poshmark's fee"
+        found.append(gap("poshmark_specifics.smartSell.minimumPrice",
+                         f"Poshmark won't turn on Smart Sell below ${lowest}: the Lowest Price has to cover "
+                         f"{covers}. Raise the Lowest Price to ${lowest} or more, or turn Smart Sell off."))
     dropped = []
     for value in (snapshot.get("primaryColor") or snapshot.get("color"), snapshot.get("secondaryColor")):
         text = str(value or "").strip()
