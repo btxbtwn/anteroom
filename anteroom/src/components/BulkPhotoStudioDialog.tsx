@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { refreshInventory } from "../api/inventoryRefresh";
@@ -78,15 +78,19 @@ export function BulkPhotoBatches({ batches, onDone }: {
   batches: BulkPhotoBatch[];
   onDone: (id: number) => void;
 }) {
-  return batches.map((batch, slot) => (
-    <BulkPhotoStudioDialog key={batch.id} batchId={batch.id} slot={slot} listings={batch.listings} onDone={() => onDone(batch.id)} />
-  ));
+  const busyPhotos = useRef(new Set<string>());
+  return (
+    <div className="fixed bottom-28 right-4 z-20 flex max-h-[40dvh] max-w-[calc(100vw-2rem)] flex-col items-end gap-2 overflow-y-auto p-1">
+      {batches.map((batch) => (
+        <BulkPhotoStudioDialog key={batch.id} batchId={batch.id} busyPhotos={busyPhotos} listings={batch.listings} onDone={() => onDone(batch.id)} />
+      ))}
+    </div>
+  );
 }
 
-function BulkPhotoStudioDialog({ batchId, slot = 0, listings, onDone }: {
+function BulkPhotoStudioDialog({ batchId, busyPhotos, listings, onDone }: {
   batchId: number;
-  /** Stacks this batch's background button above earlier batches' buttons. */
-  slot?: number;
+  busyPhotos: RefObject<Set<string>>;
   listings: Listing[];
   onDone: () => void;
 }) {
@@ -131,22 +135,34 @@ function BulkPhotoStudioDialog({ batchId, slot = 0, listings, onDone }: {
     if (active.current || !work.length) return;
     const run = { controller: new AbortController(), stop: false };
     active.current = run;
+    const claimed = new Set<string>();
+    const overlaps = new Map<string, PhotoResult>();
+    const requests: Target[] = [];
+    for (const { draft, photos } of work) {
+      const available = photos.filter((photo) => {
+        if (busyPhotos.current.has(photo.id)) {
+          overlaps.set(photo.id, { state: "skipped", needsReview: true, detail: "Already editing in another batch." });
+          return false;
+        }
+        busyPhotos.current.add(photo.id);
+        claimed.add(photo.id);
+        return true;
+      });
+      for (let start = 0; start < available.length; start += MAX_STUDIO_PHOTOS) {
+        requests.push({ draft, photos: available.slice(start, start + MAX_STUDIO_PHOTOS) });
+      }
+    }
     setStep("results");
     setRunning(true);
     setStopping(false);
     setResults((previous) => {
       const next = new Map(previous);
       for (const { photos } of work) for (const photo of photos) next.delete(photo.id);
+      for (const [id, result] of overlaps) next.set(id, result);
       return next;
     });
     const { signal } = run.controller;
     let pause: string | null = null;
-    const requests: Target[] = [];
-    for (const { draft, photos } of work) {
-      for (let start = 0; start < photos.length; start += MAX_STUDIO_PHOTOS) {
-        requests.push({ draft, photos: photos.slice(start, start + MAX_STUDIO_PHOTOS) });
-      }
-    }
     try {
       // Each request already runs several photos in parallel. Queue drafts here
       // so selecting more listings doesn't multiply Photoroom concurrency.
@@ -183,6 +199,7 @@ function BulkPhotoStudioDialog({ batchId, slot = 0, listings, onDone }: {
         setResults((previous) => new Map([...previous, ...outcome]));
       }
     } finally {
+      for (const id of claimed) busyPhotos.current.delete(id);
       active.current = null;
       if (!signal.aborted) {
         void client.invalidateQueries({ queryKey: scheduledDraftsQuery.queryKey });
@@ -214,8 +231,11 @@ function BulkPhotoStudioDialog({ batchId, slot = 0, listings, onDone }: {
   };
   const close = () => running ? setVisible(false) : onDone();
   if (!visible) return (
-    <Button className="fixed right-4 z-20" style={{ bottom: `calc(7rem + ${slot} * 2.75rem)` }} variant="outline" onClick={() => setVisible(true)}>
-      {running ? `Photo edits · ${results.size} of ${photoCount}` : "Photo edit results"}
+    <Button className="max-w-full shrink-0" variant="outline" onClick={() => setVisible(true)}>
+      <span className="truncate">{targets[0]?.draft.title}</span>
+      <span className="shrink-0 text-xs text-muted-foreground">
+        {running ? `Photo edits · ${results.size} of ${photoCount}` : "Photo edit results"}
+      </span>
     </Button>
   );
 

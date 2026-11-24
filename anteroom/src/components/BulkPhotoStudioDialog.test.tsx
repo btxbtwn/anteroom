@@ -100,25 +100,30 @@ it("reselects only unchanged, unedited photos after a reply is lost", async () =
   }
 });
 
-it("starts another batch for other drafts while an earlier batch keeps running in the background", async () => {
+it("starts an independent batch and skips photos the first batch is editing", async () => {
   vi.spyOn(api.conversations, "photos").mockImplementation(async (id) => [{ ...photos[0], id: `${id}-p0`, conversation_id: id }]);
   let finish: () => void = () => {};
-  const studio = vi.spyOn(api.conversations, "photoStudio").mockImplementation((id, ids) => id === "draft"
-    ? new Promise((resolve) => { finish = () => resolve({ photos: [], errors: [] }); })
-    : Promise.resolve({ photos: ids.map((photoId) => ({ ...photos[0], id: photoId, conversation_id: id })), errors: [] }));
+  let firstRequest = true;
+  const studio = vi.spyOn(api.conversations, "photoStudio").mockImplementation((id, ids) => {
+    const response = { photos: ids.map((photoId) => ({ ...photos[0], id: photoId, conversation_id: id })), errors: [] };
+    if (!firstRequest) return Promise.resolve(response);
+    firstRequest = false;
+    return new Promise((resolve) => { finish = () => resolve(response); });
+  });
+  const firstDraft = { id: "draft", status: "draft", title: "Jacket" };
   const { click, host, close, render } = await openDialog();
   try {
     await click("Review photos");
     await click("Apply to 1 photo");
     await click("Continue in background");
     await render([
-      { id: 1, listings: [{ id: "draft", status: "draft", title: "Jacket" }] },
-      { id: 2, listings: [{ id: "other", status: "draft", title: "Boots" }] },
+      { id: 1, listings: [firstDraft] },
+      { id: 2, listings: [firstDraft, { id: "other", status: "draft", title: "Boots" }] },
     ]);
     expect(host.textContent).toContain("Photo edits · 0 of 1");
     await click("Review photos");
-    await click("Apply to 1 photo");
-    await vi.waitFor(() => expect(host.textContent).toContain("1 saved · 0 failed"));
+    await click("Apply to 2 photos");
+    await vi.waitFor(() => expect(host.textContent).toContain("1 saved · 0 failed · 1 skipped"));
     expect(studio.mock.calls.map((call) => call[0])).toEqual(["draft", "other"]);
     await act(async () => finish());
   } finally {

@@ -49,6 +49,10 @@ test("bulk AI Studio reviews covers across drafts and saves each selected photo 
   }));
   const otherTitle = "Wool cardigan";
   const { id: otherId } = await (await createConversation({ title: otherTitle, notes: "" })).json();
+  const otherUpload = await request.post(`/api/conversations/${otherId}/photos`, {
+    multipart: { files: { name: "cardigan.png", mimeType: "image/png", buffer: png(160, 70, 30) } },
+  });
+  expect(otherUpload.ok()).toBe(true);
 
   await page.goto("/");
   if (phone) {
@@ -56,10 +60,13 @@ test("bulk AI Studio reviews covers across drafts and saves each selected photo 
     await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
   }
   await showStatusTab(page, "Draft");
-  await page.getByRole("button", { name: "Select listings", exact: true }).click();
-  for (const draft of drafts) await page.getByRole("checkbox", { name: `Select ${draft.title}`, exact: true }).click();
-  await page.getByRole("region", { name: "Bulk listing actions" }).getByRole("button", { name: "More", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Edit photos" }).click();
+  const startBatch = async (titles: string[]) => {
+    await page.getByRole("button", { name: "Select listings", exact: true }).click();
+    for (const title of titles) await page.getByRole("checkbox", { name: `Select ${title}`, exact: true }).click();
+    await page.getByRole("region", { name: "Bulk listing actions" }).getByRole("button", { name: "More", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Edit photos" }).click();
+  };
+  await startBatch(drafts.map((draft) => draft.title));
 
   const dialog = page.getByRole("dialog", { name: "Edit photos" });
   await dialog.getByRole("textbox", { name: "Keep in cutout" }).fill("garment");
@@ -87,13 +94,15 @@ test("bulk AI Studio reviews covers across drafts and saves each selected photo 
   const before = await photos(drafts[1].id);
   expect((await request.delete(`/api/conversations/${drafts[1].id}/photos/${before[1].id}`)).ok()).toBe(true);
   const results = page.getByRole("dialog", { name: "Photo edit results" });
-  // Test navigation while the batch is in flight, then drop one reply after
-  // the real sandbox route has saved the edit.
+  // Hold the first batch while a second one saves, then drop one reply after
+  // the real sandbox route has saved the first batch's edit.
   let resume = () => {};
   const waiting = new Promise<void>((resolve) => { resume = resolve; });
   await page.route("**/photos/studio", async (route) => {
-    await waiting;
-    if (route.request().url().endsWith(`/conversations/${drafts[0].id}/photos/studio`)) {
+    const request = route.request();
+    const firstBatch = request.postDataJSON().options.keep === "garment";
+    if (firstBatch) await waiting;
+    if (firstBatch && request.url().endsWith(`/conversations/${drafts[0].id}/photos/studio`)) {
       expect((await route.fetch()).ok()).toBe(true);
       await route.abort();
     } else {
@@ -103,6 +112,17 @@ test("bulk AI Studio reviews covers across drafts and saves each selected photo 
   try {
     await dialog.getByRole("button", { name: "Apply to 3 photos" }).click();
     await results.getByRole("button", { name: "Continue in background" }).click();
+    await startBatch([drafts[0].title, otherTitle]);
+    await dialog.getByRole("button", { name: "Review photos" }).click();
+    await dialog.getByRole("button", { name: "Apply to 2 photos" }).click();
+    await expect(results.getByText("1 saved · 0 failed · 1 skipped", { exact: true })).toBeVisible();
+    await expect(results.getByText(/Already editing in another batch/)).toBeVisible();
+    expect((await photos(otherId))[0].edits?.studio).toBeTruthy();
+    expect((await photos(drafts[0].id))[0].edits?.studio).toBeFalsy();
+    const parallelResults = info.outputPath("bulk-photo-parallel-results.png");
+    await page.screenshot({ path: parallelResults, animations: "disabled" });
+    await info.attach("bulk-photo-parallel-results", { path: parallelResults, contentType: "image/png" });
+    await results.getByRole("button", { name: "Done" }).click();
     await page.getByRole("link", { name: otherTitle, exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`listing=${otherId}`));
     await page.getByRole("button", { name: "Photo edits · 0 of 3" }).click();
