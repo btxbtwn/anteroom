@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1210 — 2026-11-24
+
+- Your AI agent can now look up each marketplace's categories, the fields a category asks for and the values they accept, read the form a listing shows for one marketplace, check your region, currency and connected marketplaces, and read your listing rules before it writes or edits a draft. These lookups only read: nothing is published or changed.
+
 ## 0.1.1209 — 2026-11-24
 
 - The privacy policy now explains what Claude, ChatGPT or Gemini can see and change when you connect them to Anteroom, and how to disconnect them.
