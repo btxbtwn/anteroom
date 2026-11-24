@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from anteroom import database
+from anteroom.database import in_worker_session
 from anteroom.services import mcp_photo_tools, mcp_tokens
 
 # Included by routes/mcp.py, under /api/mcp.
@@ -56,5 +57,10 @@ async def upload_photo(upload_id: str, request: Request):
     else:
         seller = nullcontext()
     with seller:
-        outcome = await mcp_photo_tools.receive_upload(request, claim.conversation_id)
+        try:
+            outcome = await mcp_photo_tools.receive_upload(request, claim.conversation_id)
+        except HTTPException as exc:
+            if exc.status_code in mcp_photo_tools.RETRYABLE_STATUSES:
+                await in_worker_session(mcp_photo_tools.release_upload, upload_id)
+            raise
     return JSONResponse(outcome, status_code=201, headers={"Cache-Control": "no-store"})

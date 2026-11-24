@@ -536,3 +536,93 @@ def test_hosted_upload_link_reaches_one_listing_and_nothing_else(cloud, signing_
     # Alice's app sees it; the cover can be set through MCP.
     got, error = _call(client, "set_cover_photo", {"conversation_id": conv_id, "photo_id": rows[0].id}, alice)
     assert not error, got
+
+
+# ---------------------------------------------------------------------------
+# Busy uploads and cancelled saves
+# ---------------------------------------------------------------------------
+
+
+def _busy_once(monkeypatch, status=429):
+    """The seller's upload slot is taken for the next upload only."""
+    from contextlib import asynccontextmanager
+
+    calls = {"n": 0}
+    real = mcp_photo_tools.hold_upload_slot
+
+    @asynccontextmanager
+    async def slot(request, *, per_seller=True):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise HTTPException(status, "Another upload is still running. Try again in a moment.")
+        async with real(request, per_seller=per_seller):
+            yield
+
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(mcp_photo_tools, "hold_upload_slot", slot)
+
+
+def test_upload_link_turned_away_as_busy_can_be_retried(monkeypatch):
+    client = TestClient(app)
+    conv_id = _draft(client)
+    link = _upload_links(client, conv_id)["uploads"][0]
+    _busy_once(monkeypatch)
+    busy = _upload(client, link, _jpeg())
+    assert busy.status_code == 429
+    # Nothing was stored, so the link is not spent: the same command works again.
+    retried = _upload(client, link, _jpeg())
+    assert retried.status_code == 201, retried.text
+    assert len(_listing_photos(conv_id)) == 1
+    assert _upload(client, link, _jpeg()).status_code == 401
+
+
+def test_add_listing_photos_reports_a_busy_upload_slot_as_a_tool_error(monkeypatch):
+    client = TestClient(app)
+    conv_id = _draft(client)
+    _busy_once(monkeypatch, status=503)
+    refused, error = _call(client, "add_listing_photos", {"conversation_id": conv_id, "photos": [{"data": _b64(_jpeg())}]})
+    assert error and "No photo was added" in refused["error"] and "Try again" in refused["error"]
+    assert _listing_photos(conv_id) == []
+
+
+def test_cancelled_upload_keeps_files_whose_rows_were_saved(monkeypatch):
+    """A cancelled request does not stop the database worker: files go only if its rows were not saved."""
+    import asyncio
+    import threading
+
+    conv_id = _draft(TestClient(app))
+    meta = photo_pipeline_store(conv_id)
+    started, release = threading.Event(), threading.Event()
+    real_save = mcp_photo_tools.save_photos
+
+    def slow_save(db, conv, metas, expired):
+        started.set()
+        release.wait(5)
+        return real_save(db, conv, metas, expired)
+
+    monkeypatch.setattr(mcp_photo_tools, "save_photos", slow_save)
+
+    async def exercise():
+        call = asyncio.create_task(mcp_photo_tools._save(conv_id, [meta], lambda: False))
+        await asyncio.to_thread(started.wait, 5)
+        call.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await call
+        release.set()
+        for _ in range(100):
+            if len(_listing_photos(conv_id)) == 1:
+                break
+            await asyncio.sleep(0.05)
+        await asyncio.sleep(0.2)
+
+    asyncio.run(exercise())
+    rows = _listing_photos(conv_id)
+    assert [r.stored_filename for r in rows] == [meta["stored_filename"]]
+    assert photo_store().exists(meta["stored_filename"])
+
+
+def photo_pipeline_store(conv_id):
+    from anteroom.services import photos as photo_pipeline
+
+    return photo_pipeline.process_bytes(_jpeg(), "front.jpg", "image/jpeg", collection_id=conv_id)

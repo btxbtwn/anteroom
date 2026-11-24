@@ -202,12 +202,31 @@ async def _store(conv_id: str, data: bytes, filename: str, mime: str) -> dict[st
     return await asyncio.to_thread(photo_pipeline.process_bytes, data, filename, mime, collection_id=conv_id)
 
 
+_cleanups: set[asyncio.Task] = set()
+
+
+async def _discard_unless_saved(save: asyncio.Future, keys: list[str]) -> None:
+    try:
+        await save
+    except BaseException:
+        await asyncio.to_thread(_discard, keys)
+
+
 async def _save(conv_id: str, metas: list[dict[str, Any]], expired: Callable[[], bool]) -> tuple[list[str], int]:
     """Save the stored photos' rows; if they are not saved, remove the stored files."""
+    keys = [meta["stored_filename"] for meta in metas]
+    save = asyncio.ensure_future(in_worker_session(save_photos, conv_id, metas, expired))
     try:
-        return await in_worker_session(save_photos, conv_id, metas, expired)
+        return await asyncio.shield(save)
+    except asyncio.CancelledError:
+        # Cancelling the request does not stop the worker, which may still commit
+        # the rows: remove the files only once it has failed.
+        cleanup = asyncio.ensure_future(_discard_unless_saved(save, keys))
+        _cleanups.add(cleanup)
+        cleanup.add_done_callback(_cleanups.discard)
+        raise
     except BaseException:
-        await asyncio.shield(asyncio.to_thread(_discard, [meta["stored_filename"] for meta in metas]))
+        await asyncio.shield(asyncio.to_thread(_discard, keys))
         raise
 
 
@@ -266,17 +285,22 @@ async def _store_and_save(
     metas: list[dict[str, Any]] = []
     failed: list[str] = []
     # The hosted API bounds how many photos decode at once, per seller, as for the web app's uploads.
-    async with hold_upload_slot(request, per_seller=True):
-        for number, photo in enumerate(photos, 1):
-            if expired():
-                failed.append(f"Photo {number} was not saved: the request ran out of time.")
-                continue
-            try:
-                metas.append(await _store(conv_id, photo["data"], photo["filename"], photo["mime"]))
-            except ValueError as exc:
-                failed.append(f"Photo {number}: {exc}.")
-            except HTTPException as exc:
-                failed.append(f"Photo {number} could not be stored: {exc.detail}")
+    try:
+        async with hold_upload_slot(request, per_seller=True):
+            for number, photo in enumerate(photos, 1):
+                if expired():
+                    failed.append(f"Photo {number} was not saved: the request ran out of time.")
+                    continue
+                try:
+                    metas.append(await _store(conv_id, photo["data"], photo["filename"], photo["mime"]))
+                except ValueError as exc:
+                    failed.append(f"Photo {number}: {exc}.")
+                except HTTPException as exc:
+                    failed.append(f"Photo {number} could not be stored: {exc.detail}")
+    except HTTPException as exc:
+        # The seller's upload slot stayed busy: nothing was stored.
+        await asyncio.to_thread(_discard, [meta["stored_filename"] for meta in metas])
+        raise PhotoToolError(f"No photo was added: {exc.detail}") from None
     if not metas:
         raise PhotoToolError("No photo was added. " + " ".join(failed))
     try:
@@ -363,8 +387,10 @@ def _tool_create_photo_upload_url(db: Session, args: dict[str, Any], **_kw: Any)
         "instructions": (
             "Each link uploads one photo, once. Run its curl command with /path/to/photo.jpg replaced by the "
             f"photo's path on this computer, or POST the file's bytes to upload_url with the {UPLOAD_HEADER} "
-            "header. Photos are added in the order they are uploaded. A failed upload spends its link: ask for "
-            "a new one. Keep the upload token private; it is not shown again."
+            "header. Run the uploads one at a time: photos are added in the order they are uploaded. If an "
+            "upload is turned away as busy (429), wait a moment and run the same command again. A file that is "
+            "not a photo, or too large, spends its link: ask for a new one. Keep the upload token private; it is "
+            "not shown again."
         ),
         "published": False,
     }
@@ -409,6 +435,24 @@ def consume_upload(engine: Engine, upload_id: str, secret: str, *, hosted: bool)
             select(row.user_id, row.conversation_id).where(row.id == upload_id)
         ).one()
     return UploadClaim(str(owner), str(conv_id))
+
+
+# Refusals after a link is spent that leave nothing stored and that a retry can
+# get past (busy, timed out, listing full or busy, Storage down): the link is
+# given back so the same command can run again. A file that is not a photo or
+# is too large still spends it.
+RETRYABLE_STATUSES = frozenset({408, 409, 429, 503})
+
+
+def release_upload(db: Session, upload_id: str) -> None:
+    """Make a spent link usable again, if it has not expired. Runs as the link's seller."""
+    db.execute(
+        update(McpPhotoUpload)
+        .where(McpPhotoUpload.id == upload_id, McpPhotoUpload.used_at.is_not(None),
+               McpPhotoUpload.expires_at > datetime.now(UTC))
+        .values(used_at=None)
+    )
+    db.commit()
 
 
 def _never_expired() -> bool:
