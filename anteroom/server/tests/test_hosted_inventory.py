@@ -122,6 +122,41 @@ def test_storage_requests_use_seller_credentials_and_sdk_delete_contract(monkeyp
     assert 'PRIVATE' not in str(error.value)
 
 
+def test_storage_call_retries_a_stale_connection_once(monkeypatch):
+    """AI Studio Apply fails when a reused Storage connection drops once; one retry recovers."""
+    monkeypatch.setenv('SUPABASE_URL', 'https://example.supabase.co')
+    monkeypatch.setenv('SUPABASE_PUBLISHABLE_KEY', 'public-test-key')
+    key = USER_ID + '/draft/' + 'b' * 32 + '.jpg'
+    attempts = {'n': 0}
+
+    def request(method, url, **kwargs):
+        attempts['n'] += 1
+        if attempts['n'] == 1:
+            raise httpx.RemoteProtocolError('Server disconnected without sending a response.')
+        assert method == 'POST'
+        assert kwargs['headers'].get('x-upsert') == 'true'
+        return httpx.Response(200, content=b'')
+
+    monkeypatch.setattr(hosted_photos._storage, 'request', request)
+    assert hosted_photos.storage_call('POST', key, 'seller-token', b'jpeg-bytes') == b''
+    assert attempts['n'] == 2
+
+
+def test_storage_call_gives_up_after_a_second_connection_failure(monkeypatch):
+    monkeypatch.setenv('SUPABASE_URL', 'https://example.supabase.co')
+    monkeypatch.setenv('SUPABASE_PUBLISHABLE_KEY', 'public-test-key')
+    key = USER_ID + '/draft/' + 'c' * 32 + '.jpg'
+
+    def request(*_args, **_kwargs):
+        raise httpx.ConnectError('Connection refused')
+
+    monkeypatch.setattr(hosted_photos._storage, 'request', request)
+    with pytest.raises(Exception) as error:
+        hosted_photos.storage_call('GET', key, 'seller-token')
+    assert error.value.status_code == 503
+    assert error.value.detail == 'Photo storage is temporarily unavailable'
+
+
 def test_storage_policies_enforce_owner_even_with_a_broad_policy(migration_engine):  # noqa: F811
     engine = migration_engine
     if engine.dialect.name != 'postgresql':

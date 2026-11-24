@@ -1,0 +1,1 @@
+- AI Studio Apply no longer fails when photo storage briefly drops a connection

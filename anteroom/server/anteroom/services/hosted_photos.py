@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import os
 import threading
 import uuid
@@ -14,6 +15,8 @@ from PIL import Image
 from anteroom.config import MAX_PHOTO_COUNT, MAX_PHOTO_SIZE_MB
 from anteroom.services import image_decode
 
+log = logging.getLogger(__name__)
+
 BUCKET = 'anteroom-photos'
 MAX_BYTES = MAX_PHOTO_SIZE_MB * 1024 * 1024
 MAX_PHOTOS = MAX_PHOTO_COUNT
@@ -22,6 +25,10 @@ MAX_SIDE = 2400
 # Storage beside the photo, so a restart or deploy never has to remake them.
 # 384 is the iPhone's photo tiles (about 136 pt at 3x).
 KEPT_THUMB_SIZES = (96, 192, 384)
+# A reused keepalive to Supabase can drop between calls; one immediate retry
+# recovers AI Studio Apply and other photo saves without a second Photoroom charge.
+# Match providers/http_retry: only errors before an answer starts, never a spent read.
+_RETRY_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError)
 # Thumbnails decode a JPEG at a fraction of its size, so they need little memory
 # and never wait behind a full-size upload in ``image_decode``.
 _thumb_slot = threading.Semaphore(2)
@@ -60,6 +67,25 @@ def with_renditions(key: str) -> list[str]:
     return [key, *(rendition_key(key, size) for size in KEPT_THUMB_SIZES)]
 
 
+def _request(method: str, url: str, *, headers: dict, timeout: float,
+             json: dict | None = None, content: bytes | None = None) -> httpx.Response:
+    """One Storage HTTP call; retry once when a reused connection drops before answering."""
+    last: BaseException | None = None
+    for _attempt in range(2):
+        try:
+            return _storage.request(method, url, headers=headers, json=json, content=content,
+                                    timeout=timeout, follow_redirects=False)
+        except _RETRY_ERRORS as exc:
+            # Type only: the exception can name the Storage URL.
+            log.warning('Photo storage %s failed: %s', method, type(exc).__name__)
+            last = exc
+        except httpx.HTTPError as exc:
+            log.warning('Photo storage %s failed: %s', method, type(exc).__name__)
+            raise
+    assert last is not None
+    raise last
+
+
 def storage_call(method: str, key: str, token: str, data: bytes | None = None, *, timeout: float = 20) -> bytes:
     public_key = os.environ.get('SUPABASE_PUBLISHABLE_KEY', '')
     if not public_key:
@@ -67,16 +93,17 @@ def storage_call(method: str, key: str, token: str, data: bytes | None = None, *
     origin = os.environ.get('SUPABASE_URL', '').rstrip('/')
     if not origin:
         raise HTTPException(503, 'Photo storage is not configured')
+    url = f'{origin}/storage/v1/object/{BUCKET}'
+    if method != 'DELETE':
+        url += '/' + key
+    headers = {'Authorization': f'Bearer {token}', 'apikey': public_key,
+               'Content-Type': 'application/json' if method == 'DELETE' else 'image/jpeg',
+               'Cache-Control': 'no-store',
+               **({'x-upsert': 'true'} if method == 'POST' else {})}
     try:
-        url = f'{origin}/storage/v1/object/{BUCKET}'
-        if method != 'DELETE':
-            url += '/' + key
-        response = _storage.request(method, url,
-                                 headers={'Authorization': f'Bearer {token}', 'apikey': public_key,
-                                          'Content-Type': 'application/json' if method == 'DELETE' else 'image/jpeg',
-                                          'Cache-Control': 'no-store'},
-                                 json={'prefixes': with_renditions(key)} if method == 'DELETE' else None,
-                                 content=None if method == 'DELETE' else data, timeout=timeout, follow_redirects=False)
+        response = _request(method, url, headers=headers, timeout=timeout,
+                            json={'prefixes': with_renditions(key)} if method == 'DELETE' else None,
+                            content=None if method == 'DELETE' else data)
     except httpx.HTTPError:
         raise HTTPException(503, 'Photo storage is temporarily unavailable') from None
     if method == 'DELETE' and response.status_code == 404:
@@ -94,10 +121,10 @@ def remove_objects(keys: list[str], token: str) -> None:
         raise HTTPException(503, 'Photo storage is not configured')
     for start in range(0, len(keys), 1000):
         try:
-            response = _storage.request('DELETE', f'{origin}/storage/v1/object/{BUCKET}',
-                                     headers={'Authorization': f'Bearer {token}', 'apikey': public_key,
-                                              'Cache-Control': 'no-store'},
-                                     json={'prefixes': keys[start:start + 1000]}, timeout=60, follow_redirects=False)
+            response = _request(
+                'DELETE', f'{origin}/storage/v1/object/{BUCKET}',
+                headers={'Authorization': f'Bearer {token}', 'apikey': public_key, 'Cache-Control': 'no-store'},
+                timeout=60, json={'prefixes': keys[start:start + 1000]})
         except httpx.HTTPError:
             raise HTTPException(503, 'Photo storage is temporarily unavailable') from None
         if not response.is_success and response.status_code != 404:
