@@ -5,6 +5,8 @@ from decimal import Decimal, InvalidOperation
 import math
 import xml.etree.ElementTree as ET
 
+import httpx
+
 from sqlalchemy.orm import Session
 
 from anteroom.database import in_worker_session
@@ -86,6 +88,73 @@ def _seller_sku(value) -> str | None:
     return text
 
 
+def _decimal_text(value) -> str:
+    """A positive number as eBay wrote it, without trailing zeros ("10.50" -> "10.5"), else ""."""
+    try:
+        number = Decimal(str(value or "").strip())
+    except InvalidOperation:
+        return ""
+    if not number.is_finite() or number <= 0:
+        return ""
+    return format(number.normalize(), "f")
+
+
+def _package(package: dict) -> dict:
+    """Package weight (lbs. and oz.) and dimensions (in.), as Item Details keeps them."""
+    out: dict = {}
+    pounds, ounces = _number(package.get("WeightMajor")), _number(package.get("WeightMinor"))
+    if (pounds or 0) + (ounces or 0) > 0:
+        out.update(weight_lb=pounds or 0, weight_oz=ounces or 0)
+    sides = [_decimal_text(package.get(name)) for name in ("PackageLength", "PackageWidth", "PackageDepth")]
+    if all(sides):
+        out["package_dimensions_in"] = "x".join(sides)
+    return out
+
+
+def _best_offer(offer: dict) -> dict | None:
+    """Best Offer exactly as the listing has it: on with its own prices (blank when it has none), or off."""
+    enabled = str(offer.get("enabled") or "").strip().casefold()
+    if enabled not in {"true", "false"}:
+        return None
+    if enabled == "false":
+        return {"enabled": False}
+    return {"enabled": True, "autoAcceptPrice": str(offer.get("autoAcceptPrice") or "").strip(),
+            "minimumOfferPrice": str(offer.get("minimumOfferPrice") or "").strip()}
+
+
+def _listing_settings(info: dict) -> dict:
+    """The rest of eBay's listing form, under the ``ebay_specifics`` keys the eBay tab and List/Update read."""
+    from anteroom.services.marketplace_schemas import _ebay_listing_type, ebay_duration
+
+    out: dict = {key: value for key, value in (info.get("policies") or {}).items() if str(value or "").strip()}
+    if info.get("merchantLocationKey"):
+        out["merchantLocationKey"] = info["merchantLocationKey"]
+    best_offer = _best_offer(info.get("bestOffer") or {})
+    if best_offer is not None:
+        out["bestOffer"] = best_offer
+    if kind := _ebay_listing_type(info.get("type")):
+        out["listingFormat"] = kind
+    if duration := ebay_duration(info.get("duration")):
+        out["listingDuration"] = duration
+    for key in ("subtitle", "upc", "charityId", "donationPercent"):
+        if str(info.get(key) or "").strip():
+            out[key] = str(info[key]).strip()
+    if (lot := _number(info.get("lotSize"))) and lot > 1:
+        out["lotSize"] = str(lot)
+    if str(info.get("privateListing") or "").casefold() == "true":
+        out["privateListing"] = True
+    if str((info.get("package") or {}).get("ShippingIrregular") or "").casefold() == "true":
+        out["irregularPackage"] = True
+    if second := str(info.get("secondaryCategoryId") or "").strip():
+        out["secondaryCategoryId"] = second
+        if name := str(info.get("secondaryCategoryName") or "").strip():
+            out["secondaryCategoryPath"] = name.replace(":", " > ")
+    if info.get("conditionDescription"):
+        out["conditionDescription"] = info["conditionDescription"]
+    # ``videoId`` names a local ListingVideo. eBay's video stays where it is: an unset choice leaves it on Update.
+    return out
+
+
 def listing_snapshot(info: dict) -> dict:
     total, sold = _number(info.get("quantity")), _number(info.get("soldQuantity"))
     if total is None or sold is None or sold > total:
@@ -105,27 +174,82 @@ def listing_snapshot(info: dict) -> dict:
         return next(iter(by_name.get(name) or []), None)
 
     category = str(info.get("categoryName") or "").replace(":", " > ")
+    category_id = str(info.get("categoryId") or "").strip()
+    # A category eBay did not name is left unset for the seller to choose, never stored as "".
+    categories: dict = {"category_path": category} if category else {}
+    if category_id:
+        categories.update(marketplace_category_ids={"ebay": category_id},
+                          direct_category_ids={"ebay": category_id, **({"ebay_path": category} if category else {})})
+    if category:
+        categories["marketplace_categories"] = {"ebay": category}
+    general = {key: value for key, value in (("primaryColor", first("color")), ("department", first("department")),
+                                              ("sizeType", first("size type"))) if value}
     return {"title": info["title"], "description": info["description"], "price": float(price), "quantity": total - sold,
             "brand": first("brand"), "size": first("size"), "sku": _seller_sku(info.get("sku")),
             "condition": ListingSchema.validate_condition(info.get("condition") or None),
-            "category_path": category, "marketplace_categories": {"ebay": category},
-            "marketplace_category_ids": {"ebay": info.get("categoryId")},
-            "direct_category_ids": {"ebay": str(info.get("categoryId") or ""), "ebay_path": category},
-            "ebay_specifics": {**specifics, **({"conditionDescription": info["conditionDescription"]} if info.get("conditionDescription") else {})}}
+            **general, **categories, **_package(info.get("package") or {}),
+            "ebay_specifics": {**specifics, **_listing_settings(info)}}
+
+
+async def _read_inventory(client: EbayClient, path: str, params: dict) -> dict:
+    """A read the import can do without: an Inventory API answer, or {} when eBay has none for this listing."""
+    try:
+        body = await client.request("GET", path, params=params)
+    except (EbayFailure, httpx.HTTPError):
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
+async def _inventory_details(client: EbayClient, info: dict) -> dict:
+    """Category and item location GetItem leaves out. Read only.
+
+    A listing made through eBay's Inventory API has an offer that names both. Otherwise the
+    item location is the seller's one inventory location at the listing's ZIP code.
+    """
+    found: dict = {}
+    sku = str(info.get("sku") or "").strip()
+    if sku:
+        body = await _read_inventory(client, "/sell/inventory/v1/offer", {"sku": sku, "marketplace_id": "EBAY_US"})
+        offer = next((offer for offer in body.get("offers") or [] if isinstance(offer, dict)
+                      and str((offer.get("listing") or {}).get("listingId") or "") == info["id"]), {})
+        found = {key: str(offer[key]) for key in ("categoryId", "merchantLocationKey") if str(offer.get(key) or "").strip()}
+    postal = str(info.get("postalCode") or "").strip()
+    if not found.get("merchantLocationKey") and postal:
+        body = await _read_inventory(client, "/sell/inventory/v1/location", {"limit": "100"})
+        keys = [str(location["merchantLocationKey"]) for location in body.get("locations") or []
+                if isinstance(location, dict) and location.get("merchantLocationKey")
+                and str(location.get("merchantLocationStatus") or "ENABLED").upper() == "ENABLED"
+                and str(((location.get("location") or {}).get("address") or {}).get("postalCode") or "").strip() == postal]
+        if len(keys) == 1:
+            found["merchantLocationKey"] = keys[0]
+    return found
+
+
+NO_CATEGORY = "eBay did not say which category this listing is in. Choose it on the eBay tab before updating the listing."
 
 
 async def import_listing(client: EbayClient, listing_id: str, *, unless_matched: bool = False) -> dict:
     info = await ebay_actions.owned_listing(client, listing_id)
     if info.get("id") != listing_id:
         raise EbayFailure("eBay returned a different listing. Nothing was imported.", 409)
+    listing_snapshot(info)  # Refuse an unsupported listing before reading anything else.
+    found = await _inventory_details(client, info)
+    if not str(info.get("categoryId") or "").strip() and found.get("categoryId"):
+        info = {**info, "categoryId": found["categoryId"]}
+    if found.get("merchantLocationKey"):
+        info = {**info, "merchantLocationKey": found["merchantLocationKey"]}
     snapshot = listing_snapshot(info)
     try:
-        return await inventory_import.save_owned_listing(
+        result = await inventory_import.save_owned_listing(
             "ebay", listing_id, snapshot, info.get("images", []), lambda: assert_identity(client.seller),
             unless_matched=unless_matched,
         )
     except inventory_import.ImportConflict as exc:
         raise EbayFailure(str(exc), 409) from exc
+    if "ebay" not in snapshot.get("direct_category_ids", {}) and result.get("conversation_id") \
+            and not result.get("reused") and isinstance(result.get("warnings"), list):
+        result["warnings"].append(NO_CATEGORY)
+    return result
 
 
 async def link_listing(client: EbayClient, listing_id: str, conversation_id: str) -> dict:

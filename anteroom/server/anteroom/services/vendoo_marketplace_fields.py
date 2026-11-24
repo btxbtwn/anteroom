@@ -167,9 +167,17 @@ def whole_price(price: Any) -> str:
 
 
 def poshmark_smart_sell(price: Any) -> dict[str, bool | str]:
-    """Smart Sell accepts offers down to the same minimum as eBay, or stays off."""
+    """Smart Sell accepts offers down to the same minimum as eBay, or stays off.
+
+    Poshmark refuses a Lowest Price that does not cover its fee, which the
+    eBay minimum misses on cheap items, so those list with Smart Sell off.
+    """
+    from anteroom.services.chrome_listing import poshmark_lowest_smart_floor
+
     floors = offer_floors(price)
-    return {"enabled": floors is not None, "minPrice": floors[1] if floors else ""}
+    if floors is None or int(floors[1]) < poshmark_lowest_smart_floor():
+        return {"enabled": False, "minPrice": ""}
+    return {"enabled": True, "minPrice": floors[1]}
 
 
 def ebay_offer_terms(price: Any, chosen: dict[str, Any] | None = None) -> dict[str, Any]:

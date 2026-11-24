@@ -842,7 +842,7 @@ def align_size_fields(listing: dict, *, previous_size: str | None = None) -> boo
         changed = True
     if propagate_general_size(listing, previous_size=previous_size):
         changed = True
-    if sync_title_size(listing):
+    if sync_title_size(listing, previous_size=previous_size):
         changed = True
     from anteroom.services.bottoms_sizes import apply_bottoms_sizes
 
@@ -852,15 +852,28 @@ def align_size_fields(listing: dict, *, previous_size: str | None = None) -> boo
 
 
 _TITLE_SIZE_TOKEN_RE = re.compile(
-    # Two digits at most, so a model number like 501 is never mistaken for a size.
-    r"(?i)^(?:x{0,3}s|m|x{0,3}l|os|p[sml]|\d{1,2}[x\u00d7/]\d{1,2}|\d{1,2}(?:\.5)?[wl]?)$"
+    # Two digits at most, so a model number like 501 is never mistaken for a size,
+    # and a fraction like 3/4 Sleeve or 1/2 Zip is not a size and inseam.
+    r"(?i)^(?:x{0,3}s|m|x{0,3}l|os|p[sml]|\d{1,2}[x\u00d7]\d{1,2}|\d{1,2}/(?![2348]$)\d{1,2}|\d{1,2}(?:\.5)?[wl]?)$"
 )
 
 
-def sync_title_size(listing: dict) -> bool:
-    """Make the title carry the size field verbatim — Brand Size Vibe Item Color Fit."""
+def _sequence_at(tokens: list[str], wanted: list[str]) -> int | None:
+    """Where ``wanted`` stands as whole words in ``tokens``, ignoring case and commas, or None."""
+    folded = [token.strip(",").casefold() for token in tokens]
+    target = [part.casefold() for part in wanted]
+    if not target:
+        return None
+    return next((i for i in range(len(folded) - len(target) + 1) if folded[i:i + len(target)] == target), None)
+
+
+def sync_title_size(listing: dict, *, previous_size: str | None = None) -> bool:
+    """Make the title carry the size — Brand Size Vibe Item Color Fit — unless it already names it."""
+    from anteroom.models.sizes import title_names_size
+
     if not isinstance(listing, dict):
         return False
+    previous = sanitize_size_value(previous_size) if previous_size else ""
     title = str(listing.get("title") or "").strip()
     size = sanitize_size_value(listing.get("size"))
     if not title or not size:
@@ -885,6 +898,13 @@ def sync_title_size(listing: dict) -> bool:
         end += len(size_tokens)
     if end > slot:
         tokens[slot:end] = size_tokens
+    elif title_names_size(title, size):
+        # Large, Men's L, 11/30 or S (6-7): the title names the size as written.
+        return False
+    elif previous and (at := _sequence_at(tokens[slot:], previous.split())) is not None:
+        # A size change swaps the old size where the title names it, after the
+        # brand, so a brand word that matches the old size is never replaced.
+        tokens[slot + at:slot + at + len(previous.split())] = size_tokens
     elif slot < len(tokens) and _TITLE_SIZE_TOKEN_RE.match(tokens[slot].strip(",")):
         existing = tokens[slot].strip(",")
         # Petite "PM" is the tag. Replacing it with the letter "M" drops the P.

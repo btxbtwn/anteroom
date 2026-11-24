@@ -160,7 +160,8 @@ class ValidationCasesTest(unittest.TestCase):
         for title, valid in (
             ("Free People IT 42 Bohemian Camisole Red Regular", True),
             ("Free People IT 44 Bohemian Camisole Red Regular", False),
-            ("Free People Bohemian IT 42 Camisole Red Regular", False),
+            # A title that names the size elsewhere is kept as written (#1990).
+            ("Free People Bohemian IT 42 Camisole Red Regular", True),
             ("Free People Bohemian Camisole Red Regular", False),
         ):
             with self.subTest(title=title):
@@ -168,6 +169,14 @@ class ValidationCasesTest(unittest.TestCase):
                 result = validate_listing(listing, 5, selected_marketplaces=["ebay"])
                 title_errors = [err for err in result.errors if err["field"] == "title"]
                 self.assertEqual(not title_errors, valid, title_errors)
+
+    def test_title_formula_accepts_size_written_elsewhere_or_as_word_form(self):
+        listing = {**VALID_LISTING, "brand": "Example", "size": "L"}
+        for title in ("Example Casual Pocket Tee Large Black Regular",
+                      "Example Casual Pocket Tee Men’s L Black Regular"):
+            listing["title"] = title
+            result = validate_listing(listing, 5, selected_marketplaces=["ebay"])
+            assert not [err for err in result.errors if err["field"] == "title"]
 
     def test_modern_blouse_is_left_off_etsy_without_blocking_send(self):
         # Send leaves Etsy empty for modern resale, so Etsy's own fields
@@ -1020,7 +1029,8 @@ class ListingIntegrityRouteTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 422)
 
-    def test_listing_saves_repair_repeated_size_and_reads_do_not_write(self):
+    def test_listing_saves_keep_an_untouched_title_and_reads_do_not_write(self):
+        # A save that leaves title, size and brand alone never changes the title (#1990).
         listing = {
             **copy.deepcopy(VALID_LISTING),
             "title": "Maliparmi IT 42 IT 42 IT 42 Bohemian Camisole Red Regular",
@@ -1029,7 +1039,7 @@ class ListingIntegrityRouteTest(unittest.TestCase):
         }
         original = listing_persistence.save_revision(self.db, self.conv.id, listing, source="user_form")
         url = f"/api/conversations/{self.conv.id}/listing"
-        expected = "Maliparmi IT 42 Bohemian Camisole Red Regular"
+        expected = listing["title"]
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["listing"]["title"], listing["title"])

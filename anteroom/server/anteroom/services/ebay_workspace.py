@@ -448,4 +448,18 @@ async def listing(client: EbayClient, listing_id: str) -> dict:
             "condition": text("e:ConditionDisplayName"), "conditionDescription": text("e:ConditionDescription"),
             "specifics": specifics,
             "images": [node.text for node in item.findall("e:PictureDetails/e:PictureURL", NS) if node.text],
-            "videoIds": [node.text for node in item.findall("e:VideoDetails/e:VideoID", NS) if node.text]}
+            "videoIds": [node.text for node in item.findall("e:VideoDetails/e:VideoID", NS) if node.text],
+            "duration": text("e:ListingDuration"), "subtitle": text("e:SubTitle"), "lotSize": text("e:LotSize"),
+            "privateListing": text("e:PrivateListing"), "postalCode": text("e:PostalCode"),
+            "secondaryCategoryId": text("e:SecondaryCategory/e:CategoryID"),
+            "secondaryCategoryName": text("e:SecondaryCategory/e:CategoryName"),
+            "upc": text("e:ProductListingDetails/e:UPC"),
+            "charityId": text("e:Charity/e:CharityID"), "donationPercent": text("e:Charity/e:DonationPercent"),
+            "package": {name: text(f"e:ShippingPackageDetails/e:{name}") for name in
+                        ("WeightMajor", "WeightMinor", "PackageLength", "PackageWidth", "PackageDepth", "ShippingIrregular")},
+            "policies": {"fulfillmentPolicyId": text("e:SellerProfiles/e:SellerShippingProfile/e:ShippingProfileID"),
+                         "paymentPolicyId": text("e:SellerProfiles/e:SellerPaymentProfile/e:PaymentProfileID"),
+                         "returnPolicyId": text("e:SellerProfiles/e:SellerReturnProfile/e:ReturnProfileID")},
+            "bestOffer": {"enabled": text("e:BestOfferDetails/e:BestOfferEnabled"),
+                          "autoAcceptPrice": text("e:ListingDetails/e:BestOfferAutoAcceptPrice"),
+                          "minimumOfferPrice": text("e:ListingDetails/e:MinimumBestOfferPrice")}}

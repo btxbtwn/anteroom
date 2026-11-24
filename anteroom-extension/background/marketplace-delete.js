@@ -108,7 +108,13 @@ async function runMarketplaceDelete(payload) {
     return marketplaceFailure(marketplaceError('Confirm deleting a named marketplace listing.'), true);
   }
   try {
-    return await entry[1](String(payload.listing_id), Date.now() + DELETE_DEADLINE_MS, payload.seller_region);
+    const deadline = Date.now() + DELETE_DEADLINE_MS;
+    if (payload.marketplace === 'depop' && payload.action === 'relist') {
+      // An accepted live-listing read says nothing about access to the drafts
+      // API needed to recreate it. Check drafts before touching the live item.
+      await depopAction('session', { deadline: Math.min(deadline, Date.now() + 10000) });
+    }
+    return await entry[1](String(payload.listing_id), deadline, payload.seller_region);
   } catch (error) {
     // Every delete reads the listing first, so repeating one is safe.
     return marketplaceFailure(error.code === 'uncertain' ? Object.assign(error, { code: 'network' }) : error, true);

@@ -6,6 +6,59 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1210 — 2026-11-24
+
+- Your AI agent can now look up each marketplace's categories, the fields a category asks for and the values they accept, read the form a listing shows for one marketplace, check your region, currency and connected marketplaces, and read your listing rules before it writes or edits a draft. These lookups only read: nothing is published or changed.
+
+## 0.1.1209 — 2026-11-24
+
+- The privacy policy now explains what Claude, ChatGPT or Gemini can see and change when you connect them to Anteroom, and how to disconnect them.
+
+## 0.1.1208 — 2026-11-24
+
+- Importing a listing from eBay now brings over its color, department, size type, package weight and dimensions, shipping, payment and return policies, item location, offer settings, format and duration, subtitle, second category, lot size, private listing, charity and UPC, so the eBay tab matches the listing on eBay. Updating an imported listing keeps the video it already has on eBay.
+- When eBay doesn't say which category an imported listing is in, Anteroom takes it from the listing's inventory offer, or tells you to choose one, instead of saving an empty category.
+
+## 0.1.1207 — 2026-11-24
+
+- Set the Depop category from listing chat, even when the draft's old category is no longer recognized.
+
+## 0.1.1206 — 2026-11-24
+
+- Importing a listing from Poshmark now brings over everything Poshmark has for it: its category, both colors, style tags, original price, sizes and size group (including listings with several sizes), quantity type, shipping discount, availability, Smart Sell, cost, SKU and other info, so its Poshmark tab matches Poshmark and an update sends the same values back.
+
+## 0.1.1205 — 2026-11-24
+
+- Importing a listing from Etsy now also brings over its category path, primary and secondary colors, condition (when Etsy has one), and package weight and size, so the Etsy tab matches the listing on Etsy.
+
+## 0.1.1204 — 2026-11-24
+
+- Auto-relist checks access to Depop drafts before removing a live listing. It pauses the rest of a marketplace's batch if the connection needs attention, the marketplace is limiting requests, or a replacement fails to confirm.
+
+## 0.1.1203 — 2026-11-24
+
+- Cheap items no longer fail to list on Poshmark because Smart Sell's Lowest Price was below Poshmark's fee. Anteroom leaves Smart Sell off when the lowest offer wouldn't cover the fee, and the Poshmark tab tells you before you list when a Lowest Price you set doesn't cover Poshmark's fee and your shipping discount.
+
+## 0.1.1202 — 2026-11-24
+
+- Saving a listing no longer rewrites its title: a title that already names the size (Large, Men's L, 11/30, S (6-7)) stays as written, and a title you type is kept exactly as you typed it. Changing the size still updates it in the title.
+
+## 0.1.1201 — 2026-11-24
+
+- Listing on Poshmark an item that has no Poshmark category now stops before anything is sent and asks you to choose one, instead of failing with "needs more details".
+
+## 0.1.1200 — 2026-11-24
+
+- Explain when Mercari blocks a hosted offer check and record which request was refused.
+
+## 0.1.1199 — 2026-11-24
+
+- Keep active Poshmark listings from showing up as sold comps when a search result includes the seller’s Sold Listings count.
+
+## 0.1.1198 — 2026-11-24
+
+- Open the original listing with View when Anteroom cannot confirm that it was delisted.
+
 ## 0.1.1197 — 2026-11-24
 
 - Edit photos across selected drafts with Photoroom. Review cover photos or pick individual photos, then apply the same edit in one batch.

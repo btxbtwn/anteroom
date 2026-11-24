@@ -65,6 +65,7 @@ class ReadOnlyEbay:
     def __init__(self):
         self.item = item_xml()
         self.calls = []
+        self.inventory = {}
 
     async def trading(self, call, fields):
         self.calls.append((call, fields))
@@ -72,7 +73,10 @@ class ReadOnlyEbay:
         assert fields == {"ItemID": ITEM_ID, "DetailLevel": "ReturnAll", "IncludeItemSpecifics": "true"}
         return {"xml": response("GetItemResponse", self.item)}
 
-    async def request(self, method, path, *, xml, call):
+    async def request(self, method, path, *, xml=None, call=None, params=None):
+        if method == "GET" and path.startswith("/sell/inventory/v1/"):
+            self.calls.append((path, params))
+            return self.inventory.get(path, {})
         assert (method, path, call) == ("POST", "/ws/api.dll", "GetMyeBaySelling"), "Import must only read eBay"
         request = ET.fromstring(xml)
         assert request.findtext("e:ActiveList/e:Pagination/e:EntriesPerPage", namespaces=NS) == "25"
@@ -142,7 +146,8 @@ def test_import_creates_local_inventory_photos_and_direct_identity_without_vendo
     saved_photos = imported.db.query(Photo).order_by(Photo.display_order).all()
     assert [photo.display_order for photo in saved_photos] == [0, 1]
     assert all((imported.directory / photo.stored_filename).exists() for photo in saved_photos)
-    assert [call[0] for call in imported.remote.calls] == ["GetItem"]
+    # Read only: GetItem, then the listing's inventory offer (its SKU), nothing written.
+    assert [call[0] for call in imported.remote.calls] == ["GetItem", "/sell/inventory/v1/offer"]
 
 
 def test_repeated_import_does_not_overwrite_local_edits_or_download_photos_again(imported):
@@ -248,7 +253,8 @@ def test_import_matches_previously_received_sales_without_delisting(imported):
     response = imported.client.post("/api/ebay/import", json={"listing_id": ITEM_ID}).json()
     imported.db.refresh(sale)
     assert sale.conversation_id == response["conversation_id"]
-    assert all(call[0] == "GetItem" for call in imported.remote.calls)
+    # Only reads: GetItem and the fake's Inventory API GETs (it records nothing else).
+    assert all(call[0] == "GetItem" or call[0].startswith("/sell/inventory/v1/") for call in imported.remote.calls)
 
 
 def test_invalid_photo_does_not_leave_an_orphan_file(imported):
@@ -322,3 +328,108 @@ def test_linking_refuses_a_listing_that_is_not_the_sellers_or_not_active(importe
     assert imported.client.post("/api/ebay/import", json={"listing_id": ITEM_ID, "link_conversation_id": conv.id}).status_code == 409
     assert imported.db.query(MarketplaceListing).count() == 0
     assert imported.client.post("/api/ebay/import", json={"listing_id": ITEM_ID, "link_conversation_id": "missing"}).status_code == 404
+
+
+def full_item():
+    """A listing with every field eBay's GetItem can return for a fixed-price item."""
+    item = item_xml(**{
+        "ListingDuration": "GTC", "SubTitle": "Fully lined", "LotSize": "2", "PrivateListing": "true", "PostalCode": "94110",
+        "SecondaryCategory/CategoryID": "11450", "SecondaryCategory/CategoryName": "Clothing:Vintage",
+        "ShippingPackageDetails/WeightMajor": "2", "ShippingPackageDetails/WeightMinor": "6",
+        "ShippingPackageDetails/PackageLength": "14", "ShippingPackageDetails/PackageWidth": "10.5",
+        "ShippingPackageDetails/PackageDepth": "4", "ShippingPackageDetails/ShippingIrregular": "true",
+        "SellerProfiles/SellerShippingProfile/ShippingProfileID": "111",
+        "SellerProfiles/SellerReturnProfile/ReturnProfileID": "222",
+        "SellerProfiles/SellerPaymentProfile/PaymentProfileID": "333",
+        "BestOfferDetails/BestOfferEnabled": "true", "ListingDetails/BestOfferAutoAcceptPrice": "40.00",
+        "ListingDetails/MinimumBestOfferPrice": "35.00", "Charity/CharityID": "1234", "Charity/DonationPercent": "10",
+        "ProductListingDetails/UPC": "012345678905", "VideoDetails/VideoID": "vid-1",
+    })
+    specifics = item.find("ItemSpecifics")
+    for name, value in (("Color", "Blue"), ("Department", "Women"), ("Size Type", "Regular"), ("Size", "M")):
+        pair = ET.SubElement(specifics, "NameValueList")
+        ET.SubElement(pair, "Name").text = name
+        ET.SubElement(pair, "Value").text = value
+    return item
+
+
+def test_import_brings_over_every_field_ebay_has_into_the_keys_the_ebay_tab_reads(imported):
+    imported.remote.item = full_item()
+    imported.remote.inventory["/sell/inventory/v1/location"] = {"locations": [
+        {"merchantLocationKey": "home", "location": {"address": {"postalCode": "94110", "country": "US"}}},
+        {"merchantLocationKey": "other", "location": {"address": {"postalCode": "10001", "country": "US"}}}]}
+    result = imported.client.post("/api/ebay/import", json={"listing_id": ITEM_ID})
+    assert result.status_code == 200, result.text
+    assert result.json()["warnings"] == []
+    snapshot = imported.db.query(ListingRevision).one().listing_json
+    assert snapshot["primaryColor"] == "Blue" and snapshot["department"] == "Women"
+    assert snapshot["sizeType"] == "Regular" and snapshot["size"] == "M"
+    assert snapshot["weight_lb"] == 2 and snapshot["weight_oz"] == 6
+    assert snapshot["package_dimensions_in"] == "14x10.5x4"
+    assert snapshot["direct_category_ids"] == {"ebay": "63862", "ebay_path": "Clothing > Women > Coats"}
+    ebay = snapshot["ebay_specifics"]
+    assert ebay["Color"] == ["Blue"] and ebay["Brand"] == ["Pendleton"]
+    assert ebay["fulfillmentPolicyId"] == "111" and ebay["returnPolicyId"] == "222" and ebay["paymentPolicyId"] == "333"
+    assert ebay["merchantLocationKey"] == "home"
+    assert ebay["bestOffer"] == {"enabled": True, "autoAcceptPrice": "40.00", "minimumOfferPrice": "35.00"}
+    assert ebay["listingFormat"] == "FIXED_PRICE" and ebay["listingDuration"] == "GTC"
+    assert ebay["subtitle"] == "Fully lined" and ebay["lotSize"] == "2" and ebay["privateListing"] is True
+    assert ebay["secondaryCategoryId"] == "11450" and ebay["secondaryCategoryPath"] == "Clothing > Vintage"
+    assert ebay["irregularPackage"] is True and ebay["upc"] == "012345678905"
+    # eBay's video ID is not a local video: leaving it unset keeps eBay's video on Update.
+    assert "videoId" not in ebay
+    assert ebay["charityId"] == "1234" and ebay["donationPercent"] == "10"
+    # Read only: GetItem and the seller's inventory locations, nothing written.
+    assert [call[0] for call in imported.remote.calls] == ["GetItem", "/sell/inventory/v1/offer", "/sell/inventory/v1/location"]
+
+
+def test_imported_fields_round_trip_into_what_ebay_update_sends(imported):
+    from anteroom.services import ebay_listings
+
+    imported.remote.item = full_item()
+    imported.client.post("/api/ebay/import", json={"listing_id": ITEM_ID})
+    snapshot = imported.db.query(ListingRevision).one().listing_json
+    assert ebay_listings.own_listing_choices(snapshot) == {
+        "fulfillmentPolicyId": "111", "paymentPolicyId": "333", "returnPolicyId": "222"}
+    assert ebay_listings.listing_format(snapshot) == {"format": "FIXED_PRICE", "duration": "GTC"}
+    assert ebay_listings.best_offer_terms({}, "45.50", snapshot) == {
+        "bestOfferEnabled": True, "autoAcceptPrice": {"value": "40.00", "currency": "USD"},
+        "autoDeclinePrice": {"value": "35.00", "currency": "USD"}}
+    assert ebay_listings.package_ounces(snapshot, {}) == "38"
+    options = ebay_listings.listing_options(snapshot)
+    assert options["subtitle"] == "Fully lined" and options["secondary_category_id"] == "11450"
+    assert options["lot_size"] == 2 and options["private"] is True and options["irregular"] is True
+    assert options["charity"] == {"charityId": "1234", "donationPercentage": "10.0"}
+    assert ebay_listings._video_choice(snapshot) is False
+
+
+def test_offers_turned_off_on_ebay_stay_off(imported):
+    imported.remote.item = item_xml(**{"BestOfferDetails/BestOfferEnabled": "false"})
+    imported.client.post("/api/ebay/import", json={"listing_id": ITEM_ID})
+    snapshot = imported.db.query(ListingRevision).one().listing_json
+    assert snapshot["ebay_specifics"]["bestOffer"] == {"enabled": False}
+    from anteroom.services import ebay_listings
+    assert ebay_listings.best_offer_terms({}, "45.50", snapshot) == {"bestOfferEnabled": False}
+
+
+def test_a_listing_without_a_category_id_takes_it_from_its_inventory_offer(imported):
+    imported.remote.item = item_xml(**{"PrimaryCategory/CategoryID": "", "PrimaryCategory/CategoryName": ""})
+    imported.remote.inventory["/sell/inventory/v1/offer"] = {"offers": [
+        {"sku": "COAT-1", "categoryId": "99999", "merchantLocationKey": "elsewhere", "listing": {"listingId": "1"}},
+        {"sku": "COAT-1", "categoryId": "63862", "merchantLocationKey": "home", "listing": {"listingId": ITEM_ID}}]}
+    result = imported.client.post("/api/ebay/import", json={"listing_id": ITEM_ID})
+    assert result.status_code == 200 and result.json()["warnings"] == []
+    snapshot = imported.db.query(ListingRevision).one().listing_json
+    assert snapshot["direct_category_ids"]["ebay"] == "63862"
+    assert snapshot["marketplace_category_ids"] == {"ebay": "63862"}
+    assert snapshot["ebay_specifics"]["merchantLocationKey"] == "home"
+
+
+def test_a_listing_whose_category_cannot_be_found_says_so_and_never_stores_an_empty_one(imported):
+    imported.remote.item = item_xml(**{"PrimaryCategory/CategoryID": "", "PrimaryCategory/CategoryName": ""})
+    result = imported.client.post("/api/ebay/import", json={"listing_id": ITEM_ID})
+    assert result.status_code == 200
+    assert any("category" in warning for warning in result.json()["warnings"])
+    snapshot = imported.db.query(ListingRevision).one().listing_json
+    assert "ebay" not in (snapshot.get("direct_category_ids") or {})
+    assert "ebay" not in (snapshot.get("marketplace_category_ids") or {})

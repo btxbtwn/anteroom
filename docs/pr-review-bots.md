@@ -58,6 +58,23 @@ Answered threads stay open for you to resolve, like CodeRabbit's. Auto-fix
 never merges, never queues auto-merge and never publishes or delists
 anything.
 
+## After a production deploy or Mac release fails
+
+**Claude release auto-fix** reviews failed `Deploy hosted` and `Studio macOS`
+runs from `main`. Its Actions summary links to the failed attempt, names the
+failed steps, and records the diagnosis. The hosted deploy records the
+commit it selected so Claude can compare that revision with current
+`main`. The review job uses the existing Claude subscription and runs
+outside the production and release environments. It passes detailed logs
+only from selected build and test steps.
+
+When Claude reproduces a code defect and verifies a fix, it opens a linked
+issue and a ready repair PR. Normal CI and reviews run on that PR. The bot
+opens at most one PR per workflow and failed revision. For failures that
+need an operator, such as expired signing credentials or an external
+service outage, the diagnosis stays in the Actions summary. A repair
+ships through the normal merge and release workflows.
+
 ## Setup
 
 1. Install the [Claude GitHub App](https://github.com/apps/claude) on this
