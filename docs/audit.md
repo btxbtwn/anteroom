@@ -42,9 +42,15 @@ These override everything below.
   (`ANTEROOM_PORT`, `ANTEROOM_WEB_PORT`). The iPhone script always uses
   4320, so stop the hosted sandbox before running it. If a developer's sandbox
   already holds a port, pick other ports; do not stop their process.
-- On the seller's Mac a hand-installed pytest plugin (`heavy_gate`,
-  `~/.local/lib/heavy-gate`) lets one pytest run at a time across every
-  worktree: a later run prints `[heavy-gate] waiting for a test slot` and
+  Set those ports only on the sandbox or browser-test command itself, never
+  in the shell that runs `./check.sh` or pytest: `config.py` builds the
+  trusted origins from them, so four origin tests in `test_local_requests.py`
+  and `test_audit_fixes.py` then fail with 403 or 1008 on 4318/5173
+  (2026-11-24, #2033).
+- On the seller's Mac a hand-installed plugin (`heavy_gate`,
+  `~/.local/lib/heavy-gate`) lets one pytest or Playwright run at a time
+  across every worktree (the waiting line names a `(playwright)` holder
+  since 2026-11-24): a later run prints `[heavy-gate] waiting for a test slot` and
   sleeps, so a one-test reproduction can look hung while another worker's
   suite runs. Since 2026-11-22 it has no opt-out: `HEAVY_GATE_SLOTS=0`
   counts as one slot, so every run waits its turn. `~/.cache/heavy-gate/slot-*.lock`
@@ -56,7 +62,13 @@ These override everything below.
   `./check.sh --fast` alongside `./check.sh --all` pushed the load past 19:
   Playwright's web server missed its 120 s start, every iPhone test timed
   out, and the backend run took two hours. Finish the smoke first, then
-  check fix branches one after another.
+  check fix branches one after another. When other workers' suites hold the
+  slot, `./check.sh --all` can outlast a 2-hour background limit: on
+  2026-11-24 it waited 53 minutes between its SQLite and Postgres steps at
+  load 24 and was stopped. Run the light steps (code health, extension,
+  relay, skills, lock audit) directly, give each heavy step its own run, and
+  record any step that never got a slot as **not run (machine busy)** with
+  the holders and wait time.
 - Give each fix worktree its own `anteroom/.venv` and npm install. Run this
   from the fix worktree root. It removes any links left by the old shared
   setup and keeps your shell at the root for `./check.sh --fast`.
