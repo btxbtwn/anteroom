@@ -49,6 +49,7 @@ client, and openapi-typescript's extra exports fail `knip`.
 | `GET /api/conversations/{id}` | `Conversation` | |
 | `PATCH /api/conversations/{id}` | `Conversation` | `ConversationInput` (hosted) |
 | `DELETE /api/conversations/{id}` | `DeleteConversationResult` | |
+| `PUT /api/conversations/{id}/favorite` | `FavoriteResult` | `FavoriteInput` |
 | `GET /api/conversations/{id}/listing` | `ListingDocument` | |
 | `PUT /api/conversations/{id}/listing` | `ListingSaveResult` | `ListingSave` |
 | `GET /api/conversations/{id}/photos` | `ListingPhoto[]` (with `PhotoEdits`, `CropBox`) | |

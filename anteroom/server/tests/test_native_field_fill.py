@@ -644,6 +644,28 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
             ask.assert_not_called()
             self.assertEqual(self._current().id, revision_id)
 
+    async def test_generating_again_keeps_answers_whose_evidence_still_holds(self):
+        from anteroom.services import native_contract
+
+        form = {"category_id": "12", "fields": [
+            row("ebay_specifics.Material", "Material", ["Cotton"], required=True),
+            row("ebay_specifics.Rise", "Rise", ["High"], required=True),
+        ]}
+        listing = {"ebay_specifics": {"Material": "Cotton"}}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"ebay": form}, ["ebay"])
+        listing[native_contract.EVIDENCE_KEY] = {
+            "ebay_specifics.Material": {"value": "Cotton", "quote": "100% cotton"}}
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, "native_schema")
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
+                patch("anteroom.services.marketplaces.get_selected_marketplaces", return_value=["ebay"]), \
+                patch.object(native_field_fill, "_fill_native_fields", AsyncMock(return_value=None)):
+            await native_field_fill.prepare_generation_forms(self.conv.id, object(), evidence="100% cotton")
+        saved = self._current().listing_json
+        self.assertEqual(saved[native_contract.EVIDENCE_KEY]["ebay_specifics.Material"]["quote"], "100% cotton")
+        # Only the unanswered field is asked again.
+        self.assertEqual([r["path"] for r in fillable_rows(form, "ebay", saved, evidence="100% cotton, high rise")],
+                         ["ebay_specifics.Rise"])
+
     async def test_malformed_refill_reply_does_not_clear_existing_answers(self):
         from anteroom.services import native_contract
 

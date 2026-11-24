@@ -14,6 +14,8 @@ from anteroom.routes.api_contract import (
     Conversation,
     ConversationSummary,
     DeleteConversationResult,
+    FavoriteInput,
+    FavoriteResult,
     ListingPhoto,
 )
 from anteroom.services.unsent_edits import unsent_edits
@@ -209,6 +211,13 @@ def update_conversation(conv_id: str, body: ConversationUpdate, db: Session = De
         db.commit()
         db.refresh(conv)
     return _conv_response(conv, _extras_for(db, conv_id))
+
+
+@router.put("/{conv_id}/favorite", response_model=FavoriteResult, responses=NOT_FOUND)
+def set_favorite(conv_id: str, body: FavoriteInput, db: Session = Depends(get_db)):
+    if not ConversationRepo(db).set_favorites([conv_id], body.favorite):
+        raise HTTPException(404, "Conversation not found")
+    return FavoriteResult(id=conv_id, favorite=body.favorite)
 
 
 @router.get("/{conv_id}/messages")
@@ -415,10 +424,16 @@ def _carried_notes(db: Session, conv_id: str, notes: str | None) -> str | None:
 
 
 def _wipe(db: Session, conv_id: str, keep_inputs: bool, notes: str | None) -> None:
+    from anteroom.services.listing_generate import regenerate_reading, restamp_reading
     from anteroom.services.vendoo_import import parse_notes
 
+    # Regenerate keeps the photo reading of these photos and Item Details, so
+    # the photos are not paid for again.
+    reading = regenerate_reading(db, conv_id) if keep_inputs else None
     # Marketplace records survive Clear and Regenerate, with the jobs they name.
-    wipe_contents(db, conv_id, keep_photos=keep_inputs, keep_marketplace_listings=True)
+    wipe_contents(db, conv_id, keep_photos=keep_inputs, keep_marketplace_listings=True, keep_message_id=reading)
+    if reading is not None:
+        restamp_reading(db, reading, notes)
     db.expire_all()
     conv = ConversationRepo(db).get(conv_id)
     if not conv:
@@ -586,6 +601,7 @@ def _conv_response(conv, extras: dict | None = None) -> Conversation:
         etsy_eligible=bool(row.get("etsy_eligible", True)),
         inactive_marketplaces=_inactive(row.get("direct_records") or {}),
         price_drift=row.get("price_drift") or [],
+        favorite=bool(conv.favorite),
         **imported_fields(parse_notes(conv.notes), row.get("direct_records") or {}),
     )
 

@@ -81,10 +81,14 @@ export type FilterableListing = {
   inactive_marketplaces?: string[];
   /** Marketplace prices that differ from the seller's pricing rules. */
   price_drift?: { marketplace: string; expected?: number; price?: number; source?: string }[];
+  /** Starred by the seller. */
+  favorite?: boolean;
 };
 
 export interface ListingFilters {
   status: ListingStatusFilter;
+  /** Keep only listings the seller starred. */
+  favorites: boolean;
   marketplaces: string[];
   /** Labels a listing must wear one of (✓). */
   labels: string[];
@@ -112,6 +116,7 @@ export interface ListingFilters {
 
 export const DEFAULT_LISTING_FILTERS: ListingFilters = {
   status: "active",
+  favorites: false,
   marketplaces: [],
   labels: [],
   excludeLabels: [],
@@ -220,6 +225,7 @@ export function matchesFilters(
   now: number = Date.now(),
 ): boolean {
   if (!inStatusTab(listing, filters.status)) return false;
+  if (filters.favorites && !listing.favorite) return false;
   const listed = listedOn(listing);
   if (filters.notListed) {
     // Vendoo's "View Not Listed" asks for the items no marketplace carries.
@@ -393,6 +399,7 @@ export function activeFilterCount(filters: ListingFilters): number {
   return (
     // "Not listed on eBay" is one narrowing, not two.
     Math.max(filters.marketplaces.length, filters.notListed ? 1 : 0) +
+    (filters.favorites ? 1 : 0) +
     filters.labels.length +
     (filters.excludeLabels?.length || 0) +
     (filters.unsent ? 1 : 0) +
@@ -463,6 +470,11 @@ export function staleCounts(
 /** Listings edited since they were last sent to a marketplace. */
 export function unsentCount(listings: FilterableListing[]): number {
   return listings.filter((listing) => Boolean(listing.unsent_edits)).length;
+}
+
+/** Listings the seller starred. */
+export function favoriteCount(listings: FilterableListing[]): number {
+  return listings.filter((listing) => Boolean(listing.favorite)).length;
 }
 
 /** Listings whose sale is missing details. */

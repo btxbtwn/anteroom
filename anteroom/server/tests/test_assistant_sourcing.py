@@ -29,7 +29,7 @@ def _box(store, vid, title, price, ship, pcs, grade, per_piece):
     }
     row = s.price_lot(row, ship, per_piece, sell_through=PREFS["sell_through"], fees=PREFS["fees"],
                       cost_per_piece=PREFS["cost_per_piece"])
-    row.update(comps_count=3 if per_piece else 0, active_median=None,
+    row.update(comps_count=3 if per_piece else 0,
                research_at=NOW.isoformat() if per_piece else None, research_source="eBay" if per_piece else None)
     return row
 

@@ -5,7 +5,8 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { MarketplaceLogo } from "../MarketplaceLogo";
-import { LayoutTemplateIcon, CopyIcon, EllipsisIcon, PencilIcon, Trash2Icon, XIcon } from "lucide-react";
+import { LayoutTemplateIcon, CopyIcon, EllipsisIcon, PencilIcon, StarIcon, StarOffIcon, Trash2Icon, XIcon } from "lucide-react";
+import { FavoriteStar, useSetFavorite } from "../favorites";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { toastManager } from "../ui/toast";
 import { cn } from "../../lib/utils";
@@ -86,6 +87,10 @@ export const ListingRow = memo(function ListingRow({
   const [copyOpen, setCopyOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draftTitle, setDraftTitle] = useState(title);
+  const favorite = Boolean(listing.favorite);
+  const setFavorite = useSetFavorite();
+  const toggleFavorite = () => setFavorite.mutate({ id: listing.id, favorite: !favorite });
+  const favoriteLabel = favorite ? "Remove from favorites" : "Add to favorites";
 
   const renameListing = useMutation({
     mutationFn: (nextTitle: string) => api.conversations.update(listing.id, { title: nextTitle }),
@@ -255,6 +260,33 @@ export const ListingRow = memo(function ListingRow({
             </a>
           )}
           <div className="mt-1 flex items-center gap-2">
+            {/* With a mouse the star has its own slot, as in Gmail: filled once starred, outlined
+                on hover. It sits apart from the hover actions so the title stays clickable. */}
+            {!selecting ? (
+              <button
+                type="button"
+                aria-pressed={favorite}
+                aria-label={`${favoriteLabel}: ${title}`}
+                title={favoriteLabel}
+                className={cn(
+                  "relative z-[1] -my-1 -ml-1 hidden size-6 shrink-0 cursor-pointer items-center justify-center rounded-md outline-none hover:bg-sidebar-row-hover focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring min-[901px]:pointer-fine:inline-flex",
+                  favorite ? "text-sidebar-foreground/80" : "text-sidebar-muted-foreground opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100",
+                )}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleFavorite();
+                }}
+              >
+                <FavoriteStar on={favorite} className="size-3.5" />
+              </button>
+            ) : null}
+            {/* Touch screens star from the row's menu; the row only shows the mark. */}
+            {favorite ? (
+              <span role="img" aria-label="Favorite" title="Favorite"
+                className={cn("inline-flex shrink-0 text-sidebar-foreground/80", !selecting && "min-[901px]:pointer-fine:hidden")}>
+                <FavoriteStar on className="size-3.5" />
+              </span>
+            ) : null}
             <ListingStatusLabel status={status} title={statusTitle} />
             {status === "sold" && listing.missing_sale_data?.length ? (
               <ListingTag tone="warning" title={`Missing: ${listing.missing_sale_data.join(", ")}`}>
@@ -328,6 +360,10 @@ export const ListingRow = memo(function ListingRow({
             <EllipsisIcon className="size-4.5" />
           </MenuTrigger>
           <MenuPopup align="end" width="content">
+            <MenuItem onClick={toggleFavorite}>
+              {favorite ? <StarOffIcon /> : <StarIcon />}
+              {favoriteLabel}
+            </MenuItem>
             <MenuItem disabled={renameListing.isPending} onClick={startRename}>
               <PencilIcon />
               Rename

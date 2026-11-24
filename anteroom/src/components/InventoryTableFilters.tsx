@@ -2,9 +2,11 @@
 import { ListFilterIcon, XIcon } from "lucide-react";
 import { labelColor, labelDotClass, type LabelColor } from "../labelColors";
 import { cn } from "../lib/utils";
+import { FavoriteStar } from "./favorites";
 import { Dot, FilterRow, LabelRow } from "./ListingFilters";
 import {
   cycleLabelFilter,
+  favoriteCount,
   inactiveCount,
   labelCounts,
   labelFilterState,
@@ -17,12 +19,14 @@ import {
 import { Button } from "./ui/button";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu";
 
-export type TableFilters = Pick<ListingFilters, "labels" | "excludeLabels" | "inactive" | "priceDrift" | "missingSku">;
+export type TableFilters = Pick<ListingFilters, "favorites" | "labels" | "excludeLabels" | "inactive" | "priceDrift" | "missingSku">;
 
-export const NO_TABLE_FILTERS: TableFilters = { labels: [], excludeLabels: [], inactive: false, priceDrift: false, missingSku: false };
+export const NO_TABLE_FILTERS: TableFilters = {
+  favorites: false, labels: [], excludeLabels: [], inactive: false, priceDrift: false, missingSku: false,
+};
 
 export function tableFilterCount(filters: TableFilters): number {
-  return filters.labels.length + filters.excludeLabels.length
+  return Number(filters.favorites) + filters.labels.length + filters.excludeLabels.length
     + Number(filters.inactive) + Number(filters.priceDrift) + Number(filters.missingSku);
 }
 
@@ -48,6 +52,10 @@ export function InventoryTableFilters({ listings, filters, labelColors, pricingR
         {chosen ? <span className="text-xs text-muted-foreground tabular-nums">{chosen}</span> : null}
       </MenuTrigger>
       <MenuPopup align="start" className="max-h-[min(70vh,32rem)] min-w-60" aria-label="Filter inventory">
+        <FilterRow checked={filters.favorites} count={favoriteCount(listings)} label="Favorites" title="Listings you starred"
+          glyph={<FavoriteStar on className="size-3.5 shrink-0 text-muted-foreground" />}
+          onSelect={() => onChange({ ...filters, favorites: !filters.favorites })} />
+        <MenuSeparator />
         <MenuGroup>
           <MenuGroupLabel>Warnings</MenuGroupLabel>
           <FilterRow checked={filters.inactive} count={inactiveCount(listings)} glyph={<Dot />} label="Inactive"

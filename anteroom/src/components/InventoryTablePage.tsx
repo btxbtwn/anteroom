@@ -32,6 +32,7 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from "./ui/input-group";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Toggle, ToggleGroup } from "./ui/toggle-group";
 import { useInventoryReadiness } from "./useInventoryReadiness";
+import { FavoriteToggle } from "./favorites";
 import { InventoryTableFilters, NO_TABLE_FILTERS, type TableFilters } from "./InventoryTableFilters";
 import { inStatusTab } from "./inventoryFilters";
 import { EmptyRow, Panel, WorkspacePage } from "./WorkspacePage";
@@ -231,10 +232,10 @@ export function InventoryTablePage({
                             className="group/row absolute inset-x-0 grid border-b border-border/40"
                             style={{ ...columns, height: ROW_HEIGHT, transform: `translateY(${item.start}px)` }}
                           >
-                            <div role="rowheader" className="sticky left-0 z-10 min-w-0 bg-background">
+                            <div role="rowheader" className="sticky left-0 z-10 flex min-w-0 items-center bg-background group-hover/row:bg-accent">
                               <button
                                 type="button"
-                                className="flex size-full min-w-0 cursor-pointer items-center gap-3 px-4 text-left outline-none group-hover/row:bg-accent focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                                className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-3 ps-4 pe-2 text-left outline-none focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                                 title={name === title ? title : `${name} · ${title}`}
                                 onClick={() => onOpenListing(listing.id)}
                               >
@@ -246,6 +247,9 @@ export function InventoryTablePage({
                                   <RowWarnings listing={listing} warnMissingSku={warnMissingSku} />
                                 </span>
                               </button>
+                              {/* A favorite keeps its star in view; the others offer one on hover, as Gmail's rows do. */}
+                              <FavoriteToggle id={listing.id} title={title} favorite={Boolean(listing.favorite)}
+                                className={cn("me-2", !listing.favorite && "opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100")} />
                             </div>
                             <div role="cell" className="flex items-center justify-end px-3 text-sm text-foreground tabular-nums group-hover/row:bg-accent">
                               {listing.price != null ? formatMoney(listing.price) : <span className="text-muted-foreground">—</span>}

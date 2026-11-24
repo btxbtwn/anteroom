@@ -20,6 +20,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     true,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -55,6 +56,8 @@ class Conversation(SellerOwned, Base):
     # explicitly records False; undoing a sale may only undo that ownership.
     settled_by_seller: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
     unsettled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Starred by the seller to find again. Not an edit: setting it leaves updated_at alone.
+    favorite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=True)
 
@@ -84,6 +87,9 @@ class Message(SellerOwned, Base):
     attachments: Mapped[Any] = mapped_column(JSON, nullable=True)
     # Identifies the exact ordered photo files used for a vision reading.
     photo_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Identifies the Item Details a generation's photo reading was given, so a
+    # retry or Regenerate reuses it only while photos and notes are unchanged.
+    notes_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)
 
     conversation: Mapped[Conversation] = relationship("Conversation", back_populates="messages", primaryjoin="and_(Conversation.id == foreign(Message.conversation_id), Conversation.user_id == Message.user_id)")

@@ -23,6 +23,10 @@ echo "Test inventory rules and lossless listing edits"
 xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift Sources/API/MarketplaceReadiness.swift Sources/Inventory/InventoryFilters.swift Sources/Inventory/Suggestions.swift Tests/InventoryTests.swift -o "$RUNNER_TEMP/inventory-tests"
 "$RUNNER_TEMP/inventory-tests"
 
+echo "Test inventory favorites"
+xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift Sources/API/MarketplaceReadiness.swift Sources/Inventory/InventoryFilters.swift Sources/Inventory/Suggestions.swift Tests/InventoryFavoritesTests.swift -o "$RUNNER_TEMP/inventory-favorites-tests"
+"$RUNNER_TEMP/inventory-favorites-tests"
+
 echo "Test thumbnail sizes and cache keys"
 xcrun swiftc Sources/Photos/ThumbnailSize.swift Tests/ThumbnailSizeTests.swift -o "$RUNNER_TEMP/thumbnail-size-tests"
 "$RUNNER_TEMP/thumbnail-size-tests"

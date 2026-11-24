@@ -6,6 +6,31 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1227 — 2026-11-24
+
+- Retrying a draft after an error no longer reads the photos, picks the category or fills marketplace fields again when the photos and Item Details haven't changed, so a retry costs less.
+- Regenerate reuses the photo reading when the photos and Item Details haven't changed. Changing a photo or the Item Details still reads the photos again.
+
+## 0.1.1226 — 2026-11-24
+
+- Box Scout no longer reads Poshmark's search, which Poshmark doesn't allow. It prices boxes from your own sales and eBay's sold listings, and says that Poshmark sales aren't checked.
+- Box Scout no longer shows Poshmark asking prices or caps its estimate at them.
+
+## 0.1.1225 — 2026-11-24
+
+- Star the items you care about from the inventory list, the inventory table or the item editor, on the web and the iPhone app, and use the new Favorites filter to see only them. Starring never changes a marketplace and doesn't move the item in Recent activity.
+- AI agents connected to Anteroom can star or unstar items with the new set_favorite tool, and search_inventory can return only your favorites.
+
+## 0.1.1224 — 2026-11-24
+
+- Your AI agent can now see which items have edits not yet sent to their live marketplaces and what changed field by field, and put an item back to the version that's live, keeping your labels and cost. It never contacts a marketplace.
+- Your AI agent can list your labels with how many items wear each, and rename or delete a label across your whole inventory.
+- Your AI agent can mark two items as not duplicates so that pair never comes back.
+
+## 0.1.1223 — 2026-11-24
+
+- Fix Anteroom updates failing to start after another pair of changes each added a database step at the same time.
+
 ## 0.1.1222 — 2026-11-24
 
 - Your AI assistant can send feedback to the Anteroom team for you: a bug, a feature request, a question or something confusing. It shows you the message first. On myanteroom.com it is emailed to the team; on the Mac app it is saved and the assistant gives you an email link to send it yourself.

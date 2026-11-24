@@ -103,6 +103,7 @@ def reset_unsent_draft(db, identity, *, keep_inputs: bool) -> set[str]:
     """
     from anteroom.models.conversation import utcnow
     from anteroom.services.background_tasks import delete_history
+    from anteroom.services.listing_generate import regenerate_reading, restamp_reading
     from anteroom.services.vendoo_import import parse_notes
 
     reason = blocker(db, identity, regenerate=keep_inputs)
@@ -110,12 +111,19 @@ def reset_unsent_draft(db, identity, *, keep_inputs: bool) -> set[str]:
         raise ValueError(reason)
     row = db.get(Conversation, identity)
     notes = row.notes
+    reading = None
     if keep_inputs:
+        # Regenerate keeps the photo reading of these photos and Item Details.
+        reading = regenerate_reading(db, identity)
         notes = carried_notes(db, identity, notes)
     keys = _attachment_keys(db, identity) | (set() if keep_inputs else _photo_keys(db, identity))
     delete_history(db, identity)
-    for model in (Listing, ListingRevision, Message) + (() if keep_inputs else (Photo, ListingCorrection)):
+    for model in (Listing, ListingRevision) + (() if keep_inputs else (Photo, ListingCorrection)):
         db.execute(delete(model).where(model.conversation_id == identity))
+    messages = delete(Message).where(Message.conversation_id == identity)
+    db.execute(messages if reading is None else messages.where(Message.id != reading))
+    if reading is not None:
+        restamp_reading(db, reading, notes)
     # A name the seller gave the listing outlives Regenerate; Clear drops it.
     if not (keep_inputs and parse_notes(notes).get('titlePinned')):
         row.title = 'New Listing'

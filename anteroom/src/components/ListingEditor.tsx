@@ -38,6 +38,7 @@ import { MarketplacesLayout, useReportFieldsShown } from "./MarketplacesSection"
 import { confirmDialog } from "../ui/confirmDialog";
 import { useChatBusy } from "./chat/liveChatStore";
 import { ListingActionsMenu } from "./ListingReviewActions";
+import { FavoriteToggle } from "./favorites";
 import { type ListingReviewTab } from "./ListingReviewTabs";
 import type { BulkListingUploadResult } from "../bulkPhotoUpload";
 import { GenerationFeedback } from "./GenerationFeedback";
@@ -296,7 +297,10 @@ export function ListingEditor({
         }}
         selected={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
         railActions={runtime.features.has("generation") ? <RegenerateListingButton convId={convId} variant="ghost-muted" onRegenerated={onCleared} /> : undefined}
-        railMenu={<ListingActionsMenu convId={convId} onCleared={onCleared} />}
+        railMenu={<span className="flex items-center gap-0.5">
+          {conversation ? <FavoriteToggle id={convId} title={String(listing.title || conversation.title || "Listing")} favorite={Boolean(conversation.favorite)} /> : null}
+          <ListingActionsMenu convId={convId} onCleared={onCleared} />
+        </span>}
         railStatus={editState.saving ? <span role="status" className="text-xs text-muted-foreground">{generating ? "Edits kept. Waiting for chat to finish before saving…" : "Saving…"}</span> : undefined}
         onSelect={(id) => {
           setFieldTarget(null);

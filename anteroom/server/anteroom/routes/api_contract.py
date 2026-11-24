@@ -54,6 +54,7 @@ CONTRACT_OPERATIONS: tuple[tuple[str, str], ...] = (
     ("get", "/api/conversations/{identity}"),
     ("patch", "/api/conversations/{identity}"),
     ("delete", "/api/conversations/{identity}"),
+    ("put", "/api/conversations/{identity}/favorite"),
     ("get", "/api/conversations/{identity}/listing"),
     ("put", "/api/conversations/{identity}/listing"),
     ("get", "/api/conversations/{identity}/photos"),
@@ -255,6 +256,8 @@ class ConversationSummary(ContractModel):
     """False for modern resale: Etsy removes those."""
     missing_sale_data: list[str] = []
     """Sale details the sales ledger still needs from the seller."""
+    favorite: bool = False
+    """Starred by the seller. Starring is not an edit and leaves ``updated_at`` as it was."""
 
 
 class Conversation(ConversationSummary):
@@ -275,6 +278,19 @@ class ConversationInput(ContractModel):
     """Item Details' changed keys, merged into the notes as they are now, so keys
     the server wrote since the notes were read survive. Measurements merge per field."""
     box_id: str | None = Field(None, max_length=100)
+
+
+class FavoriteInput(ContractModel):
+    """Star or unstar one item."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    favorite: bool
+
+
+class FavoriteResult(ContractModel):
+    id: str
+    favorite: bool
 
 
 class DeleteConversationResult(ContractModel):
