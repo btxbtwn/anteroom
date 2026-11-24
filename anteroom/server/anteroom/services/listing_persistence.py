@@ -148,8 +148,12 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
                 native_contract.constrain_generated(listing_json, before, freeze_categories=False,
                                                     use_saved_defaults=use_saved_defaults)
         else:
+            # An agent's edit over MCP sets categories on purpose, like the seller's own (#2076),
+            # so the old category's answers are cleared as on the seller's own save.
+            if source == "mcp":
+                native_contract.invalidate_dependents(before, listing_json)
             native_contract.constrain_generated(listing_json, before, freeze_categories=source not in {
-                "native_fields", "native_categories", "vendoo_prepare", "category_analysis", "category_schema_cache"},
+                "native_fields", "native_categories", "vendoo_prepare", "category_analysis", "category_schema_cache", "mcp"},
                 keep_evidence=source == "native_fields", use_saved_defaults=use_saved_defaults)
     elif native_contract.KEY in listing_json:
         compacted = choice_lists.compact_contracts(listing_json[native_contract.KEY])
