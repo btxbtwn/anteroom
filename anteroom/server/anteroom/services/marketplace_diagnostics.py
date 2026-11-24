@@ -10,9 +10,11 @@ _OPERATIONS = frozenset({"marketplace.execute", "marketplace.delete", "marketpla
                          "marketplace.orders", "marketplace.listings"})
 _PREVIEW_STEPS = frozenset({"mercari-account", "mercari-item", "mercari-eligibility", "mercari-bounds",
                             "depop-account", "depop-product", "depop-offer-preview"})
+_RESPONSE_FORMATS = frozenset({"html", "json", "other"})
+_CHALLENGE_MARKERS = frozenset({"cloudflare", "perimeterx", "datadome", "captcha", "human_verification"})
 _NUMBERS = frozenset({"elapsed_ms", "timeout_ms", "discount_percent", "price_cents", "offer_price_cents",
                       "floor_cents", "poshmark_price_input", "smart_sell_minimum_input", "read_price_cents"})
-_BOOLEANS = frozenset({"safe_to_retry", "smart_sell_enabled_input"})
+_BOOLEANS = frozenset({"safe_to_retry", "smart_sell_enabled_input", "cloudflare_challenge_header"})
 _DECIMAL = re.compile(r"\d{1,9}(?:\.\d{1,4})?\Z")
 
 
@@ -30,9 +32,13 @@ def sanitize_context(value: object) -> dict:
     for key in _BOOLEANS:
         if type(value.get(key)) is bool:
             result[key] = value[key]
-    for key, allowed in (("action", _ACTIONS), ("operation", _OPERATIONS), ("preview_step", _PREVIEW_STEPS)):
+    for key, allowed in (("action", _ACTIONS), ("operation", _OPERATIONS), ("preview_step", _PREVIEW_STEPS),
+                         ("response_format", _RESPONSE_FORMATS), ("challenge_marker", _CHALLENGE_MARKERS)):
         if isinstance(value.get(key), str) and value[key] in allowed:
             result[key] = value[key]
+    status = value.get("response_status")
+    if type(status) is int and 100 <= status <= 599:
+        result["response_status"] = status
     return result
 
 
@@ -54,6 +60,11 @@ def failure_context(operation: str, payload: dict | None, result: object, elapse
             values["preview_step"] = result.get("preview_step")
             # What the marketplace's own item read returned before a later read refused; not an input.
             values["read_price_cents"] = result.get("price_cents")
+            challenge = result.get("challenge_response")
+            if payload.get("marketplace") == "mercari" and result.get("error_code") == "challenge" and isinstance(challenge, dict):
+                values.update(response_status=challenge.get("status"), response_format=challenge.get("format"),
+                              challenge_marker=challenge.get("marker"),
+                              cloudflare_challenge_header=challenge.get("cloudflare_challenge_header"))
     listing = payload.get("listing")
     if payload.get("marketplace") == "poshmark" and isinstance(listing, dict):
         specifics = listing.get("poshmark_specifics")

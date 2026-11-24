@@ -227,6 +227,47 @@ def test_preview_read_step_rejects_arbitrary_values(step):
                                                {'preview_step': step}, 1, 90)
 
 
+def test_cloud_mercari_offer_challenge_reaches_alert_as_typed_evidence(monkeypatch, caplog):
+    from anteroom.services import cloud_marketplace
+
+    message = "Mercari blocked Anteroom's cloud request for listing details. The offer check stopped."
+    result = {
+        'ok': False, 'safe_to_retry': True, 'error_code': 'challenge', 'preview_step': 'mercari-item',
+        'error': message, 'marketplace_message': 'HTTP 403',
+        'challenge_response': {'status': 403, 'format': 'html', 'marker': 'cloudflare',
+                               'cloudflare_challenge_header': True, 'body': 'private-response'},
+    }
+    execute = AsyncMock(return_value=result)
+    monkeypatch.setattr(cloud_marketplace, 'execute', execute)
+    monkeypatch.setattr(listing_promotions, 'run_worker_db_step', AsyncMock(return_value=True))
+    row = ListingPromotion(marketplace='mercari', action='offer', batch_id='fixture', discount_percent=12)
+
+    with caplog.at_level(logging.ERROR), pytest.raises(listing_promotions.PromotionError) as raised:
+        asyncio.run(listing_promotions._review_remote(row, 'm12345678901'))
+
+    assert str(raised.value) == message
+    assert raised.value.code == 'challenge'
+    assert row.sent_at is None
+    report = build_report(caplog.records[-1])
+    context = report['marketplace_context']
+    assert context['preview_step'] == 'mercari-item'
+    assert context['response_status'] == 403
+    assert context['response_format'] == 'html'
+    assert context['challenge_marker'] == 'cloudflare'
+    assert context['cloudflare_challenge_header'] is True
+    assert 'private-response' not in render_email(report, 0, None)[1]
+    execute.assert_awaited_once()
+
+
+def test_challenge_evidence_rejects_arbitrary_values():
+    from anteroom.services.marketplace_diagnostics import sanitize_context
+
+    assert sanitize_context({
+        'response_status': '403', 'response_format': 'text/html; unexpected=private',
+        'challenge_marker': 'raw response excerpt', 'cloudflare_challenge_header': 'challenge',
+    }) == {}
+
+
 def test_nested_unknown_does_not_inherit_preview_read_step(caplog):
     from anteroom.services.marketplace_errors import report_result
     with caplog.at_level(logging.ERROR):

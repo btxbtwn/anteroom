@@ -1,0 +1,1 @@
+- Explain when Mercari blocks a hosted offer check and record which request was refused.
