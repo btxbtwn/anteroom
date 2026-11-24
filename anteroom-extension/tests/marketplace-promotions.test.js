@@ -193,8 +193,8 @@ function offerWorker(marketplace, answers) {
     const key = `${options.method || 'GET'} ${parsed.hostname}${parsed.pathname}${body?.operationName ? ` ${body.operationName}` : ''}`;
     requests.push({ key, body, headers: options.headers });
     const answer = answers[key];
-    const [status, data] = typeof answer === 'function' ? answer(body) : answer || [404, {}];
-    return reply(status, data);
+    const [status, data, headers] = typeof answer === 'function' ? answer(body) : answer || [404, {}];
+    return reply(status, data, headers);
   };
   const results = [];
   c.sendBrowserResult = (_msg, result) => results.push(JSON.parse(JSON.stringify(result)));
@@ -344,6 +344,27 @@ test('Mercari offer outcomes: a lost or unreadable reply is uncertain; a refusal
     assert.equal(run.requests.filter(r => r.key === OFFER_SEND).length, 1, JSON.stringify(answer));
     assert.equal(run.store['promotion_action-1'].finished, true);
   }
+});
+
+// Cloudflare can mark its challenge only in the header. That is a browser check, not a
+// sign-out: the session is not read again, nothing is resent, and an offer goes out at most once.
+test('a header-only Cloudflare challenge stops a Mercari offer without resending it', async () => {
+  const challenge = [403, '<!doctype html><html><body>private-response</body></html>',
+    { 'content-type': 'text/html', 'cf-mitigated': 'challenge' }];
+  const ITEM_READ = 'POST www.mercari.com/v1/api sellFetchItemsDetails';
+  for (const [blocked, sends] of [[ITEM_READ, 0], [OFFER_SEND, 1]]) {
+    const run = offerWorker('mercari', mercariAnswers({ [blocked]: challenge }));
+    await mercariOffer(run.c);
+    assert.deepEqual([run.results[0].ok, run.results[0].error_code], [false, 'challenge'], blocked);
+    assert.equal(run.requests.filter(r => r.key === blocked).length, 1, blocked);
+    assert.equal(run.requests.filter(r => r.key === OFFER_SEND).length, sends, blocked);
+  }
+  const check = offerWorker('mercari', mercariAnswers({ [ITEM_READ]: challenge }));
+  await check.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'mercari', action: 'offer',
+    listing_id: ITEM, discount_percent: 20 } });
+  assert.deepEqual([check.results[0].error_code, check.results[0].preview_step], ['challenge', 'mercari-item']);
+  assert.equal(check.requests.filter(r => r.key === ITEM_READ).length, 1);
+  assert.ok(!check.requests.some(r => r.key === OFFER_SEND));
 });
 
 // Shapes from the seller's Selling Hub; every value is made up.
