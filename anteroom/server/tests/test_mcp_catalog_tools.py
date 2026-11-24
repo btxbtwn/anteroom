@@ -195,6 +195,28 @@ def test_ebay_attributes_come_from_the_saved_schema_and_say_when_it_was_read(eba
     assert options["selection_only"] is False
 
 
+def test_etsy_property_options_are_the_labels_the_form_saves(ebay_tree):
+    from anteroom.services import etsy_form, etsy_listings
+    from anteroom.services.category_fields import save_rows
+
+    category_id = next(iter(etsy_form.category_choices()["option_values"].values()))
+    color = {"id": "200", "name": "Primary color", "required": True, "mode": "selection", "multi": False,
+             "values": [{"id": 1, "label": "Beige"}, {"id": 2, "label": "Black"}]}
+    save_rows("etsy_properties", str(category_id), [color])
+    client = TestClient(app)
+    result, is_error = _call_tool(
+        client, "get_category_attributes", {"marketplace": "etsy", "category_id": str(category_id)})
+    assert not is_error, result
+    row = {row["path"]: row for row in result["fields"]}[f"{etsy_form.PROPERTIES_PATH}.Primary color"]
+    assert row["options"] == ["Beige", "Black"]
+    # Saving what the tool offers makes List send that property.
+    def assigned(saved):
+        return etsy_listings.property_values({"etsy_specifics": {"category_specifics": {"Primary color": saved}}}, [color])
+
+    assert assigned(row["options"][1])[0]["value_ids"] == [2]
+    assert assigned("2") == []  # An ID is not matched, so it must never be offered as the value.
+
+
 def test_search_attribute_options_finds_values_in_a_long_list():
     client = TestClient(app)
     result, is_error = _call_tool(client, "search_attribute_options", {

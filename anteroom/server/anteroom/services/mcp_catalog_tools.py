@@ -336,13 +336,13 @@ def _schema_rows(fields: list[dict], prefix: str, *, ebay: bool) -> list[dict]:
             continue
         values = item.get("values") or []
         labels = list(dict.fromkeys(str(value.get("label") or "") for value in values if value.get("label")))
-        option_values = {} if ebay else {str(value["label"]): value.get("id") for value in values if value.get("label")}
         rows.append({
             "path": f"{prefix}.{name}", "label": name, "required": bool(item.get("required")),
             "multi": bool(item.get("multi")), "max_values": item.get("max_values"), "max_length": item.get("max_length"),
             # eBay's page offers only its listed sizes, though its API takes others.
             "selection_only": item.get("mode") == "selection" or (ebay and name == "Size" and bool(labels)),
-            "options": labels, "option_values": option_values, "category_specific": True,
+            # Both save the label: Etsy matches a saved answer to its choices by label, not ID.
+            "options": labels, "category_specific": True,
             "section": ("Item specifics: Required" if item.get("required") else "Item specifics: Additional (optional)")
             if ebay else "About this item",
         })
@@ -516,7 +516,7 @@ def _tool_search_attribute_options(db: Session, args: dict[str, Any], **_kw: Any
         "query": query or None,
         "total_matches": len(order),
         "options": [options[i] for i in order[:limit]],
-        **({} if summary["selection_only"] or not summary["type"] in {"text", "select"}
+        **({} if summary["selection_only"] or summary["type"] not in {"text", "select"}
            else {"note": "This field also takes free text."}),
     }
 
