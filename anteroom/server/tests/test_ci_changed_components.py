@@ -165,7 +165,8 @@ def test_test_only_change_does_not_run_browser_suites(tmp_path: Path) -> None:
     ],
 )
 def test_browser_matrix_preserves_shared_and_release_coverage(tmp_path: Path, event, paths, suites) -> None:
-    selected = components(tmp_path, "--stdin", "--workflow", event, stdin=paths)
+    # A pull request runs browser tests in its full stage, once it is queued.
+    selected = components(tmp_path, "--stdin", "--workflow", event, "--queued", "true", stdin=paths)
     assert selected["browser"] == "true"
     assert json.loads(selected["browser_suites"]) == [{"name": name} for name in suites]
 
