@@ -74,6 +74,11 @@ def prepared_listing(previous: dict, listing: dict, *, notes: dict | None = None
     preserving_locks(updated, _normalize)
     for market, block in native_blocks.items():
         updated[f"{market}_specifics"] = block
+    # Native restore can put Other back after size propagation. Other never
+    # hides a known tag when Depop offers the matching size (kids ages included).
+    from anteroom.services.depop_fields import replace_depop_other_size
+
+    replace_depop_other_size(updated)
     lock_native_edits(previous, updated, native_blocks)
     return updated
 

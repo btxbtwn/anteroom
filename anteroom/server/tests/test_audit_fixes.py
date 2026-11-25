@@ -895,7 +895,9 @@ class ValidationCasesTest(unittest.TestCase):
         listing["depop_specifics"] = {**listing["depop_specifics"], "size": "Other"}
         with patch("anteroom.services.category_fields.load_fields", return_value=None):
             result = validate_listing(listing, 5, selected_marketplaces=["depop"])
-        self.assertTrue(any(error["field"] == "depop_specifics.size" for error in result.errors), result.errors)
+        other_errors = [error for error in result.errors if error["field"] == "depop_specifics.size"]
+        self.assertTrue(other_errors, result.errors)
+        self.assertIn("16 years", other_errors[0]["message"])
         listing["direct_category_ids"] = {"depop": "everything-else_decor-home-accesories"}
         with patch("anteroom.services.category_fields.load_fields", return_value=None):
             result = validate_listing(listing, 5, selected_marketplaces=["depop"])

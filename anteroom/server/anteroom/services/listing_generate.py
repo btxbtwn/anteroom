@@ -880,6 +880,11 @@ def align_size_fields(listing: dict, *, previous_size: str | None = None) -> boo
         changed = True
     if propagate_general_size(listing, previous_size=previous_size):
         changed = True
+    from anteroom.services.depop_fields import replace_depop_other_size
+
+    # Locked Other survives propagate; replace it when Depop offers a real size.
+    if replace_depop_other_size(listing):
+        changed = True
     if sync_title_size(listing, previous_size=previous_size):
         changed = True
     from anteroom.services.bottoms_sizes import apply_bottoms_sizes

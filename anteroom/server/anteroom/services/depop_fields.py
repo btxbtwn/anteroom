@@ -538,6 +538,43 @@ def depop_size_for(size: Any, listing: dict) -> str:
     return size_label(depop_category_id(listing), text)
 
 
+def replace_depop_other_size(listing: dict) -> bool:
+    """Replace Depop Other with the tag's matching size when Depop offers one.
+
+    Other is never kept over a known tag. Kids letters become ages (Youth L is
+    14 years). Drops a seller lock that was holding Other, and clears a stale
+    native size id from the old Other choice.
+    """
+    if not isinstance(listing, dict):
+        return False
+    depop = listing.get("depop_specifics")
+    if not isinstance(depop, dict):
+        return False
+    if text_value(depop.get("size")).casefold() != "other":
+        return False
+    tag = text_value(listing.get("size"))
+    if not tag or tag.casefold() in {"other", "one size", "os"}:
+        return False
+    if not depop_offers_sizes(listing):
+        return False
+    mapped = text_value(depop_size_for(tag, listing))
+    if not mapped or mapped.casefold() == "other":
+        return False
+    updated = {**depop, "size": mapped}
+    updated.pop("nativeSizeId", None)
+    listing["depop_specifics"] = updated
+    from anteroom.services.seller_overrides import _write_locks, fold_key, locked_paths
+
+    locks = locked_paths(listing)
+    drop = {
+        path for path in locks
+        if path.startswith("depop_specifics.") and fold_key(path.rsplit(".", 1)[-1]) == "size"
+    }
+    if drop:
+        _write_locks(listing, locks - drop)
+    return True
+
+
 def depop_offers_sizes(listing: dict) -> bool:
     """Depop's category has real sizes, not only Other and One size.
 
