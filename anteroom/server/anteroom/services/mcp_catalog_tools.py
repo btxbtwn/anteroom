@@ -4,7 +4,8 @@ Categories, the fields a category asks for and the values each accepts, the
 form a listing shows for one marketplace, and the seller's region and connections.
 Catalog reads use data Anteroom already keeps. An explicit form refresh reads
 the marketplace after the MCP database session closes and returns the form
-without saving a listing revision.
+without saving a listing revision. A form reload does what Reload choices does
+in the editor: it reads the form the same way and saves it to the listing.
 """
 from __future__ import annotations
 
@@ -138,6 +139,29 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "reload_marketplace_form",
+        "title": "Reload a listing's marketplace form",
+        "description": (
+            "Read one marketplace's current form for a listing and save it to the listing, exactly like "
+            "Reload choices in the Anteroom editor. Use it when a listing's validation says \"Reload its "
+            "fields before listing\" after its category, weight or another choice changed. Pass "
+            "expected_revision_id from get_listing; refused if the listing changed since. Returns the new "
+            "revision_id and what that marketplace's form still needs. Saves only Anteroom's listing: never "
+            "publishes, saves a marketplace draft or changes a live listing."
+        ),
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "conversation_id": {"type": "string", "description": "Listing / conversation ID."},
+                "marketplace": {"type": "string", "enum": sorted(MARKETS)},
+                "expected_revision_id": {"type": "string", "description": "current_revision_id from get_listing."},
+            },
+            "required": ["conversation_id", "marketplace", "expected_revision_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "get_auto_relist_status",
         "title": "Preview Auto-Relist readiness",
         "description": (
@@ -169,7 +193,11 @@ TOOLS: list[dict[str, Any]] = [
     },
 ]
 
-PERMISSIONS: dict[str, tuple[str, str]] = {tool["name"]: ("listings", "read") for tool in TOOLS}
+# Reloading a form saves it to the listing, so it needs the same access as edit_listing.
+_WRITE_TOOLS = {"reload_marketplace_form"}
+PERMISSIONS: dict[str, tuple[str, str]] = {
+    tool["name"]: ("listings", "write" if tool["name"] in _WRITE_TOOLS else "read") for tool in TOOLS
+}
 
 # Appended to the create and edit tool descriptions in mcp_http.
 WRITE_GUIDANCE = (
@@ -589,6 +617,53 @@ def _tool_get_marketplace_form(db: Session, args: dict[str, Any], **_kw: Any) ->
     return _form_result(out, form)
 
 
+def _tool_reload_marketplace_form(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str, Any]:
+    from anteroom.repositories.queries import ListingRepo
+    from anteroom.services.seller_region import seller_region
+
+    conv_id = _text(args, "conversation_id", max_len=500)
+    market = _market(args)
+    revision_id = args.get("expected_revision_id")
+    if not isinstance(revision_id, str) or not 1 <= len(revision_id) <= 100:
+        raise ValueError("Use the current revision ID from get_listing as expected_revision_id.")
+    current = ListingRepo(db).get_current(conv_id)
+    if current is None:
+        raise ValueError("Listing not found.")
+    if current.current_revision_id != revision_id:
+        raise ValueError("The listing changed. Read its current revision with get_listing and try again.")
+    region = seller_region(db=db)
+    if market not in region.marketplaces:
+        raise ValueError(f"{NAMES[market]} is unavailable in the seller's Anteroom region ({region.country}).")
+    # The form is read and saved after this call's session closes, like Reload choices in the editor.
+    return {"_after": [{_FORM_PLACEHOLDER: {
+        "conversation_id": conv_id, "marketplace": market, "revision_id": revision_id, "save": True,
+    }}]}
+
+
+def _remaining_form_gaps(db: Session, conv_id: str, market: str) -> list[dict[str, Any]]:
+    from anteroom.repositories.queries import ListingRepo
+    from anteroom.services import native_contract
+
+    repo = ListingRepo(db)
+    current = repo.get_current(conv_id)
+    revision = repo.get_revision(current.current_revision_id) if current and current.current_revision_id else None
+    listing = revision.listing_json if revision else {}
+    return [{"field": gap["field"], "message": gap["message"]}
+            for gap in native_contract.gaps(listing, market) if gap.get("blocking", True)]
+
+
+async def _save_reloaded_form(spec: dict, form: dict) -> dict:
+    """Save a form read by Reload: the editor's own fenced save, then what that marketplace still needs."""
+    from anteroom.database import in_worker_session
+    from anteroom.services import native_editor
+
+    market, conv_id = spec["marketplace"], spec["conversation_id"]
+    saved = await in_worker_session(native_editor.save_refreshed_form, conv_id, market, spec["revision_id"], form)
+    remaining = await in_worker_session(_remaining_form_gaps, conv_id, market)
+    return {"conversation_id": conv_id, "marketplace": market, "saved": True, "revision_id": saved["revision_id"],
+            "remaining": remaining}
+
+
 def _form_result(out: dict[str, Any], form: dict) -> dict[str, Any]:
     out["category_id"] = form.get("category_id")
     out["fields"] = [_summary(row, with_value=True) for row in form.get("fields") or [] if not _photo_or_note(row)]
@@ -735,10 +810,15 @@ def _refresh_error(market: str, exc: Exception) -> tuple[str, str]:
 
     from anteroom.services.ebay_client import EbayFailure
     from anteroom.services.marketplace_accounts import SignInRequired
+    from anteroom.services.native_marketplaces import NativeMarketplaceError
 
     name = NAMES[market]
     if isinstance(exc, _FormUnavailable):
         return exc.code, str(exc)
+    if isinstance(exc, NativeMarketplaceError):
+        # The editor's own reload wording: the listing moved on, or the form could not be read.
+        return ("listing_changed" if exc.status_code == 409 else "not_found" if exc.status_code == 404
+                else "unavailable"), str(exc)
     if isinstance(exc, (TimeoutError, httpx.TimeoutException)):
         return "timeout", f"{name} did not return its choices in time. Try again."
     if isinstance(exc, SignInRequired) or (market == "etsy" and str(exc).startswith("Connect Etsy in Settings")):
@@ -768,14 +848,26 @@ async def finish_form_reads(reads: list[tuple[dict[str, Any], dict[str, Any]]], 
             remaining = deadline - monotonic()
             if remaining <= 0:
                 raise TimeoutError
-            async with asyncio.timeout(remaining):
-                data = await _refresh_marketplace_form(spec, min(25.0, remaining))
-                if not await in_worker_session(_revision_matches, conv_id, revision_id):
-                    raise _FormUnavailable("listing_changed", "The listing changed while choices loaded. Read its revision and try again.")
+            if spec.get("save"):
+                from anteroom.services import native_editor
+
+                # Only the marketplace read is under the deadline. The save that follows is a short,
+                # fenced database write: cancelling it part-way could commit after "Nothing was saved".
+                async with asyncio.timeout(min(25.0, remaining)):
+                    form = await native_editor.editor_form(conv_id, market, revision_id, refresh=True)
+                data = await _save_reloaded_form(spec, form)
+            else:
+                async with asyncio.timeout(remaining):
+                    data = await _refresh_marketplace_form(spec, min(25.0, remaining))
+                    if not await in_worker_session(_revision_matches, conv_id, revision_id):
+                        raise _FormUnavailable("listing_changed", "The listing changed while choices loaded. Read its revision and try again.")
         except Exception as exc:  # noqa: BLE001 - never expose provider errors or the internal snapshot
             code, message = _refresh_error(market, exc)
             data = {"marketplace": market, "conversation_id": conv_id, "revision_id": revision_id,
                     "available": False, "source": "unavailable", "reason": code, "message": message}
+            if spec.get("save"):
+                data = {"marketplace": market, "conversation_id": conv_id, "revision_id": revision_id,
+                        "saved": False, "reason": code, "message": f"{message} Nothing was saved."}
         result["content"] = [{"type": "text", "text": json.dumps(data, indent=2, default=str)}]
 
     await asyncio.gather(*(finish(result, spec) for result, spec in reads))
@@ -847,6 +939,7 @@ HANDLERS: dict[str, Callable[..., dict[str, Any]]] = {
     "get_category_attributes": _tool_get_category_attributes,
     "search_attribute_options": _tool_search_attribute_options,
     "get_marketplace_form": _tool_get_marketplace_form,
+    "reload_marketplace_form": _tool_reload_marketplace_form,
     "get_auto_relist_status": _tool_get_auto_relist_status,
     "get_account_settings": _tool_get_account_settings,
 }
