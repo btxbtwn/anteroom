@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1249 — 2026-11-25
+
+- Auto-relist price drops on Poshmark and Mercari now land on whole dollars (rounded down), so relists no longer fail with "Enter a whole-dollar price".
+
 ## 0.1.1248 — 2026-11-25
 
 - Saving or listing on Depop, Mercari or Poshmark from the web no longer hangs on "Waiting for Chrome to confirm" when the action is started in the background: it now reaches Chrome instead of being turned away before it starts.
