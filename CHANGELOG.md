@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1252 — 2026-11-25
+
+- Keep web app updates from stalling on a test that timed out on busy build machines.
+
 ## 0.1.1251 — 2026-11-25
 
 - Draft rows and listing threads show a Scheduled tag with the publish date and time in your local time.

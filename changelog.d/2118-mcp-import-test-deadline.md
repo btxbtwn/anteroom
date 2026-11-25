@@ -1,1 +1,0 @@
-- Keep web app updates from stalling on a test that timed out on busy build machines.
