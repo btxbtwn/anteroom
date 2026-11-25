@@ -73,7 +73,11 @@ def _skip_client_warning(scope, route, status: int, *, fly_replay: bool) -> bool
         return True
     if scope["method"] == "HEAD" and status == 405:
         return True
-    if getattr(route, "path", None) == "/api/marketplaces/sessions" and status == 409:
+    template = getattr(route, "path", None)
+    if template == "/api/mcp" and scope["method"] == "GET" and status == 405:
+        # MCP explicitly returns 405 when unsolicited SSE is unsupported.
+        return True
+    if template == "/api/marketplaces/sessions" and status == 409:
         return True
     return False
 

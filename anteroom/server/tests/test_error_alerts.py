@@ -714,6 +714,43 @@ def test_expected_client_4xx_and_fly_replay_do_not_warn():
         warning.assert_called_once()
 
 
+def test_expected_mcp_get_405_stays_in_access_log_without_warning():
+    from fastapi import FastAPI, Response
+    from fastapi.testclient import TestClient
+    from anteroom.hosted import AccessLogMiddleware
+    from anteroom.routes.mcp import router
+
+    app = FastAPI()
+
+    @app.get("/api/other")
+    def other():
+        return Response(status_code=405)
+
+    @app.post("/api/mcp")
+    def mcp_post(status: int = 503):
+        return Response(status_code=status)
+
+    app.include_router(router)
+    app.add_middleware(AccessLogMiddleware)
+    client = TestClient(app)
+    with (patch.object(logging.getLogger("anteroom.http"), "warning") as warning,
+          patch.object(logging.getLogger("anteroom.access"), "info") as access):
+        response = client.get("/api/mcp")
+        assert response.status_code == 405
+        assert response.headers["Allow"] == "POST, DELETE"
+        warning.assert_not_called()
+        assert access.call_args.args[1:4] == ("GET", "/api/mcp", 405)
+
+        assert client.get("/api/other").status_code == 405
+        warning.assert_called_once_with("%s %s answered %s", "GET", "/api/other", 405)
+        assert client.post("/api/mcp?status=405").status_code == 405
+        assert warning.call_args.args[1:] == ("POST", "/api/mcp", 405)
+
+        with patch.object(logging.getLogger("anteroom.http"), "error") as error:
+            assert client.post("/api/mcp").status_code == 503
+        assert error.call_args.args[1:4] == ("POST", "/api/mcp", 503)
+
+
 def test_operator_email_reads_env_and_falls_back(monkeypatch):
     import smtplib
 
