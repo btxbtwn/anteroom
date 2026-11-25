@@ -1,0 +1,1 @@
+- Opening a listing checks what each marketplace still needs once for all of them, so several open screens no longer tie up the server while a listing loads.
