@@ -1,1 +1,0 @@
-- Fixed duplicate entries in the sale tracker when Anteroom checks the same sale in two places at once.
