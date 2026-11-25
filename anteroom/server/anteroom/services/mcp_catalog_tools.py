@@ -20,7 +20,6 @@ from time import monotonic
 from types import SimpleNamespace
 from typing import Any
 
-from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from anteroom.models.catalog import CategoryFieldSchema
@@ -656,15 +655,11 @@ def _remaining_form_gaps(db: Session, conv_id: str, market: str) -> list[dict[st
 def _save_form_in_time(db: Session, expired: Callable[[], bool], conv_id: str, market: str,
                        revision_id: str, form: dict) -> dict:
     from anteroom.services import native_editor
+    from anteroom.services.mcp_photo_tools import refuse_late_commit
 
-    def refuse_late_commit(*_args: Any) -> None:
-        # The caller was already told this call timed out and nothing more was saved.
-        if expired():
-            raise TimeoutError
-
-    event.listen(db, "before_commit", refuse_late_commit)
-    # A commit flushes after before_commit, and a flush can wait on a locked database.
-    event.listen(db, "after_flush", refuse_late_commit)
+    # This is not the MCP call's own session, so it needs that session's late-commit guard: a save
+    # still waiting on a locked database must not commit after the caller was told it timed out.
+    refuse_late_commit(db, expired)
     return native_editor.save_refreshed_form(db, conv_id, market, revision_id, form)
 
 

@@ -240,6 +240,17 @@ def test_hosted_mcp_form_uses_the_sellers_relay_and_rejects_results_for_old_revi
 _RELOAD_HINT = "Reload its fields before listing"
 
 
+@pytest.fixture
+def _reload_draft_cleanup():
+    """Edits record listing corrections; remove them so later files' table cleanups still work."""
+    yield
+    from anteroom.models.listing_evidence import ListingCorrection
+
+    with SessionLocal() as db:
+        db.query(ListingCorrection).delete()
+        db.commit()
+
+
 def _reload_errors(conv_id, market):
     """The saved form's own staleness check, the one List and Schedule refuse on."""
     from anteroom.repositories.queries import ListingRepo
@@ -251,7 +262,7 @@ def _reload_errors(conv_id, market):
     return [gap for gap in native_contract.gaps(listing, market) if _RELOAD_HINT in gap["message"]]
 
 
-def test_reload_marketplace_form_saves_the_form_so_the_draft_can_list(monkeypatch):
+def test_reload_marketplace_form_saves_the_form_so_the_draft_can_list(monkeypatch, _reload_draft_cleanup):
     from anteroom.services import mercari_api
 
     async def quotes(_category, _ounces, _dimensions):
@@ -283,7 +294,7 @@ def test_reload_marketplace_form_saves_the_form_so_the_draft_can_list(monkeypatc
     assert not _reload_errors(draft["conversation_id"], "mercari")
 
 
-def test_reload_marketplace_form_refuses_a_listing_that_changed(monkeypatch):
+def test_reload_marketplace_form_refuses_a_listing_that_changed(monkeypatch, _reload_draft_cleanup):
     from anteroom.services import mercari_api
 
     async def quotes(_category, _ounces, _dimensions):
@@ -302,7 +313,7 @@ def test_reload_marketplace_form_refuses_a_listing_that_changed(monkeypatch):
     assert listing["current_revision_id"] == edited["revision_id"]
 
 
-def test_reload_marketplace_form_timeout_saves_nothing(monkeypatch):
+def test_reload_marketplace_form_timeout_saves_nothing(monkeypatch, _reload_draft_cleanup):
     from anteroom.services import mercari_api
 
     async def stalled(*_args):
@@ -324,7 +335,7 @@ def test_reload_marketplace_form_timeout_saves_nothing(monkeypatch):
     assert listing["current_revision_id"] == draft["revision_id"]
 
 
-def test_reload_marketplace_form_save_past_the_request_deadline_is_not_committed(monkeypatch):
+def test_reload_marketplace_form_save_past_the_request_deadline_is_not_committed(monkeypatch, _reload_draft_cleanup):
     import threading
     import time
 
@@ -360,7 +371,11 @@ def test_reload_marketplace_form_save_past_the_request_deadline_is_not_committed
     }})
     assert response.status_code == 504, response.text
     assert finished.wait(5)
-    time.sleep(0.2)
+    # The save's session commits (or refuses to) after the save returns: wait for the call's worker.
+    deadline = time.monotonic() + 5
+    while mcp._active_calls and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not mcp._active_calls
     monkeypatch.setattr(mcp, "_MCP_RPC_TIMEOUT_SECONDS", 30.0)
     listing, error = _call_tool(client, "get_listing", {"conversation_id": draft["conversation_id"]})
     assert not error and listing["current_revision_id"] == draft["revision_id"], listing
