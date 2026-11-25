@@ -1,13 +1,13 @@
 """Remember which price revision each Auto-Relist attempt saved.
 
 Revision ID: f3c8a1d6b294
-Revises: c7a3e9f41b28
+Revises: 68f2ba103d5c
 """
 import sqlalchemy as sa
 from alembic import op
 
 revision = "f3c8a1d6b294"
-down_revision = "c7a3e9f41b28"
+down_revision = "68f2ba103d5c"
 branch_labels = None
 depends_on = None
 
