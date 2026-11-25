@@ -241,6 +241,47 @@ def test_get_listing_says_how_the_last_mac_run_ended(provider):
     assert state() == {"state": "idle"}
 
 
+def test_a_mac_run_is_not_completed_while_its_marketplace_fields_are_still_being_prepared(provider):
+    """Generation ends its stream, then fills the marketplace fields in a task of its own.
+
+    An agent told "completed" before that task ends would read a listing without those
+    fields, and an edit then would make the finish step throw its work away.
+    """
+    import asyncio
+
+    from anteroom.services import activity, listing_generation, streaming
+
+    client = TestClient(app)
+    conv_id = _draft(client)
+
+    async def streamed(run):
+        return None
+
+    async def end_stream():
+        run = streaming.start_generation(conv_id, streamed)
+        await asyncio.gather(run.task, return_exceptions=True)
+
+    def state():
+        listing, error = _call(client, "get_listing", {"conversation_id": conv_id})
+        assert not error
+        return listing["generation"]
+
+    finishing = activity.begin(conv_id, listing_generation.FINISHING_LABEL)
+    other = None
+    try:
+        asyncio.run(end_stream())
+        assert state() == {"state": "running"}
+        activity.end(finishing)
+        # Other work on the listing (a chat answer, a photo edit) is not this generation.
+        other = activity.begin(conv_id, "Answering…")
+        assert state() == {"state": "completed"}
+    finally:
+        activity.end(finishing)
+        if other is not None:
+            activity.end(other)
+        asyncio.run(streaming.reset_generations())
+
+
 def test_the_mac_starts_no_more_drafts_once_the_call_ran_out_of_time(started):
     import asyncio
 
