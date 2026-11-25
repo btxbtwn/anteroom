@@ -97,6 +97,11 @@ def _photos_fingerprint(db, conv_id: str) -> str:
     return photo_fingerprint(ConversationRepo(db).get_photos(conv_id))
 
 
+# The step after the stream ends: native marketplace fields, Etsy and the summary.
+# Generation is not finished until it is (``mcp_generation_tools.generation_state``).
+FINISHING_LABEL = "Preparing marketplace fields…"
+
+
 async def run_listing_generation(
     run: GenerationRun,
     *,
@@ -379,7 +384,7 @@ async def run_listing_generation(
                 part for part in (prompt_analysis, item_details, comps_text) if part
             )
             # Registered before [DONE] reaches the client, so chat stays busy until it ends.
-            activity.track_task(conv_id, "Preparing marketplace fields…", spawn(_finish_generation_background(
+            activity.track_task(conv_id, FINISHING_LABEL, spawn(_finish_generation_background(
                 conv_id,
                 listing,
                 evidence=evidence_text,
