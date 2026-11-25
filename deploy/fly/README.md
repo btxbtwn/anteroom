@@ -112,10 +112,12 @@ context is the repository root. The allowlist in `.dockerignore` excludes
 local data, photos, databases, credentials, tests and the extension.
 
 The configuration runs two process groups from one image. `app` (role `web`,
-one performance CPU, 2 GB) serves HTTPS with a health check and is kept running
+one performance CPU, 4 GB — raised from 2 GB as an incident mitigation on
+2026-11-22, #1816) serves HTTPS with a health check and is kept running
 (`auto_stop_machines = 'off'`, `min_machines_running = 1`). `worker` (role
 `worker`, one shared CPU, 2 GB) has no public service and runs the draft worker,
-the scheduled automations, offer checks and Sourcing refreshes. Machines without
+scheduled automations, offer checks, the job watchdog, sales sync, Plaid expense
+sync, and cloud marketplace sale checks and promotions. Machines without
 a service are never auto-stopped. Supabase's project URL is
 public configuration. No database password, service-role key, provider key or
 seller data is needed for this first deployment. Later hosted data routes
