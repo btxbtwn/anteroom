@@ -119,7 +119,8 @@ def test_upgrade_keeps_confirmed_then_oldest_tracker_row(migration_engine):  # n
 
     command.upgrade(config, "head")
     with engine.begin() as connection:
-        kept = dict(connection.execute(select(events.c.id, events.c.new_listing_id)).tuples().all())
+        kept = {row.id: row.new_listing_id
+                for row in connection.execute(select(events.c.id, events.c.new_listing_id))}
         assert kept == {"a-first-time": "confirmed", "other-owner": None,
                         "other-action": None, "other-marketplace": None}
         # An ordinary insert and update with the old schema still work during rollout.
