@@ -17,7 +17,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from anteroom.models.conversation import Conversation, new_id
@@ -69,18 +69,21 @@ def resolve_sku(db: Session, conv: Conversation | None) -> str | None:
 
 
 def resolve_skus(db: Session, convs: list[Conversation]) -> dict[str, str | None]:
-    """``resolve_sku`` for many items, in two queries."""
-    current = {listing.conversation_id: listing.current_revision_id for listing in
-               db.query(Listing).filter(Listing.conversation_id.in_({conv.id for conv in convs}))}
-    wanted = set(current.values()) - {None}
-    revisions: dict[str | None, ListingRevision] = {
-        rev.id: rev for rev in db.query(ListingRevision).filter(ListingRevision.id.in_(wanted))} if wanted else {}
+    """``resolve_sku`` for many items, in one query.
+
+    It reads each current revision's small stored fields, never the whole
+    marketplace form: one form per item held the seller's connection (#2104).
+    """
+    fields = {conv_id: current for conv_id, current in db.execute(
+        select(Listing.conversation_id, ListingRevision.inventory_fields)
+        .join(ListingRevision, ListingRevision.id == Listing.current_revision_id)
+        .where(Listing.conversation_id.in_({conv.id for conv in convs})))} if convs else {}
     skus: dict[str, str | None] = {}
     for conv in convs:
         skus[conv.id] = None
-        rev = revisions.get(current.get(conv.id))
-        if rev and isinstance(rev.listing_json, dict):
-            raw_sku = rev.listing_json.get("sku")
+        current = fields.get(conv.id)
+        if isinstance(current, dict):
+            raw_sku = current.get("sku")
             if isinstance(raw_sku, str) and raw_sku.strip():
                 skus[conv.id] = raw_sku.strip()
                 continue

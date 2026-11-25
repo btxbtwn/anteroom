@@ -118,3 +118,22 @@ def test_local_quantity_edit_does_not_erase_multiunit_publication_evidence(etsy_
     conv_id, _ = prepare(etsy_imported)
     listing_persistence.save_revision(etsy_imported.db, conv_id, {"title": "Coat", "quantity": 1}, "user")
     assert stock(etsy_imported, conv_id)["status"] == "unknown"
+
+
+@pytest.mark.parametrize("rows, expected", [
+    ([{"quantity": "2"}, {"quantity": "1"}], "unknown"),
+    ([], "sold_out"),
+])
+def test_ebay_variations_count_toward_recorded_stock(etsy_imported, rows, expected):
+    from anteroom.models.conversation import Conversation
+
+    db = etsy_imported.db
+    conv = Conversation(title="Tee", status="listed")
+    db.add(conv)
+    db.flush()
+    listing_persistence.save_revision(db, conv.id, {"title": "Tee", "quantity": 1, "ebay_specifics": {
+        "variations": {"aspects": ["Size"], "rows": rows}}}, "user", commit=False)
+    db.add(MarketplaceSale(marketplace="ebay", listing_id="777", order_id="o", line_id="l", quantity=1,
+                           order_status="paid", conversation_id=conv.id))
+    db.commit()
+    assert stock_after_sale(db, conv.id, "ebay", "777")["status"] == expected

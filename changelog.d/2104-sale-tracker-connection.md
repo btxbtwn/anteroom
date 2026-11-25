@@ -1,0 +1,1 @@
+- The Sales Tracker opens faster and no longer ties up the cloud database while it loads: it reads each sold item's SKU and quantity instead of its full marketplace forms.

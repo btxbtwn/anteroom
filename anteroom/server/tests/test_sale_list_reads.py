@@ -49,13 +49,15 @@ def _sell(count: int, start: int) -> None:
         db.commit()
 
 
-def _statements(client, alice, path: str) -> tuple[int, dict]:
+def _statements(client, alice, path: str, texts: list[str] | None = None) -> tuple[int, dict]:
     from anteroom import database
 
     seen = []
 
-    def note(*_args, **_kwargs):
+    def note(_conn, _cursor, statement, *_args, **_kwargs):
         seen.append(1)
+        if texts is not None:
+            texts.append(statement)
 
     event.listen(database.engine, 'before_cursor_execute', note)
     try:
@@ -83,3 +85,22 @@ def test_more_sales_do_not_add_statements_to_the_held_connection(cloud, signing_
     many, body = _statements(client, alice, path)
     assert _still_listed(body) == 30, 'every sold item still listed elsewhere is shown'
     assert many <= few, f'{path} sent {few} statements for 3 sales but {many} for 30'
+
+
+def test_sales_tracker_reads_small_fields_not_whole_listing_documents(cloud, signing_keys):  # noqa: F811
+    """The tracker needs each item's SKU and quantity, not its marketplace forms.
+
+    Production revisions average 83 kB of ``listing_json``; loading one per sold
+    item held the seller's pooled connection for up to 28 seconds (#2104).
+    """
+    client, _engine = cloud
+    alice = headers(signing_keys)
+    _sell(30, 0)
+    texts: list[str] = []
+    count, body = _statements(client, alice, '/api/marketplace-sales/tracker', texts)
+    assert len(body['entries']) == 30
+    assert {entry['sku'] for entry in body['entries']} == {f'SKU-{i}' for i in range(30)}
+    assert all(entry['stockStatus'] == 'sold_out' for entry in body['entries'])
+    whole = [text for text in texts if 'listing_revisions.listing_json AS' in text]
+    assert not whole, f'the tracker loaded whole listing documents: {whole}'
+    assert count <= 22, f'the tracker sent {count} statements'
