@@ -1,7 +1,7 @@
 """Release a stopping Machine's device routes before its scheduler lease.
 
 Revision ID: f3c8a1d6e270
-Revises: c4ae31f62b90
+Revises: f3c8a1d6b294
 Create Date: 2026-11-25 15:00:00.000000
 
 A stopping Machine closes its listening socket at once but may keep the
@@ -17,7 +17,7 @@ import sqlalchemy as sa
 
 
 revision = 'f3c8a1d6e270'
-down_revision = 'c4ae31f62b90'
+down_revision = 'f3c8a1d6b294'
 branch_labels = None
 depends_on = None
 
