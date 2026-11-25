@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1244 — 2026-11-25
+
+- Mark Ready to list when Depop Source or Age is saved as a list (like Preloved) and when Mercari’s shoebox answer comes from your saved default.
+
 ## 0.1.1243 — 2026-11-25
 
 - Clear the false Depop warning for measurements copied from Item Details.

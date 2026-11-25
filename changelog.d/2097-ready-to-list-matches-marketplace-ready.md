@@ -1,1 +1,0 @@
-- Mark Ready to list when Depop Source or Age is saved as a list (like Preloved) and when Mercari’s shoebox answer comes from your saved default.
