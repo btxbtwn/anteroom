@@ -19,13 +19,16 @@ import json
 import logging
 import re
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from time import monotonic
 from typing import Any
 
 from fastapi import HTTPException
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
+from anteroom.models.conversation import Conversation
 from anteroom.repositories.queries import ConversationRepo, ListingRepo
 from anteroom.services.general_measurements import (
     GARMENT_SPECS,
@@ -235,7 +238,7 @@ async def finish_reads(reads: list[tuple[dict[str, Any], dict[str, Any]]], *, de
                 # The hosted app's per-seller budget for new model work, as the buttons have.
                 limit_seller_submissions(request)
             async with asyncio.timeout(remaining):
-                data = await _read_and_save(spec, remaining)
+                data = await _read_and_save(spec, remaining, lambda: monotonic() >= deadline)
             result["content"] = [{"type": "text", "text": json.dumps(data, indent=2, default=str)}]
             result["isError"] = False
         except Exception as exc:  # noqa: BLE001 - each reading reports its own failure
@@ -263,7 +266,7 @@ def _failure(spec: dict[str, Any], exc: Exception) -> str:
     return f"{who} could not read the {what} in these photos. Nothing was saved."
 
 
-async def _read_and_save(spec: dict[str, Any], remaining: float) -> dict[str, Any]:
+async def _read_and_save(spec: dict[str, Any], remaining: float, expired: Callable[[], bool]) -> dict[str, Any]:
     from anteroom.database import in_worker_session
     from anteroom.services import measure_read, size_tag_read
 
@@ -275,8 +278,34 @@ async def _read_and_save(spec: dict[str, Any], remaining: float) -> dict[str, An
             reading = await measure_read.read_measurements(spec["provider"], paths, spec["garment"])
     conv_id = spec["conversation_id"]
     if spec["kind"] == "size_tag":
-        return await in_worker_session(_settle_size, conv_id, reading, spec["save"])
-    return await in_worker_session(_settle_measurements, conv_id, spec["garment"], reading, spec["save"])
+        return await in_worker_session(_settle_size, conv_id, reading, spec["save"], expired)
+    return await in_worker_session(
+        _settle_measurements, conv_id, spec["garment"], reading, spec["save"], expired)
+
+
+def _lock_listing(db: Session, conv_id: str, expired: Callable[[], bool]) -> Conversation:
+    """The listing, locked until this session ends, in a session that will not commit late.
+
+    The lock makes the blank-field check and the notes merge one step, so a size
+    and a measurement reading of one listing (``finish_reads`` runs them side by
+    side) or a seller's edit cannot overwrite each other's notes. Cancelling the
+    awaiting coroutine at the deadline does not stop this worker thread, so the
+    commit itself refuses once the call's deadline has passed and the agent was
+    told nothing was saved.
+    """
+    def refuse_late_commit(*_args: Any) -> None:
+        if expired():
+            raise TimeoutError
+
+    event.listen(db, "before_commit", refuse_late_commit)
+    # A commit flushes after before_commit, and a flush can wait on a locked database.
+    event.listen(db, "after_flush", refuse_late_commit)
+    refuse_late_commit()
+    db.scalar(select(Conversation.id).where(Conversation.id == conv_id).with_for_update())
+    conv = ConversationRepo(db).get(conv_id)
+    if conv is None:
+        raise ReadingToolError("Listing not found.")
+    return conv
 
 
 def _download(keys: list[str], folder: Path, remaining: float) -> list[Path]:
@@ -313,12 +342,12 @@ def _set_size(db: Session, conv_id: str) -> str:
     return ""
 
 
-def _settle_size(db: Session, conv_id: str, reading: dict[str, Any], save: bool) -> dict[str, Any]:
+def _settle_size(
+    db: Session, conv_id: str, reading: dict[str, Any], save: bool, expired: Callable[[], bool],
+) -> dict[str, Any]:
     """Fold a size-tag reading into Item Details as the button's Fill does (``sizeTagReading.ts``)."""
     repo = ConversationRepo(db)
-    conv = repo.get(conv_id)
-    if conv is None:
-        raise ReadingToolError("Listing not found.")
+    conv = _lock_listing(db, conv_id, expired)
     typed = _set_size(db, conv_id)
     status, sizes = reading.get("status"), list(reading.get("sizes") or [])
     size = str(reading.get("size") or "").strip()
@@ -353,13 +382,11 @@ def _settle_size(db: Session, conv_id: str, reading: dict[str, Any], save: bool)
 
 
 def _settle_measurements(
-    db: Session, conv_id: str, garment: str, reading: dict[str, Any], save: bool,
+    db: Session, conv_id: str, garment: str, reading: dict[str, Any], save: bool, expired: Callable[[], bool],
 ) -> dict[str, Any]:
     """Fold a yardstick reading into Item Details as the button's Fill does (``measurementReading.ts``)."""
     repo = ConversationRepo(db)
-    conv = repo.get(conv_id)
-    if conv is None:
-        raise ReadingToolError("Listing not found.")
+    conv = _lock_listing(db, conv_id, expired)
     notes = parse_notes(conv.notes)
     typed = stored_measurements(notes)[garment]
     readings = reading.get("measurements") or {}

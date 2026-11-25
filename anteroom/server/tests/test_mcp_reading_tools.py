@@ -341,6 +341,44 @@ def test_read_measurements_without_save_only_reports(model, monkeypatch):
     assert "measurements" not in _notes(conv_id)
 
 
+def test_both_readings_in_one_batch_keep_each_others_fields(model, monkeypatch):
+    client = TestClient(app)
+    conv_id = _draft(client)
+    _set_notes(conv_id, {"sku": "A4-1"})
+    model(FakeProvider([_found("M"), _found("M")]))
+    _measured(monkeypatch, {"pitToPit": {"status": "accepted", "value": 21.0}})
+
+    batch = [
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": {"name": "read_size_tag", "arguments": {"conversation_id": conv_id}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+         "params": {"name": "read_measurements", "arguments": {"conversation_id": conv_id, "garment": "top"}}},
+    ]
+    resp = client.post("/api/mcp", json=batch)
+    assert resp.status_code == 200, resp.text
+    assert [r["result"]["isError"] for r in resp.json()] == [False, False], resp.text
+    notes = _notes(conv_id)
+    assert notes["size"] == "M" and notes["measurements"]["top"] == {"pitToPit": "21"} and notes["sku"] == "A4-1"
+
+
+def test_a_settlement_past_the_deadline_saves_nothing(model):
+    client = TestClient(app)
+    conv_id = _draft(client)
+    _set_notes(conv_id, {"sku": "A4-1"})
+    checks = iter([False])  # Still in time when the settlement starts; past the deadline by its commit.
+
+    with SessionLocal() as db, pytest.raises(TimeoutError):
+        mcp_reading_tools._settle_size(
+            db, conv_id, {"status": "accepted", "size": "M", "sizes": ["M"]}, True, lambda: next(checks, True))
+    assert _notes(conv_id) == {"sku": "A4-1"}
+
+    with SessionLocal() as db, pytest.raises(TimeoutError):
+        mcp_reading_tools._settle_measurements(
+            db, conv_id, "top", {"photos_read": 1, "measurements": {"length": {"status": "accepted", "value": 27}}},
+            True, lambda: True)
+    assert _notes(conv_id) == {"sku": "A4-1"}
+
+
 # ---------------------------------------------------------------------------
 # Hosted
 # ---------------------------------------------------------------------------
