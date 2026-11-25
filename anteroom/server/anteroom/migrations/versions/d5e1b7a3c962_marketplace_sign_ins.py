@@ -5,7 +5,7 @@ Machine) now finishes on any other. Expand-only: a new seller table; the
 release before this one never reads it.
 
 Revision ID: d5e1b7a3c962
-Revises: c7a3e9f41b28
+Revises: f3c8a1d6b294
 Create Date: 2026-11-25 12:00:00.000000
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 
 
 revision = "d5e1b7a3c962"
-down_revision = "c7a3e9f41b28"
+down_revision = "f3c8a1d6b294"
 branch_labels = None
 depends_on = None
 
