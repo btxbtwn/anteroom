@@ -11,7 +11,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { toastManager } from "../ui/toast";
 import { cn } from "../../lib/utils";
 import { confirmDialog } from "../../ui/confirmDialog";
-import { ListingStatusLabel, ListingTag, ListingThumb, SelectCheckbox } from "./ListingBits";
+import { DraftScheduleTag, ListingStatusLabel, ListingTag, ListingThumb, SelectCheckbox } from "./ListingBits";
 import { displayCoverUrl } from "./coverSrc";
 import { statusIsListed } from "../fillLog/marketplaces";
 import { inventoryStatus, listedFromImport, listingRowPrice, marketplacesLabel, partialSale, quantityLabel, statusHint, withDirectListings } from "./listingStatus";
@@ -304,6 +304,11 @@ export const ListingRow = memo(function ListingRow({
             {settledAt ? <span className="text-xs font-medium text-sidebar-muted-foreground">{settledAt}</span> : null}
             {price ? <span className="ml-auto shrink-0 pl-1 text-xs font-medium tabular-nums text-sidebar-foreground/80">{price}</span> : null}
           </div>
+          {listing.scheduled_publish_at ? (
+            <div className="mt-1">
+              <DraftScheduleTag publishAt={listing.scheduled_publish_at} />
+            </div>
+          ) : null}
           {listedMarketplaces.length ? (
             <div
               className="mt-2 flex flex-wrap items-center gap-2.5"

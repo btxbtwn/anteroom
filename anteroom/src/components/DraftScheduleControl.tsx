@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarClockIcon } from "lucide-react";
 
 import { api } from "../api/client";
+import { refreshInventory } from "../api/inventoryRefresh";
 import { scheduledDraftsQuery } from "../api/pageQueries";
 import { confirmDialog } from "../ui/confirmDialog";
 import { marketplaceName } from "./marketplaceNames";
@@ -38,6 +39,7 @@ export function DraftScheduleControl({ convId }: { convId: string }) {
   const [error, setError] = useState("");
 
   const refresh = () => {
+    refreshInventory(queryClient);
     void queryClient.invalidateQueries({ queryKey: ["draft-schedule", convId] });
     void queryClient.invalidateQueries({ queryKey: scheduledDraftsQuery.queryKey });
   };

@@ -13,6 +13,7 @@ import { ListingSession } from "../components/listingSession";
 import { HostedSetupChecklist, SetupChecklist } from "../components/SetupChecklist";
 import { ListingSidebar } from "../components/ListingSidebar";
 import { AssistantThreadPanel } from "../components/sidebar/AssistantThreadPanel";
+import { DraftScheduleTag } from "../components/sidebar/ListingBits";
 import { NavRail } from "../components/sidebar/NavRail";
 import { ArrowLeftIcon, HistoryIcon, PlusIcon, SearchIcon, SquarePenIcon } from "lucide-react";
 import {
@@ -791,6 +792,12 @@ export function App() {
     ? <MarketplaceActivity jobs={queue.data?.jobs} checkedAt={queue.dataUpdatedAt} onOpen={openListing} />
     : null;
 
+  const listingSchedule = activeView === "listings" && !mobileListOpen && selectedListing?.scheduled_publish_at ? (
+    <div role="status" aria-label="Draft schedule" className="shrink-0 border-b border-border px-3 py-2">
+      <DraftScheduleTag publishAt={selectedListing.scheduled_publish_at} />
+    </div>
+  ) : null;
+
   return (
     <div className={`app-shell${phoneInventory ? " phone-inventory" : ""}`} style={panelWidthStyle}>
       {runtime.features.has("marketplace_sessions") && <MarketplaceSessionNotice />}
@@ -945,6 +952,7 @@ export function App() {
               </div>
             ) : null}
           </header>
+          {isMobile && listingSchedule}
           {isMobile && activeView === "listings" && returnToSuggestions && (
             <div className="shrink-0 border-b border-border px-3 py-2">
               <Button variant="ghost" size="sm" className="min-h-11" onClick={openSuggestions}><ArrowLeftIcon /> Back to suggestions</Button>
@@ -952,6 +960,7 @@ export function App() {
           )}
           <div className="workspace-body">
             <main className="panel main-panel" ref={mainPanelRef}>
+              {!isMobile && listingSchedule}
               {!isMobile && activeView === "listings" && returnToSuggestions && (
                 <div className="shrink-0 border-b border-border px-3 py-2">
                   <Button variant="ghost" size="sm" onClick={openSuggestions}><ArrowLeftIcon /> Back to suggestions</Button>

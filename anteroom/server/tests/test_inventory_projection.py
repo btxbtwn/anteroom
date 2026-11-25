@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from alembic import command
 from sqlalchemy import MetaData, Table, event, select
 from sqlalchemy.orm import Session
@@ -26,7 +28,10 @@ def test_inventory_reads_do_not_extract_large_marketplace_forms(migration_engine
             "marketplace_forms": {"unused": "large form " * 10000},
         }))
         db.flush()
-        db.add(Listing(conversation_id="item", current_revision_id="revision"))
+        listing = Listing(conversation_id="item", current_revision_id="revision",
+                          scheduled_revision_id="revision", scheduled_status="scheduled",
+                          scheduled_publish_at=datetime(2030, 1, 2, 15, 30))
+        db.add(listing)
         db.add(MarketplaceListing(conversation_id="item", marketplace="ebay", state="published",
                                   listing_url="https://www.ebay.com/itm/1"))
         db.add(MarketplaceListing(conversation_id="item", marketplace="mercari", state="not_saved",
@@ -54,6 +59,7 @@ def test_inventory_reads_do_not_extract_large_marketplace_forms(migration_engine
                                    for metric in ('ms', 'orm_calls')}
             assert phases['step_conversations_orm_calls'] == 1
             assert phases['step_covers_orm_calls'] == 1
+            assert phases['step_listings_orm_calls'] == 1
             assert phases['step_assemble_orm_calls'] == 0
             assert all(isinstance(value, int) and value >= 0 for value in phases.values())
         finally:
@@ -61,6 +67,7 @@ def test_inventory_reads_do_not_extract_large_marketplace_forms(migration_engine
         assert suggestion[3:] == ("Example", ["Men", "Coats"], ["Winter"], "Wool coat", "Coat", ["Wool"])
         assert analytics.price == 42 and analytics.cost == 5
         assert summary["sku"] == "coat-1" and summary["price"] == 42 and summary["quantity"] == 2
+        assert summary["scheduled_publish_at"] == "2030-01-02T15:30:00Z"
         assert summary["direct_marketplaces"] == ["ebay"]
         assert summary["direct_records"] == {
             "ebay": {"state": "published", "listing_url": "https://www.ebay.com/itm/1", "failed": False, "fields": 0, "price": None, "listed_at": None},
@@ -68,6 +75,14 @@ def test_inventory_reads_do_not_extract_large_marketplace_forms(migration_engine
         }
         assert reads
         assert not any("listing_json" in query for query in reads)
+
+        for status, revision in [("failed", "revision"), ("scheduled", "older-revision")]:
+            listing = db.get(Listing, "item")
+            assert listing is not None
+            listing.scheduled_status = status
+            listing.scheduled_revision_id = revision
+            db.commit()
+            assert inventory_response(db)[0]["scheduled_publish_at"] is None
 
 
 def test_upgrade_computes_existing_fields_and_sql_writes_keep_them_current(migration_engine):  # noqa: F811
