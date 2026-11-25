@@ -1,0 +1,3 @@
+- Fix Chrome form refreshes from the web asking to update Anteroom Bridge when the extension already supports form reads.
+- Ignore invalid listing links and encode listing IDs in API requests so a bad link cannot trigger unexpected requests.
+- Clear a previous account's saved workspace and photo thumbnails from a shared browser after a session expires while the tab is closed, and remove other accounts' cached thumbnails on sign-in.

@@ -142,12 +142,26 @@ async function keepOnDevice(src: string, blob: Blob): Promise<void> {
   }
 }
 
-/** Forget every seller's thumbnails kept on this device, as signing out does. */
-export async function forgetDeviceImages(): Promise<void> {
+let deviceCleanupGen = 0;
+
+/**
+ * Forget sellers' thumbnails kept on this device. Without `keepSeller`, forgets
+ * every seller (sign-out or a signed-out load); with `keepSeller`, prunes only
+ * other sellers' caches (sign-in). A newer call supersedes an older one so a
+ * slow signed-out clear cannot delete a seller who just signed in.
+ */
+export async function forgetDeviceImages(keepSeller?: string): Promise<void> {
+  const gen = ++deviceCleanupGen;
   if (typeof caches === "undefined") return;
   try {
+    const keep = keepSeller ? DEVICE_CACHE_PREFIX + keepSeller : null;
     const names = await caches.keys();
-    await Promise.all(names.filter(name => name.startsWith(DEVICE_CACHE_PREFIX)).map(name => caches.delete(name)));
+    if (gen !== deviceCleanupGen) return;
+    await Promise.all(
+      names
+        .filter(name => name.startsWith(DEVICE_CACHE_PREFIX) && name !== keep)
+        .map(name => caches.delete(name)),
+    );
   } catch {
     // Nothing kept, or the store is blocked.
   }
