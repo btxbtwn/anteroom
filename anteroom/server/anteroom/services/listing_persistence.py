@@ -19,6 +19,11 @@ def _publish_category_fills(db):
     from anteroom.services.native_field_fill import category_saved
     for _transaction, args in db.info.pop("category_fills", []):
         category_saved(*args)
+    from anteroom.services.native_marketplaces import forget_unpinned_preflight
+
+    # A preflight that names no revision must not join a build that read the one before.
+    for conv_id in db.info.pop("saved_listings", ()):
+        forget_unpinned_preflight(conv_id)
 
 
 @event.listens_for(Session, "after_soft_rollback")
@@ -225,6 +230,7 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
         if conv and not parse_notes(conv.notes).get("titlePinned"):
             conv.title = title
 
+    db.info.setdefault("saved_listings", set()).add(conv_id)
     if commit:
         db.commit()
     else:

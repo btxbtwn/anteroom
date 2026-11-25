@@ -113,6 +113,44 @@ def test_a_newer_revision_does_not_wait_on_an_older_build(listing):
     assert newer["revision_id"] == revision_id
 
 
+def test_a_request_without_a_revision_does_not_join_a_build_from_before_a_save(listing):
+    """Installed iPhone builds ask without a revision; a save must not leave them the old one."""
+    (conv_id, revision_id), _ = listing
+    started, release = threading.Event(), threading.Event()
+    build = native.preflight
+    seen = []
+
+    def slow_build(*args):
+        seen.append(1)
+        answer = build(*args)
+        if len(seen) == 1:  # Read the listing, then stay in flight across the save.
+            started.set()
+            release.wait(10)
+        return answer
+
+    def save():
+        from anteroom import database
+
+        with database.SessionLocal() as db:
+            return listing_persistence.save_revision(db, conv_id, {**LISTING, "price": 45}, "user_form").id
+
+    async def run():
+        before = asyncio.ensure_future(native.shared_preflight(conv_id, None))
+        await asyncio.to_thread(started.wait, 10)
+        saved = await asyncio.to_thread(save)
+        after = asyncio.ensure_future(native.shared_preflight(conv_id, None))
+        answer = await after
+        release.set()
+        return saved, await before, answer
+
+    with patch.object(native, "preflight", slow_build):
+        saved, before, after = asyncio.run(run())
+    assert len(seen) == 2
+    assert before["revision_id"] == revision_id
+    assert after["revision_id"] == saved != revision_id
+    assert native._preflight_builds == {}
+
+
 def test_a_failed_build_reaches_every_waiter_and_is_not_kept(listing):
     with pytest.raises(native.NativeMarketplaceError):
         asyncio.run(native.shared_preflight("missing-listing", None))

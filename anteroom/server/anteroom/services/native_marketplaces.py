@@ -706,6 +706,15 @@ def _build_preflight(key: tuple[str, str, str | None], build: concurrent.futures
         build.set_exception(error)
 
 
+def forget_unpinned_preflight(conv_id: str) -> None:
+    """Called once a new revision of ``conv_id`` is committed. A request that names no
+    revision (installed iPhone builds) must not join a build that may have read the one
+    before it, so the next one starts fresh. A build in flight still answers its waiters."""
+    with _preflight_lock:
+        for key in [key for key in _preflight_builds if key[1] == conv_id and key[2] is None]:
+            del _preflight_builds[key]
+
+
 async def shared_preflight(conv_id: str, revision_id: str | None = None) -> dict:
     """``preflight`` for a route: one build, in one session, for every request asking at once.
 
