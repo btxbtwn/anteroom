@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1265 — 2026-11-25
+
+- Retry sale events on the Mac after a temporary error so sale alerts and delist-after-sale can still run.
+- Keep the Mac connected to its existing sale inbox when Keychain access returns.
+
 ## 0.1.1264 — 2026-11-25
 
 - Fix Chrome form refreshes from the web asking to update Anteroom Bridge when the extension already supports form reads.
