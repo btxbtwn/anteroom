@@ -450,19 +450,21 @@ def _job_running(db: Session, job_id: str) -> bool:
     return job is not None and job.status in ACTIVE_JOB_STATUSES
 
 
-async def _wait_while(check, *args) -> bool:
+async def _wait_while(check, *args, deadline: float | None = None) -> bool:
     """Poll ``check(db, *args)`` until it is false. Each poll has its own short session."""
-    deadline = asyncio.get_running_loop().time() + IDLE_TIMEOUT_S
+    loop = asyncio.get_running_loop()
+    if deadline is None:
+        deadline = loop.time() + IDLE_TIMEOUT_S
     while await _db_work(check, *args):
-        if asyncio.get_running_loop().time() > deadline:
+        if loop.time() >= deadline:
             return False
         await asyncio.sleep(0.5)
     return True
 
 
-async def _wait_until_free(marketplace: str) -> bool:
+async def _wait_until_free(marketplace: str, *, deadline: float | None = None) -> bool:
     """Wait until nothing stops an action on this marketplace (see ``blocking_job``)."""
-    return await _wait_while(_blocked, marketplace)
+    return await _wait_while(_blocked, marketplace, deadline=deadline)
 
 
 async def _wait_for_job(job_id: str) -> bool:
