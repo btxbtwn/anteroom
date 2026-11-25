@@ -20,7 +20,7 @@ from anteroom.services import sale_quantity_sync
 from anteroom.services.hosted_database import SellerDatabaseSession
 from test_seller_ownership import migration_config, migration_engine  # noqa: F401
 
-PREVIOUS_HEAD = "c7a3e9f41b28"
+PREVIOUS_HEAD = "c4ae31f62b90"
 
 
 def test_two_sessions_record_one_delist_outcome(migration_engine):  # noqa: F811

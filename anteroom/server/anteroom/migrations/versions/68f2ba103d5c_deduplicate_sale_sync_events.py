@@ -1,7 +1,7 @@
 """Keep one tracker outcome per seller, sale, marketplace and action.
 
 Revision ID: 68f2ba103d5c
-Revises: c7a3e9f41b28
+Revises: c4ae31f62b90
 Create Date: 2026-11-25 06:27:12.489408
 """
 from __future__ import annotations
@@ -16,7 +16,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 
 
 revision = '68f2ba103d5c'
-down_revision = 'c7a3e9f41b28'
+down_revision = 'c4ae31f62b90'
 branch_labels = None
 depends_on = None
 INDEX_NAME = 'uq_sale_sync_events_seller_sale_target_action'
