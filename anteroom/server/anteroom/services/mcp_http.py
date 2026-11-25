@@ -47,6 +47,7 @@ from anteroom.services import (
     mcp_marketplace_tools,
     mcp_organize_tools,
     mcp_photo_tools,
+    mcp_reading_tools,
     mcp_tokens,
 )
 from anteroom.services.background_tasks import ACTIVE as ACTIVE_TASK_STATUSES
@@ -134,6 +135,7 @@ TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
     **mcp_finance_tools.PERMISSIONS,
     **mcp_feedback_tools.PERMISSIONS,
     **mcp_photo_tools.PERMISSIONS,
+    **mcp_reading_tools.PERMISSIONS,
     **mcp_generation_tools.PERMISSIONS,
 }
 
@@ -573,6 +575,7 @@ def tool_definitions() -> list[dict[str, Any]]:
     tools.extend(mcp_finance_tools.TOOLS)
     tools.extend(mcp_feedback_tools.TOOLS)
     tools.extend(mcp_photo_tools.TOOLS)
+    tools.extend(mcp_reading_tools.TOOLS)
     tools.extend(mcp_generation_tools.TOOLS)
     return [{**tool, "annotations": {**tool["annotations"], "title": tool["title"]}} for tool in tools]
 
@@ -824,6 +827,7 @@ def _dispatch_tool(
         **mcp_import_match_tools.HANDLERS,
         **mcp_finance_tools.HANDLERS,
         **mcp_photo_tools.HANDLERS,
+        **mcp_reading_tools.HANDLERS,
         **mcp_generation_tools.HANDLERS,
     }
     handler = handlers.get(name)
@@ -1082,7 +1086,7 @@ def load_pending_photos(pending: list[tuple[list[Any], int]], *, deadline: float
             continue
         try:
             # Mac uploads keep the camera's bytes, EXIF orientation included.
-            jpeg = image_decode.jpeg(_read_photo(photo["key"], timeout=remaining),
+            jpeg = image_decode.jpeg(read_photo(photo["key"], timeout=remaining),
                                      max_side=photo["max_side"], quality=82)
         except Exception:  # noqa: BLE001 - one unreadable photo must not fail the others
             content[index] = {"type": "text", "text": f"Photo {photo['id']} could not be loaded."}
@@ -1090,7 +1094,7 @@ def load_pending_photos(pending: list[tuple[list[Any], int]], *, deadline: float
         content[index] = {"type": "image", "mimeType": "image/jpeg", "data": base64.b64encode(jpeg).decode("ascii")}
 
 
-def _read_photo(key: str, *, timeout: float) -> bytes:
+def read_photo(key: str, *, timeout: float) -> bytes:
     from anteroom.services.hosted_context import HostedPhotoStore
     from anteroom.services.photo_store import photo_store
 

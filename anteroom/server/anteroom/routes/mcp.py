@@ -33,6 +33,7 @@ from anteroom.services import (
     mcp_marketplace_tools,
     mcp_oauth,
     mcp_photo_tools,
+    mcp_reading_tools,
     mcp_tokens,
 )
 from anteroom.services.hosted_limits import limit_seller_submissions, read_bounded_body
@@ -182,7 +183,9 @@ async def mcp_post(request: Request):
     if is_hosted:
         mcp_generation_tools.submission_limit.set(lambda: limit_seller_submissions(request))
 
-    deadline = monotonic() + _MCP_RPC_TIMEOUT_SECONDS
+    # A size-tag or measurement reading waits on a photo model: those calls get longer.
+    call_timeout = mcp_reading_tools.call_timeout(payload, _MCP_RPC_TIMEOUT_SECONDS)
+    deadline = monotonic() + call_timeout
     stopped = Event()
 
     def expired() -> bool:
@@ -233,6 +236,11 @@ async def mcp_post(request: Request):
             if forms:
                 await mcp_catalog_tools.finish_form_reads(forms, deadline=deadline - _MCP_REPLY_MARGIN_SECONDS,
                                                           expired=expired)
+            readings = mcp_reading_tools.pending_reads(outcome[0])
+            if readings:
+                # Photos are fetched and read by a photo model only once the session is closed.
+                await mcp_reading_tools.finish_reads(
+                    readings, deadline=deadline - _MCP_REPLY_MARGIN_SECONDS, request=request if is_hosted else None)
             for generation_result, spec in mcp_generation_tools.pending_generations(outcome[0]):
                 # On the Mac each generation runs in this process; it keeps going after the call answers.
                 await _start_generations(generation_result, spec, expired)
@@ -264,7 +272,7 @@ async def mcp_post(request: Request):
     worker.add_done_callback(_finish_call)
     try:
         body, status_code, extra_headers = await asyncio.wait_for(
-            result, timeout=_MCP_RPC_TIMEOUT_SECONDS,
+            result, timeout=call_timeout,
         )
     except TimeoutError:
         return JSONResponse(
