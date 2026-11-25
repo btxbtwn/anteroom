@@ -936,3 +936,60 @@ def test_resolve_migration_keeps_snoozes_and_row_security(tmp_path, monkeypatch)
         if admin is not None:
             with admin.connect() as connection:
                 connection.execute(sa.text(f'DROP DATABASE "{name}" WITH (FORCE)'))
+
+
+def test_resolved_failed_listing_stays_resolved_after_a_background_save():
+    """Resolve hides an alert until what it reports changes (#2030). A price or
+    inventory read saved onto the same failed listing changes nothing it reports."""
+    from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
+
+    client = TestClient(app)
+    now = datetime.now(UTC).replace(tzinfo=None)
+    with SessionLocal() as db:
+        conv = Conversation(id="conv-resolve-failed", title="Denim Jacket", status="listed")
+        db.add(conv)
+        db.flush()
+        _add_listing(db, conv, {"title": "Denim Jacket", "price": 40.0, "quantity": 1})
+        db.add(MarketplaceListing(conversation_id=conv.id, marketplace="ebay", state="published",
+                                  listing_id="998877665544", listing_url="https://www.ebay.com/itm/998877665544",
+                                  listed_at=now - timedelta(days=2), error="eBay rejected the last update."))
+        db.commit()
+    item = next(i for i in _attention(client)["needs_attention"] if i["key"] == "publish-error:conv-resolve-failed:ebay")
+    resolved = client.post("/api/home/attention/resolve", json={
+        "item_key": item["key"], "kind": item["kind"], "fingerprint": item["fingerprint"],
+    })
+    assert resolved.status_code == 200, resolved.text
+    assert item["key"] not in {i["key"] for i in _attention(client)["needs_attention"]}
+
+    # The inventory check records the live price on that row, as it does on every pass.
+    with SessionLocal() as db:
+        conv = db.get(Conversation, "conv-resolve-failed")
+        MarketplaceListingRepo(db).save(conv.id, "ebay", {"listed_price": 41.0})
+        db.commit()
+
+    assert item["key"] not in {i["key"] for i in _attention(client)["needs_attention"]}
+
+
+def test_resolved_failed_listing_returns_when_a_new_attempt_fails_the_same_way():
+    client = TestClient(app)
+    now = datetime.now(UTC).replace(tzinfo=None)
+    with SessionLocal() as db:
+        conv = Conversation(id="conv-refail", title="Denim Jacket", status="listed")
+        db.add(conv)
+        db.flush()
+        _add_listing(db, conv, {"title": "Denim Jacket", "price": 40.0, "quantity": 1})
+        db.add(MarketplaceListing(conversation_id=conv.id, marketplace="ebay", state="failed", job_id="job-first",
+                                  listed_at=now - timedelta(days=2), error="eBay rejected the listing."))
+        db.commit()
+    item = next(i for i in _attention(client)["needs_attention"] if i["key"] == "publish-error:conv-refail:ebay")
+    client.post("/api/home/attention/resolve", json={
+        "item_key": item["key"], "kind": item["kind"], "fingerprint": item["fingerprint"],
+    })
+    assert item["key"] not in {i["key"] for i in _attention(client)["needs_attention"]}
+
+    # The seller tries again and it fails with the same message: a new failure.
+    with SessionLocal() as db:
+        row = db.query(MarketplaceListing).filter_by(conversation_id="conv-refail", marketplace="ebay").one()
+        row.job_id = "job-second"
+        db.commit()
+    assert item["key"] in {i["key"] for i in _attention(client)["needs_attention"]}
