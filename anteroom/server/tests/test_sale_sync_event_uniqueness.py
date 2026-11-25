@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from threading import Barrier
 
 import pytest
 from alembic import command
-from sqlalchemy import MetaData, Table, event, select
+from sqlalchemy import MetaData, Table, event, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -146,3 +147,30 @@ def test_upgrade_keeps_confirmed_then_oldest_tracker_row(migration_engine):  # n
         connection.execute(events.update().where(events.c.id == "old-writer").values(attempts=2))
     with pytest.raises(IntegrityError), engine.begin() as connection:
         connection.execute(events.insert(), {**base, "id": "duplicate"})
+
+
+def test_upgrade_waits_out_a_busy_tracker_table(migration_engine, monkeypatch):  # noqa: F811
+    engine = migration_engine
+    if engine.dialect.name != "postgresql":
+        pytest.skip("Table locks and lock timeouts are Postgres behavior")
+    config = migration_config(engine)
+    command.upgrade(config, PREVIOUS_HEAD)
+    waits = []
+    with engine.connect() as writer, engine.connect() as migration:
+        # A live writer holds a lock that conflicts with the cleanup's fence.
+        writer.exec_driver_sql("LOCK TABLE sale_sync_events IN ROW EXCLUSIVE MODE")
+
+        def sleep(delay):
+            waits.append(delay)
+            writer.rollback()
+
+        monkeypatch.setattr(time, "sleep", sleep)
+        migration.exec_driver_sql("SET lock_timeout = '200ms'")
+        migration.commit()
+        config.attributes["connection"] = migration
+        command.upgrade(config, "head")
+    assert waits == [10]
+    with engine.connect() as connection:
+        assert connection.scalar(text(
+            "SELECT indisvalid FROM pg_index WHERE indexrelid = to_regclass(:name)"
+        ), {"name": "uq_sale_sync_events_seller_sale_target_action"}) is True

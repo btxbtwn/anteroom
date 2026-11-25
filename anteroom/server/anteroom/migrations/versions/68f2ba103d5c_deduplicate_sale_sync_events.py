@@ -6,11 +6,13 @@ Create Date: 2026-11-25 06:27:12.489408
 """
 from __future__ import annotations
 
+import sys
+import time
 from contextlib import nullcontext
 
 from alembic import op
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 
 revision = '68f2ba103d5c'
@@ -18,6 +20,7 @@ down_revision = 'c7a3e9f41b28'
 branch_labels = None
 depends_on = None
 INDEX_NAME = 'uq_sale_sync_events_seller_sale_target_action'
+LOCK_RETRY_DELAYS = (10, 20, 40)
 
 
 def _deduplicate() -> None:
@@ -48,15 +51,29 @@ def _deduplicate() -> None:
 def _deduplicate_postgres(connection) -> None:
     # Fence writers only while choosing the rows to keep. The concurrent
     # index build runs after this short transaction releases its locks.
-    connection.exec_driver_sql('BEGIN')
-    try:
-        connection.exec_driver_sql('LOCK TABLE sale_sync_events IN SHARE ROW EXCLUSIVE MODE')
-        _deduplicate()
-    except BaseException:
-        connection.exec_driver_sql('ROLLBACK')
-        raise
-    else:
-        connection.exec_driver_sql('COMMIT')
+    # Alembic has already committed before this autocommit block, so env.py's
+    # lock-timeout retry no longer applies: retry the lock here instead. Each
+    # attempt is its own transaction, so repeating it is safe.
+    for delay in (*LOCK_RETRY_DELAYS, None):
+        connection.exec_driver_sql('BEGIN')
+        try:
+            connection.exec_driver_sql('LOCK TABLE sale_sync_events IN SHARE ROW EXCLUSIVE MODE')
+            _deduplicate()
+        except DBAPIError as error:
+            connection.exec_driver_sql('ROLLBACK')
+            if delay is None or getattr(error.orig, 'sqlstate', None) != '55P03':
+                raise
+        except BaseException:
+            connection.exec_driver_sql('ROLLBACK')
+            raise
+        else:
+            connection.exec_driver_sql('COMMIT')
+            return
+        print(
+            f'sale_sync_events is busy; retrying the duplicate cleanup in {delay}s.',
+            file=sys.stderr, flush=True,
+        )
+        time.sleep(delay)
 
 
 def upgrade() -> None:
