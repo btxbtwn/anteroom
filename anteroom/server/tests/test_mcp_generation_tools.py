@@ -177,11 +177,42 @@ def test_generate_listings_needs_a_connected_model(monkeypatch, started):
     assert started == []
 
 
+def test_generate_listings_has_no_fixed_batch_cap(provider, started):
+    client = TestClient(app)
+    conv_id = _draft(client)
+    result, error = _call(client, "generate_listings", {"conversation_ids": [conv_id, *(f"missing-{i}" for i in range(60))]})
+    assert not error, result
+    assert result["started"] == started == [conv_id] and len(result["skipped"]) == 60
+
+
+def test_get_listing_says_where_generation_is_on_the_mac(provider):
+    client = TestClient(app)
+    conv_id = _draft(client)
+    listing, error = _call(client, "get_listing", {"conversation_id": conv_id})
+    assert not error and listing["generation"] == {"state": "idle"}
+    _status(conv_id, "in_progress")
+    listing, error = _call(client, "get_listing", {"conversation_id": conv_id})
+    assert not error and listing["generation"] == {"state": "running"}
+
+
+def test_the_mac_starts_no_more_drafts_once_the_call_ran_out_of_time(started):
+    import asyncio
+
+    from anteroom.routes import mcp as route
+
+    result: dict = {}
+    spec = {"ready": ["a", "b"], "skipped": []}
+    asyncio.run(route._start_generations(result, spec, lambda: True))
+    data = json.loads(result["content"][0]["text"])
+    assert started == [] and data["started"] == []
+    assert [row["conversation_id"] for row in data["skipped"]] == ["a", "b"]
+    assert "ran out of time" in data["skipped"][0]["reason"]
+
+
 def test_generate_listings_bounds_its_input(provider, started):
     client = TestClient(app)
     for arguments, message in [
         ({"conversation_ids": []}, "at least one"),
-        ({"conversation_ids": ["x"] * 51}, "at most 50"),
         ({"conversation_ids": [""]}, "listing ID"),
     ]:
         refused, error = _call(client, "generate_listings", arguments)
@@ -206,6 +237,8 @@ def test_hosted_queues_the_sellers_durable_generate_task(cloud, signing_keys, st
     bob = _hosted_token(client, signing_keys, BOB)
     conv_id = _draft(client, extra_headers=alice)
 
+    listing, error = _call(client, "get_listing", {"conversation_id": conv_id}, alice)
+    assert not error and listing["generation"] == {"state": "idle"}
     refused, error = _call(client, "generate_listings", {"conversation_ids": [conv_id]}, bob)
     assert not error and refused["started"] == [] and refused["skipped"][0]["reason"] == "Listing not found."
 
@@ -215,3 +248,6 @@ def test_hosted_queues_the_sellers_durable_generate_task(cloud, signing_keys, st
     with Session(engine) as db:
         tasks = db.query(BackgroundTask).filter(BackgroundTask.conversation_id == conv_id).all()
     assert [(task.kind, task.user_id) for task in tasks] == [("generate", USER_ID)]
+    # Queued leaves the listing a draft: get_listing's generation field says what is happening.
+    listing, error = _call(client, "get_listing", {"conversation_id": conv_id}, alice)
+    assert not error and listing["generation"]["state"] in {"queued", "running", "completed", "failed"}

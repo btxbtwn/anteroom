@@ -1007,6 +1007,7 @@ def _tool_get_listing(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str
         "etsy_eligible": etsy_eligible(editable),
         "marketplaces": direct,
         "photos": photo_payload,
+        "generation": mcp_generation_tools.generation_state(db, conv_id),
     }
 
 

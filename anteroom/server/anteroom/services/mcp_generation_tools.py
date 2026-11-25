@@ -27,7 +27,6 @@ from anteroom.models.marketplace_listing import LIVE_STATES, MarketplaceListing
 from anteroom.repositories.queries import ConversationRepo
 from anteroom.services.service_context import current
 
-MAX_DRAFTS = 50
 _PLACEHOLDER = "_anteroom_generation"
 # The hosted app's per-seller budget for new background work, set by the route:
 # each draft queued here takes from it, as each Generate in the app does.
@@ -43,7 +42,8 @@ TOOLS: list[dict[str, Any]] = [
             "labels, notes) are used as the seller's facts, so set them first (read_size_tag, read_measurements, "
             "edit_listing sku, manage_labels_and_notes). Only drafts with photos are generated; a draft "
             "already generating, live or sold is skipped with the reason. Returns once each one has started; "
-            "follow it with get_listing (status in_progress while generating, draft once saved). Generation "
+            "follow each with get_listing's generation field (queued, running, completed or failed with the "
+            "reason). Generation "
             "stops at a saved draft: it never publishes or reaches a marketplace."
         ),
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
@@ -54,7 +54,6 @@ TOOLS: list[dict[str, Any]] = [
                     "type": "array",
                     "items": {"type": "string"},
                     "minItems": 1,
-                    "maxItems": MAX_DRAFTS,
                     "uniqueItems": True,
                     "description": "The drafts to generate (listing / conversation IDs).",
                 },
@@ -70,7 +69,7 @@ PERMISSIONS: dict[str, tuple[str, str]] = {"generate_listings": ("listings", "wr
 
 _NOTE = (
     "Generating in Anteroom. Each draft is saved when it finishes, and nothing is published. "
-    "Follow it with get_listing: status in_progress while generating, draft once saved."
+    "Follow each with get_listing: its generation field says queued, running, completed or failed."
 )
 
 
@@ -82,8 +81,6 @@ def _conversation_ids(args: dict[str, Any]) -> list[str]:
     raw = args.get("conversation_ids")
     if not isinstance(raw, list) or not raw:
         raise GenerationToolError("conversation_ids must list at least one draft.")
-    if len(raw) > MAX_DRAFTS:
-        raise GenerationToolError(f"Name at most {MAX_DRAFTS} drafts per call.")
     ids: list[str] = []
     for value in raw:
         if not isinstance(value, str) or not value.strip():
@@ -171,6 +168,29 @@ def _result(started: list[str], skipped: list[dict[str, str]]) -> dict[str, Any]
 
 
 HANDLERS = {"generate_listings": _generate_listings}
+
+
+def generation_state(db: Session, conv_id: str) -> dict[str, Any]:
+    """Where this listing's generation is, for get_listing.
+
+    Hosted generation is the seller's durable draft task: a queued one leaves the
+    listing a draft until a worker starts it, so the task says what is happening
+    and why it failed. On the Mac a run is in this process while it lasts.
+    """
+    if current() is not None:
+        from anteroom.models.background_task import BackgroundTask
+
+        task = db.scalar(select(BackgroundTask).where(
+            BackgroundTask.conversation_id == conv_id, BackgroundTask.kind == "generate",
+        ).order_by(BackgroundTask.created_at.desc()).limit(1))
+        if task is None:
+            return {"state": "idle"}
+        return {"state": task.status, "error": task.error, "updated_at": task.updated_at}
+    from anteroom.services.streaming import active_generation
+
+    conv = ConversationRepo(db).get(conv_id)
+    running = active_generation(conv_id) is not None or (conv is not None and conv.status == "in_progress")
+    return {"state": "running" if running else "idle"}
 
 
 def pending_generations(body: Any) -> list[tuple[dict[str, Any], dict[str, Any]]]:

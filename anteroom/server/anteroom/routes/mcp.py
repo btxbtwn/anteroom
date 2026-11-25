@@ -234,7 +234,7 @@ async def mcp_post(request: Request):
                 await mcp_catalog_tools.finish_form_reads(forms, deadline=deadline - _MCP_REPLY_MARGIN_SECONDS)
             for generation_result, spec in mcp_generation_tools.pending_generations(outcome[0]):
                 # On the Mac each generation runs in this process; it keeps going after the call answers.
-                await _start_generations(generation_result, spec)
+                await _start_generations(generation_result, spec, expired)
             if not result.done():
                 result.set_result(outcome)
         except Exception as exc:
@@ -289,13 +289,21 @@ async def mcp_post(request: Request):
     return JSONResponse(body, status_code=status_code, headers=headers)
 
 
-async def _start_generations(result: dict, spec: dict) -> None:
-    """Start Generate for each draft, as the editor does, without waiting for it to finish."""
+async def _start_generations(result: dict, spec: dict, expired: Callable[[], bool]) -> None:
+    """Start Generate for each draft, as the editor does, without waiting for it to finish.
+
+    Once the call has run out of time it starts no more: the agent was told the
+    call timed out, and a retry must not find drafts it never saw started.
+    """
     from anteroom.routes.chat import generate_listing
 
     started: list[str] = []
     skipped: list[dict[str, str]] = []
     for conv_id in spec["ready"]:
+        if expired():
+            skipped.append({"conversation_id": conv_id,
+                            "reason": "Not started: the call ran out of time. Ask for this draft again."})
+            continue
         try:
             # The run is registered and keeps going; its stream is not followed here.
             await generate_listing(conv_id)
