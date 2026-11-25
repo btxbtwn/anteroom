@@ -64,6 +64,16 @@ DELIST_BLOCKERS = ("signed_out", "challenge", "chrome_unavailable", "rate_limite
 RULE_DISABLED_AFTER_DELETE = "The relist rule was turned off after deletion. Review the listing before recreating it."
 # How long a relist cancelled mid-delete waits to put its price back.
 RESTORE_PRICE_DEADLINE_S = 30.0
+# Marketplaces whose replacement is first saved as a native draft, which the marketplace
+# can refuse. Relisting deletes the old listing first, so a refused draft left the item
+# down (production 2026-11-25: Mercari refused native_mercari_save_draft after the delete).
+# A replacement draft cannot be saved and verified before that delete: the item's one
+# marketplace_listings row holds the live listing, and a draft is refused while it is live.
+# Until it can, Auto-Relist leaves these listings up rather than delete one first.
+REPLACEMENT_UNVERIFIED = {
+    "mercari": ("Mercari Auto-Relist is paused: Mercari can refuse the replacement after the old listing is "
+                "deleted, so Anteroom left this listing up with its price unchanged."),
+}
 
 
 class AutoRelistError(ValueError):
@@ -650,6 +660,7 @@ def preview_status(db: Session, *, marketplace: str | None = None, limit: int = 
             connection = "Connected eBay API account"
         previews.append({
             **view, "candidate_counts": counts, "pending_items": len(pending[market]), "candidates": details,
+            "paused_reason": REPLACEMENT_UNVERIFIED.get(market),
             "connection_requirement": connection,
         })
     return {"as_of": _iso(moment), "rules": previews, "connection_verified": False, "listing_mode": listing_mode.read(db),
@@ -1138,7 +1149,7 @@ def _reserve_relist_attempt(
             return {"reserved": False, "outcome": None}
 
         price_error = poshmark_fractional_price_error(new_price) if marketplace == "poshmark" else None
-        preflight_error = readiness_error or price_error
+        preflight_error = REPLACEMENT_UNVERIFIED.get(marketplace) or readiness_error or price_error
         revision_id = None if preflight_error else _prepare_price_revision(
             db, conv_id, marketplace, new_price, current_revision_id,
         )
@@ -1150,7 +1161,8 @@ def _reserve_relist_attempt(
                 old_listing_id=old_listing_id,
                 new_listing_id=None,
                 old_price=old_price,
-                new_price=new_price,
+                # A paused marketplace never priced the relist, so its log shows no price change.
+                new_price=old_price if marketplace in REPLACEMENT_UNVERIFIED else new_price,
                 status="failed",
                 reason=preflight_error or "Listing has no saved revision to relist.",
                 moment=moment,
@@ -1234,7 +1246,7 @@ async def run_auto_relist(
                 "old_price": entry["price"],
                 "new_price": entry["new_price"],
                 "status": "dry_run",
-                "reason": None,
+                "reason": REPLACEMENT_UNVERIFIED.get(entry["marketplace"]),
             }
             for entry in plan
         ]
@@ -1242,6 +1254,8 @@ async def run_auto_relist(
     async def _run_delist(
         conv_id: str, marketplace: str, expected_listing_id: str, rule_id: str, revision_id: str
     ) -> dict[str, Any]:
+        if marketplace in REPLACEMENT_UNVERIFIED:
+            return {"ok": False, "error": REPLACEMENT_UNVERIFIED[marketplace]}
         if not await in_worker_session(_rule_enabled, rule_id):
             return {
                 "ok": False,
@@ -1367,6 +1381,9 @@ async def run_auto_relist(
         if not reservation["reserved"]:
             if reservation.get("outcome") is not None:
                 outcomes.append(reservation["outcome"])
+                if market in REPLACEMENT_UNVERIFIED:
+                    # One refusal per pass says why; the rest of this marketplace waits.
+                    blocked_markets.add(market)
             continue
 
         attempt_id = reservation["attempt_id"]
