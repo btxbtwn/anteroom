@@ -907,9 +907,23 @@ class ValidationCasesTest(unittest.TestCase):
         from anteroom.services.depop_fields import depop_kids_size
 
         for tag, age in {"XL (18/20)": "16 years", "XL": "16 years", "M": "10 years", "L (14/16)": "14 years",
+                         "Youth L": "14 years", "L / G / G YOUTH ENFANT NIÑOS": "14 years",
                          "XS": "4 years", "4T": "4 years", "10/12": "10 years", "8": "8 years", "12M": "12-18 months",
                          "0-3M": "0-3 months", "OS": "One size", "Husky": "Husky"}.items():
             self.assertEqual(depop_kids_size(tag), age, tag)
+
+    def test_depop_other_hint_names_only_a_listed_size(self):
+        import copy
+
+        listing = copy.deepcopy(VALID_LISTING)
+        listing["size"] = "EU 42"
+        listing["direct_category_ids"] = {"depop": "womenswear_tshirts"}
+        listing["depop_specifics"] = {**listing["depop_specifics"], "size": "Other"}
+        result = validate_listing(listing, 5, selected_marketplaces=["depop"])
+        other_errors = [error for error in result.errors if error["field"] == "depop_specifics.size"]
+        self.assertTrue(other_errors, result.errors)
+        self.assertNotIn("Choose EU 42", other_errors[0]["message"])
+        self.assertIn("Choose the Depop size that matches it.", other_errors[0]["message"])
 
     def test_legacy_etsy_when_made_aliases_match_current_dropdown(self):
         listing = dict(VALID_LISTING)

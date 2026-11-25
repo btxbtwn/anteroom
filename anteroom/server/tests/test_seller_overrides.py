@@ -141,37 +141,61 @@ class DepopStyleClearTest(unittest.TestCase):
         """Depop has no Youth L; sellers pick Other, but L maps to 14 years (#2099)."""
         from anteroom.services.listing_editor import prepared_listing
         from anteroom.services.validation import validate_listing
-        from unittest.mock import patch
 
         previous = {
             "title": "Unbranded L Casual Graphic Tee Green Cotton",
             "size": "L",
-            "direct_category_ids": {"depop": "kidswear_tops"},
+            "direct_category_ids": {"depop": "kidswear_tshirts"},
             "depop_specifics": {"size": "Other", "nativeSizeId": 99},
             "seller_fields": ["depop_specifics.size"],
             "_native_forms": {"depop": {}},
         }
         submitted = copy.deepcopy(previous)
-        with patch("anteroom.services.category_fields.load_fields", return_value=None):
-            saved = prepared_listing(previous, submitted)
-            self.assertEqual(saved["depop_specifics"]["size"], "14 years")
-            self.assertNotIn("nativeSizeId", saved["depop_specifics"])
-            result = validate_listing(saved, 5, selected_marketplaces=["depop"])
+        saved = prepared_listing(previous, submitted)
+        self.assertEqual(saved["depop_specifics"]["size"], "14 years")
+        self.assertNotIn("nativeSizeId", saved["depop_specifics"])
+        result = validate_listing(saved, 5, selected_marketplaces=["depop"])
         self.assertFalse(any(error["field"] == "depop_specifics.size" for error in result.errors), result.errors)
+
+    def test_youth_letter_tag_maps_through_other_to_the_listed_age(self):
+        from anteroom.services.depop_fields import replace_depop_other_size
+
+        listing = {
+            "size": "Youth L",
+            "direct_category_ids": {"depop": "kidswear_tshirts"},
+            "depop_specifics": {"size": "Other", "nativeSizeId": 12},
+            "seller_fields": ["depop_specifics.size"],
+        }
+        self.assertTrue(replace_depop_other_size(listing))
+        self.assertEqual(listing["depop_specifics"]["size"], "14 years")
+        self.assertNotIn("nativeSizeId", listing["depop_specifics"])
 
     def test_locked_depop_other_still_yields_to_a_known_adult_tag(self):
         from anteroom.services.depop_fields import replace_depop_other_size
 
         listing = {
             "size": "XL",
-            "direct_category_ids": {"depop": "menswear_tops"},
+            "direct_category_ids": {"depop": "menswear_tshirts"},
             "depop_specifics": {"size": "Other"},
             "seller_fields": ["depop_specifics.size"],
         }
-        with patch("anteroom.services.category_fields.load_fields", return_value=None):
-            self.assertTrue(replace_depop_other_size(listing))
+        self.assertTrue(replace_depop_other_size(listing))
         self.assertEqual(listing["depop_specifics"]["size"], "XL")
         self.assertFalse(field_locked(listing, "depop", "size"))
+
+    def test_unlisted_tag_leaves_locked_depop_other_alone(self):
+        from anteroom.services.depop_fields import replace_depop_other_size
+
+        listing = {
+            "size": "EU 42",
+            "direct_category_ids": {"depop": "womenswear_tshirts"},
+            "depop_specifics": {"size": "Other", "nativeSizeId": 7},
+            "seller_fields": ["depop_specifics.size"],
+        }
+        self.assertFalse(replace_depop_other_size(listing))
+        self.assertEqual(listing["depop_specifics"]["size"], "Other")
+        self.assertEqual(listing["depop_specifics"]["nativeSizeId"], 7)
+        self.assertTrue(field_locked(listing, "depop", "size"))
 
     def test_a_comma_joined_style_becomes_separate_choices(self):
         listing = {"depop_specifics": {"style": ["Casual, Minimalist, Indie"]}}
