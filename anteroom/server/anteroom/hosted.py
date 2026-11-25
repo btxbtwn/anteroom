@@ -527,20 +527,32 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             if watching_chrome_waits:
                 chrome_wait_connections.unwatch(database_engine)
             process_handoff.begin_draining()
-            try:
-                await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(handoff)), timeout=30)
-            except Exception:
-                logging.getLogger(__name__).warning('Scheduled work did not stop before shutdown')
             stopping.set()
-            try:
-                if worker is not None:
+
+            async def handoff_done():
+                try:
+                    # Lets a running relist or scheduled publish finish (process_handoff.DRAIN_GRACE_S).
+                    await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(handoff)),
+                                           timeout=process_handoff.HANDOFF_WAIT_S)
+                except Exception:
+                    logging.getLogger(__name__).warning('Scheduled work did not stop before shutdown')
+
+            async def worker_done():
+                if worker is None:
+                    return
+                try:
                     # A disconnected browser does not mean its draft is done.
                     # Let the current task save before cancelling the background loop.
                     await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(worker)), timeout=120)
-            except TimeoutError:
-                logging.getLogger(__name__).warning('Draft worker exceeded the shutdown grace period')
-            except Exception:
-                logging.getLogger(__name__).warning('Draft worker stopped before shutdown completed')
+                except TimeoutError:
+                    logging.getLogger(__name__).warning('Draft worker exceeded the shutdown grace period')
+                except Exception:
+                    logging.getLogger(__name__).warning('Draft worker stopped before shutdown completed')
+
+            try:
+                # Both have been draining since the stop signal. Waiting side by side keeps
+                # request draining (120 s) + this (120 s) + stopping loops under kill_timeout 300 s.
+                await asyncio.gather(handoff_done(), worker_done())
             finally:
                 await asyncio.gather(*(asyncio.to_thread(background.stop) for background in backgrounds))
                 await asyncio.to_thread(task_signals.stop)

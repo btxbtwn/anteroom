@@ -147,10 +147,18 @@ move a running Machine.
 
 ## Shutdown during deployments
 
-Fly sends SIGTERM with a 300-second grace period. Uvicorn allows active requests
-120 seconds to finish; the draft worker then stops claiming tasks and has up to
-120 seconds to save its current draft before the background loop is stopped.
-This also drains draft work whose browser has disconnected. Work that exceeds
+Fly sends SIGTERM with a 300-second grace period. On the signal, the Machine
+releases its Mac and Chrome routes at once (its listening socket is closed), the
+draft worker stops claiming tasks, and Auto-Relist and scheduled publishing start
+no new listing. A relist or scheduled publish already talking to a marketplace gets
+up to 75 seconds to finish while this Machine keeps renewing the scheduler lease,
+so the new Machine does not start its schedulers until the old one hands over.
+Then the schedulers stop and the lease is released.
+Meanwhile Uvicorn allows active requests 120 seconds to finish. After that the
+app waits, side by side, up to 120 seconds for the handoff and up to 120
+seconds for the draft worker to save its current draft, then stops the
+background loops (up to 20 seconds), which keeps the whole stop under 300
+seconds. This also drains draft work whose browser has disconnected. Work that exceeds
 the grace period remains protected by its expiring lease and is never marked
 complete or replayed automatically. The seller must review the saved draft and
 retry interrupted work. A new web version offers a Reload app button instead

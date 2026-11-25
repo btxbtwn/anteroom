@@ -1376,12 +1376,16 @@ async def run_auto_relist(
             "native_job_id": res.get("job_id"),
         }
 
+    from anteroom.services import process_handoff
     from anteroom.services.native_marketplaces import NativeMarketplaceError, check_depop_relist_shipping
 
     outcomes: list[dict[str, Any]] = []
     blocked_markets: set[str] = set()
     started = time.monotonic()
     for index, entry in enumerate(plan):
+        if process_handoff.draining():
+            log.info("Auto-relist stops for this Machine's shutdown; %d due listings wait for the next one.", len(plan) - index)
+            break
         if time_budget is not None and index and time.monotonic() - started >= time_budget.total_seconds():
             log.info("Auto-relist pass used its %s; %d due listings wait for the next pass.", time_budget, len(plan) - index)
             break
