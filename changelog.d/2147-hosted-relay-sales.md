@@ -1,0 +1,2 @@
+- Check remaining stock for new eBay and Etsy sales on the web and apply your post-sale automation settings.
+- Keep sales syncing when an event repeatedly fails or another seller's check is slow.
