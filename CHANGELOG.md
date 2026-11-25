@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1250 — 2026-11-25
+
+- With Anteroom open in several tabs or devices, the "sold but still listed" alert now loads once for all of them instead of each screen holding a database connection, so pages stop failing with "Cloud data is temporarily unavailable".
+
 ## 0.1.1249 — 2026-11-25
 
 - Auto-relist price drops on Poshmark and Mercari now land on whole dollars (rounded down), so relists no longer fail with "Enter a whole-dollar price".
