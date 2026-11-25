@@ -5,6 +5,8 @@ import { createClient, type Session } from "@supabase/supabase-js";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { createStudioQueryClient } from "../api/queryClient";
 import { installHostedApiSession, studioFetch } from "../api/transport";
+import { reachability } from "../api/databaseReachability";
+import { DatabaseUnreachableBanner } from "../components/DatabaseUnreachableBanner";
 import { forgetDeviceImages } from "../api/privateImages";
 import { App } from "../app/App";
 import { WorkspaceRuntimeProvider } from "../app/runtime";
@@ -151,15 +153,21 @@ function HostedWorkspace({ session }: { session: Session }) {
       if (refresh.active && saved && !refresh.fresh) { refresh.shown = true; setRuntime(saved); }
     });
     const remove = installHostedApiSession(hostedApiSession(session.user.id));
-    void studioFetch("/api/runtime").then(async response => {
+    const load = () => void studioFetch("/api/runtime").then(async response => {
       if (!response.ok) throw new Error("Could not open your workspace. Reload to try again.");
       const value = await response.json();
       refresh.fresh = true;
-      if (refresh.active) setRuntime(value);
+      if (refresh.active) { setError(""); setRuntime(value); }
       void saveRuntime(session.user.id, value);
     // Once the saved workspace is open, each screen reports its own failed refresh.
     }).catch(error => { if (refresh.active && !refresh.shown) setError(error.message); });
-    return () => { refresh.active = false; remove(); queryClient.clear(); };
+    load();
+    // The database is back: open the workspace if it never loaded, and re-read what failed meanwhile.
+    const stopRecovery = reachability.onRecovered(() => {
+      if (!refresh.fresh) load();
+      void queryClient.refetchQueries({ predicate: query => query.state.status === "error" });
+    });
+    return () => { refresh.active = false; stopRecovery(); reachability.reset(); remove(); queryClient.clear(); };
   }, [session.user.id, session.user.email, queryClient]);
   // Changes from the seller's other devices arrive live; polling covers any gap.
   // supabase-js refreshes the Realtime token itself, so a refresh need not resubscribe.
@@ -169,10 +177,10 @@ function HostedWorkspace({ session }: { session: Session }) {
   // The Mac app's window has no Chrome extension; its own Chrome connection stays with this Mac's listings.
   const account = { id: session.user.id, email: session.user.email || "" };
   const controls = <div className="cloud-account"><AccountMenu account={account} chrome={!isMacApp()} canDelete={!!runtime?.features.includes("account_deletion")} onSignOut={() => void supabase.auth.signOut({ scope: "local" }).then(({ error }) => { if (error) setError("Could not sign out. Please try again."); })}/></div>;
-  if (!runtime) return <StartupScreen error={error}/>;
+  if (!runtime) return <><DatabaseUnreachableBanner/><StartupScreen error={error}/></>;
   return <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(runtime.features), views: new Set(runtime.views), marketplaceForms: new Set(runtime.marketplace_forms), actionMarketplaces: new Set(runtime.action_marketplaces), accountControls: controls, account }}>
     <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}><ToastProvider><AnchoredToastProvider>
-      {error && <div role="alert">{error}</div>}<App/>
+      {error && <div role="alert">{error}</div>}<DatabaseUnreachableBanner/><App/>
     </AnchoredToastProvider></ToastProvider></PersistQueryClientProvider>
   </WorkspaceRuntimeProvider>;
 }

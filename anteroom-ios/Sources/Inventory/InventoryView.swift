@@ -1111,6 +1111,9 @@ struct ListingRowContent<Thumbnail: View>: View {
                     }
                 }
                 .font(.subheadline)
+                if let publishAt = ServerDate.parse(listing.scheduledPublishAt) {
+                    ScheduledDraftLabel(publishAt: publishAt)
+                }
                 let logos = listing.rowLogos(selling: selling)
                 if !logos.isEmpty {
                     let liveNames = logos.filter { !$0.sold }.map { Marketplaces.name($0.marketplace) }

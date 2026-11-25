@@ -62,11 +62,13 @@ test("workspace startup supports a slow response, reload and an actionable error
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  // The database banner keeps its own (empty) live region mounted beside the startup screen.
+  const startupStatus = page.getByRole("main", { name: "Opening Anteroom" }).getByRole("status");
   try {
-    await expect(page.getByRole("status")).toHaveText("Getting things ready…");
+    await expect(startupStatus).toHaveText("Getting things ready…");
     await expect(page.getByRole("button", { name: "Reload Anteroom" })).toHaveCount(0);
     await expect(page.locator(".startup-spinner")).toHaveCSS("animation-name", "none");
-    await expect(page.getByRole("status")).toContainText("Taking longer than usual", { timeout: 15_000 });
+    await expect(startupStatus).toContainText("Taking longer than usual", { timeout: 15_000 });
     fail = true;
     await page.getByRole("button", { name: "Reload Anteroom" }).click();
     await expect(page.getByRole("alert")).toContainText("Could not open your workspace");

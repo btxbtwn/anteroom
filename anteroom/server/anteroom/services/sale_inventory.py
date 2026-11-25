@@ -4,8 +4,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from anteroom.database import json_value
 from anteroom.models.conversation import Conversation
 from anteroom.models.listing import Listing, ListingRevision
 from anteroom.models.marketplace_listing import MarketplaceListing
@@ -65,13 +67,34 @@ def stocks_after_sales(db: Session, keys: Iterable[StockKey]) -> dict[StockKey, 
                db.query(Listing).filter(Listing.conversation_id.in_({key[0] for key in undecided}))}
     wanted = {*(current.get(key[0]) for key in undecided),
               *(records.get(key[:2], {}).get("revision_id") for key in undecided)} - {None}
-    revisions: dict[str | None, ListingRevision] = {revision.id: revision for revision in
-                 db.query(ListingRevision).filter(ListingRevision.id.in_(wanted))} if wanted else {}
+    revisions = _revision_quantities(db, wanted, {
+        revision for key in undecided if key[1] == "ebay"
+        for revision in (current.get(key[0]), records.get(key[:2], {}).get("revision_id")) if revision})
     for key in undecided:
         record = records.get(key[:2], {})
         result[key] = _recorded_stock(key, lines[key], record, revisions.get(current.get(key[0])),
                                       revisions.get(record.get("revision_id")))
     return result
+
+
+def _revision_quantities(db: Session, wanted: set, ebay: set) -> dict[str | None, dict]:
+    """The quantity fields of ``wanted`` revisions, never their whole marketplace forms.
+
+    A revision's ``listing_json`` averages tens of kilobytes; reading one per
+    sold item held the seller's connection for seconds (#2104). Only eBay
+    revisions read their variations, the one part of the form stock needs.
+    """
+    if not wanted:
+        return {}
+    revisions: dict[str | None, dict] = {
+        revision_id: {"quantity": (fields or {}).get("quantity")} for revision_id, fields in
+        db.execute(select(ListingRevision.id, ListingRevision.inventory_fields).where(ListingRevision.id.in_(wanted)))}
+    if ebay & revisions.keys():
+        for revision_id, variations in db.execute(
+                select(ListingRevision.id, json_value(ListingRevision.listing_json, "ebay_specifics.variations"))
+                .where(ListingRevision.id.in_(ebay & revisions.keys()))):
+            revisions[revision_id]["ebay_specifics"] = {"variations": variations}
+    return revisions
 
 
 def _unknown() -> dict:
@@ -107,7 +130,7 @@ def _observed_stock(key: StockKey, lines: list[MarketplaceSale], record: dict, n
 
 
 def _recorded_stock(key: StockKey, lines: list[MarketplaceSale], record: dict,
-                    revision: ListingRevision | None, published: ListingRevision | None) -> dict:
+                    revision: dict | None, published: dict | None) -> dict:
     """Without a fresh read, a single-unit item is sold out; anything listed with more units is unknown."""
     from anteroom.services.ebay_variations import total_quantity
 
@@ -115,10 +138,9 @@ def _recorded_stock(key: StockKey, lines: list[MarketplaceSale], record: dict,
     paid = [line for line in lines if line.order_status in PAID_STATUSES]
     observed = record.get("inventory_observation") or {}
     # A listing with variations holds stock per variation: its total counts, not the single quantity field.
-    quantities = [revision.listing_json.get("quantity") if revision else None,
-                  published.listing_json.get("quantity") if published else None,
-                  *[total_quantity(source.listing_json) for source in (revision, published)
-                    if source and marketplace == "ebay" and isinstance(source.listing_json, dict)],
+    quantities = [revision.get("quantity") if revision else None,
+                  published.get("quantity") if published else None,
+                  *[total_quantity(source) for source in (revision, published) if source and marketplace == "ebay"],
                   observed.get("quantity"), *[line.quantity for line in paid]]
     if any(type(quantity) is int and quantity > 1 for quantity in quantities):
         return _unknown()

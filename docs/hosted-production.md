@@ -190,11 +190,22 @@ The regression holds three editor responses open with a three-connection pool
 while another draft saves. This proves response delivery cannot reserve that
 pool; production generation and latency still require a live browser run.
 
+On 2026-11-25 pool snapshots showed five or six marketplace preflights for one
+listing holding connections together, 0.5–3.6 s each: the editor, the marketplace
+panel, the iPhone and every save or live update asked separately, and each request
+built the whole answer on its own request session. The preflight answers every
+marketplace in one response, and requests for the same seller, listing and revision
+that arrive while one is being built wait for that build
+(`native_marketplaces.shared_preflight`) without a session of their own. The build
+uses one short worker session and outlives a caller that disconnects; finished
+results are not kept.
+
 The 0.1.713 production browser run still reproduced pool exhaustion. Its first
 error stack showed repeated full inventory reconciliation and suggestion
 calculations from several open tabs, including notes parsing and quantity
 derivation while transactions remained open. Hosted inventory and suggestion
-reads therefore share one build per seller and view. Completed snapshots are
+reads therefore share one build per seller and view; so does the still-listed
+sale alert (#2103), which every open screen polls. Completed snapshots are
 validated with the seller's complete change-feed vector on each request.
 The active draft-ID set is checked too, so durable task changes made by worker
 SQL invalidate busy suggestions even without a feed notification. Lease renewal
@@ -424,6 +435,16 @@ stop the proxy from routing, or restart the only Machine in a loop. The deploy
 workflow instead waits for `/api/ready` after the new version is live and
 fails the run if it never becomes ready. A model outage does not fail
 `/api/health`.
+
+Because nothing outside calls `/api/ready`, the web process watches it itself
+where error emails are on (`services/database_watch.py`): every 30 seconds,
+with a 10-second deadline, and after two minutes of continuous failure one
+"Hosted database unreachable" email to the operator, then one "reachable
+again" email. The outage email goes even though the mail budget (kept in the
+same database) cannot be read; a failed send is tried again after five
+minutes. The database 503s carry `X-Anteroom-Reason: database_unavailable`;
+the web and iPhone apps then check `/api/ready` and, while it fails, say
+"Can't reach your data right now — retrying" instead of loading forever.
 
 `migrations/env.py` sets `lock_timeout = '5s'` on the migration connection.
 `ANTEROOM_MIGRATION_LOCK_TIMEOUT` overrides it. The test suite sets `0`

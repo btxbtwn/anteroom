@@ -235,3 +235,147 @@ def test_hosted_mcp_form_uses_the_sellers_relay_and_rejects_results_for_old_revi
         reply(command)
         result, error = pending.result(timeout=5)
     assert not error and result["reason"] == "listing_changed", result
+
+
+_RELOAD_HINT = "Reload its fields before listing"
+
+
+@pytest.fixture
+def _reload_draft_cleanup():
+    """Edits record listing corrections; remove them so later files' table cleanups still work."""
+    yield
+    from anteroom.models.listing_evidence import ListingCorrection
+
+    with SessionLocal() as db:
+        db.query(ListingCorrection).delete()
+        db.commit()
+
+
+def _reload_errors(conv_id, market):
+    """The saved form's own staleness check, the one List and Schedule refuse on."""
+    from anteroom.repositories.queries import ListingRepo
+    from anteroom.services import native_contract
+
+    with SessionLocal() as db:
+        repo = ListingRepo(db)
+        listing = repo.get_revision(repo.get_current(conv_id).current_revision_id).listing_json
+    return [gap for gap in native_contract.gaps(listing, market) if _RELOAD_HINT in gap["message"]]
+
+
+def test_reload_marketplace_form_saves_the_form_so_the_draft_can_list(monkeypatch, _reload_draft_cleanup):
+    from anteroom.services import mercari_api
+
+    async def quotes(_category, _ounces, _dimensions):
+        return [{"id": 2553, "fee": 999, "weightRange": {"min": 1, "max": 48}, "etaForSeller": "1 - 7 days"}]
+
+    monkeypatch.setattr(mercari_api, "shipping_quotes", quotes)
+    client = TestClient(app)
+    draft = _new_draft(client, {
+        "direct_category_ids": {"mercari": "275"},
+        "mercari_specifics": {"package": {"pounds": 1, "ounces": 0, "fitsShoebox": "yes"}},
+    })
+    first, error = _call_tool(client, "reload_marketplace_form", {
+        "conversation_id": draft["conversation_id"], "marketplace": "mercari", "expected_revision_id": draft["revision_id"],
+    })
+    assert not error and first["saved"] is True, first
+    assert first["revision_id"] != draft["revision_id"]
+
+    # A new weight changes Mercari's shipping labels: the draft is blocked until its form is read again.
+    edited, error = _call_tool(client, "edit_listing", {"conversation_id": draft["conversation_id"],
+                                                        "fields": {"weight_oz": 40}})
+    assert not error, edited
+    assert _reload_errors(draft["conversation_id"], "mercari")
+
+    reloaded, error = _call_tool(client, "reload_marketplace_form", {
+        "conversation_id": draft["conversation_id"], "marketplace": "mercari", "expected_revision_id": edited["revision_id"],
+    })
+    assert not error and reloaded["saved"] is True, reloaded
+    assert not any(_RELOAD_HINT in row["message"] for row in reloaded["remaining"])
+    assert not _reload_errors(draft["conversation_id"], "mercari")
+
+
+def test_reload_marketplace_form_refuses_a_listing_that_changed(monkeypatch, _reload_draft_cleanup):
+    from anteroom.services import mercari_api
+
+    async def quotes(_category, _ounces, _dimensions):
+        return [{"id": 2553, "fee": 999, "weightRange": {"min": 1, "max": 48}, "etaForSeller": "1 - 7 days"}]
+
+    monkeypatch.setattr(mercari_api, "shipping_quotes", quotes)
+    client = TestClient(app)
+    draft = _new_draft(client, {"direct_category_ids": {"mercari": "275"}})
+    edited, error = _call_tool(client, "edit_listing", {"conversation_id": draft["conversation_id"], "fields": {"price": 40}})
+    assert not error, edited
+    stale, error = _call_tool(client, "reload_marketplace_form", {
+        "conversation_id": draft["conversation_id"], "marketplace": "mercari", "expected_revision_id": draft["revision_id"],
+    })
+    assert stale.get("saved") is not True, stale
+    listing, error = _call_tool(client, "get_listing", {"conversation_id": draft["conversation_id"]})
+    assert listing["current_revision_id"] == edited["revision_id"]
+
+
+def test_reload_marketplace_form_timeout_saves_nothing(monkeypatch, _reload_draft_cleanup):
+    from anteroom.services import mercari_api
+
+    async def stalled(*_args):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(mercari_api, "shipping_quotes", stalled)
+    client = TestClient(app)
+    draft = _new_draft(client, {
+        "direct_category_ids": {"mercari": "275"},
+        "mercari_specifics": {"package": {"pounds": 1, "ounces": 0, "fitsShoebox": "yes"}},
+    })
+    monkeypatch.setattr(mcp, "_MCP_RPC_TIMEOUT_SECONDS", 0.5)
+    monkeypatch.setattr(mcp, "_MCP_REPLY_MARGIN_SECONDS", 0.2)
+    result, error = _call_tool(client, "reload_marketplace_form", {
+        "conversation_id": draft["conversation_id"], "marketplace": "mercari", "expected_revision_id": draft["revision_id"],
+    })
+    assert not error and result["saved"] is False and result["reason"] == "timeout", result
+    listing, error = _call_tool(client, "get_listing", {"conversation_id": draft["conversation_id"]})
+    assert listing["current_revision_id"] == draft["revision_id"]
+
+
+def test_reload_marketplace_form_save_past_the_request_deadline_is_not_committed(monkeypatch, _reload_draft_cleanup):
+    import threading
+    import time
+
+    from test_mcp_http import _rpc
+
+    from anteroom.services import mercari_api, native_editor
+
+    async def quotes(_category, _ounces, _dimensions):
+        return [{"id": 2553, "fee": 999, "weightRange": {"min": 1, "max": 48}, "etaForSeller": "1 - 7 days"}]
+
+    monkeypatch.setattr(mercari_api, "shipping_quotes", quotes)
+    client = TestClient(app)
+    draft = _new_draft(client, {
+        "direct_category_ids": {"mercari": "275"},
+        "mercari_specifics": {"package": {"pounds": 1, "ounces": 0, "fitsShoebox": "yes"}},
+    })
+    save = native_editor.save_refreshed_form
+    finished = threading.Event()
+
+    def slow_save(*args, **kwargs):
+        # The save waits on a locked database until after the caller was answered.
+        try:
+            time.sleep(1.5)
+            return save(*args, **kwargs)
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(native_editor, "save_refreshed_form", slow_save)
+    monkeypatch.setattr(mcp, "_MCP_RPC_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setattr(mcp, "_MCP_REPLY_MARGIN_SECONDS", 0.2)
+    response = _rpc(client, "tools/call", {"name": "reload_marketplace_form", "arguments": {
+        "conversation_id": draft["conversation_id"], "marketplace": "mercari", "expected_revision_id": draft["revision_id"],
+    }})
+    assert response.status_code == 504, response.text
+    assert finished.wait(5)
+    # The save's session commits (or refuses to) after the save returns: wait for the call's worker.
+    deadline = time.monotonic() + 5
+    while mcp._active_calls and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not mcp._active_calls
+    monkeypatch.setattr(mcp, "_MCP_RPC_TIMEOUT_SECONDS", 30.0)
+    listing, error = _call_tool(client, "get_listing", {"conversation_id": draft["conversation_id"]})
+    assert not error and listing["current_revision_id"] == draft["revision_id"], listing

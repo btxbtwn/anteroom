@@ -54,10 +54,10 @@ def status(conv_id: str, db: Session = Depends(get_db, scope="function")):
 
 
 @router.get("/preflight")
-def preflight(conv_id: str, db: Session = Depends(get_db, scope="function")):
-    """What each marketplace still needs before List. A plain function, so FastAPI runs
-    its database work in the threadpool instead of on the event loop."""
-    return _sync(native.preflight, conv_id, db)
+async def preflight(conv_id: str, revision_id: str | None = None):
+    """What each marketplace still needs before List, for every marketplace in one answer.
+    Requests asking at once share one build in one short worker session."""
+    return await _reply(native.shared_preflight(conv_id, revision_id))
 
 
 # These actions wait on Chrome or a marketplace. They take no request session: the service runs

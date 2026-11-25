@@ -231,7 +231,8 @@ async def mcp_post(request: Request):
                 await mcp_photo_tools.finish_pending_uploads(uploads, expired=expired, request=request)
             forms = mcp_catalog_tools.pending_form_reads(outcome[0])
             if forms:
-                await mcp_catalog_tools.finish_form_reads(forms, deadline=deadline - _MCP_REPLY_MARGIN_SECONDS)
+                await mcp_catalog_tools.finish_form_reads(forms, deadline=deadline - _MCP_REPLY_MARGIN_SECONDS,
+                                                          expired=expired)
             for generation_result, spec in mcp_generation_tools.pending_generations(outcome[0]):
                 # On the Mac each generation runs in this process; it keeps going after the call answers.
                 await _start_generations(generation_result, spec, expired)

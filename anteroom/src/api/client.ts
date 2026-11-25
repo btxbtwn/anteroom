@@ -1012,8 +1012,10 @@ export const api = {
         options,
       ),
     status: (convId: string, options?: ReadOptions) => read<NativeDrafts>(`/conversations/${convId}/native-marketplaces`, options),
-    preflight: (convId: string) =>
-      request<NativePreflight>(`/conversations/${convId}/native-marketplaces/preflight`),
+    /** One answer for every marketplace. Screens asking about the same revision at once share one server build. */
+    preflight: (convId: string, revisionId?: string | null) =>
+      request<NativePreflight>(`/conversations/${convId}/native-marketplaces/preflight${
+        revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
     /** The fields each listing still needs per marketplace; the inventory asks for the rows on screen. */
     readiness: (convIds: readonly string[]) =>
       request<{ listings: Record<string, ListingReadiness> }>(

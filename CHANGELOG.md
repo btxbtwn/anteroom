@@ -6,6 +6,43 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1257 — 2026-11-25
+
+- Let a connected AI agent reload a draft's marketplace form, like Reload choices in the editor, so drafts it fixes can be listed or scheduled.
+
+## 0.1.1256 — 2026-11-25
+
+- When auto-relist drops a price, the new price now also saves as the item's General price. Other marketplaces keep their own prices.
+
+## 0.1.1255 — 2026-11-25
+
+- The Sales Tracker opens faster and no longer ties up the cloud database while it loads: it reads each sold item's SKU and quantity instead of its full marketplace forms.
+
+## 0.1.1254 — 2026-11-25
+
+- Opening a listing checks what each marketplace still needs once for all of them, so several open screens no longer tie up the server while a listing loads.
+
+## 0.1.1253 — 2026-11-25
+
+- When Anteroom's cloud database can't be reached, the website and iPhone app now say "Can't reach your data right now — retrying" instead of loading forever, and reload on their own once it's back.
+- The operator now gets one email when the cloud database stays unreachable for two minutes, and one when it's reachable again.
+
+## 0.1.1252 — 2026-11-25
+
+- Keep web app updates from stalling on a test that timed out on busy build machines.
+
+## 0.1.1251 — 2026-11-25
+
+- Draft rows and listing threads show a Scheduled tag with the publish date and time in your local time.
+
+## 0.1.1250 — 2026-11-25
+
+- With Anteroom open in several tabs or devices, the "sold but still listed" alert now loads once for all of them instead of each screen holding a database connection, so pages stop failing with "Cloud data is temporarily unavailable".
+
+## 0.1.1249 — 2026-11-25
+
+- Auto-relist price drops on Poshmark and Mercari now land on whole dollars (rounded down), so relists no longer fail with "Enter a whole-dollar price".
+
 ## 0.1.1248 — 2026-11-25
 
 - Saving or listing on Depop, Mercari or Poshmark from the web no longer hangs on "Waiting for Chrome to confirm" when the action is started in the background: it now reaches Chrome instead of being turned away before it starts.

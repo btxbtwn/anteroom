@@ -249,6 +249,7 @@ class SellerReadSnapshots:
                 return result
         except SQLAlchemyError as exc:
             note_cause(exc)
-            raise HTTPException(503, 'Cloud data is temporarily unavailable', headers={'Retry-After': '5'}) from None
+            raise HTTPException(503, 'Cloud data is temporarily unavailable', headers={
+                'Retry-After': '5', 'X-Anteroom-Reason': 'database_unavailable'}) from None
         finally:
             report()

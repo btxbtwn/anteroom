@@ -69,11 +69,12 @@ def classify_failure(exc):
             DAY if quota else (3600 if code and code >= 500 else 300))
 
 
-def reserve_direct_send(store, daily_limit: int, clock=time.time) -> bool:
-    """Charge one message sent outside the outbox (seller feedback) to the shared budget.
+def reserve_direct_send(store, daily_limit: int, clock=time.time, *, keep_error_reserve: bool = True) -> bool:
+    """Charge one message sent outside the outbox (seller feedback, a database alert) to the shared budget.
 
-    Refused while the relay is paused or another sender holds the lease, and
-    whenever it would cut into the quarter of the daily budget kept for errors.
+    Refused while the relay is paused or another sender holds the lease, and,
+    with ``keep_error_reserve``, whenever it would cut into the quarter of the
+    daily budget kept for errors. An operator alert is an error and may use it.
     The reservation commits before any network activity.
     """
     daily_limit = max(0, daily_limit)
@@ -83,7 +84,7 @@ def reserve_direct_send(store, daily_limit: int, clock=time.time) -> bool:
         state = transaction.state
         now = clock()
         attempts = state['attempts'] = [t for t in state.get('attempts', []) if t > now - DAY]
-        reserve = max(1, daily_limit // 4)
+        reserve = max(1, daily_limit // 4) if keep_error_reserve else 0
         if (len(attempts) >= daily_limit - reserve
                 or sum(t > now - 3600 for t in attempts) >= HOURLY_CAP
                 or state.get('paused_until', 0) > now or state.get('lease_until', 0) > now):
