@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1272 — 2026-11-25
+
+- Keep expected MCP connection checks out of operator error emails.
+
 ## 0.1.1271 — 2026-11-25
 
 - Mercari Auto-Relist no longer deletes a live Mercari listing first. Mercari could refuse the replacement after the delete and leave the item off Mercari, so Auto-Relist now leaves Mercari listings up with their price unchanged and says so in the Auto-relist log. Poshmark, eBay and Depop Auto-Relist, and listing or delisting on Mercari yourself, work as before.
