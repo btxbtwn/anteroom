@@ -1,0 +1,2 @@
+- Keep operator email moving when a diagnostic report contains malformed text or fails to save.
+- Space out operator email retries during SMTP outages and stop stalled sends before another worker can retry them.
