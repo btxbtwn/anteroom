@@ -284,6 +284,11 @@ class FakeResponse:
 
 
 class SignInTest(unittest.TestCase):
+    def tearDown(self):
+        from test_marketplace_accounts import clear_sign_ins
+
+        clear_sign_ins()
+
     def test_sign_in_finishes_only_with_the_claim_its_browser_brought_back(self):
         calls = []
 
@@ -321,7 +326,8 @@ class SignInTest(unittest.TestCase):
                 self.assertNotIn(("GET", "/studio/oauth/result", {"state": "someone-elses", "claim": "c1"}), calls)
                 done = await marketplace_accounts.finish_sign_in("ebay", "s1", "c1")
                 self.assertEqual(done, {"marketplace": "ebay", "label": "cris"})
-                await marketplace_accounts._pending[("", "ebay")].task
+                # The finish stops the watcher; it does not wait out the relay's 15 minutes.
+                self.assertNotIn(("", "ebay"), marketplace_accounts._watchers)
                 listen.assert_called_once()
 
         asyncio.run(scenario())
@@ -348,7 +354,7 @@ class SignInTest(unittest.TestCase):
                 await marketplace_accounts.start_sign_in("ebay")
                 with self.assertRaises(marketplace_accounts.RelayError):
                     await marketplace_accounts.finish_sign_in("ebay", "s3", "forged")
-                await marketplace_accounts._pending[("", "ebay")].task
+                self.assertNotIn(("", "ebay"), marketplace_accounts._watchers)
 
         asyncio.run(scenario())
         self.assertNotIn("ebay", keychain.get_marketplace_accounts())
@@ -367,7 +373,7 @@ class SignInTest(unittest.TestCase):
                  mock.patch.object(marketplace_accounts, "POLL_INTERVAL_S", 0), \
                  mock.patch.object(marketplace_accounts.webbrowser, "open"):
                 await marketplace_accounts.start_sign_in("etsy")
-                await marketplace_accounts._pending[("", "etsy")].task
+                await marketplace_accounts._watchers[("", "etsy")]
 
         asyncio.run(scenario())
         status = marketplace_accounts.status()["accounts"]["etsy"]

@@ -1,0 +1,2 @@
+- Connecting eBay or Etsy on the web no longer fails with "not started here" when Anteroom updates while you are signing in.
+- An eBay or Etsy sign-in link now works for 15 minutes, as long as the relay keeps it, and can't be used twice.

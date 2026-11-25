@@ -14,15 +14,21 @@ that account's sales here.
 from __future__ import annotations
 
 import asyncio
-import hmac
 import logging
 import secrets
 import time
 import webbrowser
-from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from functools import partial
-from typing import Any
+from typing import Any, cast
 
+from sqlalchemy import CursorResult, delete, select, update
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from anteroom.database import SessionLocal, in_worker_session
+from anteroom.models.marketplace_sign_in import MarketplaceSignIn
+from anteroom.models.ownership import LOCAL_USER_ID
 from anteroom.services import relay_client
 from anteroom.services.keychain import (
     delete_marketplace_account,
@@ -44,7 +50,8 @@ NAMES = {
     "poshmark": "Poshmark",
     "mercari": "Mercari",
 }
-SIGN_IN_TIMEOUT_S = 10 * 60
+# The relay forgets a sign-in after 15 minutes, so Anteroom does too.
+SIGN_IN_TIMEOUT_S = 15 * 60
 POLL_INTERVAL_S = 2
 # Refresh a little before the marketplace says the token expires.
 REFRESH_MARGIN_S = 120
@@ -52,18 +59,10 @@ REFRESH_MARGIN_S = 120
 APP_RETURN = "anteroom://marketplace-signin"
 
 
-@dataclass
-class PendingSignIn:
-    marketplace: str
-    state: str
-    authorize_url: str
-    started_at: float = field(default_factory=time.time)
-    error: str | None = None
-    done: bool = False
-    task: asyncio.Task | None = None
-
-
-_pending: dict[tuple[str, str], PendingSignIn] = {}
+# Sign-ins in progress live in the database (MarketplaceSignIn), so any process
+# can finish one. This only lets the process that started a sign-in stop
+# watching it early; nothing depends on it being here.
+_watchers: dict[tuple[str, str], asyncio.Task] = {}
 
 
 def _seller() -> str:
@@ -116,34 +115,105 @@ def _account_record(result: dict) -> dict:
     }
 
 
-async def _wait_for_sign_in(pending: PendingSignIn) -> None:
-    """Report a sign-in that failed or expired. Success arrives through finish_sign_in."""
-    deadline = pending.started_at + SIGN_IN_TIMEOUT_S
-    name = NAMES[pending.marketplace]
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _aware(moment: datetime) -> datetime:
+    # SQLite hands back UTC times without their zone.
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+
+
+def _owner() -> str:
+    return _seller() or LOCAL_USER_ID
+
+
+def _sign_in(marketplace: str):
+    """This seller's sign-in for the marketplace. Row security scopes hosted sessions too."""
+    return (MarketplaceSignIn.user_id == _owner()) & (MarketplaceSignIn.marketplace == marketplace)
+
+
+def _save_sign_in(db: Session, marketplace: str, state: str, authorize_url: str) -> None:
+    """Replace any earlier sign-in for this marketplace with the new one."""
+    for attempt in range(2):
+        now = _now()
+        db.execute(delete(MarketplaceSignIn).where(_sign_in(marketplace)))
+        db.add(MarketplaceSignIn(user_id=_owner(), marketplace=marketplace, state=state, authorize_url=authorize_url,
+                                 started_at=now, expires_at=now + timedelta(seconds=SIGN_IN_TIMEOUT_S)))
+        try:
+            db.commit()
+            return
+        except IntegrityError:
+            # Another start for this marketplace saved its row in between; the later one wins.
+            db.rollback()
+            if attempt:
+                raise
+
+
+def _consume_sign_in(db: Session, marketplace: str, state: str) -> bool:
+    """Take the sign-in to finish it. Only one caller ever does, and only before it expires."""
+    taken = cast(CursorResult, db.execute(
+        update(MarketplaceSignIn)
+        .where(_sign_in(marketplace), MarketplaceSignIn.state == state,
+               MarketplaceSignIn.finished_at.is_(None), MarketplaceSignIn.expires_at > _now())
+        .values(finished_at=_now())
+        .execution_options(synchronize_session=False)
+    )).rowcount
+    db.commit()
+    return taken == 1
+
+
+def _release_sign_in(db: Session, marketplace: str, state: str) -> None:
+    """Give a taken sign-in back when the relay could not be reached, so the seller can retry."""
+    db.execute(update(MarketplaceSignIn)
+               .where(_sign_in(marketplace), MarketplaceSignIn.state == state, MarketplaceSignIn.error.is_(None))
+               .values(finished_at=None)
+               .execution_options(synchronize_session=False))
+    db.commit()
+
+
+def _end_sign_in(db: Session, marketplace: str, state: str, error: str, *, taken: bool = False) -> None:
+    """Record why a sign-in ended, unless it already ended (or was taken by a finish) another way."""
+    query = update(MarketplaceSignIn).where(_sign_in(marketplace), MarketplaceSignIn.state == state)
+    if not taken:
+        query = query.where(MarketplaceSignIn.finished_at.is_(None))
+    db.execute(query.values(error=error, finished_at=_now()).execution_options(synchronize_session=False))
+    db.commit()
+
+
+def _stop_watching(marketplace: str) -> None:
+    task = _watchers.pop((_seller(), marketplace), None)
+    if task is not None and not task.done():
+        # Safe from a worker thread too (cancel_sign_in runs in one).
+        task.get_loop().call_soon_threadsafe(task.cancel)
+
+
+async def _wait_for_sign_in(marketplace: str, state: str) -> None:
+    """Report a sign-in that failed or expired. Success arrives through finish_sign_in,
+    on whichever process the seller's browser reaches."""
+    deadline = time.monotonic() + SIGN_IN_TIMEOUT_S
+    name = NAMES[marketplace]
+    error = f"The {name} sign-in timed out. Try again."
     try:
-        while time.time() < deadline:
+        while time.monotonic() < deadline:
             await asyncio.sleep(POLL_INTERVAL_S)
-            if pending.done:
-                return
-            resp = await relay_request("GET", "/studio/oauth/result", params={"state": pending.state})
-            if pending.done:
-                return
+            resp = await relay_request("GET", "/studio/oauth/result", params={"state": state})
             if resp.status_code == 404:
-                pending.error = f"The {name} sign-in expired. Try again."
-                return
+                # Also what a finished sign-in looks like; then the finish already ended it.
+                error = f"The {name} sign-in expired. Try again."
+                break
             if resp.status_code == 200 and resp.json().get("error"):
-                pending.error = resp.json()["error"]
-                return
-        pending.error = f"The {name} sign-in timed out. Try again."
+                error = str(resp.json()["error"])
+                break
     except asyncio.CancelledError:
-        if not pending.done:
-            pending.error = "Sign-in cancelled"
         raise
     except Exception as exc:  # noqa: BLE001 - surfaced in status
         log.warning("%s sign-in failed: %s", name, exc)
-        pending.error = f"{name} sign-in failed. Try again."
-    finally:
-        pending.done = True
+        error = f"{name} sign-in failed. Try again."
+    try:
+        await in_worker_session(_end_sign_in, marketplace, state, error)
+    except Exception:  # noqa: BLE001 - status shows it as expired once its time is up
+        log.warning("could not record how the %s sign-in ended", name, exc_info=True)
 
 
 class SignInNotFound(RuntimeError):
@@ -151,22 +221,32 @@ class SignInNotFound(RuntimeError):
 
 
 async def finish_sign_in(marketplace: str, state: str, claim: str) -> dict:
-    """Collect the tokens for a sign-in this Anteroom started, with the claim its browser brought back."""
+    """Collect the tokens for a sign-in this seller started, with the claim its browser brought back.
+
+    Any process can finish it: the sign-in is read from the database, and taken
+    there first, so a state is finished at most once.
+    """
     _check(marketplace)
     name = NAMES[marketplace]
-    pending = _pending.get((_seller(), marketplace))
-    if pending is None or pending.done or not hmac.compare_digest(pending.state.encode(), state.encode()):
+    if not await in_worker_session(_consume_sign_in, marketplace, state):
         raise SignInNotFound(f"This {name} sign-in was not started here, or it already ended. Start again from Connections.")
-    resp = await relay_request("GET", "/studio/oauth/result", params={"state": state, "claim": claim})
+    try:
+        resp = await relay_request("GET", "/studio/oauth/result", params={"state": state, "claim": claim})
+    except BaseException:
+        # No answer for this claim (unreachable, relay refused this device, or the request
+        # was cancelled): give the sign-in back so the seller can retry the same link.
+        # Shielded so a cancelled finish still releases it.
+        await asyncio.shield(in_worker_session(_release_sign_in, marketplace, state))
+        raise
+    # The relay has answered for this claim: nothing is left to watch for.
+    _stop_watching(marketplace)
     result = resp.json() if resp.status_code == 200 else {}
     if resp.status_code != 200 or result.get("error") or not (result.get("tokens") or {}).get("accessToken"):
         message = str(result.get("error") or f"{name} sign-in could not be confirmed. Try again.")
-        pending.error = message
-        pending.done = True
+        await in_worker_session(partial(_end_sign_in, taken=True), marketplace, state, message)
         raise RelayError(message, resp.status_code)
     account = _account_record(result)
     await asyncio.to_thread(set_marketplace_account, marketplace, account)
-    pending.done = True
     for warning in result.get("warnings") or []:
         log.warning("%s sign-in: %s", name, warning)
     start_listening()
@@ -192,9 +272,7 @@ async def start_sign_in(marketplace: str, features: list[str] | None = None, cli
     if marketplace == "ebay":
         # Listing on eBay reads the seller's business policies, which needs this grant.
         features = sorted({*(features or []), "listings"})
-    previous = _pending.pop((_seller(), marketplace), None)
-    if previous and previous.task and not previous.task.done():
-        previous.task.cancel()
+    _stop_watching(marketplace)
     params = {"features": ",".join(features)} if features else {}
     params["returnTo"] = _return_to(marketplace, client)
     resp = await relay_request("POST", f"/studio/oauth/{marketplace}/start", params=params)
@@ -203,28 +281,31 @@ async def start_sign_in(marketplace: str, features: list[str] | None = None, cli
     if resp.status_code != 200:
         raise RelayError(f"Could not start {NAMES[marketplace]} sign-in ({resp.status_code}).", resp.status_code)
     body = resp.json()
-    pending = PendingSignIn(marketplace=marketplace, state=body["state"], authorize_url=body["authorizeUrl"])
-    pending.task = asyncio.get_running_loop().create_task(_wait_for_sign_in(pending))
-    _pending[(_seller(), marketplace)] = pending
+    state, authorize_url = str(body["state"]), str(body["authorizeUrl"])
+    await in_worker_session(_save_sign_in, marketplace, state, authorize_url)
+    _watchers[(_seller(), marketplace)] = asyncio.get_running_loop().create_task(_wait_for_sign_in(marketplace, state))
     if not _on_web():
         # On the web, the seller's own browser opens the page from the response.
         try:
-            webbrowser.open(pending.authorize_url)
+            webbrowser.open(authorize_url)
         except Exception:  # noqa: BLE001 - the page shows the link too
             log.debug("could not open %s sign-in", marketplace, exc_info=True)
-    return {"authorizeUrl": pending.authorize_url}
+    return {"authorizeUrl": authorize_url}
 
 
 def cancel_sign_in(marketplace: str) -> None:
-    pending = _pending.pop((_seller(), _check(marketplace)), None)
-    if pending and pending.task and not pending.task.done():
-        pending.task.cancel()
+    """Forget the sign-in in progress. Blocking: call from a worker thread or a plain route."""
+    _check(marketplace)
+    _stop_watching(marketplace)
+    with SessionLocal() as db:
+        db.execute(delete(MarketplaceSignIn).where(_sign_in(marketplace)))
+        db.commit()
 
 
 async def disconnect(marketplace: str) -> None:
     """Unlink the account on the relay and forget its tokens here."""
     _check(marketplace)
-    cancel_sign_in(marketplace)
+    await asyncio.to_thread(cancel_sign_in, marketplace)
     account = (await _accounts()).get(marketplace)
     if account and account.get("accountId") and await asyncio.to_thread(get_relay_device):
         try:
@@ -646,19 +727,37 @@ def start_listening() -> None:
         relay_client.start_stream(_handler())
 
 
+def _sign_ins() -> dict[str, tuple[str | None, str | None]]:
+    """Each marketplace's sign-in: the page to open while it is in progress, or why it ended."""
+    with SessionLocal() as db:
+        rows = db.scalars(select(MarketplaceSignIn).where(MarketplaceSignIn.user_id == _owner())).all()
+    now, out = _now(), {}
+    for row in rows:
+        if row.finished_at is not None:
+            out[row.marketplace] = (None, row.error)
+        elif _aware(row.expires_at) <= now:
+            # Nobody is watching it any more (the process that started it is gone).
+            out[row.marketplace] = (None, f"The {NAMES.get(row.marketplace, row.marketplace)} sign-in expired. Try again.")
+        else:
+            out[row.marketplace] = (row.authorize_url, None)
+    return out
+
+
 def status() -> dict:
+    """Blocking: reads the database. Call from a worker thread or a plain route."""
     accounts = get_marketplace_accounts()
+    sign_ins = _sign_ins()
     out = {}
     for marketplace in MARKETPLACES:
         account = accounts.get(marketplace)
-        pending = _pending.get((_seller(), marketplace))
+        authorize_url, error = sign_ins.get(marketplace, (None, None))
         out[marketplace] = {
             "connected": bool(account and not account.get("authError")),
             "label": account.get("label") if account else None,
             "connectedAt": account.get("connectedAt") if account else None,
-            "pending": bool(pending and not pending.done),
-            "authorizeUrl": pending.authorize_url if pending and not pending.done else None,
-            "error": (pending.error if pending and pending.done else None) or (account.get("authError") if account else None),
+            "pending": authorize_url is not None,
+            "authorizeUrl": authorize_url,
+            "error": error or (account.get("authError") if account else None),
         }
     relay = relay_client.stream_state() if not _on_web() else {"running": False, "connected": False, "lastError": None, "skippedEvent": None, "lastEventAt": None}
     return {"accounts": out, "relay": relay}
