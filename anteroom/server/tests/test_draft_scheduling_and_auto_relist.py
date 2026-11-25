@@ -1501,11 +1501,12 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertEqual({m: price_for(published.listing_json, m) for m in before}, before)
 
     def test_relist_price_drop_changes_only_the_relisted_marketplace(self):
-        from anteroom.services.seller_overrides import price_for
+        from anteroom.services.seller_overrides import locked_paths, price_for
 
         self._pricing_rules_on()
         conv, rev, before = self._stale_poshmark_draft(general=30.0, listed_price=38.0, drop=5)
         self.assertEqual(before["poshmark"], 38)
+        self._live_on_ebay(conv.id)
 
         outcomes, listed = self._relist()
 
@@ -1513,18 +1514,23 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         published = self.db.get(ListingRevision, listed[0])
         assert published is not None
         self.assertEqual(price_for(published.listing_json, "poshmark"), 33)
-        # General saves the relist price; the other marketplaces keep theirs.
+        # General saves the relist price; the marketplaces the item is live on keep theirs.
         self.assertEqual(published.listing_json["price"], 33.0)
         self.assertEqual(price_for(published.listing_json, "ebay"), before["ebay"])
-        self.assertEqual(price_for(published.listing_json, "mercari"), before["mercari"])
+        # Not listed on Mercari, so it follows the new General price through its rule.
+        self.assertNotIn("mercari_specifics.price", locked_paths(published.listing_json))
+        self.assertNotEqual(price_for(published.listing_json, "mercari"), before["mercari"])
         listing = self.db.query(Listing).filter_by(conversation_id=conv.id).one()
         self.assertEqual(listing.current_revision_id, published.id)
 
     def test_relist_price_drop_saves_general_without_pricing_rules(self):
         from anteroom.services.seller_overrides import price_for
 
+        from anteroom.services.seller_overrides import locked_paths
+
         conv, rev, before = self._stale_poshmark_draft(general=38.0, listed_price=38.0, drop=5)
         self.assertEqual(before, {"poshmark": 38, "ebay": 38, "mercari": 38})
+        self._live_on_ebay(conv.id)
 
         outcomes, listed = self._relist()
 
@@ -1533,8 +1539,21 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         assert published is not None
         self.assertEqual(published.listing_json["price"], 33.0)
         self.assertEqual(price_for(published.listing_json, "poshmark"), 33)
+        # Live on eBay: it keeps its price. Not listed on Mercari: it follows General.
         self.assertEqual(price_for(published.listing_json, "ebay"), 38)
-        self.assertEqual(price_for(published.listing_json, "mercari"), 38)
+        self.assertEqual(price_for(published.listing_json, "mercari"), 33)
+        locks = locked_paths(published.listing_json)
+        self.assertIn("ebay_specifics.price", locks)
+        for market in ("mercari", "depop", "etsy"):
+            self.assertNotIn(f"{market}_specifics.price", locks)
+
+    def _live_on_ebay(self, conv_id: str) -> None:
+        self.db.add(MarketplaceListing(
+            id=new_id(), conversation_id=conv_id, marketplace="ebay", state="published",
+            listing_id="1234567890", listing_url="https://www.ebay.com/itm/1234567890",
+            listed_at=_now() - timedelta(days=5), listed_price=38.0,
+        ))
+        self.db.commit()
 
     def test_relist_without_a_recorded_live_price_starts_from_the_marketplace_price(self):
         from anteroom.services.seller_overrides import price_for
