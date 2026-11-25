@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1254 — 2026-11-25
+
+- Opening a listing checks what each marketplace still needs once for all of them, so several open screens no longer tie up the server while a listing loads.
+
 ## 0.1.1253 — 2026-11-25
 
 - When Anteroom's cloud database can't be reached, the website and iPhone app now say "Can't reach your data right now — retrying" instead of loading forever, and reload on their own once it's back.
