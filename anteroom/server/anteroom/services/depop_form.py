@@ -108,6 +108,14 @@ def _by_id() -> dict:
     return {row["id"]: row for row in catalog()["categories"]}
 
 
+def size_options(category_id: str) -> list[str]:
+    """Depop's size labels for this category, or empty when the catalog has none."""
+    if not category_id:
+        return []
+    category = _by_id().get(category_id) or {}
+    return list(next((row["options"] for row in category.get("fields") or [] if row["id"] == "variants"), []) or [])
+
+
 def size_label(category_id: str, size) -> str:
     """The size as this category's own list spells it, else the size as written.
 
@@ -121,9 +129,7 @@ def size_label(category_id: str, size) -> str:
     written = str(size or "").strip()
     if not written or not category_id:
         return written
-    category = _by_id().get(category_id) or {}
-    options = next((row["options"] for row in category.get("fields") or [] if row["id"] == "variants"), [])
-    return size_choice(written, options) or written
+    return size_choice(written, size_options(category_id)) or written
 
 
 def form(listing: dict) -> dict:
