@@ -61,6 +61,9 @@ Their release history (store listings, changelogs) is tracked in
 | [eBay Seller Hub](https://www.ebay.com/sellercenter) and [Etsy](https://community.etsy.com/t5/Announcements/bd-p/announcements) | Closed | [eBay announcements](https://community.ebay.com/t5/Announcements/bd-p/Announcements), Etsy announcements | Changes to the marketplace forms Anteroom replicates. Confirm a form change with the form sweeps, not the announcement. |
 | [Shopify admin](https://www.shopify.com/editions) | Closed admin, public components | [Editions](https://www.shopify.com/editions) (twice-yearly releases), [developer changelog](https://shopify.dev/changelog), [Polaris web components](https://shopify.dev/docs/api/app-home/polaris-web-components) | Seller admin conventions: product lists, inventory, orders, bulk actions. Polaris React is [archived](https://github.com/Shopify/polaris-react-archive); its [what's new](https://polaris-react.shopify.com/whats-new) records the move. |
 
+For listing statuses such as **Scheduled**, use Shopify's examples of short,
+read-only labels placed beside the item they describe. [Polaris badge best practices (2025-07)](https://shopify.dev/docs/api/customer-account-ui-extensions/2025-07/ui-components/feedback-and-status-indicators/badge#best-practices)
+
 **Dense workspaces Anteroom looks like (closed source).**
 
 | Product | Where changes are recorded | Study it for |

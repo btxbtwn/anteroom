@@ -3,6 +3,7 @@ from typing import cast as type_cast
 from sqlalchemy.engine import CursorResult
 
 from types import SimpleNamespace
+from datetime import datetime
 import logging
 from typing import Any
 
@@ -74,7 +75,14 @@ def _sync_settlement(conv: Conversation, status: str | None, *, backfill: bool =
     return False
 
 
-# What ``_facet`` reads from a revision, extracted inside the database.
+# The scheduled revision is the one the seller approved for publishing.
+scheduled_publish_at_column = case((
+    (Listing.scheduled_status == "scheduled") & (Listing.scheduled_revision_id == Listing.current_revision_id),
+    Listing.scheduled_publish_at,
+))
+
+
+# What ``_facet`` reads from a listing and its revision, extracted inside the database.
 def _facet_columns() -> tuple:
     doc = ListingRevision.listing_json
     return (
@@ -83,6 +91,7 @@ def _facet_columns() -> tuple:
         json_value(doc, "etsy_specifics"),
         # The shared Etsy reader recognizes historical keys inside this block.
         json_value(doc, "ebay_specifics"),
+        scheduled_publish_at_column,
     )
 
 
@@ -145,6 +154,9 @@ class ConversationRepo:
             .first()
         )
         return row
+
+    def scheduled_publish_at(self, conv_id: str) -> datetime | None:
+        return self.db.scalar(select(scheduled_publish_at_column).where(Listing.conversation_id == conv_id))
 
 
     def cover_photos(self, conv_ids: list[str] | None = None) -> dict[str, tuple[str, str | None]]:

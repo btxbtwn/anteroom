@@ -81,6 +81,9 @@ struct ListingEditorView: View {
         return ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                if let publishAt = model.scheduledPublishAt {
+                    ScheduledDraftLabel(publishAt: publishAt)
+                }
                 if model.recoveryDraft != nil {
                     WorkspaceSection("Kept unsaved edits") {
                         Text(model.recoveryDrafts.count == 1
@@ -230,7 +233,8 @@ struct ListingEditorView: View {
             }
         }) { opening in
             ListingAssistantView(api: model.api, listingID: model.listingID, photoCount: photoCount,
-                                 hasCopy: model.hasCopy, generate: opening.generate, text: opening.text) { assistant = nil }
+                                 hasCopy: model.hasCopy, scheduledPublishAt: model.scheduledPublishAt,
+                                 generate: opening.generate, text: opening.text) { assistant = nil }
         }
         .sheet(isPresented: $showingHistory, onDismiss: {
             Task {

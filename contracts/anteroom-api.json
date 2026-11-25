@@ -781,6 +781,18 @@
             "title": "Removed Marketplaces",
             "type": "array"
           },
+          "scheduled_publish_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When a pending publish is scheduled, in UTC.",
+            "title": "Scheduled Publish At"
+          },
           "settled_at": {
             "anyOf": [
               {
@@ -1174,6 +1186,18 @@
             },
             "title": "Removed Marketplaces",
             "type": "array"
+          },
+          "scheduled_publish_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When a pending publish is scheduled, in UTC.",
+            "title": "Scheduled Publish At"
           },
           "settled_at": {
             "anyOf": [

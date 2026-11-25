@@ -23,7 +23,7 @@ import { inventoryRows, listedCounts, marketplaceCell, type MarketplaceCellKind 
 import { MarketplaceLogo } from "./MarketplaceLogo";
 import { marketplaceName } from "./marketplaceNames";
 import { MarketplaceSheetView } from "./MarketplaceSheetView";
-import { ListingThumb } from "./sidebar/ListingBits";
+import { DraftScheduleTag, ListingThumb } from "./sidebar/ListingBits";
 import { displayCoverUrl } from "./sidebar/coverSrc";
 import type { Listing } from "./sidebar/listingShelves";
 import { Badge } from "./ui/badge";
@@ -227,15 +227,17 @@ export function InventoryTablePage({
                         return (
                           <div
                             key={item.key}
+                            ref={virtualizer.measureElement}
+                            data-index={item.index}
                             role="row"
                             aria-rowindex={item.index + 2}
                             className="group/row absolute inset-x-0 grid border-b border-border/40"
-                            style={{ ...columns, height: ROW_HEIGHT, transform: `translateY(${item.start}px)` }}
+                            style={{ ...columns, minHeight: ROW_HEIGHT, transform: `translateY(${item.start}px)` }}
                           >
-                            <div role="rowheader" className="sticky left-0 z-10 flex min-w-0 items-center bg-background group-hover/row:bg-accent">
+                            <div role="rowheader" className="sticky left-0 z-10 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] bg-background group-hover/row:bg-accent">
                               <button
                                 type="button"
-                                className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-3 ps-4 pe-2 text-left outline-none focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                                className="flex min-h-12 min-w-0 cursor-pointer items-center gap-3 ps-4 pe-2 text-left outline-none focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                                 title={name === title ? title : `${name} · ${title}`}
                                 onClick={() => onOpenListing(listing.id)}
                               >
@@ -249,7 +251,12 @@ export function InventoryTablePage({
                               </button>
                               {/* A favorite keeps its star in view; the others offer one on hover, as Gmail's rows do. */}
                               <FavoriteToggle id={listing.id} title={title} favorite={Boolean(listing.favorite)}
-                                className={cn("me-2", !listing.favorite && "opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100")} />
+                                className={cn("me-2 self-center", !listing.favorite && "opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100")} />
+                              {listing.scheduled_publish_at ? (
+                                <div className="col-span-2 ps-4 pe-2 pb-2">
+                                  <DraftScheduleTag publishAt={listing.scheduled_publish_at} />
+                                </div>
+                              ) : null}
                             </div>
                             <div role="cell" className="flex items-center justify-end px-3 text-sm text-foreground tabular-nums group-hover/row:bg-accent">
                               {listing.price != null ? formatMoney(listing.price) : <span className="text-muted-foreground">—</span>}

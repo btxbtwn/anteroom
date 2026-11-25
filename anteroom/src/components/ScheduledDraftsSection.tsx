@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarClockIcon, ChevronDownIcon } from "lucide-react";
 
 import { api } from "../api/client";
+import { refreshInventory } from "../api/inventoryRefresh";
 import { scheduledDraftsQuery } from "../api/pageQueries";
 import type { DraftScheduleState } from "../api/automations";
 import { confirmDialog } from "../ui/confirmDialog";
@@ -63,6 +64,7 @@ export function ScheduledDraftsSection({ onOpenListing }: { onOpenListing: (id: 
   const [notice, setNotice] = useState("");
 
   const refresh = () => {
+    refreshInventory(queryClient);
     void queryClient.invalidateQueries({ queryKey: KEY });
     void queryClient.invalidateQueries({ queryKey: LOGS_KEY });
   };

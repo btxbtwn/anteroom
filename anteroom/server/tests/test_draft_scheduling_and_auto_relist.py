@@ -134,6 +134,8 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         ok_ready = self.client.put(f"/api/conversations/{c1.id}/schedule/ready", json={"ready_to_list": True})
         self.assertEqual(ok_ready.status_code, 200)
         self.assertTrue(ok_ready.json()["ready_to_list"])
+        inventory = {row["id"]: row for row in self.client.get("/api/conversations").json()}
+        self.assertIsNone(inventory[c1.id]["scheduled_publish_at"])
 
         bad_ready = self.client.put(f"/api/conversations/{c_bad.id}/schedule/ready", json={"ready_to_list": True})
         self.assertEqual(bad_ready.status_code, 400)
@@ -154,6 +156,11 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertEqual(len(bulk_data["scheduled"]), 2)
         self.assertEqual(len(bulk_data["failed"]), 1)
         self.assertEqual(bulk_data["failed"][0]["conversation_id"], c_bad.id)
+
+        inventory = {row["id"]: row for row in self.client.get("/api/conversations").json()}
+        self.assertEqual(inventory[c1.id]["scheduled_publish_at"], future)
+        self.assertEqual(inventory[c2.id]["scheduled_publish_at"], future)
+        self.assertIsNone(inventory[c_bad.id]["scheduled_publish_at"])
 
         # Editing a scheduled draft automatically unschedules it so stale changes never publish.
         listing_persistence.save_revision(
@@ -176,6 +183,10 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         )
         self.assertEqual(unsched.status_code, 200)
         self.assertEqual(len(unsched.json()["unscheduled"]), 1)
+
+        inventory = {row["id"]: row for row in self.client.get("/api/conversations").json()}
+        self.assertIsNone(inventory[c1.id]["scheduled_publish_at"])
+        self.assertIsNone(inventory[c2.id]["scheduled_publish_at"])
 
         logs = self.client.get("/api/automations/scheduled-drafts/logs").json()["logs"]
         statuses = [entry["status"] for entry in logs]
