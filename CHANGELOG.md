@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1264 — 2026-11-25
+
+- Fix Chrome form refreshes from the web asking to update Anteroom Bridge when the extension already supports form reads.
+- Ignore invalid listing links and encode listing IDs in API requests so a bad link cannot trigger unexpected requests.
+- Clear a previous account's saved workspace and photo thumbnails from a shared browser after a session expires while the tab is closed, and remove other accounts' cached thumbnails on sign-in.
+
 ## 0.1.1263 — 2026-11-25
 
 - Keep operator email moving when a diagnostic report contains malformed text or fails to save.
