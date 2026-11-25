@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1251 — 2026-11-25
+
+- Draft rows and listing threads show a Scheduled tag with the publish date and time in your local time.
+
 ## 0.1.1250 — 2026-11-25
 
 - With Anteroom open in several tabs or devices, the "sold but still listed" alert now loads once for all of them instead of each screen holding a database connection, so pages stop failing with "Cloud data is temporarily unavailable".
