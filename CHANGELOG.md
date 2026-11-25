@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1269 — 2026-11-25
+
+- Check remaining stock for new eBay and Etsy sales on the web and apply your post-sale automation settings.
+- Keep sales syncing when an event repeatedly fails or another seller's check is slow.
+
 ## 0.1.1268 — 2026-11-25
 
 - Fixed duplicate entries in the sale tracker when Anteroom checks the same sale in two places at once.
