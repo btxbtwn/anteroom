@@ -21,15 +21,148 @@ from anteroom.services import schema_migrations
 
 # Revisions up to this one predate the rule and are not rewritten.
 LAST_UNCHECKED_REVISION = 'e3bea75f1b9b'
+# Revisions up to this one predate the expand/contract drop guard and are not rewritten.
+LAST_UNCHECKED_DROP_REVISION = 'c7a3e9f41b28'
 
 _SQL_TABLE = re.compile(r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:[\w"]+\.)?"?(\w+)"?', re.I)
 _SQL_INDEX = re.compile(
     r'CREATE\s+(?:UNIQUE\s+)?INDEX\s+(CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?[\w"]+\s+ON\s+(?:ONLY\s+)?'
     r'(?:[\w"]+\.)?"?(\w+)"?', re.I)
+_SQL_DESTRUCTIVE_DROP = re.compile(r'\bDROP\s+(TABLE|COLUMN|FUNCTION)\b', re.I)
 
 
 def _string(node):
     return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
+def _contract_after_marker(tree: ast.Module) -> str | None:
+    """Return the non-empty module-level CONTRACT_AFTER marker, if declared."""
+    for node in tree.body:
+        value = None
+        if isinstance(node, ast.Assign):
+            if any(isinstance(target, ast.Name) and target.id == 'CONTRACT_AFTER' for target in node.targets):
+                value = _string(node.value)
+        elif isinstance(node, ast.AnnAssign):
+            if isinstance(node.target, ast.Name) and node.target.id == 'CONTRACT_AFTER':
+                value = _string(node.value)
+        if value is not None and value.strip():
+            return value.strip()
+    return None
+
+
+def _module_string_constants(tree: ast.Module) -> dict[str, str]:
+    constants: dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and (text := _string(node.value)) is not None:
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    constants[target.id] = text
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if (text := _string(node.value)) is not None:
+                constants[node.target.id] = text
+    return constants
+
+
+def _upgrade_functions(tree: ast.Module) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
+    functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    if 'upgrade' not in functions:
+        return []
+    reachable: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
+    seen: set[str] = set()
+    queue = ['upgrade']
+    while queue:
+        name = queue.pop(0)
+        if name in seen or name == 'downgrade' or name not in functions:
+            continue
+        seen.add(name)
+        fn = functions[name]
+        reachable.append(fn)
+        for node in ast.walk(fn):
+            if (
+                isinstance(node, ast.Name)
+                and node.id in functions
+                and node.id not in seen
+                and node.id != 'downgrade'
+            ):
+                queue.append(node.id)
+    return reachable
+
+
+def _function_body_without_docstring(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.stmt]:
+    body = fn.body
+    if body and isinstance(body[0], ast.Expr) and _string(body[0].value) is not None:
+        return body[1:]
+    return body
+
+
+def _collect_drop_problems(
+    node: ast.AST,
+    module_strings: dict[str, str],
+    problems: list[str],
+) -> None:
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        if node.func.attr == 'drop_column':
+            keywords = {kw.arg: kw.value for kw in node.keywords}
+            if len(node.args) >= 2:
+                target = f'{_string(node.args[0]) or "?"}.{_string(node.args[1]) or "?"}'
+            elif node.args:
+                first = _string(node.args[0]) or '?'
+                if 'column_name' in keywords:
+                    target = f'{first}.{_string(keywords["column_name"]) or "?"}'
+                else:
+                    target = first
+            else:
+                table = _string(keywords.get('table_name'))
+                column = _string(keywords.get('column_name'))
+                target = f'{table}.{column}' if table and column else (column or '?')
+            problems.append(f'line {node.lineno}: drop_column({target}) needs CONTRACT_AFTER')
+        elif node.func.attr == 'drop_table':
+            keywords = {kw.arg: kw.value for kw in node.keywords}
+            table = _string(node.args[0]) if node.args else _string(keywords.get('table_name'))
+            problems.append(f'line {node.lineno}: drop_table({table or "?"}) needs CONTRACT_AFTER')
+    if isinstance(node, ast.JoinedStr):
+        rendered = ''.join(
+            part.value if isinstance(part, ast.Constant) and isinstance(part.value, str) else ' _ '
+            for part in node.values
+        )
+        for match in _SQL_DESTRUCTIVE_DROP.finditer(rendered):
+            problems.append(f'line {node.lineno}: SQL DROP {match.group(1).upper()} needs CONTRACT_AFTER')
+        for part in node.values:
+            if isinstance(part, ast.FormattedValue):
+                _collect_drop_problems(part.value, module_strings, problems)
+        return
+    if (text := _string(node)) is not None:
+        for match in _SQL_DESTRUCTIVE_DROP.finditer(text):
+            problems.append(f'line {node.lineno}: SQL DROP {match.group(1).upper()} needs CONTRACT_AFTER')
+        return
+    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in module_strings:
+        for match in _SQL_DESTRUCTIVE_DROP.finditer(module_strings[node.id]):
+            problems.append(f'line {node.lineno}: SQL DROP {match.group(1).upper()} needs CONTRACT_AFTER')
+        return
+    for child in ast.iter_child_nodes(node):
+        _collect_drop_problems(child, module_strings, problems)
+
+
+def destructive_drop_problems(source: str) -> list[str]:
+    """Drops of columns, tables, or functions in upgrade() without CONTRACT_AFTER.
+
+    Deployments run `alembic upgrade head` before rolling out the new image, so
+    dropping an object that the previous release still queries breaks blue-green
+    overlap and rollback. Index drops do not break queries and are allowed.
+    """
+    tree = ast.parse(source)
+    if _contract_after_marker(tree) is not None:
+        return []
+    module_strings = _module_string_constants(tree)
+    problems: list[str] = []
+    for fn in _upgrade_functions(tree):
+        for stmt in _function_body_without_docstring(fn):
+            _collect_drop_problems(stmt, module_strings, problems)
+    return problems
 
 
 def index_lock_problems(source: str) -> list[str]:
@@ -109,6 +242,104 @@ def upgrade():
         op.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS ix2 ON jobs (status)")
 '''
     assert index_lock_problems(safe) == []
+
+
+def test_new_revisions_require_contract_marker_for_destructive_drops():
+    script = ScriptDirectory.from_config(schema_migrations.alembic_config())
+    grandfathered = {revision.revision for revision in script.walk_revisions('base', LAST_UNCHECKED_DROP_REVISION)}
+    problems = {}
+    for revision in script.walk_revisions():
+        if revision.revision in grandfathered:
+            continue
+        with open(revision.path, encoding='utf-8') as source:
+            found = destructive_drop_problems(source.read())
+        if found:
+            problems[revision.path] = found
+    assert not problems, (
+        'Destructive drops in upgrade() must wait one release behind the code that stopped '
+        'using the object (deploy/fly/README.md). Declare CONTRACT_AFTER = "#<pr>" naming '
+        'that earlier PR or release: ' + repr(problems))
+
+
+def test_destructive_drop_check_requires_contract_marker_in_upgrade():
+    unmarked = '''
+SIGNATURE = "anteroom_private.old_fn()"
+DROP_SQL = "ALTER TABLE listings DROP COLUMN legacy_flag"
+
+def upgrade():
+    op.drop_column("listings", "obsolete")
+    with op.batch_alter_table("marketplace_relist_rules") as batch_op:
+        batch_op.drop_column("skip_active_offers")
+    op.drop_table("scout_checks")
+    op.execute(f"DROP FUNCTION IF EXISTS {SIGNATURE}")
+    op.execute("DROP TABLE IF EXISTS stale_cache")
+    op.execute(DROP_SQL)
+'''
+    assert destructive_drop_problems(unmarked) == [
+        'line 6: drop_column(listings.obsolete) needs CONTRACT_AFTER',
+        'line 8: drop_column(skip_active_offers) needs CONTRACT_AFTER',
+        'line 9: drop_table(scout_checks) needs CONTRACT_AFTER',
+        'line 10: SQL DROP FUNCTION needs CONTRACT_AFTER',
+        'line 11: SQL DROP TABLE needs CONTRACT_AFTER',
+        'line 12: SQL DROP COLUMN needs CONTRACT_AFTER',
+    ]
+
+    helper_drop = '''
+def upgrade():
+    _cleanup()
+
+def _cleanup():
+    op.drop_table("old_table")
+'''
+    assert destructive_drop_problems(helper_drop) == [
+        'line 6: drop_table(old_table) needs CONTRACT_AFTER',
+    ]
+
+    blank_marker = '''
+CONTRACT_AFTER = "   "
+
+def upgrade():
+    op.drop_table("old_table")
+'''
+    assert destructive_drop_problems(blank_marker) == [
+        'line 5: drop_table(old_table) needs CONTRACT_AFTER',
+    ]
+
+    marked = '''
+CONTRACT_AFTER = "#1959"
+
+def upgrade():
+    op.drop_table("scout_checks")
+    op.execute("DROP FUNCTION IF EXISTS anteroom_private.old_fn()")
+'''
+    assert destructive_drop_problems(marked) == []
+
+    annotated_marked = '''
+CONTRACT_AFTER: str = "0.1.1258"
+
+def upgrade():
+    with op.batch_alter_table("listings") as batch_op:
+        batch_op.drop_column("obsolete")
+'''
+    assert destructive_drop_problems(annotated_marked) == []
+
+    safe = '''
+"""Docstring mentioning DROP TABLE old_table is ignored."""
+
+def upgrade():
+    """Upgrade docstring mentioning DROP COLUMN foo is ignored."""
+    op.add_column("listings", sa.Column("fresh", sa.String(), nullable=True))
+    op.drop_index("ix_listings_old", table_name="listings")
+    op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_jobs_old")
+    op.execute("DROP TRIGGER IF EXISTS account_write_guard ON public.listings")
+    op.execute("DROP POLICY IF EXISTS old_policy ON listings")
+
+def downgrade():
+    op.drop_column("listings", "fresh")
+    op.drop_table("brand_new_table")
+    op.execute("DROP FUNCTION IF EXISTS anteroom_private.brand_new_fn()")
+'''
+    assert destructive_drop_problems(safe) == []
 
 
 def test_a_deploy_migration_gives_up_on_a_held_table_lock(migration_engine, monkeypatch):  # noqa: F811
