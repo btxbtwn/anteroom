@@ -29,8 +29,15 @@ const MARKETPLACE_STATUS_ORDER = [
 // cannot reach (Sellwild, Facebook); once the seller has delisted from Anteroom,
 // those leftovers do not keep the item live.
 const DELISTABLE_MARKETPLACES = new Set(["ebay", "etsy", "poshmark", "mercari", "depop"]);
+/** Vendoo history can name these; Anteroom cannot list or delist them, so the inventory never shows them. */
+const HIDDEN_IMPORTED_MARKETPLACES = new Set(["sellwild"]);
 // Vendoo keys Vestiaire's API integration separately; Settings treats it as one marketplace.
 const MARKETPLACE_ID_ALIASES: Record<string, string> = { vestiaireApi: "vestiaire" };
+
+/** True when the inventory should never badge or filter by this imported marketplace. */
+export function isHiddenImportedMarketplace(id: string): boolean {
+  return HIDDEN_IMPORTED_MARKETPLACES.has(MARKETPLACE_ID_ALIASES[id] || id);
+}
 
 /** Why a listing reads the way it does. */
 export function statusHint(status: string): string {
@@ -158,7 +165,7 @@ export function listedFromImport(
   const seen = new Set<string>();
   for (const rawId of listing.vendoo_marketplaces || []) {
     const id = MARKETPLACE_ID_ALIASES[rawId] || rawId;
-    if (id === "general" || seen.has(id)) continue;
+    if (id === "general" || seen.has(id) || isHiddenImportedMarketplace(id)) continue;
     if (visible && !visible.has(id)) continue;
     seen.add(id);
     rows.push({

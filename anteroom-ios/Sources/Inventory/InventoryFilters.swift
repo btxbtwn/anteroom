@@ -251,6 +251,7 @@ extension ConversationSummary {
         let sold = Set(vendooSoldDates.keys.map(Self.canonical)).union(soldOn)
         let ids = Set(records.keys).union(missing.filter { !$0.value.isEmpty }.keys)
             .union(importedMarketplaces).union(removed).union(sold)
+            .subtracting(Self.hiddenImported)
         return Marketplaces.sorted(ids).compactMap { id in
             MarketplaceBadge(marketplace: id, record: records[id], missing: missing[id] ?? [], basePrice: price,
                              imported: importedMarketplaces.contains(id), removed: removed.contains(id),
@@ -283,13 +284,17 @@ extension ConversationSummary {
     /// where it sold, and a sold item has nothing left to list there.
     var filterMarketplaces: [String] {
         var seen = Set<String>()
-        return (liveMarketplaces + soldMarketplaces.map(Self.canonical)).filter { seen.insert($0).inserted }
+        return (liveMarketplaces + soldMarketplaces.map(Self.canonical))
+            .filter { !Self.hiddenImported.contains($0) && seen.insert($0).inserted }
     }
 
     /// The marketplaces Anteroom can delist. The imported history also names
     /// others it cannot reach (Sellwild, Facebook), which do not keep a
     /// delisted item live.
     private static let delistable: Set<String> = ["ebay", "etsy", "poshmark", "mercari", "depop"]
+    /// Vendoo history can name these; Anteroom cannot list or delist them, so
+    /// the inventory never badges or filters by them.
+    private static let hiddenImported: Set<String> = ["sellwild"]
 
     /// A listing Anteroom published reads Active even if it was a draft, and one
     /// Anteroom delisted from every marketplace it can reach reads Inactive,

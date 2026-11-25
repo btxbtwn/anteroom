@@ -310,6 +310,15 @@ describe("filter options", () => {
     ]);
   });
 
+  it("does not offer Sellwild in the marketplace filter", () => {
+    const withSellwild = [
+      ...inventory,
+      { ...tee, id: "wild", vendoo_marketplaces: ["ebay", "sellwild"] },
+    ];
+    expect(marketplaceOptions(withSellwild, ["ebay", "poshmark"])).toEqual(["ebay", "poshmark", "depop"]);
+    expect(marketplaceOptions(withSellwild, ["ebay", "poshmark"])).not.toContain("sellwild");
+  });
+
   it("counts what is filtering the list", () => {
     expect(activeFilterCount(DEFAULT_LISTING_FILTERS)).toBe(0);
     // The selected tab is already visible; it is not a menu filter.

@@ -161,6 +161,15 @@ struct InventoryTests {
          "vendoo_marketplaces":["ebay","poshmark","sellwild"],"removed_marketplaces":["ebay","poshmark"]}
         """#.utf8))
         precondition(delisted.inventoryStatus == "inactive" && delisted.statusTab == "draft" && delisted.statusLabel == "Inactive")
+        // Sellwild stays in Vendoo history but never appears on badges, logos or filters.
+        let withSellwild = try JSONDecoder().decode(ConversationSummary.self, from: Data(#"""
+        {"id":"sw","title":"Jersey","status":"active","created_at":"2026-08-01T00:00:00","updated_at":"2026-10-01T00:00:00",
+         "vendoo_marketplaces":["ebay","sellwild","poshmark"]}
+        """#.utf8))
+        precondition(withSellwild.marketplaceBadges().map(\.marketplace) == ["ebay", "poshmark"])
+        precondition(withSellwild.rowLogos().map(\.marketplace) == ["ebay", "poshmark"])
+        precondition(withSellwild.filterMarketplaces == ["ebay", "poshmark"])
+        precondition(!withSellwild.marketplaceBadges().map(\.marketplace).contains("sellwild"))
         // A live listing stays under Active while a job runs on it (status "listing"), keeping its Listing label.
         let sendingLive = try JSONDecoder().decode(ConversationSummary.self, from: Data(#"""
         {"id":"sl","title":"Jacket","status":"listing","created_at":"2026-08-01T00:00:00","updated_at":"2026-10-01T00:00:00",
