@@ -1,1 +1,0 @@
-- Refuse AI agent tool calls that have no declared permission entry, and log a warning if background photo cleanup fails after an agent call.

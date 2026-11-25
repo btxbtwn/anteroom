@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1266 — 2026-11-25
+
+- Refuse AI agent tool calls that have no declared permission entry, and log a warning if background photo cleanup fails after an agent call.
+
 ## 0.1.1265 — 2026-11-25
 
 - Retry sale events on the Mac after a temporary error so sale alerts and delist-after-sale can still run.
