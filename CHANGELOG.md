@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1261 — 2026-11-25
+
+- Resume cloud sale checks and scheduled promotions automatically after a temporary database outage.
+
 ## 0.1.1260 — 2026-11-25
 
 - Update hosted deployment, process-lease, error-alert, and webhook-relay documentation to match current server behavior.

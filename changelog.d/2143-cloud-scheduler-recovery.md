@@ -1,1 +1,0 @@
-- Resume cloud sale checks and scheduled promotions automatically after a temporary database outage.
