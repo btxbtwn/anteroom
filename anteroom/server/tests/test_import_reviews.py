@@ -182,7 +182,9 @@ def test_mcp_confirm_whose_link_step_ends_after_the_deadline_reports_what_was_sa
         return real_link(*args)
 
     monkeypatch.setattr(inventory_import, "_link", late_link)
-    monkeypatch.setattr("anteroom.routes.mcp._MCP_RPC_TIMEOUT_SECONDS", 2.5)
+    # The link step's deadline is 0.5 s; the call as a whole has room to spare on a busy CI worker.
+    monkeypatch.setattr("anteroom.routes.mcp._MCP_RPC_TIMEOUT_SECONDS", 10.0)
+    monkeypatch.setattr("anteroom.routes.mcp._MCP_REPLY_MARGIN_SECONDS", 9.5)
     body, error = _call(chrome, "confirm_import_match", {"review_id": review_id})
     # What the assistant is told matches the database.
     assert not error, body
