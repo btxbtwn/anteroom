@@ -395,7 +395,7 @@ export function MarketplacesLayout({
   const etsyReady = Boolean(etsyDefaults.data?.shipping_profile_id && etsyDefaults.data?.readiness_state_id && etsyDefaults.data?.return_policy_id);
   const preflight = useQuery({
     queryKey: ["native-preflight", convId, revisionId],
-    queryFn: () => api.nativeMarketplaces.preflight(convId),
+    queryFn: () => api.nativeMarketplaces.preflight(convId, revisionId),
     enabled: runtime.actionMarketplaces.size > 0 && Boolean(revisionId),
     staleTime: 15_000,
     // Every save is a new revision. Keep the last answer on screen until the new one

@@ -538,7 +538,7 @@ export function StructuredEditor({
   // the seller-confirmed List attempt.
   const preflight = useQuery({
     queryKey: ["native-preflight", convId, revisionId],
-    queryFn: () => api.nativeMarketplaces.preflight(convId),
+    queryFn: () => api.nativeMarketplaces.preflight(convId, revisionId),
     enabled: runtime.actionMarketplaces.size > 0 && nativeTab && Boolean(revisionId) && !saving,
     staleTime: 15_000,
     placeholderData: (previous) => previous,
