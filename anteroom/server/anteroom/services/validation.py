@@ -496,12 +496,27 @@ def normalize_listing_dropdowns(listing: dict) -> bool:
                 depop["parcel_size"] = canonical
             depop_changed = True
         for key, allowed in (("source", VALID_DEPOP_SOURCE), ("age", VALID_DEPOP_AGE)):
-            raw_value = text_value(depop.get(key))
-            if not raw_value:
+            # Depop's Source and Age are multi-selects: the form and field fill
+            # store a list of labels or codes. Keep that shape; only collapse a
+            # single string when the listing already held a scalar.
+            raw_value = depop.get(key)
+            values = as_list(raw_value)
+            if not values:
                 continue
-            hit = canonical_option(raw_value, allowed)
-            if hit and hit != raw_value:
-                depop[key] = hit
+            canonical_values: list[str] = []
+            for item in values:
+                hit = canonical_option(item, allowed)
+                if hit and hit not in canonical_values:
+                    canonical_values.append(hit)
+            if not canonical_values:
+                continue
+            new_value: object = (
+                canonical_values
+                if isinstance(raw_value, list) or len(canonical_values) > 1
+                else canonical_values[0]
+            )
+            if new_value != raw_value:
+                depop[key] = new_value
                 depop_changed = True
         styles = as_list(depop.get("style"))
         mapped: list[str] = []
@@ -778,15 +793,21 @@ def validate_listing(
         depop = {}
     depop = depop or {}
     if "depop" in selected_set and "depop" not in native_blocks:
-        source = text_value(depop.get("source"))
-        if source and not allowed_match(source, VALID_DEPOP_SOURCE):
-            add_issue(result, "depop_specifics.source", "Depop source is not a current dropdown value")
-        elif not source:
+        sources = as_list(depop.get("source"))
+        if sources:
+            for source in sources:
+                if not allowed_match(source, VALID_DEPOP_SOURCE):
+                    add_issue(result, "depop_specifics.source", "Depop source is not a current dropdown value")
+                    break
+        else:
             add_issue(result, "depop_specifics.source", "Depop source is required")
-        age = text_value(depop.get("age"))
-        if age and not allowed_match(age, VALID_DEPOP_AGE):
-            add_issue(result, "depop_specifics.age", "Depop age is not a current dropdown value")
-        elif not age:
+        ages = as_list(depop.get("age"))
+        if ages:
+            for age in ages:
+                if not allowed_match(age, VALID_DEPOP_AGE):
+                    add_issue(result, "depop_specifics.age", "Depop age is not a current dropdown value")
+                    break
+        else:
             add_issue(result, "depop_specifics.age", "Depop age is required")
         styles = as_list(depop.get("style"))
         if not styles:
