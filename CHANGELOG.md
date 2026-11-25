@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1255 — 2026-11-25
+
+- The Sales Tracker opens faster and no longer ties up the cloud database while it loads: it reads each sold item's SKU and quantity instead of its full marketplace forms.
+
 ## 0.1.1254 — 2026-11-25
 
 - Opening a listing checks what each marketplace still needs once for all of them, so several open screens no longer tie up the server while a listing loads.
