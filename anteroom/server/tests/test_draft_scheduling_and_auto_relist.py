@@ -459,27 +459,32 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         )
         self.db.commit()
 
-        async def delete(market, command, **_kwargs):
-            if command["type"] == "marketplace.form":
+        async def cloud_delete(market, command, **_kwargs):
+            self.assertEqual((market, command["type"]), ("mercari", "marketplace.delete"))
+            return {"ok": False, "error_code": "challenge", "error": "Mercari asked for a browser check."}
+
+        async def chrome(_job, kind, payload, **_kwargs):
+            self.assertEqual(payload["marketplace"], "depop")
+            if kind == "marketplace.form":
                 return {"ok": True, "relist_shipping_checked": True}
-            if market == "mercari":
-                return {"ok": False, "error_code": "challenge", "error": "Mercari asked for a browser check."}
+            self.assertEqual((kind, payload["action"], payload["confirm"]), ("marketplace.delete", "relist", True))
             return {"ok": True, "state": "deleted"}
 
         with (
             patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
-            patch("anteroom.services.cloud_marketplace.execute", side_effect=delete) as execute,
+            patch("anteroom.services.cloud_marketplace.execute", side_effect=cloud_delete) as execute,
+            patch("anteroom.services.extension_connection.current_extension") as extension,
+            patch("anteroom.services.browser_bridge.request", side_effect=chrome) as request,
             patch("anteroom.services.native_marketplaces.list_now", AsyncMock(return_value={
                 "state": "published", "listing_id": "seller-new-fleece",
                 "listing_url": "https://www.depop.com/products/seller-new-fleece/",
             })) as publish,
         ):
+            extension.return_value.connected = True
             outcomes = asyncio.run(auto_relist.run_auto_relist(now=now))
 
-        self.assertEqual([(call.args[0], call.args[1]["type"]) for call in execute.await_args_list], [
-            ("mercari", "marketplace.delete"), ("depop", "marketplace.form"), ("depop", "marketplace.delete"),
-        ])
-        self.assertEqual(execute.await_args_list[-1].args[1]["payload"]["action"], "relist")
+        execute.assert_awaited_once()
+        self.assertEqual([call.args[1] for call in request.await_args_list], ["marketplace.form", "marketplace.delete"])
         self.assertEqual([row["status"] for row in outcomes], ["failed", "completed"])
         self.assertEqual(publish.await_count, 1)
         self.assertEqual(publish.await_args.args[:2], (ids["seller-fleece"][0], "depop"))
@@ -511,9 +516,9 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         reason = "Depop needs a package size it offers for this item (it does not offer Extra extra small)."
         with (
             patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
-            patch("anteroom.services.cloud_marketplace.execute", AsyncMock(return_value={
+            patch("anteroom.services.browser_bridge.request", AsyncMock(return_value={
                 "ok": False, "error_code": "missing_fields", "error": reason,
-            })) as execute,
+            })) as request,
             patch("anteroom.services.marketplace_delist.delist", AsyncMock(return_value={
                 "depop": {"state": "deleted"},
             })) as delete,
@@ -523,12 +528,12 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         ):
             outcomes = asyncio.run(auto_relist.run_auto_relist(now=now, marketplace="depop"))
 
-        execute.assert_awaited_once()
-        command = execute.await_args.args[1]
-        self.assertEqual(command["type"], "marketplace.form")
-        self.assertTrue(command["payload"]["check_relist_shipping"])
-        self.assertEqual(command["payload"]["listing"]["price"], 10.80)
-        self.assertEqual(command["payload"]["listing"]["depop_specifics"]["parcelSize"], "Extra extra small")
+        request.assert_awaited_once()
+        _, kind, payload = request.await_args.args
+        self.assertEqual(kind, "marketplace.form")
+        self.assertTrue(payload["check_relist_shipping"])
+        self.assertEqual(payload["listing"]["price"], 10.80)
+        self.assertEqual(payload["listing"]["depop_specifics"]["parcelSize"], "Extra extra small")
         delete.assert_not_awaited()
         publish.assert_not_awaited()
         self.assertEqual([(row["status"], row["reason"]) for row in outcomes], [("failed", reason)])
@@ -537,6 +542,39 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertEqual(listing.current_revision_id, original_id)
         live = self.db.query(MarketplaceListing).filter_by(conversation_id=conv.id, marketplace="depop").one()
         self.assertEqual((live.state, live.listing_id, live.listed_price), ("published", old_id, 12))
+
+    def test_depop_relist_keeps_the_old_listing_when_chrome_closes_after_shipping_check(self):
+        now = _now()
+        conv, _, original = self._create_draft("Jeans")
+        original_id = original.id
+        old_id = "seller-jeans"
+        self.db.add_all([
+            MarketplaceListing(
+                id=new_id(), conversation_id=conv.id, marketplace="depop", state="published",
+                listing_id=old_id, listing_url=f"https://www.depop.com/products/{old_id}/",
+                listed_at=now - timedelta(days=45),
+            ),
+            MarketplaceRelistRule(id=new_id(), marketplace="depop", enabled=True),
+        ])
+        self.db.commit()
+        with (
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+            patch("anteroom.services.extension_connection.current_extension") as extension,
+            patch("anteroom.services.cloud_marketplace.execute", new_callable=AsyncMock) as cloud,
+            patch("anteroom.services.browser_bridge.request", new_callable=AsyncMock) as chrome,
+        ):
+            extension.return_value.connected = False
+            chrome.return_value = {"ok": True, "relist_shipping_checked": True}
+            outcomes = asyncio.run(auto_relist.run_auto_relist(now=now, marketplace="depop"))
+
+        chrome.assert_awaited_once()
+        self.assertEqual(chrome.await_args.args[1], "marketplace.form")
+        cloud.assert_not_awaited()
+        self.assertEqual([(row["status"], row["reason"]) for row in outcomes], [("failed", "Connect Chrome first.")])
+        self.db.expire_all()
+        self.assertEqual(self.db.query(Listing).filter_by(conversation_id=conv.id).one().current_revision_id, original_id)
+        live = self.db.query(MarketplaceListing).filter_by(conversation_id=conv.id, marketplace="depop").one()
+        self.assertEqual((live.state, live.listing_id), ("published", old_id))
 
     def test_depop_relist_skips_shipping_if_another_run_fills_the_daily_cap(self):
         now = _now()

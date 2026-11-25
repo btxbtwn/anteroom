@@ -182,6 +182,7 @@ async function marketplaceFetch(url, { marketplace, step, method = 'GET', header
       let data = null;
       if (json && text) { try { data = JSON.parse(text); } catch { data = null; } }
       const html = !data && /<html|<!doctype/i.test(text);
+      const format = html || /text\/html/i.test(contentType) ? 'html' : json ? 'json' : 'other';
       const status = response.status;
       const statusLine = `HTTP ${status}${response.statusText ? ` ${response.statusText}` : ''}`;
       const plain = !data && text && !html ? marketplaceScrub(text).slice(0, 180) : '';
@@ -194,15 +195,19 @@ async function marketplaceFetch(url, { marketplace, step, method = 'GET', header
       // Cloudflare marks a challenge in this header even when its page carries none of the markers above.
       // It is a browser check, never a refused session.
       const cloudflareChallenge = response.headers?.get?.('cf-mitigated') === 'challenge';
+      const depopBlock = marketplace === 'depop' && status === 403 && format === 'html'
+        && /sorry,\s*not authorized\b/i.test(text);
       if (challenge || (blocked && cloudflareChallenge)) {
         failure = marketplaceError(`${label} asked for a browser check. Open ${label} in Chrome, finish the check, then try again.`,
           { code: 'challenge', status, marketplace_message: ownWords });
-        const format = html || /text\/html/i.test(contentType) ? 'html' : json ? 'json' : 'other';
         failure.challenge_response = {
           status, format,
           marker: challenge ? Object.keys(challenge.groups).find(name => challenge.groups[name]) : 'cloudflare',
           cloudflare_challenge_header: cloudflareChallenge,
         };
+      } else if (depopBlock) {
+        failure = marketplaceError('Depop blocked this request. Open Depop in Chrome and try again.',
+          { code: 'challenge', status, marketplace_message: statusLine });
       } else if (status === 401 || status === 403) {
         failure = marketplaceError(`${label} asked to sign in again. Reconnect ${label} in Anteroom.`,
           { code: 'signed_out', status, marketplace_message: ownWords });
@@ -233,13 +238,13 @@ async function marketplaceFetch(url, { marketplace, step, method = 'GET', header
         failure.response_body = marketplaceScrub(JSON.stringify(data));
         // The parsed body, for a caller that hides more than tokens. Never exported as is.
         Object.defineProperty(failure, 'response_data', { value: data, enumerable: false });
-      } else if (failure && text && !html) {
+      } else if (failure && text && format !== 'html') {
         failure.response_body = marketplaceScrub(text);
       }
-      marketplaceLog(marketplace, step, { method, status, attempt: attempt || null, error_code: failure?.code, ms });
+      marketplaceLog(marketplace, step, { method, status, format, attempt: attempt || null, error_code: failure?.code, ms });
       if (!failure) return { status, data: expect === 'text' ? text : (data ?? {}), headers: response.headers };
     } else {
-      marketplaceLog(marketplace, step, { method, status: 'no-reply', attempt: attempt || null, error_code: failure.code, ms: Date.now() - started });
+      marketplaceLog(marketplace, step, { method, status: 'no-reply', format: 'none', attempt: attempt || null, error_code: failure.code, ms: Date.now() - started });
     }
     const transient = failure.cancelled !== true && ['network', 'uncertain', 'rate_limited'].includes(failure.code);
     const wait = failure.wait_s != null ? failure.wait_s * 1000

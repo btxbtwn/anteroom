@@ -48,7 +48,6 @@ function cookieHost(marketplace, hostname) {
 function isAllowedHost(hostname, marketplace = 'poshmark') {
   const host = String(hostname || '').toLowerCase();
   if (cookieHost(marketplace, host)) return true;
-  if (marketplace === 'depop') return /^[a-z0-9.-]+\.s3(?:-accelerate)?\.amazonaws\.com$/.test(host);
   if (marketplace !== 'poshmark') return false;
   if (ALLOWED_S3_HOST.test(host)) return true;
   if (ALLOWED_CLOUDFRONT_HOST.test(host)) return true;
@@ -225,9 +224,6 @@ function createMarketplaceFetch({ jar, userAgent, httpFetch, marketplace = 'posh
         headerMap.set('origin', ['Origin', 'https://www.depop.com']);
         const page = currentUrl.pathname.includes('/receipts/') ? 'sellinghub/' : 'sellinghub/drafts/';
         headerMap.set('referer', ['Referer', `https://www.depop.com/${page}`]);
-      }
-      if (marketplace === 'depop' && currentUrl.hostname.endsWith('.s3-accelerate.amazonaws.com')) {
-        headerMap.set('referer', ['Referer', 'https://web.depop.com/']);
       }
       if (currentUrl.origin !== new URL(rawUrl).origin) {
         headerMap.delete('authorization');
@@ -452,7 +448,7 @@ async function executeMarketplaceOperation({
     'marketplace.promote', 'marketplace.promotion_check', 'marketplace.promotion_result',
     'marketplace.sessions', 'marketplace.verify_session', 'marketplace.sales', 'marketplace.sales_history',
     'marketplace.import.page', 'marketplace.import.listing', 'marketplace.like_events'];
-  if (marketplace === 'poshmark' || (marketplace === 'depop' && command.payload?.check_relist_shipping === true)) {
+  if (marketplace === 'poshmark') {
     allowed.push('marketplace.form');
   }
   if (!allowed.includes(type)) {
@@ -474,6 +470,12 @@ async function executeMarketplaceOperation({
   }
   if (refusal) {
     return { result: refusal, cookies_changed: false, cookies };
+  }
+  // Depop rejects cloud POSTs. A relist delete belongs in the same Chrome flow as its replacement.
+  if (marketplace === 'depop' && (type === 'marketplace.execute' || type === 'marketplace.promote'
+      || (type === 'marketplace.delete' && payload.action === 'relist'))) {
+    return { result: { ok: false, safe_to_retry: true, error_code: 'rejected',
+      error: 'This Depop action requires a signed-in Chrome with Anteroom Bridge.' }, cookies_changed: false, cookies };
   }
   if (type === 'marketplace.promote' && payload.action === 'follow') {
     const cfg = payload.follow_config || {};
@@ -554,8 +556,11 @@ async function executeMarketplaceOperation({
   }
 
   if (marketplace === 'depop') {
-    // Photos are decoded, resized and encoded by the worker from approved bytes.
-    context.depopPhotoBlob = photo => new Blob([Buffer.from(photo.base64, 'base64')], { type: 'image/jpeg' });
+    // Log only shared HTTP diagnostics. Other Depop logs may contain response bodies and listing details.
+    context.marketplaceLog = (_market, step, { method, status, format, attempt, error_code, ms } = {}) => {
+      if (!format) return;
+      process.stderr.write(`[cloud-depop] command=${type} step=${step} method=${method} status=${status} format=${format} attempt=${attempt ?? 0} outcome=${error_code || 'ok'} ms=${ms}\n`);
+    };
   }
 
   if (typeof onContextReady === 'function') {
@@ -588,7 +593,11 @@ async function executeMarketplaceOperation({
       if (summary && err?.code === 'signed_out') {
         result = { ok: true, session: { ...summary, state: 'expired', expiring: false } };
       } else {
-        result = { ok: false, error_code: err?.code || 'network', error: String(err?.message || err) };
+        const code = err?.code || 'network';
+        const error = marketplace === 'depop' && code === 'challenge'
+          ? 'Depop blocked the Cloud connection test. Try again later.'
+          : String(err?.message || err);
+        result = { ok: false, error_code: code, error };
       }
     }
   } else if (cmdType === 'marketplace.form' && marketplace === 'poshmark') {

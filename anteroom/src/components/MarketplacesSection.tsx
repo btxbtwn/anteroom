@@ -424,7 +424,7 @@ export function MarketplacesLayout({
           const market = marketplace as ExtensionSessionMarket;
           const cached = queryClient.getQueryData<ExtensionSessions>(["marketplace-sessions"]);
           const session = cached?.sessions[market];
-          if (runtime.hosted && runtime.account && session?.cloud_available
+          if (market === "poshmark" && runtime.hosted && runtime.account && session?.cloud_available
               && (session.mode === "cloud" || cached?.chrome_connected === false)) {
             const { token, seller_region } = await api.cloudSessions.connectToken(market);
             const { cloudExtension } = await import("../api/cloudExtension");

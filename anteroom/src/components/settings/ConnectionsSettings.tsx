@@ -474,7 +474,9 @@ function CloudSignIn({
     <div role="group" aria-label="Cloud" className="min-w-0 space-y-2 border-t border-border/50 pt-3 sm:border-t-0 sm:border-l sm:pt-0 sm:pl-3">
       <p className="text-xs font-medium text-foreground">Cloud</p>
       <SettingsNote id={helpId}>
-        Anteroom saves an encrypted sign-in so listing actions, sales checks, and enabled automations can run with Chrome closed.
+        {marketplace === "depop"
+          ? "Anteroom saves an encrypted sign-in for sales checks, imports, and standalone delists. Keep Chrome connected for drafts, publishing, edits, relists, and offers."
+          : "Anteroom saves an encrypted sign-in so listing actions, sales checks, and enabled automations can run with Chrome closed."}
       </SettingsNote>
       <SignInStatus state={state} />
       {checkedAt && !statusError ? (
@@ -555,9 +557,7 @@ function HostedChromeSessions({ salesSwitch, checks }: {
       })}
       <SettingsRow
         title="Sign-in setup"
-        description={cloud.data?.enabled.length
-          ? "Start either sign-in in desktop Chrome with Anteroom Bridge. One connection per marketplace is enough. When both are active, Anteroom uses Cloud."
-          : "Start the sign-in in desktop Chrome with Anteroom Bridge."}
+        description="Start marketplace sign-in in desktop Chrome with Anteroom Bridge."
         control={
           <Button size="xs" variant="outline" render={<a href={CHROME_WEB_STORE_URL} target="_blank" rel="noopener noreferrer" />}>
             <ExternalLinkIcon />
