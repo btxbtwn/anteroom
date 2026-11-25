@@ -1,1 +1,0 @@
-- Kids letter sizes no longer stay stuck on Depop Other when Depop uses ages instead (Youth L becomes 14 years).

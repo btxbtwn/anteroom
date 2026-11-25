@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1246 — 2026-11-25
+
+- Kids letter sizes no longer stay stuck on Depop Other when Depop uses ages instead (Youth L becomes 14 years).
+
 ## 0.1.1245 — 2026-11-25
 
 - Inventory no longer shows Sellwild as a marketplace logo or filter. Anteroom cannot list or delist there; that history stays in the import only.
