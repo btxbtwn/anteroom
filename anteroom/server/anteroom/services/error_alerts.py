@@ -18,6 +18,7 @@ sandboxes never do.
 """
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import hashlib
 import json
@@ -28,9 +29,13 @@ import sys
 import threading
 import time
 import traceback
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from sqlalchemy.exc import DBAPIError, DisconnectionError, InterfaceError, OperationalError
+from sqlalchemy.exc import TimeoutError as PoolTimeout
 
 from anteroom import app_module_path
 from anteroom.services.marketplace_diagnostics import sanitize_context
@@ -39,6 +44,7 @@ from anteroom.version import app_version
 
 OPERATOR = "ccanizares@myanteroom.com"
 SMTP_HOST, SMTP_PORT = "smtp-relay.gmail.com", 587
+SMTP_SEND_DEADLINE = 60
 MAX_MESSAGE = 2000
 MAX_STACK = 12000
 # Loggers whose errors are reported. Each is attached directly so a logger
@@ -228,12 +234,12 @@ def operator_email() -> str:
 def send_email(subject: str, body: str, *, sender: str = "Anteroom Errors", timeout: float = 20) -> None:
     """Workspace SMTP relay: allowed by the app's static egress IPs, TLS required.
 
-    ``timeout`` bounds each socket operation (connect, TLS, every SMTP reply).
+    The total SMTP deadline leaves time to finish the outbox's 120-second lease.
     """
-    import smtplib
-    import ssl
     from email.message import EmailMessage
     from email.utils import make_msgid
+
+    from aiosmtplib import SMTP
 
     recipient = operator_email()
     domain = recipient.partition("@")[2] or "myanteroom.com"
@@ -243,9 +249,30 @@ def send_email(subject: str, body: str, *, sender: str = "Anteroom Errors", time
     message["Subject"] = subject
     message["Message-ID"] = make_msgid(domain=domain)
     message.set_content(body)
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, local_hostname=domain, timeout=timeout) as smtp:
-        smtp.starttls(context=ssl.create_default_context())
-        smtp.send_message(message)
+    async def deliver() -> None:
+        smtp = SMTP(hostname=SMTP_HOST, port=SMTP_PORT, local_hostname=domain, timeout=timeout, start_tls=True)
+        try:
+            async with asyncio.timeout(SMTP_SEND_DEADLINE):
+                await smtp.connect()
+                await smtp.send_message(message)
+        finally:
+            # After the reply to DATA, delivery is settled. Close without
+            # waiting for QUIT or flushing unsent data on a timeout.
+            if isinstance(smtp.transport, asyncio.WriteTransport):
+                smtp.transport.abort()
+            smtp.close()
+
+    # Each caller is a worker thread. Closing the private loop does not wait
+    # for the OS resolver if cancellation happened during DNS.
+    with closing(asyncio.new_event_loop()) as loop:
+        loop.run_until_complete(deliver())
+
+
+def _storage_unavailable(exc: Exception) -> bool:
+    return (
+        isinstance(exc, (ConnectionError, DisconnectionError, InterfaceError, OperationalError, PoolTimeout))
+        or (isinstance(exc, DBAPIError) and exc.connection_invalidated)
+    )
 
 
 class AlertHandler(logging.Handler):
@@ -320,6 +347,26 @@ class AlertHandler(logging.Handler):
         with self._cond:
             return bool(self._errors or self._warnings)
 
+    def _store_batch(self, batch: list[dict[str, Any]]) -> None:
+        try:
+            self.delivery.add_many(batch)
+        except Exception as exc:
+            if _storage_unavailable(exc):
+                raise
+            # The failed transaction rolled back. Isolate bad reports and
+            # keep only the unprocessed suffix if storage goes offline here.
+            while batch:
+                try:
+                    self.delivery.add_many(batch[:1])
+                except Exception as item_error:
+                    if _storage_unavailable(item_error):
+                        raise
+                    with self._cond:
+                        self.dropped += 1
+                    print(f'error-email: dropped report ({type(item_error).__name__})', file=sys.stderr)
+                del batch[0]
+        batch.clear()
+
     def _run(self) -> None:
         batch: list[dict[str, Any]] = []
         while not (self.stopping.is_set() and not batch and not self._has_queued()):
@@ -327,8 +374,7 @@ class AlertHandler(logging.Handler):
                 if not batch:
                     batch = self._take_batch(timeout=30)
                 if batch:
-                    self.delivery.add_many(batch)
-                    batch = []
+                    self._store_batch(batch)
                 if not self.stopping.is_set():
                     self.delivery.tick()
             except Exception as exc:

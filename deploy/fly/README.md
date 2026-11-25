@@ -77,7 +77,13 @@ code one release behind it. Change the schema in two releases:
 2. **Contract.** Drop or rename the old column, table or constraint only in a
    later release, after the release that stopped using it is live. A
    destructive change always waits one release behind the code that stops
-   using it.
+   using it. Any revision that drops a column, table or function in
+   `upgrade()` (`op.drop_column`, `batch_op.drop_column`, `op.drop_table`, or
+   raw SQL `DROP COLUMN` / `DROP TABLE` / `DROP FUNCTION`) must declare a
+   module-level `CONTRACT_AFTER` naming the earlier PR or release that stopped
+   using the object (for example, `CONTRACT_AFTER = "#1234"`). CI enforces this
+   in `anteroom/server/tests/test_migration_locking.py`; dropping an index does
+   not break older queries and does not require the marker.
 
 To roll back the code, redeploy the previous image by its label. Labels are
 `v<version>-<first 8 characters of the commit>`, as the **Build the image**
@@ -112,10 +118,12 @@ context is the repository root. The allowlist in `.dockerignore` excludes
 local data, photos, databases, credentials, tests and the extension.
 
 The configuration runs two process groups from one image. `app` (role `web`,
-one performance CPU, 2 GB) serves HTTPS with a health check and is kept running
+one performance CPU, 4 GB — raised from 2 GB as an incident mitigation on
+2026-11-22, #1816) serves HTTPS with a health check and is kept running
 (`auto_stop_machines = 'off'`, `min_machines_running = 1`). `worker` (role
 `worker`, one shared CPU, 2 GB) has no public service and runs the draft worker,
-the scheduled automations, offer checks and Sourcing refreshes. Machines without
+scheduled automations, offer checks, the job watchdog, sales sync, Plaid expense
+sync, and cloud marketplace sale checks and promotions. Machines without
 a service are never auto-stopped. Supabase's project URL is
 public configuration. No database password, service-role key, provider key or
 seller data is needed for this first deployment. Later hosted data routes

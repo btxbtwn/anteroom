@@ -54,12 +54,28 @@ function withDeadline<T>(work: Promise<T>, fallback: T): Promise<T> {
 }
 
 const claims = new Map<string, Promise<UseStore | null>>();
+let pendingClear: Promise<void> = Promise.resolve();
+let clearGen = 0;
+
+async function hasWorkspaceDb(): Promise<boolean> {
+  if (typeof indexedDB === "undefined") return false;
+  if (typeof indexedDB.databases !== "function") return true;
+  try {
+    const dbs = await indexedDB.databases();
+    return dbs.some(db => db.name === "anteroom-device");
+  } catch {
+    return true;
+  }
+}
+
 /** The store, once it holds nothing but this seller's data. */
 function sellerStore(seller: string): Promise<UseStore | null> {
   let claim = claims.get(seller);
   if (!claim) {
     const target = deviceStore();
     claim = target ? (async () => {
+      await pendingClear;
+      if (forgotten) return null;
       if (await get(OWNER, target) !== seller) {
         await clear(target);
         await set(OWNER, seller, target);
@@ -142,8 +158,31 @@ export async function saveRuntime<T>(seller: string, value: T, now = Date.now())
   if (target && !forgotten) await set(RUNTIME, { value, savedAt: now, buster: DEVICE_BUSTER } satisfies Saved<T>, target).catch(() => {});
 }
 
+/**
+ * Erase a previous seller's cached workspace without locking out a later
+ * sign-in on this page. Without `keepSeller`, erases any previous owner's data.
+ */
+export async function clearDeviceWorkspace(keepSeller?: string): Promise<void> {
+  const gen = ++clearGen;
+  const work = pendingClear.then(async () => {
+    if (gen !== clearGen || forgotten) return;
+    if (store === undefined && !await hasWorkspaceDb()) return;
+    const target = deviceStore();
+    if (!target || gen !== clearGen) return;
+    const owner = await get<string>(OWNER, target);
+    if (gen !== clearGen || forgotten) return;
+    if (owner !== undefined && owner !== keepSeller) {
+      claims.clear();
+      await clear(target);
+    }
+  }).catch(() => {});
+  pendingClear = work;
+  await work;
+}
+
 /** Erase everything kept for any seller on this device. */
 export async function forgetDeviceWorkspace(): Promise<void> {
+  clearGen += 1;
   const target = deviceStore();
   forgotten = true;
   claims.clear();

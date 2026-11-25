@@ -10,7 +10,7 @@ test("a refused eBay sign-in is visible in Connections without starting sign-in"
     if (route.request().method() !== "GET") mutations.push(route.request().url());
     await route.fulfill({ json: { accounts: { ebay: {
       connected: false, label: "Sample seller", connectedAt: 1, pending: false, authorizeUrl: null, error: message,
-    } }, relay: { running: false, connected: false, lastError: null, lastEventAt: null } } });
+    } }, relay: { running: false, connected: false, lastError: null, skippedEvent: null, lastEventAt: null } } });
   });
   await page.goto("/");
   if (phone) await page.getByRole("button", { name: "Open navigation" }).click();

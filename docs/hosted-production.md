@@ -53,9 +53,9 @@ Machines: an automation run still `running` after 20 minutes can be requeued by
 another Machine and continue its unacted items there (regenerations and
 approval requests only, never marketplace writes); a Machine starting up marks
 another Machine's in-flight eBay offer or promotion round unknown or
-interrupted and pauses that rule (conservative, never resent); and Sourcing
-refreshes and sale reads can run on both, costing duplicate reads only. Run one
-role `all` or `worker` Machine until these are claimed.
+interrupted and pauses that rule (conservative, never resent); and sale reads
+can run on both, costing duplicate reads only. Run one role `all` or `worker`
+Machine until these are claimed.
 
 **Not deployed, pending cost approval.** Prices are Fly's published monthly
 rates for continuous Machines in the cheapest US regions (`iad` / `ewr`) as of
@@ -78,7 +78,7 @@ core and the worker takes the shared one.
 | Process group | Role | Machine | Runs |
 | --- | --- | --- | --- |
 | `app` | `web` | performance-1x, 4 GB | Seller requests, Mac and Chrome connections, direct marketplace jobs, Chrome sale checks and promotion rounds (`chrome` lease) |
-| `worker` | `worker` | shared-cpu-1x, 2 GB | Drafts, assistant answers, automations, eBay offers, the job watchdog, Sourcing and sales sync (`schedulers` lease) |
+| `worker` | `worker` | shared-cpu-1x, 2 GB | Drafts, assistant answers, automations, eBay offers, the job watchdog, sales sync, Plaid expense sync, and cloud marketplace sale checks and promotions (`schedulers` lease) |
 
 <!-- coderabbit-ai-generated:v1 -->
 
@@ -110,8 +110,12 @@ Chrome sale checks and promotion rounds stay on the web Machine because they
 list sellers from the Chrome tabs connected to their own process
 (`hosted_browser_relay.ready_sellers`); on the worker that list would be empty.
 `process_handoff.lead` holds each lease separately and releases them only after
-every set has stopped. A worker whose draft loop has died fails `/api/health`
-(503), so Fly restarts it.
+every set has stopped. If the draft loop stops outside shutdown, `/api/health`
+immediately returns 503 (`worker_stopped`) to fail `[checks.worker_alive]`
+(which gates blue-green deploys and marks the Machine unhealthy, but does not
+itself restart a running Machine). To trigger a Fly restart, `hosted.py`'s done
+callback calls `HostedServer.exit_on_worker_failure` (`anteroom/hosted_server.py`),
+which drains leases, stops uvicorn, and exits non-zero (`sys.exit(1)`).
 
 A web process queues drafts and leaves them to the worker group; it never
 claims one. The worker answers forwarded Mac and Chrome calls on the private
@@ -470,12 +474,15 @@ first; on 2026-11-07 a deploy with open streams answered 503 for 2 min 15 s
 and an idle one for about 20 s. The two Machines overlap for a few minutes per
 deploy; no Machine runs continuously beyond the one approved.
 
-During the overlap only the Machine holding the `schedulers` lease
-(`anteroom_private.process_leases`, revision `e5b81d27c4a6`) runs automations,
-eBay offers, the job watchdog, sourcing, Chrome sale checks, promotions and
-sales sync, because each treats work in progress at its startup as cut off.
-Drafts are claimed row by row and run on either Machine. The lease lasts 30 s
-and is renewed every 10 s (`services/process_handoff.py`).
+During the overlap, each scheduler set runs only on the Machine holding its
+process lease (`anteroom_private.process_leases`, revision `e5b81d27c4a6`),
+because each treats work in progress at its startup as cut off: the
+`schedulers` lease (on `worker`/`all`) gates automations, eBay offers, the job
+watchdog, sales sync, Plaid expense sync, and cloud marketplace sale checks and
+promotions; the separate `chrome` lease (on `web`/`all`) gates Chrome sale
+checks and Chrome promotion rounds (`hosted.py`). Drafts are claimed row by row
+and run on either worker Machine. Each lease lasts 30 s and is renewed every
+10 s (`services/process_handoff.py`).
 
 Fly sends SIGTERM with a 300-second grace period. On the signal
 (`anteroom.hosted_server`) the old Machine at once releases its Mac and
@@ -636,10 +643,13 @@ unless the seller disconnects them in Settings → Agents.
 
 ## Operator error emails
 
-Every distinct error in the hosted app is emailed to `ccanizares@myanteroom.com`
-by `anteroom/server/anteroom/services/error_alerts.py`, switched on by
-`ANTEROOM_ERROR_EMAIL = '1'` in `deploy/fly/fly.toml`. Sandboxes and the Mac app
-never send.
+Every distinct error in the hosted app is captured for operator email to
+`ccanizares@myanteroom.com` by
+`anteroom/server/anteroom/services/error_alerts.py`, switched on by
+`ANTEROOM_ERROR_EMAIL = '1'` in `deploy/fly/fly.toml`. Mail actually goes out
+only once `ANTEROOM_ERROR_EMAIL_DAILY_LIMIT` is set as a Fly secret to a
+positive daily allowance (it defaults to `0` and is not set in the repo).
+Sandboxes and the Mac app never send.
 
 **What is reported:** every WARNING and ERROR log from Anteroom, uvicorn and asyncio; a
 route's unhandled exception and any 4xx or 5xx response (with method, route template,
@@ -681,10 +691,11 @@ rolling upgrade and every 24 hours after lifecycle activation.
 Each message contains at most 20 groups; remaining groups stay pending. The
 outbox keeps the latest scrubbed report and occurrence count for each group.
 
-**Budget:** set `ANTEROOM_ERROR_EMAIL_DAILY_LIMIT` to an operator-selected
-allowance below the Workspace account's verified relay quota, leaving headroom
-for other senders. Its default is zero: retain reports without sending until
-an allowance is configured. Google does not provide our customer-specific
+**Budget:** set `ANTEROOM_ERROR_EMAIL_DAILY_LIMIT` as a Fly secret (it is not
+set in `deploy/fly/fly.toml`) to an operator-selected allowance below the
+Workspace account's verified relay quota, leaving headroom for other senders.
+Its default is zero (`services/error_alerts.py`): retain reports without sending
+until an allowance is configured. Google does not provide our customer-specific
 allowance in the rejection; confirm it with Workspace support rather than
 assuming the published maximum applies to this account.
 Every SMTP attempt, including failed or uncertain attempts, reserves one slot

@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import json
-import smtplib
 import threading
 import time
 import uuid
 
+import aiosmtplib
 import pytest
+from aiosmtplib.errors import SMTPDataError
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -53,7 +54,7 @@ def _no_real_mail(monkeypatch):
         raise AssertionError("send_feedback tried to send email")
 
     monkeypatch.setattr(mcp_feedback_tools, "_send_email", refuse)
-    monkeypatch.setattr(smtplib, "SMTP", refuse)
+    monkeypatch.setattr(aiosmtplib, "SMTP", refuse)
     monkeypatch.delenv("ANTEROOM_ERROR_EMAIL", raising=False)
     monkeypatch.delenv("ANTEROOM_SANDBOX", raising=False)
 
@@ -276,7 +277,7 @@ def test_hosted_failed_email_keeps_the_feedback_and_pauses_the_relay(hosted, mon
     client, engine, _alice, bearer, _token = hosted
 
     def refused(*_args, **_kwargs):
-        raise smtplib.SMTPDataError(550, b"Daily user sending limit exceeded")
+        raise SMTPDataError(550, "Daily user sending limit exceeded")
 
     monkeypatch.setattr(mcp_feedback_tools, "_send_email", refused)
     data, is_error = _send(client, {"message": "Feature: bulk price drop", "kind": "feature_request"}, bearer)

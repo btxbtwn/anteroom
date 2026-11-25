@@ -457,7 +457,13 @@ def _join_names(names: list[str]) -> str:
     return f"{', '.join(labels[:-1])}, and {labels[-1]}"
 
 
-def _delist_sentence(done: list[str], failed: dict[str, str]) -> str:
+def _delist_sentence(done: list[str], failed: dict[str, str], stopped: list[str] | None = None) -> str:
+    if stopped:
+        # The sale changed or Delist the other marketplaces was turned off partway.
+        text = f"Delisted from {_join_names(done)}. " if done else ""
+        if failed:
+            text += f"{_join_names(list(failed))} could not be delisted. "
+        return text + f"{_join_names(stopped)} {'was' if len(stopped) == 1 else 'were'} left listed: the sale changed or automatic delisting was turned off."
     if done and not failed:
         return f"Delisted from {_join_names(done)}."
     if done:
@@ -489,7 +495,8 @@ async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> 
 
         session_factory = SessionLocal
     from anteroom.models.marketplace_sale import MarketplaceSale
-    from anteroom.services.marketplace_delist import MARKETPLACES, DelistError, delist, listings
+    from anteroom.services.marketplace_delist import DelistError, delist
+    from anteroom.services.sale_delist_followup import pin_first_delist
 
     notes: dict[str, str] = {}
     groups: dict[str, list[str]] = {}
@@ -536,35 +543,32 @@ async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> 
             notes[sale_id] = "Couldn't adjust quantity on other marketplaces. Retry from the 60-day sale tracker."
 
     for conv_id in order:
-        live_targets: dict[str, str | None] = {}
+        # The first delist runs the follow-up's guards: only the listings pinned for this sale,
+        # and it stops when the sale changes or the seller turns the setting off.
+        sale_id = groups[conv_id][0]
         try:
             with session_factory() as db:
-                known = listings(db, conv_id)
+                live, targets = pin_first_delist(db, conv_id, groups[conv_id])
         except DelistError as exc:
             text = f"Couldn't delist it elsewhere: {exc}. You can delist it from the item."
         else:
-            live = [
-                name for name in MARKETPLACES
-                if (entry := known.get(name))
-                and entry.get("state") == "live"
-                and entry.get("listing_id")
-                and not entry.get("sold_here")
-            ]
-            live_targets = {name: (known.get(name) or {}).get("listing_id") for name in live}
             if not live:
                 text = "It isn't listed anywhere else."
+            elif not targets:
+                text = "Nothing was delisted: it was listed again elsewhere after the sale. Check it on the item."
             else:
+                names = list(targets)
                 try:
-                    result = await delist(conv_id, live, confirm=True)
+                    result = await delist(conv_id, names, confirm=True, expected=targets, sale_id=sale_id)
                 except DelistError as exc:
                     text = f"Couldn't delist it elsewhere: {exc}. You can delist it from the item."
-                    failed_map = {name: {"state": "failed", "error": str(exc)} for name in live}
+                    failed_map = {name: {"state": "failed", "error": str(exc)} for name in names}
                     with session_factory() as db:
                         sale_quantity_sync.record_delist_outcomes(
                             db,
                             sale_ids=groups[conv_id],
                             conv_id=conv_id,
-                            live_targets=live_targets,
+                            live_targets=dict(targets),
                             result=failed_map,
                         )
                 else:
@@ -573,16 +577,18 @@ async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> 
                             db,
                             sale_ids=groups[conv_id],
                             conv_id=conv_id,
-                            live_targets=live_targets,
+                            live_targets=dict(targets),
                             result=result,
                         )
                     failed = {
                         name: str((result.get(name) or {}).get("error") or "The marketplace did not confirm the delete.")
-                        for name in live
+                        for name in names
                         if (result.get(name) or {}).get("state") == "failed"
                     }
-                    done = [name for name in live if name not in failed]
-                    text = _delist_sentence(done, failed)
+                    done = [name for name in names if (result.get(name) or {}).get("state") == "deleted"]
+                    # A marketplace the delist stopped before is neither delisted nor failed.
+                    stopped = [name for name in names if name not in failed and name not in done]
+                    text = _delist_sentence(done, failed, stopped)
         for sale_id in groups[conv_id]:
             notes[sale_id] = text
     return notes
@@ -654,5 +660,5 @@ def status() -> dict:
             "authorizeUrl": pending.authorize_url if pending and not pending.done else None,
             "error": (pending.error if pending and pending.done else None) or (account.get("authError") if account else None),
         }
-    relay = relay_client.stream_state() if not _on_web() else {"running": False, "connected": False, "lastError": None, "lastEventAt": None}
+    relay = relay_client.stream_state() if not _on_web() else {"running": False, "connected": False, "lastError": None, "skippedEvent": None, "lastEventAt": None}
     return {"accounts": out, "relay": relay}

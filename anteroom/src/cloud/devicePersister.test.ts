@@ -14,7 +14,7 @@ vi.mock("idb-keyval", () => ({
   clear: async () => { saved.values.clear(); },
 }));
 
-const { DEVICE_SAVE_EVERY_MS, devicePersister } = await import("./deviceCache");
+const { DEVICE_SAVE_EVERY_MS, clearDeviceWorkspace, devicePersister, saveRuntime } = await import("./deviceCache");
 
 function snapshot(n: number): PersistedClient {
   return { timestamp: n, buster: "test", clientState: { queries: [], mutations: [] } };
@@ -24,6 +24,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.stubGlobal("indexedDB", {});
   saved.writes.length = 0;
+  saved.values.clear();
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -44,4 +45,29 @@ it("saves at once when the page is hidden or closed", async () => {
   expect(saved.writes).toEqual([snapshot(1)]);
   await vi.advanceTimersByTimeAsync(DEVICE_SAVE_EVERY_MS);
   expect(saved.writes).toHaveLength(1);
+});
+
+it("erases a previous owner's workspace on a signed-out load without blocking a later sign-in", async () => {
+  saved.values.set("owner", "seller-a");
+  saved.values.set("queries", snapshot(1));
+  saved.values.set("runtime", { value: { hosted: true }, savedAt: 1, buster: "test" });
+
+  await clearDeviceWorkspace();
+  expect([...saved.values.keys()]).toEqual([]);
+
+  await saveRuntime("seller-b", { hosted: true });
+  expect(saved.values.get("owner")).toBe("seller-b");
+  expect(saved.values.has("runtime")).toBe(true);
+});
+
+it("keeps the signed-in seller's workspace and erases another seller's", async () => {
+  saved.values.set("owner", "seller-a");
+  saved.values.set("queries", snapshot(2));
+
+  await clearDeviceWorkspace("seller-a");
+  expect(saved.values.get("owner")).toBe("seller-a");
+  expect(saved.values.get("queries")).toEqual(snapshot(2));
+
+  await clearDeviceWorkspace("seller-b");
+  expect([...saved.values.keys()]).toEqual([]);
 });

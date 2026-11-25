@@ -52,7 +52,10 @@ at most the existing 20-group email batch after checking budget/lease/backoff.
 SMTP runs after commit and before a separate completion transaction. Completion
 rechecks the lease token and subtracts only the sent counts, retaining adds made
 during SMTP. Failed or uncertain delivery retains diagnostics and consumes the
-reserved attempt as before.
+reserved attempt. Consecutive transient failures double the pause from five
+minutes up to one hour, shared by both outbox workers. A successful outbox
+send clears the backoff. Daily quota rejections pause delivery for 24 hours.
+Each SMTP exchange has a 60-second deadline within the 120-second send lease.
 
 ## Rolling deployment and removal after 2026-12-15
 
@@ -204,5 +207,8 @@ before relying on the new digest bound; old binaries do not honor the new gate.
 
 The existing logging handler still has a 500-report in-memory ingress buffer;
 overflow or a crash before durable insertion can lose those unstored events.
-This delivery policy does not change ingress durability or claim that every
-logging event is already in the durable outbox.
+New reports replace NULs and unpaired surrogates before storage. The upgrade
+repairs already-queued Postgres reports in both copies of the outbox under
+the control lock. If storing a batch fails while the database is reachable,
+the handler retries each report individually and counts invalid reports as
+dropped. On connection failures, it retries the reports still in memory.

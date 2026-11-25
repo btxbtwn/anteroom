@@ -21,6 +21,8 @@ KEEPALIVE = ": keepalive\n\n"
 _DONE = object()
 _generation_tasks: set[asyncio.Task] = set()
 _generations: dict[str, GenerationRun] = {}
+# How each listing's last run ended, for an agent following it once it is gone.
+_outcomes: dict[str, dict[str, str]] = {}
 
 
 class GenerationRun:
@@ -31,6 +33,8 @@ class GenerationRun:
         self.done = False
         self.cancelling = False
         self.last_status = ""
+        # Set by the work when it fails, so the run's outcome can say why.
+        self.error: str | None = None
 
     def subscribe(self) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue()
@@ -83,6 +87,19 @@ def active_generation(conv_id: str) -> GenerationRun | None:
     return None
 
 
+def generation_outcome(conv_id: str) -> dict[str, str] | None:
+    """How this listing's last run here ended: completed, failed (with why) or cancelled."""
+    return _outcomes.get(conv_id)
+
+
+def _outcome(run: GenerationRun) -> dict[str, str]:
+    if run.cancelling:
+        return {"state": "cancelled"}
+    if run.error:
+        return {"state": "failed", "error": run.error}
+    return {"state": "completed"}
+
+
 def active_generations() -> dict[str, GenerationRun]:
     return {conv_id: run for conv_id in _generations if (run := active_generation(conv_id)) is not None}
 
@@ -129,12 +146,14 @@ async def _pump_generation(run: GenerationRun, work) -> None:
     except asyncio.CancelledError:
         run.publish(sse_event("error", "Generation stopped."))
         run.publish("data: [DONE]\n\n")
-    except Exception:
+    except Exception as exc:
         log.exception("listing generation pump failed")
+        run.error = run.error or str(exc).strip() or type(exc).__name__
     finally:
         run.finish()
         for conv_id, active in list(_generations.items()):
             if active is run:
+                _outcomes[conv_id] = _outcome(run)
                 _forget_generation(conv_id, run)
                 break
 
@@ -167,6 +186,7 @@ async def reset_generations() -> None:
             run.cancelling = True
             run.task.cancel()
     _generations.clear()
+    _outcomes.clear()
     _generation_tasks.clear()
 
 
@@ -248,5 +268,6 @@ def start_generation(conv_id: str, work: Callable[[GenerationRun], Awaitable[Non
     """Register a run for this conversation and start pumping its work in the background."""
     run = GenerationRun()
     _generations[conv_id] = run
+    _outcomes.pop(conv_id, None)
     run.task = spawn(_pump_generation(run, work))
     return run
