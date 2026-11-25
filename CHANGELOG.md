@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1263 — 2026-11-25
+
+- Keep operator email moving when a diagnostic report contains malformed text or fails to save.
+- Space out operator email retries during SMTP outages and stop stalled sends before another worker can retry them.
+
 ## 0.1.1262 — 2026-11-25
 
 - Guard database updates against dropping tables, columns, or functions before the previous hosted release stops using them.
