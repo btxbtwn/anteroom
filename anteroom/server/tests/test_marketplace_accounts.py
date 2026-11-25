@@ -346,6 +346,46 @@ def test_a_finish_that_cannot_reach_the_relay_can_be_retried(sign_in):
     assert asyncio.run(accounts.finish_sign_in("etsy", "state-1", "claim"))["label"] == "fixture_closet"
 
 
+def test_a_finish_the_relay_refuses_before_answering_can_be_retried(sign_in, monkeypatch):
+    relay, _ = sign_in
+
+    async def busy(method, path, params=None, **kwargs):
+        if path == "/studio/oauth/result" and params and "claim" in params:
+            raise RelayError("Anteroom's relay is busy. Try again in a minute.", 429)
+        return await relay(method, path, params=params, **kwargs)
+
+    asyncio.run(accounts.start_sign_in("etsy"))
+    monkeypatch.setattr(accounts, "relay_request", busy)
+    with pytest.raises(RelayError, match="busy"):
+        asyncio.run(accounts.finish_sign_in("etsy", "state-1", "claim"))
+    assert accounts.status()["accounts"]["etsy"]["pending"]
+    monkeypatch.setattr(accounts, "relay_request", relay)
+    assert asyncio.run(accounts.finish_sign_in("etsy", "state-1", "claim"))["label"] == "fixture_closet"
+
+
+def test_a_finish_cancelled_while_waiting_on_the_relay_can_be_retried(sign_in, monkeypatch):
+    relay, _ = sign_in
+
+    async def slow(method, path, params=None, **kwargs):
+        if path == "/studio/oauth/result" and params and "claim" in params:
+            await asyncio.sleep(60)
+        return await relay(method, path, params=params, **kwargs)
+
+    async def cancelled_finish():
+        task = asyncio.create_task(accounts.finish_sign_in("etsy", "state-1", "claim"))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(accounts.start_sign_in("etsy"))
+    monkeypatch.setattr(accounts, "relay_request", slow)
+    asyncio.run(cancelled_finish())
+    assert accounts.status()["accounts"]["etsy"]["pending"]
+    monkeypatch.setattr(accounts, "relay_request", relay)
+    assert asyncio.run(accounts.finish_sign_in("etsy", "state-1", "claim"))["label"] == "fixture_closet"
+
+
 def test_a_refused_claim_ends_the_sign_in_with_its_reason(sign_in, monkeypatch):
     async def refused(method, path, params=None, **kwargs):
         if path.endswith("/start"):

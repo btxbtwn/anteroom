@@ -22,7 +22,6 @@ from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import Any, cast
 
-import httpx
 from sqlalchemy import CursorResult, delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -233,8 +232,11 @@ async def finish_sign_in(marketplace: str, state: str, claim: str) -> dict:
         raise SignInNotFound(f"This {name} sign-in was not started here, or it already ended. Start again from Connections.")
     try:
         resp = await relay_request("GET", "/studio/oauth/result", params={"state": state, "claim": claim})
-    except (httpx.HTTPError, OSError):
-        await in_worker_session(_release_sign_in, marketplace, state)
+    except BaseException:
+        # No answer for this claim (unreachable, relay refused this device, or the request
+        # was cancelled): give the sign-in back so the seller can retry the same link.
+        # Shielded so a cancelled finish still releases it.
+        await asyncio.shield(in_worker_session(_release_sign_in, marketplace, state))
         raise
     # The relay has answered for this claim: nothing is left to watch for.
     _stop_watching(marketplace)
