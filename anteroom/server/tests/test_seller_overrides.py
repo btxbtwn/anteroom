@@ -186,16 +186,18 @@ class DepopStyleClearTest(unittest.TestCase):
     def test_unlisted_tag_leaves_locked_depop_other_alone(self):
         from anteroom.services.depop_fields import replace_depop_other_size
 
-        listing = {
-            "size": "EU 42",
-            "direct_category_ids": {"depop": "womenswear_tshirts"},
-            "depop_specifics": {"size": "Other", "nativeSizeId": 7},
-            "seller_fields": ["depop_specifics.size"],
-        }
-        self.assertFalse(replace_depop_other_size(listing))
-        self.assertEqual(listing["depop_specifics"]["size"], "Other")
-        self.assertEqual(listing["depop_specifics"]["nativeSizeId"], 7)
-        self.assertTrue(field_locked(listing, "depop", "size"))
+        for size, category in (("EU 42", "womenswear_tshirts"), ("4", "kidswear_boat-shoes")):
+            with self.subTest(size=size, category=category):
+                listing = {
+                    "size": size,
+                    "direct_category_ids": {"depop": category},
+                    "depop_specifics": {"size": "Other", "nativeSizeId": 7},
+                    "seller_fields": ["depop_specifics.size"],
+                }
+                self.assertFalse(replace_depop_other_size(listing))
+                self.assertEqual(listing["depop_specifics"]["size"], "Other")
+                self.assertEqual(listing["depop_specifics"]["nativeSizeId"], 7)
+                self.assertTrue(field_locked(listing, "depop", "size"))
 
     def test_a_comma_joined_style_becomes_separate_choices(self):
         listing = {"depop_specifics": {"style": ["Casual, Minimalist, Indie"]}}
