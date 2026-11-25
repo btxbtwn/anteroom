@@ -103,7 +103,16 @@ def test_event_that_always_fails_is_skipped_after_the_attempt_limit(monkeypatch)
     assert acks[-1] == {"type": "ack", "through": 3}
     assert not unacked
     assert relay_client._event_failures == {}
-    assert "ebay ORDER_CONFIRMATION" in relay_client.stream_state()["lastError"]
+    assert "ebay ORDER_CONFIRMATION" in relay_client.stream_state()["skippedEvent"]
+
+
+def test_a_skipped_event_shows_while_the_stream_stays_connected(monkeypatch):
+    state = relay_client.StreamState(connected=True, skipped_error="Anteroom could not record an etsy event.")
+    monkeypatch.setattr(relay_client, "_state", state)
+    status = relay_client.stream_state()
+    assert status["connected"] is True
+    assert status["lastError"] is None
+    assert status["skippedEvent"] == "Anteroom could not record an etsy event."
 
 
 @pytest.mark.parametrize("error", [PermissionError("access denied"), TimeoutError("read timed out")])

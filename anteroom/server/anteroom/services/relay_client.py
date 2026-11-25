@@ -57,7 +57,8 @@ def stream_state() -> dict[str, Any]:
     return {
         "running": bool(_task and not _task.done()),
         "connected": _state.connected,
-        "lastError": _state.last_error or _state.skipped_error,
+        "lastError": _state.last_error,
+        "skippedEvent": _state.skipped_error,
         "lastEventAt": _state.last_event_at,
     }
 
@@ -127,7 +128,8 @@ async def _process(events: list[dict], handle) -> tuple[int | None, bool]:
             _event_failures.pop(seq, None)
             skipped = f"{event.get('source') or 'marketplace'} {event.get('eventType') or 'event'}"
             log.error("skipping relay event %s (%s) after %d failed attempts", seq, skipped, failures)
-            _state.skipped_error = f"Could not record a {skipped} after {failures} attempts; skipped it."
+            _state.skipped_error = (f"Anteroom could not record a {skipped} after {failures} attempts. "
+                                   "Check that sale on the marketplace.")
             through = seq
             continue
         _event_failures.pop(seq, None)
