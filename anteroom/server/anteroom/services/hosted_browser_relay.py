@@ -71,6 +71,10 @@ SEEN_FOR_S = 90.0
 NEVER_SEEN = float("-inf")
 # Empty /next requests deliberately wait this long for a command.
 WAIT_S = 20.0
+# The longest any caller waits on one relayed Chrome command: a sales-history read
+# pages through older orders for up to 20 minutes. A forwarded command carries its
+# caller's own deadline, so the internal routes accept anything up to this.
+LONGEST_WAIT_S = 20 * 60
 # Commands whose timing is kept until their reply; older ones are dropped.
 SENT_KEPT = 200
 

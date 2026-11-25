@@ -6,7 +6,7 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from anteroom.services.device_routes import token_matches
-from anteroom.services.hosted_browser_relay import ChromeReadError, relay_for as chrome_for
+from anteroom.services.hosted_browser_relay import LONGEST_WAIT_S, ChromeReadError, relay_for as chrome_for
 from anteroom.services.mac_inference import NO_REPLY, NOT_TAKEN, OPERATIONS, MacCallFailed, MacUnavailable, relay_for as mac_for
 from anteroom.services.provider_deadlines import ProviderStalled
 
@@ -68,7 +68,7 @@ class ChromeRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     user_id: str
     message: dict
-    timeout: float = Field(ge=1, le=120)
+    timeout: float = Field(ge=1, le=LONGEST_WAIT_S)
 
 
 @router.post('/browser-relay/request')
@@ -87,7 +87,7 @@ class ChromeRead(BaseModel):
     user_id: str
     command: str = Field(max_length=80)
     payload: dict
-    timeout: float = Field(ge=1, le=120)
+    timeout: float = Field(ge=1, le=LONGEST_WAIT_S)
 
 
 @router.post('/browser-relay/read')
