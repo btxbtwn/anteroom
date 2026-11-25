@@ -364,7 +364,7 @@ class KeychainThatNeverAnswersTest(unittest.TestCase):
                 patch.object(keychain, "KEYCHAIN_TIMEOUT_SEC", SHORT):
             for _ in range(2):
                 started = time.monotonic()
-                with self.assertRaises(keychain._Unavailable):
+                with self.assertRaises(keychain.KeychainUnavailable):
                     keychain._read_item("studio-secrets")
                 self.assertLess(time.monotonic() - started, HUNG / 2)
             # The second read joined the first, still waiting on the Keychain prompt.
@@ -374,7 +374,7 @@ class KeychainThatNeverAnswersTest(unittest.TestCase):
                 try:
                     self.assertEqual(keychain._read_item("studio-secrets"), json.dumps({"x": "1"}))
                     break
-                except keychain._Unavailable:
+                except keychain.KeychainUnavailable:
                     time.sleep(SHORT / 4)
             else:
                 self.fail("The Keychain answered, but the read never picked it up")

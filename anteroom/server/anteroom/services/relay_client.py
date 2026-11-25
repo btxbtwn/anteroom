@@ -21,7 +21,7 @@ import httpx
 import websockets
 
 from anteroom.config import RELAY_URL
-from anteroom.services.keychain import get_relay_device, set_relay_device
+from anteroom.services.keychain import KeychainUnavailable, get_relay_device, set_relay_device
 from anteroom.services.shared_http import http_client
 
 log = logging.getLogger("anteroom.relay")
@@ -60,7 +60,10 @@ def stream_state() -> dict[str, Any]:
 
 async def ensure_device() -> dict:
     # On the web the device lives in the seller's Vault: a database read, kept off the request loop.
-    device = await asyncio.to_thread(get_relay_device)
+    try:
+        device = await asyncio.to_thread(get_relay_device, require_readable=True)
+    except KeychainUnavailable as exc:
+        raise RelayError("Could not read this Mac's relay registration from Keychain.") from exc
     if device:
         return device
     register_secret = os.environ.get("ANTEROOM_RELAY_REGISTER_SECRET", "").strip()
@@ -99,19 +102,19 @@ async def relay_request(method: str, path: str, *, json_body: Any = None, header
         )
 
 
-async def _process(events: list[dict], handle) -> int | None:
-    """Record each event; return the highest seq that is safe to acknowledge."""
+async def _process(events: list[dict], handle) -> tuple[int | None, bool]:
+    """Return the highest seq safe to acknowledge and whether a handler failed."""
     through = None
     for event in events:
         seq = event.get("seq")
         try:
             await handle(event)
-        except Exception:  # noqa: BLE001 - keep it unacknowledged; the relay resends it
+        except Exception:  # noqa: BLE001 - stop at the first unrecorded event
             log.exception("relay event %s could not be recorded", seq)
-            break
+            return through, True
         through = seq
         _state.last_event_at = time.time()
-    return through
+    return through, False
 
 
 async def _stream_once(handle) -> None:
@@ -131,9 +134,13 @@ async def _stream_once(handle) -> None:
             message = json.loads(raw)
             if message.get("type") != "events" or not message.get("events"):
                 continue
-            through = await _process(message["events"], handle)
+            through, failed = await _process(message["events"], handle)
             if through is not None:
                 await socket.send(json.dumps({"type": "ack", "through": through}))
+            if failed:
+                # A later push can skip past the failed event. Reconnect so the relay
+                # starts again at the oldest unacknowledged event.
+                raise RelayError("Could not record a sale event. Retrying.")
 
 
 async def _run(handle) -> None:
@@ -151,7 +158,7 @@ async def _run(handle) -> None:
             if status == 401:
                 return
         except Exception as exc:  # noqa: BLE001 - offline, relay restart, etc.
-            _state.last_error = "Can't reach Anteroom's relay right now; retrying."
+            _state.last_error = str(exc) if isinstance(exc, RelayError) else "Can't reach Anteroom's relay right now; retrying."
             log.info("relay stream dropped: %s", exc)
         finally:
             _state.connected = False

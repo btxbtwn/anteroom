@@ -1,0 +1,2 @@
+- Retry sale events on the Mac after a temporary error so sale alerts and delist-after-sale can still run.
+- Keep the Mac connected to its existing sale inbox when Keychain access returns.
