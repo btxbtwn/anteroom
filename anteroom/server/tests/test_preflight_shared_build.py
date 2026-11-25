@@ -13,7 +13,6 @@ import httpx
 import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from anteroom.database import Base
 from anteroom.main import app
@@ -26,8 +25,9 @@ PANES = 5
 
 
 @pytest.fixture
-def listing(monkeypatch):
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+def listing(monkeypatch, tmp_path):
+    # A file, so builds running side by side each have a connection of their own.
+    engine = create_engine(f"sqlite:///{tmp_path / 'anteroom.db'}", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     sessions = sessionmaker(bind=engine)
     with sessions() as db:
