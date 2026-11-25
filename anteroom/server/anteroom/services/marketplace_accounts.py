@@ -654,5 +654,5 @@ def status() -> dict:
             "authorizeUrl": pending.authorize_url if pending and not pending.done else None,
             "error": (pending.error if pending and pending.done else None) or (account.get("authError") if account else None),
         }
-    relay = relay_client.stream_state() if not _on_web() else {"running": False, "connected": False, "lastError": None, "lastEventAt": None}
+    relay = relay_client.stream_state() if not _on_web() else {"running": False, "connected": False, "lastError": None, "skippedEvent": None, "lastEventAt": None}
     return {"accounts": out, "relay": relay}

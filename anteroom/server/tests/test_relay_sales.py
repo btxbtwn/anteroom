@@ -436,8 +436,8 @@ class StreamTest(unittest.TestCase):
             if event["seq"] == 2:
                 raise RuntimeError("database busy")
 
-        through = asyncio.run(relay_client._process([{"seq": 1}, {"seq": 2}, {"seq": 3}], handle))
-        self.assertEqual(through, 1)
+        result = asyncio.run(relay_client._process([{"seq": 1}, {"seq": 2}, {"seq": 3}], handle))
+        self.assertEqual(result, (1, True))
 
 
 class AutodelistOptionTest(unittest.TestCase):
