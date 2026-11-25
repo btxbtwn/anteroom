@@ -478,12 +478,16 @@ Drafts are claimed row by row and run on either Machine. The lease lasts 30 s
 and is renewed every 10 s (`services/process_handoff.py`).
 
 Fly sends SIGTERM with a 300-second grace period. On the signal
-(`anteroom.hosted_server`) the old Machine at once stops claiming drafts
-and stops its schedulers, then releases the lease and its Mac and Chrome
-routes, so the new Machine takes them over within about 10 s. Uvicorn then
-allows active requests 120 seconds, and the current draft has up to 120
-seconds to save. Work past that window keeps its lease and is not marked
-complete or replayed.
+(`anteroom.hosted_server`) the old Machine at once stops claiming drafts,
+and Auto-Relist and scheduled publishing start no new listing. A relist or
+scheduled publish already talking to a marketplace gets up to 75 s
+(`process_handoff.DRAIN_GRACE_S`) to finish while the old Machine keeps
+renewing the lease; then it stops its schedulers and releases the lease and its
+Mac and Chrome routes, so the new Machine takes them over within about 10 s
+(at once when nothing was running). Uvicorn meanwhile allows active requests
+120 seconds; then the app waits for the handoff and the current draft (up to
+120 seconds each, side by side). Work past that window keeps its lease and is
+not marked complete or replayed.
 
 The server listens on one dual-stack socket: IPv4 for Fly's proxy and IPv6 for
 the private network. Until 2026-11-07 it listened on IPv4 only, so

@@ -1827,6 +1827,51 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertEqual([o["status"] for o in outcomes], ["completed", "completed"])
         self.assertEqual(len(set(delisted)), 3)
 
+    def test_a_stopping_machine_starts_no_new_relist(self):
+        from anteroom.services import process_handoff
+
+        conv, _listing, _rev = self._create_draft("Drain Coat", price=50.0)
+        self.db.add(MarketplaceListing(
+            id=new_id(), conversation_id=conv.id, marketplace="poshmark", state="published",
+            listing_id="5f00000000000000000000e1", listing_url="https://poshmark.com/listing/5f00000000000000000000e1",
+            listed_at=_now() - timedelta(days=45), listed_price=50.0,
+        ))
+        self.db.commit()
+        auto_relist.save_rule(self.db, "poshmark", {"enabled": True, "min_age_days": 30, "daily_cap": 10}, confirm=True)
+        delister, lister = AsyncMock(return_value={"ok": True}), AsyncMock(return_value={"ok": True, "listing_id": "x"})
+
+        process_handoff.begin_draining()
+        try:
+            outcomes = asyncio.run(auto_relist.run_auto_relist(now=_now(), delister=delister, lister=lister))
+        finally:
+            process_handoff.reset()
+        self.assertEqual(outcomes, [])
+        delister.assert_not_awaited()
+        self.assertEqual(self.db.query(MarketplaceRelistLog).count(), 0)
+
+    def test_a_stopping_machine_starts_no_new_scheduled_publish(self):
+        from anteroom.services import process_handoff
+
+        conv, _listing, _rev = self._create_draft("Drain Scheduled")
+        base_now = _now()
+        draft_scheduling.schedule_draft(
+            self.db, conv.id, publish_at=base_now + timedelta(minutes=10), marketplaces=["poshmark"],
+            confirm=True, now=base_now,
+        )
+        publisher = AsyncMock(return_value={"ok": True})
+
+        process_handoff.begin_draining()
+        try:
+            outcomes = asyncio.run(draft_scheduling.run_due_scheduled_publishes(
+                now=base_now + timedelta(minutes=11), publisher=publisher,
+            ))
+        finally:
+            process_handoff.reset()
+        self.assertEqual(outcomes, [])
+        publisher.assert_not_awaited()
+        self.db.expire_all()
+        self.assertEqual(self.db.query(Listing).filter_by(conversation_id=conv.id).one().scheduled_status, "scheduled")
+
     def test_the_scheduler_gives_each_relist_pass_a_time_budget(self):
         from unittest.mock import AsyncMock
 

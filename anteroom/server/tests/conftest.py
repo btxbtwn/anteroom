@@ -85,6 +85,14 @@ def _chrome_wait_check_stays_on(_no_connection_held_during_chrome_waits):
     chrome_wait_connections.watch(engine)
 
 
+@pytest.fixture(autouse=True)
+def _not_draining():
+    """A hosted app's shutdown leaves the process draining; every test starts as a fresh process."""
+    from anteroom.services import process_handoff
+
+    process_handoff.reset()
+
+
 @pytest.fixture(scope="session")
 def _endpoint_checkouts():
     """Watch every pool for connections an async route handler takes on the event loop."""

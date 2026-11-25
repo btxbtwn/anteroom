@@ -31,6 +31,7 @@ from anteroom.models.listing import Listing, ListingRevision
 from anteroom.models.listing_video import ListingVideo
 from anteroom.models.marketplace_listing import MarketplaceListing
 from anteroom.models.marketplace_sale import PAID_STATUSES, MarketplaceSale
+from anteroom.services import process_handoff
 from anteroom.services.marketplace_delist import MARKETPLACES
 from anteroom.services.validation import validate_listing
 from anteroom.services.vendoo_import import parse_notes
@@ -910,6 +911,9 @@ async def run_due_scheduled_publishes(*, now: datetime | None = None, publisher=
         publisher = publish_revision
     outcomes: list[dict[str, Any]] = []
     for _ in range(20):
+        if process_handoff.draining():
+            # This Machine is stopping: leave the rest for the one that takes the lease.
+            break
         due = await in_worker_session(_claim_due_drafts, moment)
         if not due:
             break
