@@ -301,6 +301,10 @@ def _lock_listing(db: Session, conv_id: str, expired: Callable[[], bool]) -> Con
     # A commit flushes after before_commit, and a flush can wait on a locked database.
     event.listen(db, "after_flush", refuse_late_commit)
     refuse_late_commit()
+    if db.get_bind().dialect.name == "sqlite":
+        # SQLite ignores FOR UPDATE and pysqlite begins no transaction for a SELECT:
+        # take the write lock before the first read so the notes merge is not stale.
+        db.connection().exec_driver_sql("BEGIN IMMEDIATE")
     db.scalar(select(Conversation.id).where(Conversation.id == conv_id).with_for_update())
     conv = ConversationRepo(db).get(conv_id)
     if conv is None:

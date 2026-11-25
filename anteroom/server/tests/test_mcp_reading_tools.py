@@ -361,6 +361,55 @@ def test_both_readings_in_one_batch_keep_each_others_fields(model, monkeypatch):
     assert notes["size"] == "M" and notes["measurements"]["top"] == {"pitToPit": "21"} and notes["sku"] == "A4-1"
 
 
+def test_readings_settled_side_by_side_keep_each_others_fields(monkeypatch):
+    import threading
+
+    from anteroom.repositories.queries import ConversationRepo
+
+    client = TestClient(app)
+    conv_id = _draft(client)
+    _set_notes(conv_id, {"sku": "A4-1"})
+    # Without a lock both settlements read the notes before either writes.
+    barrier = threading.Barrier(2, timeout=1.5)
+    waited = threading.local()
+    real_get = ConversationRepo.get
+
+    def get(self, *args, **kwargs):
+        if not getattr(waited, "done", False):
+            waited.done = True
+            try:
+                barrier.wait()
+            except threading.BrokenBarrierError:
+                pass  # The other settlement holds the lock; it reads after this one writes.
+        return real_get(self, *args, **kwargs)
+
+    monkeypatch.setattr(ConversationRepo, "get", get)
+    errors: list[BaseException] = []
+
+    def settle(fn, *args):
+        try:
+            with SessionLocal() as db:
+                fn(db, conv_id, *args, lambda: False)
+                db.commit()
+        except BaseException as exc:  # noqa: BLE001 - reported by the assertion below
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=settle, args=(
+            mcp_reading_tools._settle_size, {"status": "accepted", "size": "M", "sizes": ["M"]}, True)),
+        threading.Thread(target=settle, args=(
+            mcp_reading_tools._settle_measurements, "top",
+            {"photos_read": 1, "measurements": {"pitToPit": {"status": "accepted", "value": 21.0}}}, True)),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(30)
+    assert errors == []
+    notes = _notes(conv_id)
+    assert notes["size"] == "M" and notes["measurements"]["top"] == {"pitToPit": "21"} and notes["sku"] == "A4-1"
+
+
 def test_a_settlement_past_the_deadline_saves_nothing(model):
     client = TestClient(app)
     conv_id = _draft(client)
