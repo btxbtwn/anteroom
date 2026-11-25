@@ -1,0 +1,1 @@
+- AI assistants connected to Anteroom can now start generating the drafts they name, like Generate or Bulk upload's Create and generate. Generation stops at a saved draft and never publishes.
