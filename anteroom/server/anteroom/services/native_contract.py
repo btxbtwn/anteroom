@@ -864,9 +864,20 @@ def settings_answer(listing: dict, path: str) -> str | None:
     List already falls back to these defaults; pre-flight reads the same choice
     so a policy set once in Settings is not reported as an empty row.
     """
+    from anteroom.services.user_settings import (
+        MERCARI_SHOEBOX_PATH,
+        get_ebay_listing_defaults,
+        get_listing_field_defaults,
+        get_mercari_shoebox_default,
+    )
+
+    if path == MERCARI_SHOEBOX_PATH:
+        # attach_form answers an empty shoebox from this default before List;
+        # Ready to list validates the saved listing without that write, so read
+        # the same default here (#2097).
+        return get_mercari_shoebox_default()
     if path in _ETSY_SAVED_DEFAULTS:
         from anteroom.services.etsy_fields import DEFAULT_ETSY_RENEWAL
-        from anteroom.services.user_settings import get_listing_field_defaults
 
         saved = get_listing_field_defaults()
         chosen = str((saved.get(path) or {}).get("label") or "").strip()
@@ -876,7 +887,6 @@ def settings_answer(listing: dict, path: str) -> str | None:
     setting = _SETTINGS_CHOICES.get(path)
     if not setting:
         return None
-    from anteroom.services.user_settings import get_ebay_listing_defaults
 
     return str(get_ebay_listing_defaults().get(setting) or "").strip() or None
 
