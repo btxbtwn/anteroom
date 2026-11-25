@@ -1095,6 +1095,34 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         self.bridge.side_effect = [{"ok": True, "state": "draft", "draft_url": URLS["mercari"]}, self.published("mercari")]
         self.assertEqual(self.list("mercari")["state"], "published")
 
+    def test_poshmark_preflight_and_list_require_a_whole_dollar_price(self):
+        price_message = "Enter a whole-dollar price for Poshmark."
+        for source in ("general", "poshmark"):
+            with self.subTest(source=source):
+                priced = {**LISTING, "price": 11.70} if source == "general" else {
+                    **LISTING, "poshmark_specifics": {"poshmarkPrice": 11.70},
+                    "seller_fields": ["poshmark_specifics.poshmarkPrice"],
+                }
+                revision = listing_persistence.save_revision(self.db, self.conv.id, priced, "user")
+                check = self.client.get(f"{self.base}/preflight").json()["marketplaces"]["poshmark"]
+                response = self.client.post(f"{self.base}/poshmark/list", json={
+                    "revision_id": revision.id, "confirm": True,
+                })
+                self.assertEqual(response.status_code, 400, response.text)
+                self.assertEqual(response.json()["detail"], price_message)
+                self.assertFalse(check["ready"], check)
+                self.assertIn({"field": "price", "message": price_message, "blocking": True}, check["gaps"])
+                self.bridge.assert_not_awaited()
+                self.assertEqual(self.launched, [])
+                self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
+
+        self.rev = listing_persistence.save_revision(self.db, self.conv.id, LISTING, "user")
+        check = self.client.get(f"{self.base}/preflight").json()["marketplaces"]["poshmark"]
+        self.assertTrue(check["ready"], check)
+        self.bridge.return_value = {"ok": True, "state": "published", "listing_url": POSH_URL}
+        self.assertEqual(self.list("poshmark")["state"], "published")
+        self.assertEqual(self.bridge.call_args.args[2]["listing"]["poshmark_specifics"]["poshmarkPrice"], 12)
+
     def test_poshmark_lists_in_one_step_and_updates_the_same_listing(self):
         self.bridge.return_value = {"ok": True, "state": "published", "listing_url": POSH_URL}
         record = self.list("poshmark")

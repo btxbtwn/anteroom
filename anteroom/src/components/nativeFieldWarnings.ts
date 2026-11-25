@@ -18,6 +18,7 @@ Object.assign(ROW_ALIASES.ebay, {
   "ebay_specifics.category_specifics.condition": "ebay_specifics.condition",
 });
 Object.assign(ROW_ALIASES.poshmark, {
+  price: "poshmark_specifics.poshmarkPrice",
   primaryColor: "poshmark_specifics.colors",
   secondaryColor: "poshmark_specifics.colors",
   size: "poshmark_specifics.inventoryRows",

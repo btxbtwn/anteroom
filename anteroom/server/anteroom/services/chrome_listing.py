@@ -2,10 +2,9 @@
 
 Imported ``marketplace_category_ids`` remain historical values.
 These checks read the same snapshot and only decide whether direct List can start.
-A color Poshmark does not list, a price it will round, and a quantity above one
-are said beside List. A missing category, an overlong description, a missing
-Depop parcel, or a parcel title Depop does not ship holds List off. A size
-Poshmark does not offer is added when Chrome has read Poshmark's catalog.
+These checks show unsupported colors, missing categories and shipping details,
+and other field gaps beside List. A fractional Poshmark Listing Price also
+stops the marketplace write before it starts.
 """
 from __future__ import annotations
 
@@ -39,6 +38,12 @@ def _dict(value) -> dict:
 
 def _whole_dollars(amount: Decimal) -> int:
     return int(amount.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def poshmark_fractional_price_error(price: int | float | None) -> str | None:
+    if price is not None and price % 1 != 0:
+        return "Enter a whole-dollar price for Poshmark."
+    return None
 
 
 def poshmark_fee_cents(sale_cents: int) -> int:
@@ -119,15 +124,11 @@ def poshmark_requirements(snapshot: dict, context: Context) -> list[dict]:
         found.append(gap("description", "Poshmark descriptions are at most 1,500 characters."))
     from anteroom.services.seller_overrides import price_for
 
-    amount = _money(price_for(snapshot, "poshmark"))
-    if amount is None or amount <= 0:
+    price = price_for(snapshot, "poshmark")
+    if error := poshmark_fractional_price_error(price):
+        found.append(gap("price", error))
+    elif price is None or price < 3:
         found.append(gap("price", "Poshmark needs a price of $3 or more."))
-    else:
-        whole = _whole_dollars(amount)
-        if amount != whole:
-            found.append(gap("price", f"Poshmark lists this at ${whole}.", blocking=False))
-        if whole < 3:
-            found.append(gap("price", "Poshmark needs a price of $3 or more."))
     smart = poshmark_smart_minimum(snapshot)
     shipping = poshmark_shipping_discount_cents(snapshot)
     lowest = poshmark_lowest_smart_floor(shipping)

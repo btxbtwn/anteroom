@@ -30,6 +30,7 @@ from anteroom.models.marketplace_listing import LIVE_STATES, MarketplaceListing
 from anteroom.models.marketplace_sale import PAID_STATUSES, MarketplaceSale
 from anteroom.services import listing_mode, listing_persistence
 from anteroom.services.automation_age import load_listed_index, resolve_listed_at
+from anteroom.services.chrome_listing import poshmark_fractional_price_error
 from anteroom.services.marketplace_delist import listings_for
 from anteroom.services.marketplace_identity import listing_id as extract_listing_id
 from anteroom.services.seller_overrides import (
@@ -1049,7 +1050,10 @@ def _reserve_relist_attempt(
         ):
             return {"reserved": False, "outcome": None}
 
-        revision_id = _prepare_price_revision(db, conv_id, marketplace, new_price, current_revision_id)
+        price_error = poshmark_fractional_price_error(new_price) if marketplace == "poshmark" else None
+        revision_id = None if price_error else _prepare_price_revision(
+            db, conv_id, marketplace, new_price, current_revision_id,
+        )
         if not revision_id:
             outcome = _record_log(
                 db,
@@ -1060,7 +1064,7 @@ def _reserve_relist_attempt(
                 old_price=old_price,
                 new_price=new_price,
                 status="failed",
-                reason="Listing has no saved revision to relist.",
+                reason=price_error or "Listing has no saved revision to relist.",
                 moment=moment,
             )
             return {"reserved": False, "outcome": outcome}

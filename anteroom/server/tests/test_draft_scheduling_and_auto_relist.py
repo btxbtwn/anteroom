@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import unittest
 from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -1428,7 +1428,8 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         config["rules"]["poshmark"] = {"percent": 25.0, "fixed": 0.0, "rounding": "whole"}
         pricing_rules.set_pricing_rules(enabled=True, anchor="general", rules=config["rules"])
 
-    def _stale_poshmark_draft(self, *, general: float, listed_price: float | None, drop: float | None):
+    def _stale_poshmark_draft(self, *, general: float, listed_price: float | None, drop: float | None,
+                             mode: str = "amount"):
         from anteroom.services.seller_overrides import price_for
 
         conv, _listing, rev = self._create_draft("Priced Coat", price=general)
@@ -1441,7 +1442,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.db.commit()
         auto_relist.save_rule(self.db, "poshmark", {
             "enabled": True, "min_age_days": 30, "daily_cap": 5,
-            **({"price_adjust_mode": "amount", "price_adjust_value": drop, "price_floor": 1.0} if drop else {}),
+            **({"price_adjust_mode": mode, "price_adjust_value": drop, "price_floor": 1.0} if drop else {}),
         }, confirm=True)
         return conv, rev, {market: price_for(rev.listing_json, market) for market in ("poshmark", "ebay", "mercari")}
 
@@ -1460,6 +1461,28 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         ))
         self.db.expire_all()
         return outcomes, listed
+
+    def test_auto_relist_rejects_fractional_poshmark_replacement_before_delist(self):
+        self._pricing_rules_on()
+        conv, rev, _before = self._stale_poshmark_draft(general=12, listed_price=13, drop=10, mode="percent")
+        message = "Enter a whole-dollar price for Poshmark."
+        preview = auto_relist.preview_status(self.db, marketplace="poshmark")["rules"][0]["candidates"][0]
+        self.assertEqual(preview["proposed_price"], 11.70)
+        delister = AsyncMock(return_value={"ok": True})
+        lister = AsyncMock(return_value={"ok": True, "listing_id": "5f00000000000000000000b2"})
+
+        outcomes = asyncio.run(auto_relist.run_auto_relist(now=_now(), scheduled=True, delister=delister, lister=lister))
+
+        delister.assert_not_called()
+        lister.assert_not_called()
+        self.assertFalse(preview["local_fields_ready"])
+        self.assertIn({"field": "price", "message": message, "blocking": True}, preview["listing_gaps"])
+        self.assertEqual([(row["status"], row["reason"]) for row in outcomes], [("failed", message)])
+        self.db.expire_all()
+        current = self.db.query(Listing).filter_by(conversation_id=conv.id).one()
+        self.assertEqual(current.current_revision_id, rev.id)
+        live = self.db.query(MarketplaceListing).filter_by(conversation_id=conv.id, marketplace="poshmark").one()
+        self.assertEqual((live.state, live.listing_id, live.listed_price), ("published", "5f00000000000000000000a1", 13))
 
     def test_relist_with_pricing_rules_keeps_the_live_price(self):
         from anteroom.services.seller_overrides import price_for

@@ -6,7 +6,7 @@ const poshmarkRows = [
   { key: "poshmark_specifics.description" },
   { key: "poshmark_specifics.colors" },
   { key: "poshmark_specifics.inventoryRows" },
-  { key: "price" },
+  { key: "poshmark_specifics.poshmarkPrice" },
   { key: "direct_category_ids.poshmark" },
 ];
 
@@ -76,11 +76,11 @@ describe("direct List gaps on the form", () => {
   it("finds the row a marketplace names its own way", () => {
     const found = gapsByField("poshmark", [
       { field: "title", message: "Poshmark titles are at most 80 characters.", blocking: true },
-      { field: "price", message: "Poshmark lists this at $25.", blocking: false },
+      { field: "price", message: "Enter a whole-dollar price for Poshmark.", blocking: true },
       { field: "direct_category_ids.poshmark", message: "Poshmark needs a category from its own list.", blocking: true },
     ], poshmarkRows);
     expect(found.get("poshmark_specifics.title")).toEqual(["Poshmark titles are at most 80 characters."]);
-    expect(found.get("price")).toEqual(["Poshmark lists this at $25."]);
+    expect(found.get("poshmark_specifics.poshmarkPrice")).toEqual(["Enter a whole-dollar price for Poshmark."]);
     expect(found.get("direct_category_ids.poshmark")).toEqual(["Poshmark needs a category from its own list."]);
   });
 
@@ -105,7 +105,7 @@ describe("direct List gaps on the form", () => {
   it("opens the row an Edit button is for, including the ones Poshmark names its own way", () => {
     expect(rowForField("poshmark", "primaryColor", poshmarkRows)).toBe("poshmark_specifics.colors");
     expect(rowForField("poshmark", "size", poshmarkRows)).toBe("poshmark_specifics.inventoryRows");
-    expect(rowForField("poshmark", "price", poshmarkRows)).toBe("price");
+    expect(rowForField("poshmark", "price", poshmarkRows)).toBe("poshmark_specifics.poshmarkPrice");
     expect(rowForField("poshmark", "poshmark_specifics.sellerNotes", poshmarkRows)).toBe("");
   });
 
