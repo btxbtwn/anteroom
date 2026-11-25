@@ -5,6 +5,7 @@ export type Listing = {
   id: string;
   title?: string | null;
   status?: string | null;
+  scheduled_publish_at?: string | null;
   settled_at?: string | null;
   unsettled_at?: string | null;
   created_at?: string;

@@ -20,6 +20,7 @@ final class ListingEditorModel {
     let api: AnteroomAPI
     let listingID: String
     private(set) var status: String
+    private(set) var scheduledPublishAt: Date?
     /// Starred by the seller. Saved on its own, apart from the form: it is not an edit.
     private(set) var favorite: Bool
     /// The latest star write; the next one waits for it.
@@ -67,6 +68,7 @@ final class ListingEditorModel {
         self.api = api
         listingID = listing.id
         status = listing.status.isEmpty ? "draft" : listing.status
+        scheduledPublishAt = ServerDate.parse(listing.scheduledPublishAt)
         favorite = listing.favorite
         coverPhotoID = listing.coverPhotoID
         coverPhotoVersion = listing.coverPhotoVersion
@@ -142,6 +144,7 @@ final class ListingEditorModel {
             draftNotice = "Your earlier unsaved edits are still kept on this phone. Review each kept copy before choosing what to keep."
         }
         status = screen.conversation.status
+        scheduledPublishAt = ServerDate.parse(screen.conversation.scheduledPublishAt)
         favorite = screen.conversation.favorite
         document = screen.listing.listing
         revisionID = screen.listing.currentRevisionID
@@ -357,6 +360,7 @@ final class ListingEditorModel {
                 pending = [:]
                 document = result.listing
                 revisionID = result.revisionID
+                scheduledPublishAt = nil
                 // The server recomputes marketplace rows (earnings, category
                 // fields); the tabs keep showing theirs until the new ones arrive.
                 prefetchForms(refresh: true)

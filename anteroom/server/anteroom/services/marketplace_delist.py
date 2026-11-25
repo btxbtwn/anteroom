@@ -485,7 +485,7 @@ def _failure_text(marketplace: str, exc: Exception) -> str:
 
 async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expected: dict[str, str] | None = None,
                  sale_id: str | None = None, relist_rule_id: str | None = None,
-                 requested_by: str | None = None) -> dict:
+                 requested_by: str | None = None, expected_revision_id: str | None = None) -> dict:
     """Delete the named listings. Runs as a job holding the automation slot, so no Send starts into Chrome meanwhile.
 
     ``expected`` pins the listing ID to delete on each marketplace: when one names
@@ -495,6 +495,7 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
     next marketplace if automatic delisting is turned off.
 
     A relist rule must still be enabled when a delete is recorded as started.
+    A checked replacement revision must still be current at that point.
     ``requested_by`` names the agent the seller allowed to ask for it.
 
     Each database step runs on a worker thread with its own session; none is open while
@@ -522,7 +523,9 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
                     "attempts": _attempt(entry)}
             try:
                 if sale_id is None:
-                    ebay_record = await in_worker_session(_start_delete, conv_id, name, base, job_id, relist_rule_id)
+                    ebay_record = await in_worker_session(
+                        _start_delete, conv_id, name, base, job_id, relist_rule_id, expected_revision_id,
+                    )
                 else:
                     ebay_record = await in_worker_session(_start_followup_delete, conv_id, name, base, job_id, sale_id)
             except DelistError as exc:
@@ -697,7 +700,7 @@ def _start_followup_delete(db: Session, conv_id: str, name: str, base: dict, job
 
 
 def _start_delete(db: Session, conv_id: str, name: str, base: dict, job_id: str,
-                  relist_rule_id: str | None = None) -> dict | None:
+                  relist_rule_id: str | None = None, expected_revision_id: str | None = None) -> dict | None:
     if relist_rule_id is not None:
         from anteroom.services import listing_mode
 
@@ -705,6 +708,11 @@ def _start_delete(db: Session, conv_id: str, name: str, base: dict, job_id: str,
             rule = db.get(MarketplaceRelistRule, relist_rule_id, with_for_update=True)
             if not rule or rule.marketplace != name or not rule.enabled:
                 raise DelistError(409, "The relist rule was turned off. Nothing was delisted.", reason="relist_rule_disabled")
+            if expected_revision_id is not None:
+                listing = ListingRepo(db).get_current(conv_id)
+                if not listing or listing.current_revision_id != expected_revision_id:
+                    raise DelistError(409, "The listing changed while checking shipping. Nothing was delisted.",
+                                      reason="listing_changed")
             return _record_delete_start(db, conv_id, name, base, job_id)
     return _record_delete_start(db, conv_id, name, base, job_id)
 

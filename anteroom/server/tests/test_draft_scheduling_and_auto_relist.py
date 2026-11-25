@@ -134,6 +134,8 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         ok_ready = self.client.put(f"/api/conversations/{c1.id}/schedule/ready", json={"ready_to_list": True})
         self.assertEqual(ok_ready.status_code, 200)
         self.assertTrue(ok_ready.json()["ready_to_list"])
+        inventory = {row["id"]: row for row in self.client.get("/api/conversations").json()}
+        self.assertIsNone(inventory[c1.id]["scheduled_publish_at"])
 
         bad_ready = self.client.put(f"/api/conversations/{c_bad.id}/schedule/ready", json={"ready_to_list": True})
         self.assertEqual(bad_ready.status_code, 400)
@@ -154,6 +156,11 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertEqual(len(bulk_data["scheduled"]), 2)
         self.assertEqual(len(bulk_data["failed"]), 1)
         self.assertEqual(bulk_data["failed"][0]["conversation_id"], c_bad.id)
+
+        inventory = {row["id"]: row for row in self.client.get("/api/conversations").json()}
+        self.assertEqual(inventory[c1.id]["scheduled_publish_at"], future)
+        self.assertEqual(inventory[c2.id]["scheduled_publish_at"], future)
+        self.assertIsNone(inventory[c_bad.id]["scheduled_publish_at"])
 
         # Editing a scheduled draft automatically unschedules it so stale changes never publish.
         listing_persistence.save_revision(
@@ -176,6 +183,10 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         )
         self.assertEqual(unsched.status_code, 200)
         self.assertEqual(len(unsched.json()["unscheduled"]), 1)
+
+        inventory = {row["id"]: row for row in self.client.get("/api/conversations").json()}
+        self.assertIsNone(inventory[c1.id]["scheduled_publish_at"])
+        self.assertIsNone(inventory[c2.id]["scheduled_publish_at"])
 
         logs = self.client.get("/api/automations/scheduled-drafts/logs").json()["logs"]
         statuses = [entry["status"] for entry in logs]
@@ -448,7 +459,9 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         )
         self.db.commit()
 
-        async def delete(market, _command, **_kwargs):
+        async def delete(market, command, **_kwargs):
+            if command["type"] == "marketplace.form":
+                return {"ok": True, "relist_shipping_checked": True}
             if market == "mercari":
                 return {"ok": False, "error_code": "challenge", "error": "Mercari asked for a browser check."}
             return {"ok": True, "state": "deleted"}
@@ -463,8 +476,10 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         ):
             outcomes = asyncio.run(auto_relist.run_auto_relist(now=now))
 
-        self.assertEqual([call.args[0] for call in execute.await_args_list], ["mercari", "depop"])
-        self.assertEqual(execute.await_args_list[1].args[1]["payload"]["action"], "relist")
+        self.assertEqual([(call.args[0], call.args[1]["type"]) for call in execute.await_args_list], [
+            ("mercari", "marketplace.delete"), ("depop", "marketplace.form"), ("depop", "marketplace.delete"),
+        ])
+        self.assertEqual(execute.await_args_list[-1].args[1]["payload"]["action"], "relist")
         self.assertEqual([row["status"] for row in outcomes], ["failed", "completed"])
         self.assertEqual(publish.await_count, 1)
         self.assertEqual(publish.await_args.args[:2], (ids["seller-fleece"][0], "depop"))
@@ -477,6 +492,120 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
             self.assertEqual(auto_relist.price_for(prices.listing_json, "mercari"), 58.0)
             if old_id == "m123456790":
                 self.assertEqual(current.current_revision_id, revision_id)
+
+    def test_depop_relist_refuses_unavailable_shipping_before_delisting(self):
+        now = _now()
+        conv, _, original = self._create_draft("Jeans", price=12, depop_specifics={"parcelSize": "Extra extra small"})
+        original_id = original.id
+        old_id = "seller-jeans"
+        self.db.add_all([
+            MarketplaceListing(
+                id=new_id(), conversation_id=conv.id, marketplace="depop", state="published",
+                listing_id=old_id, listing_url=f"https://www.depop.com/products/{old_id}/",
+                listed_price=12, listed_at=now - timedelta(days=45),
+            ),
+            MarketplaceRelistRule(id=new_id(), marketplace="depop", enabled=True,
+                                  price_adjust_mode="percent", price_adjust_value=10),
+        ])
+        self.db.commit()
+        reason = "Depop needs a package size it offers for this item (it does not offer Extra extra small)."
+        with (
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+            patch("anteroom.services.cloud_marketplace.execute", AsyncMock(return_value={
+                "ok": False, "error_code": "missing_fields", "error": reason,
+            })) as execute,
+            patch("anteroom.services.marketplace_delist.delist", AsyncMock(return_value={
+                "depop": {"state": "deleted"},
+            })) as delete,
+            patch("anteroom.services.native_marketplaces.list_now", AsyncMock(return_value={
+                "state": "published", "listing_id": "seller-new-jeans",
+            })) as publish,
+        ):
+            outcomes = asyncio.run(auto_relist.run_auto_relist(now=now, marketplace="depop"))
+
+        execute.assert_awaited_once()
+        command = execute.await_args.args[1]
+        self.assertEqual(command["type"], "marketplace.form")
+        self.assertTrue(command["payload"]["check_relist_shipping"])
+        self.assertEqual(command["payload"]["listing"]["price"], 10.80)
+        self.assertEqual(command["payload"]["listing"]["depop_specifics"]["parcelSize"], "Extra extra small")
+        delete.assert_not_awaited()
+        publish.assert_not_awaited()
+        self.assertEqual([(row["status"], row["reason"]) for row in outcomes], [("failed", reason)])
+        self.db.expire_all()
+        listing = self.db.query(Listing).filter_by(conversation_id=conv.id).one()
+        self.assertEqual(listing.current_revision_id, original_id)
+        live = self.db.query(MarketplaceListing).filter_by(conversation_id=conv.id, marketplace="depop").one()
+        self.assertEqual((live.state, live.listing_id, live.listed_price), ("published", old_id, 12))
+
+    def test_depop_relist_skips_shipping_if_another_run_fills_the_daily_cap(self):
+        now = _now()
+        conv, _, _ = self._create_draft("Shirt", price=13)
+        self.db.add_all([
+            MarketplaceListing(
+                id=new_id(), conversation_id=conv.id, marketplace="depop", state="published",
+                listing_id="seller-shirt", listing_url="https://www.depop.com/products/seller-shirt/",
+                listed_price=13, listed_at=now - timedelta(days=45),
+            ),
+            MarketplaceRelistRule(id=new_id(), marketplace="depop", enabled=True, daily_cap=1),
+        ])
+        self.db.commit()
+        load = auto_relist._load_enabled_rules_and_candidates
+
+        def load_before_concurrent_relist(db, *args, **kwargs):
+            plan = load(db, *args, **kwargs)
+            self.assertEqual(len(plan), 1)
+            db.add(MarketplaceRelistLog(
+                id=new_id(), conversation_id=conv.id, marketplace="depop",
+                old_listing_id="seller-previous-shirt", new_listing_id="seller-shirt",
+                status="completed", created_at=now,
+            ))
+            db.commit()
+            return plan
+
+        with (
+            patch.object(auto_relist, "_load_enabled_rules_and_candidates", side_effect=load_before_concurrent_relist),
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+            patch("anteroom.services.cloud_marketplace.execute", AsyncMock(return_value={
+                "ok": True, "relist_shipping_checked": True,
+            })) as execute,
+        ):
+            outcomes = asyncio.run(auto_relist.run_auto_relist(now=now, marketplace="depop"))
+
+        self.assertEqual(outcomes, [])
+        execute.assert_not_awaited()
+
+    def test_depop_relist_waits_after_a_busy_publish_start(self):
+        from anteroom.services import automation_actions, native_marketplaces
+
+        now = _now()
+        conv, _, _ = self._create_draft("Shirt", price=13)
+        self.db.add_all([
+            MarketplaceListing(
+                id=new_id(), conversation_id=conv.id, marketplace="depop", state="published",
+                listing_id="seller-shirt", listing_url="https://www.depop.com/products/seller-shirt/",
+                listed_price=13, listed_at=now - timedelta(days=45),
+            ),
+            MarketplaceRelistRule(id=new_id(), marketplace="depop", enabled=True,
+                                  price_adjust_mode="percent", price_adjust_value=10),
+        ])
+        self.db.commit()
+        delete = AsyncMock(return_value={"ok": True})
+        busy = native_marketplaces.NativeMarketplaceError(409, "Another Depop action is running.",
+                                                          reason=native_marketplaces.BUSY)
+        with (
+            patch.object(automation_actions, "_wait_until_free", AsyncMock(return_value=True)) as wait,
+            patch.object(native_marketplaces, "list_now", AsyncMock(side_effect=[
+                busy, {"state": "published", "listing_id": "seller-new-shirt"},
+            ])) as publish,
+        ):
+            outcomes = asyncio.run(auto_relist.run_auto_relist(now=now, marketplace="depop", delister=delete))
+
+        delete.assert_awaited_once()
+        self.assertEqual(publish.await_count, 2)
+        self.assertEqual(wait.await_count, 2)
+        self.assertEqual(outcomes[0]["status"], "completed")
+        self.assertEqual(outcomes[0]["new_listing_id"], "seller-new-shirt")
 
     def test_relist_stops_deleting_after_a_replacement_job_fails(self):
         from types import SimpleNamespace
@@ -511,16 +640,17 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         with (
             patch("anteroom.services.cloud_sessions.has_active_session", return_value=False),
             patch("anteroom.services.extension_connection.current_extension", return_value=SimpleNamespace(connected=True)),
-            patch("anteroom.services.browser_bridge.request", AsyncMock(return_value={
-                "ok": True, "state": "deleted",
-            })) as bridge,
+            patch("anteroom.services.browser_bridge.request", AsyncMock(side_effect=[
+                {"ok": True, "relist_shipping_checked": True},
+                {"ok": True, "state": "deleted"},
+            ])) as bridge,
             patch("anteroom.services.native_marketplaces.list_now", side_effect=publish) as list_now,
         ):
             outcomes = asyncio.run(auto_relist.run_auto_relist(now=now))
 
         self.assertEqual([row["status"] for row in outcomes], ["down_needs_relist"])
         self.assertEqual(outcomes[0]["reason"], "Depop asked to sign in again.")
-        bridge.assert_awaited_once()
+        self.assertEqual([call.args[1] for call in bridge.await_args_list], ["marketplace.form", "marketplace.delete"])
         self.assertEqual(bridge.await_args.args[1:3], ("marketplace.delete", {
             "marketplace": "depop", "listing_id": "seller-fleece", "confirm": True, "action": "relist",
         }))
@@ -1319,6 +1449,31 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertEqual(auto_relist.compute_relist_price(40.0, rule_floor), 40.0)
         self.assertEqual(auto_relist.compute_relist_price(52.0, rule_floor), 50.0)
 
+        # Poshmark only takes whole dollars: a drop rounds down, never under the floor.
+        posh_pct = MarketplaceRelistRule(
+            id=new_id(), marketplace="poshmark", enabled=True,
+            price_adjust_mode="percent", price_adjust_value=10.0, price_floor=None,
+        )
+        self.assertEqual(auto_relist.compute_relist_price(9.0, posh_pct), 8.0)
+        self.assertEqual(auto_relist.compute_relist_price(5.0, posh_pct), 4.0)
+        self.assertEqual(auto_relist.compute_relist_price(4.0, posh_pct), 3.0)
+        posh_pct.price_floor = 7.5
+        self.assertEqual(auto_relist.compute_relist_price(8.0, posh_pct), 8.0)
+        self.assertEqual(auto_relist.compute_relist_price(9.0, posh_pct), 8.0)
+        # Mercari's form takes whole dollars too.
+        mercari_pct = MarketplaceRelistRule(
+            id=new_id(), marketplace="mercari", enabled=True,
+            price_adjust_mode="percent", price_adjust_value=10.0, price_floor=None,
+        )
+        self.assertEqual(auto_relist.compute_relist_price(6.0, mercari_pct), 5.0)
+        self.assertEqual(auto_relist.compute_relist_price(30.0, mercari_pct), 27.0)
+        # Marketplaces that take cents keep them.
+        ebay_pct = MarketplaceRelistRule(
+            id=new_id(), marketplace="ebay", enabled=True,
+            price_adjust_mode="percent", price_adjust_value=10.0, price_floor=None,
+        )
+        self.assertEqual(auto_relist.compute_relist_price(9.0, ebay_pct), 8.1)
+
         # M5: eBay GTC 30-day cycle triggers near end of cycle 1 (29d23h30m) and cycle 2 (59d23h30m), not day 31.
         ebay_rule = MarketplaceRelistRule(
             id=new_id(), marketplace="ebay", enabled=True, ebay_recreate_before_gtc_minutes=60,
@@ -1462,27 +1617,23 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.db.expire_all()
         return outcomes, listed
 
-    def test_auto_relist_rejects_fractional_poshmark_replacement_before_delist(self):
+    def test_poshmark_percent_drop_relists_at_a_whole_dollar_price(self):
+        from anteroom.services.seller_overrides import price_for
+
         self._pricing_rules_on()
-        conv, rev, _before = self._stale_poshmark_draft(general=12, listed_price=13, drop=10, mode="percent")
-        message = "Enter a whole-dollar price for Poshmark."
+        conv, rev, before = self._stale_poshmark_draft(general=12, listed_price=13, drop=10, mode="percent")
         preview = auto_relist.preview_status(self.db, marketplace="poshmark")["rules"][0]["candidates"][0]
-        self.assertEqual(preview["proposed_price"], 11.70)
-        delister = AsyncMock(return_value={"ok": True})
-        lister = AsyncMock(return_value={"ok": True, "listing_id": "5f00000000000000000000b2"})
+        # 10% off $13 is $11.70; Poshmark takes whole dollars, so the drop lands on $11.
+        self.assertEqual(preview["proposed_price"], 11)
+        self.assertNotIn("price", [gap["field"] for gap in preview["listing_gaps"]])
 
-        outcomes = asyncio.run(auto_relist.run_auto_relist(now=_now(), scheduled=True, delister=delister, lister=lister))
+        outcomes, listed = self._relist()
 
-        delister.assert_not_called()
-        lister.assert_not_called()
-        self.assertFalse(preview["local_fields_ready"])
-        self.assertIn({"field": "price", "message": message, "blocking": True}, preview["listing_gaps"])
-        self.assertEqual([(row["status"], row["reason"]) for row in outcomes], [("failed", message)])
-        self.db.expire_all()
-        current = self.db.query(Listing).filter_by(conversation_id=conv.id).one()
-        self.assertEqual(current.current_revision_id, rev.id)
-        live = self.db.query(MarketplaceListing).filter_by(conversation_id=conv.id, marketplace="poshmark").one()
-        self.assertEqual((live.state, live.listing_id, live.listed_price), ("published", "5f00000000000000000000a1", 13))
+        self.assertEqual([o["status"] for o in outcomes], ["completed"])
+        published = self.db.get(ListingRevision, listed[0])
+        assert published is not None
+        self.assertEqual(price_for(published.listing_json, "poshmark"), 11)
+        self.assertEqual(price_for(published.listing_json, "mercari"), before["mercari"])
 
     def test_relist_with_pricing_rules_keeps_the_live_price(self):
         from anteroom.services.seller_overrides import price_for

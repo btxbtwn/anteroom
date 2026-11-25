@@ -696,6 +696,59 @@ async def save_draft(conv_id: str, marketplace: Marketplace, revision_id: str, *
                         requested_by=requested_by)
 
 
+async def check_depop_relist_shipping(conv_id: str, revision_id: str, proposed_price: float | None) -> None:
+    """Check the replacement's shipping through the same transport as publication."""
+    from types import SimpleNamespace
+
+    from anteroom.services import cloud_marketplace, cloud_sessions, hosted_browser_relay, native_editor, service_context
+    from anteroom.services.pricing_rules import SNAPSHOT_RULES, freeze_active_rules
+
+    def prepare(db: Session) -> tuple[dict, bool]:
+        with freeze_active_rules() as rules:
+            snapshot = native_editor.form_snapshot(db, conv_id, "depop", revision_id, preload=False).snapshot
+            snapshot[SNAPSHOT_RULES] = rules
+        listing = _for_chrome(snapshot, "depop")
+        shipping = {key: listing[key] for key in (
+            "_seller_region", "direct_category_ids", "price", "seller_fields",
+        ) if key in listing}
+        specifics = listing.get("depop_specifics") or {}
+        shipping["depop_specifics"] = {key: specifics[key] for key in (
+            "parcelSize", "parcel_size", "price", "domesticShippingPrice",
+        ) if key in specifics}
+        if proposed_price is not None:
+            # Quote the price the relist will lock on the replacement revision.
+            shipping["price"] = proposed_price
+            shipping["depop_specifics"]["price"] = proposed_price
+        shipping["form"] = {"ships_from_zip": (listing.get("form") or {}).get("ships_from_zip")}
+        return shipping, cloud_sessions.has_active_session("depop", db)
+
+    listing, use_cloud = await in_worker_session(prepare)
+    payload = {"marketplace": "depop", "listing": listing, "refresh": True, "check_relist_shipping": True}
+    try:
+        if use_cloud:
+            result = await cloud_marketplace.execute("depop", {"type": "marketplace.form", "payload": payload}, timeout=25)
+        elif (context := service_context.current()) is not None:
+            result = await hosted_browser_relay.relay_for(context.seller_id).read("marketplace.form", payload, 25)
+        else:
+            result = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.form", payload, timeout=25)
+    except (browser_bridge.BrowserBridgeError, hosted_browser_relay.ChromeReadError) as exc:
+        raise NativeMarketplaceError(409, "Could not check Depop shipping. Check the Chrome connection.",
+                                     reason="chrome_unavailable") from exc
+    except cloud_marketplace.CloudExecutionUnavailable as exc:
+        raise NativeMarketplaceError(409, "Could not check Depop shipping. Check the Depop connection.",
+                                     reason="network") from exc
+    if result.get("ok") is True and result.get("relist_shipping_checked") is True:
+        return
+    if result.get("ok") is True or result.get("error_code") == "invalid_input":
+        raise NativeMarketplaceError(409, "Update Anteroom Bridge so Auto-Relist can check Depop shipping.",
+                                     reason="chrome_unavailable")
+    code = result.get("error_code")
+    message = result.get("error") if code == "missing_fields" else None
+    if code == "signed_out":
+        message = "Reconnect Depop before relisting."
+    raise NativeMarketplaceError(409, message or "Depop did not confirm the replacement's shipping options.", reason=code)
+
+
 def _active(db: Session, job_id: str, conv_id: str, marketplace: str) -> bool:
     from anteroom.models.job import ACTIVE_JOB_STATUSES
 

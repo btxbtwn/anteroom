@@ -534,7 +534,7 @@ async function readPoshmarkEditorForm(listing, deadline, refresh = false) {
 }
 
 async function handleNativeMarketplaceForm(msg, respond = result => sendBrowserResult(msg, result)) {
-  const { marketplace, listing = {} } = msg.payload || {};
+  const { marketplace, listing = {}, check_relist_shipping: checkRelistShipping } = msg.payload || {};
   const refresh = msg.payload?.refresh === true;
   const deadline = Date.now() + 20000;
   let answered = false;
@@ -549,6 +549,17 @@ async function handleNativeMarketplaceForm(msg, respond = result => sendBrowserR
   try {
     if (marketplace === 'poshmark') {
       reply({ ok: true, refreshed: refresh, form: await readPoshmarkEditorForm(listing, deadline, refresh) });
+    } else if (marketplace === 'depop' && checkRelistShipping === true) {
+      const category = depopCategory(listing, await depopAttributes(deadline));
+      if (!category) {
+        reply({ ok: false, error_code: 'missing_fields', error: 'Depop needs a category from its own list.' });
+        return;
+      }
+      const shipping = await depopShippingFields(listing, category, deadline);
+      const problem = shipping.problem;
+      reply(problem
+        ? { ok: false, error_code: 'missing_fields', error: problem.message || `Depop needs ${problem.needs}.` }
+        : { ok: true, relist_shipping_checked: true });
     } else if (marketplace === 'depop') {
       // Address does not depend on taxonomy; parcel rates do. Start independent
       // reads together and bound optional account reads so they cannot consume
@@ -582,7 +593,7 @@ async function handleNativeMarketplaceForm(msg, respond = result => sendBrowserR
     }
     else reply({ ok: false, error: 'This marketplace has no Chrome form reader.' });
   } catch (error) {
-    reply(refresh ? { ok: false, error_code: error.code || 'network' }
+    reply(refresh || checkRelistShipping === true ? { ok: false, error_code: error.code || 'network' }
       : { ok: false, error: error.message || 'The marketplace catalog could not be read.' });
   } finally {
     clearTimeout(timer);

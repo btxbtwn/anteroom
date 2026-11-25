@@ -194,7 +194,8 @@ The 0.1.713 production browser run still reproduced pool exhaustion. Its first
 error stack showed repeated full inventory reconciliation and suggestion
 calculations from several open tabs, including notes parsing and quantity
 derivation while transactions remained open. Hosted inventory and suggestion
-reads therefore share one build per seller and view. Completed snapshots are
+reads therefore share one build per seller and view; so does the still-listed
+sale alert (#2103), which every open screen polls. Completed snapshots are
 validated with the seller's complete change-feed vector on each request.
 The active draft-ID set is checked too, so durable task changes made by worker
 SQL invalidate busy suggestions even without a feed notification. Lease renewal

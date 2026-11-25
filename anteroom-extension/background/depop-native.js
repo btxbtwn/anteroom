@@ -153,8 +153,12 @@ function depopParcelRows(payload) {
 function depopParcelSize(sizes, listing) {
   const rows = depopParcelRows(sizes);
   const wanted = String(listing?.depop_specifics?.parcelSize || listing?.depop_specifics?.parcel_size || '').trim().toLowerCase();
-  if (wanted) return rows.find(size => size.title.toLowerCase() === wanted || size.id.toLowerCase() === wanted) || null;
-  return rows.find(size => size.suggested) || null;
+  if (!wanted) return rows.find(size => size.suggested) || null;
+  const exact = rows.find(size => size.id.toLowerCase() === wanted || size.title.toLowerCase() === wanted);
+  if (exact) return exact;
+  const key = marketplaceNameKey(wanted);
+  const matching = key ? rows.filter(size => marketplaceNameKey(size.title) === key) : [];
+  return matching.length === 1 ? matching[0] : null;
 }
 
 // The ship-from line on the sell page: name, street, city, ST ZIP, country.

@@ -18,6 +18,7 @@ from anteroom.models.listing import Listing, ListingRevision
 from anteroom.models.marketplace_listing import LIVE_STATES
 from anteroom.services.validation import etsy_eligible, validate_listing
 from anteroom.repositories import hosted_drafts
+from anteroom.repositories.queries import ConversationRepo, scheduled_publish_at_column
 from anteroom.routes import api_contract as contract
 from anteroom.routes.api_contract import CONFLICT, NOT_FOUND, REFUSED
 from anteroom.routes.hosted_direct_listing import ACTION_MARKETPLACES
@@ -26,6 +27,7 @@ from anteroom.services import generation_feedback, user_settings
 from anteroom.services.hosted_database import get_seller_db, in_seller_session
 from anteroom.services.hosted_limits import bounded_route_class
 from anteroom.services.hosted_listing_contract import editable_listing, stored_listing_fields
+from anteroom.services.inventory_facets import scheduled_publish_iso
 from anteroom.version import app_version
 
 # Listing saves, UI prefs, and metadata writes; photos upload through dedicated photo routes.
@@ -63,7 +65,7 @@ def iso(value):
 
 
 def conversation_response(row, listing=None, direct=None, *, notes=None, include_notes=True, missing_sale_data=None, sold=None,
-                          price_drift=None):
+                          price_drift=None, scheduled_publish_at=None):
     """One inventory row. ``notes`` are the parsed notes when the caller deferred loading them.
 
     ``sold`` is the item's status from its sales: the Sold tab sorts by its
@@ -75,6 +77,7 @@ def conversation_response(row, listing=None, direct=None, *, notes=None, include
     if notes is None:
         notes = parse_notes(row.notes)
     result = {'id': row.id, 'title': row.title, 'status': row.status,
+            'scheduled_publish_at': scheduled_publish_iso(scheduled_publish_at),
             'box_id': row.box_id, 'settled_at': iso(row.settled_at), 'unsettled_at': iso(row.unsettled_at),
             'created_at': iso(row.created_at) or '', 'updated_at': iso(row.updated_at) or '',
             'sku': (listing or {}).get('sku'), 'price': (listing or {}).get('price'),
@@ -151,7 +154,6 @@ async def suggestions(request: Request):
 
 def inventory_response(db):
     from anteroom.models.background_task import BackgroundTask
-    from anteroom.repositories.queries import ConversationRepo
     from anteroom.services.background_tasks import ACTIVE
     from anteroom.services.hosted_read_snapshots import snapshot_step
 
@@ -194,13 +196,17 @@ def inventory_response(db):
     with snapshot_step(db, 'listings'):
         current = {}
         revisions: dict[str, str] = {}
-        for identity, revision_id, fields in db.execute(select(
-                Listing.conversation_id, Listing.current_revision_id, ListingRevision.inventory_fields).outerjoin(
+        scheduled: dict[str, datetime] = {}
+        for identity, revision_id, fields, publish_at in db.execute(select(
+                Listing.conversation_id, Listing.current_revision_id, ListingRevision.inventory_fields,
+                scheduled_publish_at_column).outerjoin(
                 ListingRevision, (ListingRevision.id == Listing.current_revision_id)
                 & (ListingRevision.conversation_id == Listing.conversation_id)
                 & (ListingRevision.user_id == Listing.user_id))):
             if revision_id:
                 revisions[identity] = revision_id
+            if publish_at is not None:
+                scheduled[identity] = publish_at
             if isinstance(fields, dict):
                 price = fields.get('price')
                 quantity = fields.get('quantity')
@@ -232,7 +238,8 @@ def inventory_response(db):
         for row in rows:
             summary = conversation_response(row, current.get(row.id), direct.get(row.id), notes=notes.get(row.id, {}), include_notes=False,
                                             missing_sale_data=missing.get(row.id, []), sold=analytics.statuses.get(row.id),
-                                            price_drift=drift.drift(row.id, direct.get(row.id)))
+                                            price_drift=drift.drift(row.id, direct.get(row.id)),
+                                            scheduled_publish_at=scheduled.get(row.id))
             summary['unsent_edits'] = row.id in unsent
             if row.id in covers:
                 from anteroom.services.photos import cover_thumb_url
@@ -265,7 +272,8 @@ def get_conversation(identity: str, db=Depends(get_seller_db, scope="function"))
     direct = MarketplaceListingRepo(db).summaries(identity).get(identity, {})
     return conversation_response(row, direct=direct, missing_sale_data=missing_by_conversation(db, identity).get(identity, []),
                                  sold=status_for(db, identity, parse_notes(row.notes)),
-                                 price_drift=drift.drift(identity, direct))
+                                 price_drift=drift.drift(identity, direct),
+                                 scheduled_publish_at=ConversationRepo(db).scheduled_publish_at(identity))
 
 
 @router.patch('/conversations/{identity}', response_model=contract.Conversation, responses={**REFUSED, **NOT_FOUND, **CONFLICT})
@@ -318,8 +326,10 @@ def listing_screen(identity: str, db=Depends(get_seller_db, scope="function")):
     mp_sales = conversation_new_sales(db, row, mp_listings)
     # The contract parts read exactly as their own routes answer them, so a
     # client can seed those reads from this one.
+    publish_at = ConversationRepo(db).scheduled_publish_at(identity)
     payload = {
-        'conversation': contract.Conversation.model_validate(conversation_response(row)).model_dump(mode='json'),
+        'conversation': contract.Conversation.model_validate(
+            conversation_response(row, scheduled_publish_at=publish_at)).model_dump(mode='json'),
         'listing': contract.ListingDocument.model_validate(listing_doc).model_dump(mode='json'),
         'photos': [contract.ListingPhoto.model_validate(photo).model_dump(mode='json') for photo in general_photos],
         'messages': loaded_messages,

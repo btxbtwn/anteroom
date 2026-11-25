@@ -452,7 +452,9 @@ async function executeMarketplaceOperation({
     'marketplace.promote', 'marketplace.promotion_check', 'marketplace.promotion_result',
     'marketplace.sessions', 'marketplace.verify_session', 'marketplace.sales', 'marketplace.sales_history',
     'marketplace.import.page', 'marketplace.import.listing', 'marketplace.like_events'];
-  if (marketplace === 'poshmark') allowed.push('marketplace.form');
+  if (marketplace === 'poshmark' || (marketplace === 'depop' && command.payload?.check_relist_shipping === true)) {
+    allowed.push('marketplace.form');
+  }
   if (!allowed.includes(type)) {
     return { result: { ok: false, safe_to_retry: true, error_code: 'rejected', error: 'Unsupported cloud command.' },
       cookies_changed: false, cookies };

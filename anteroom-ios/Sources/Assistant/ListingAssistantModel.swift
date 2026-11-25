@@ -24,11 +24,22 @@ final class ListingAssistantModel {
     var text = ""
     var attachments: [ChatAttachment] = []
     private(set) var attachmentsAvailable = false
+    /// When the draft is scheduled to publish. Saving a change unschedules it on
+    /// the server, so this is read again after every run.
+    private(set) var scheduledPublishAt: Date?
 
-    init(api: AnteroomAPI, listingID: String, text: String = "") {
+    init(api: AnteroomAPI, listingID: String, scheduledPublishAt: Date? = nil, text: String = "") {
         self.api = api
         self.listingID = listingID
+        self.scheduledPublishAt = scheduledPublishAt
         self.text = text
+    }
+
+    /// Reads the draft's schedule again. Any run may have saved a change, which
+    /// unschedules the draft, even one that ended with an error or a stop.
+    private func refreshSchedule() async {
+        guard let conversation = try? await api.conversation(listingID) else { return }
+        scheduledPublishAt = ServerDate.parse(conversation.scheduledPublishAt)
     }
 
     var canStart: Bool {
@@ -101,6 +112,7 @@ final class ListingAssistantModel {
             // Require an explicit reconnect instead of submitting it twice.
             needsReconnect = true
         }
+        await refreshSchedule()
     }
 
     func stop() async {

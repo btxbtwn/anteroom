@@ -200,6 +200,8 @@ class ConversationSummary(ContractModel):
     id: str
     title: str | None
     status: str
+    scheduled_publish_at: str | None = None
+    """When a pending publish is scheduled, in UTC."""
     box_id: str | None = None
     """The wholesale box this item came out of."""
     settled_at: str | None = None

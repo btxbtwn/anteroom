@@ -262,6 +262,8 @@ struct Conversation: Identifiable, Codable, Hashable, Sendable {
     var id: String
     var title: String?
     var status: String
+    /// When a pending publish is scheduled, in UTC.
+    var scheduledPublishAt: String?
     /// The wholesale box this item came out of.
     var boxID: String?
     var settledAt: String?
@@ -324,6 +326,7 @@ struct Conversation: Identifiable, Codable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, status, sku, price, quantity, favorite, notes
+        case scheduledPublishAt = "scheduled_publish_at"
         case boxID = "box_id"
         case settledAt = "settled_at"
         case unsettledAt = "unsettled_at"
@@ -361,6 +364,7 @@ extension Conversation {
         id = try values.decode(String.self, forKey: .id)
         title = try values.decodeIfPresent(String.self, forKey: .title)
         status = try values.decode(String.self, forKey: .status)
+        scheduledPublishAt = try values.decodeIfPresent(String.self, forKey: .scheduledPublishAt)
         boxID = try values.decodeIfPresent(String.self, forKey: .boxID)
         settledAt = try values.decodeIfPresent(String.self, forKey: .settledAt)
         unsettledAt = try values.decodeIfPresent(String.self, forKey: .unsettledAt)
@@ -420,6 +424,8 @@ struct ConversationSummary: Identifiable, Codable, Hashable, Sendable {
     var id: String
     var title: String?
     var status: String
+    /// When a pending publish is scheduled, in UTC.
+    var scheduledPublishAt: String?
     /// The wholesale box this item came out of.
     var boxID: String?
     var settledAt: String?
@@ -481,6 +487,7 @@ struct ConversationSummary: Identifiable, Codable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, status, sku, price, quantity, favorite
+        case scheduledPublishAt = "scheduled_publish_at"
         case boxID = "box_id"
         case settledAt = "settled_at"
         case unsettledAt = "unsettled_at"
@@ -518,6 +525,7 @@ extension ConversationSummary {
         id = try values.decode(String.self, forKey: .id)
         title = try values.decodeIfPresent(String.self, forKey: .title)
         status = try values.decode(String.self, forKey: .status)
+        scheduledPublishAt = try values.decodeIfPresent(String.self, forKey: .scheduledPublishAt)
         boxID = try values.decodeIfPresent(String.self, forKey: .boxID)
         settledAt = try values.decodeIfPresent(String.self, forKey: .settledAt)
         unsettledAt = try values.decodeIfPresent(String.self, forKey: .unsettledAt)
