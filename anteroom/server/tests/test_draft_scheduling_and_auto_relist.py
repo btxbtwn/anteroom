@@ -1621,7 +1621,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         from anteroom.services.seller_overrides import price_for
 
         self._pricing_rules_on()
-        conv, rev, before = self._stale_poshmark_draft(general=12, listed_price=13, drop=10, mode="percent")
+        self._stale_poshmark_draft(general=12, listed_price=13, drop=10, mode="percent")
         preview = auto_relist.preview_status(self.db, marketplace="poshmark")["rules"][0]["candidates"][0]
         # 10% off $13 is $11.70; Poshmark takes whole dollars, so the drop lands on $11.
         self.assertEqual(preview["proposed_price"], 11)
@@ -1633,7 +1633,8 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         published = self.db.get(ListingRevision, listed[0])
         assert published is not None
         self.assertEqual(price_for(published.listing_json, "poshmark"), 11)
-        self.assertEqual(price_for(published.listing_json, "mercari"), before["mercari"])
+        # General saves the same whole-dollar price.
+        self.assertEqual(published.listing_json["price"], 11)
 
     def test_relist_with_pricing_rules_keeps_the_live_price(self):
         from anteroom.services.seller_overrides import price_for
