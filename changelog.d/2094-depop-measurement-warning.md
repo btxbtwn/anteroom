@@ -1,0 +1,1 @@
+- Clear the false Depop warning for measurements copied from Item Details.

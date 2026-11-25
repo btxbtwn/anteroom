@@ -536,6 +536,34 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         self.assertEqual(ListingRepo(self.db).get_current(self.conv.id).current_revision_id, revision.id)
         self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
 
+    def test_depop_preflight_only_warns_about_unsupported_measurements_owned_by_the_seller(self):
+        from anteroom.services import native_contract
+
+        self.conv.notes = '{"garment":"top","measurements":{"top":{"pitToPit":"22","length":"31"}}}'
+        measurement_path = "depop_specifics.measurements"
+        description = 'Measurements: Pit to pit: 22", Length: 31"'
+        listing = native.direct_preflight.prepare(self.db, self.conv, {**LISTING, "description": description}, "depop")
+        form = {"category_id": "menswear_tshirts", "page_labels": True, "fields": [
+            {"path": "depop_specifics.description", "label": "Description", "required": True},
+        ]}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"depop": form}, ["depop"])
+        for seller_owned in (False, True):
+            with self.subTest(seller_owned=seller_owned):
+                measurements = {"unit": "in", "values": [{"id": "pit_to_pit", "value": "23"}]}
+                payload = {
+                    **listing,
+                    "depop_specifics": {**listing["depop_specifics"], "measurements": measurements if seller_owned else {}},
+                    "seller_fields": [measurement_path] if seller_owned else [],
+                }
+                revision = listing_persistence.save_revision(self.db, self.conv.id, payload, "native_schema")
+                depop = native.preflight(self.conv.id, self.db)["marketplaces"]["depop"]
+                self.assertTrue(depop["ready"], depop)
+                paths = {gap["field"] for gap in depop["gaps"] if gap["field"].startswith(measurement_path)}
+                expected = {f"{measurement_path}.unit", f"{measurement_path}.values"} if seller_owned else set()
+                self.assertEqual(paths, expected)
+                self.assertEqual(revision.listing_json["description"], description)
+        self.bridge.assert_not_awaited()
+
     def record(self, platform):
         return MarketplaceListingRepo(self.db).get(self.conv.id, platform)
 

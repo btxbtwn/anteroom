@@ -1,4 +1,4 @@
-import { createListing, expect, openListing, test } from "./fixtures";
+import { createListing, expect, openForm, openListing, test } from "./fixtures";
 
 test("a single listing reads its measurements and saves them only on Fill in", async ({ page, phone, request }, info) => {
   const title = `Measurements ${info.project.name} ${Date.now()}`;
@@ -40,6 +40,49 @@ test("a single listing reads its measurements and saves them only on Fill in", a
     await expect(pitToPit).toHaveValue("21.5");
     await expect(section.getByRole("spinbutton", { name: "Length" })).toHaveValue("28");
     await expect(suggestion).toBeHidden();
+  } finally {
+    const removed = await request.delete(`/api/conversations/${id}`);
+    expect(removed.ok()).toBe(true);
+  }
+});
+
+test("a Depop draft keeps its description measurements without an unsupported-field warning", async ({ page, phone, request }, info) => {
+  const title = `Blue western shirt ${info.project.name} ${Date.now()}`;
+  const id = await createListing(request, title);
+  try {
+    const notes = JSON.stringify({ garment: "top", measurements: { top: { pitToPit: "22", length: "31" } } });
+    const details = await request.patch(`/api/conversations/${id}`, { data: { notes } });
+    expect(details.ok(), await details.text()).toBe(true);
+    const description = 'Blue western shirt.\n\nMeasurements: Pit to pit: 22", Length: 31"';
+    const saved = await request.put(`/api/conversations/${id}/listing`, { data: { expected_revision_id: "", listing: {
+      title, description, brand: "Wrangler", condition: "Good", size: "M", price: 24, quantity: 1,
+      primaryColor: "Blue", direct_category_ids: { depop: "menswear_shirts" }, depop_specifics: { parcelSize: "Small" },
+    } } });
+    expect(saved.ok(), await saved.text()).toBe(true);
+    const { revision_id } = await saved.json();
+    const refreshed = await request.post(`/api/conversations/${id}/native-marketplaces/depop/form/refresh`, { data: { revision_id } });
+    expect(refreshed.ok(), await refreshed.text()).toBe(true);
+
+    const preflightPath = `/api/conversations/${id}/native-marketplaces/preflight`;
+    await page.route(`**${preflightPath}`, async route => {
+      const response = await route.fetch();
+      expect(response.ok(), await response.text()).toBe(true);
+      const result = await response.json();
+      const depop = result.marketplaces.depop;
+      // Isolate the measurements from the category and occasion aliases seeded by a manual fixture save.
+      const fixtureAliases = ["depop_specifics.categoryId", "depop_specifics.occasion"];
+      depop.gaps = depop.gaps.filter((gap: { field: string }) => !fixtureAliases.includes(gap.field));
+      await route.fulfill({ response, json: result });
+    });
+    const preflight = page.waitForResponse(response => response.url().endsWith(preflightPath));
+    await openListing(page, phone, title);
+    if (phone) await page.getByRole("tab", { name: "Listing", exact: true }).click();
+    await openForm(page, phone, "Depop");
+    const result = await (await preflight).json();
+    expect(result.marketplaces.depop.gaps).toEqual([]);
+    await expect(page.getByRole("textbox", { name: "Description" })).toHaveValue(description);
+    await expect(page.getByText("This field is not provided by the selected marketplace form.", { exact: true })).toHaveCount(0);
+    await page.screenshot({ path: info.outputPath("depop-measurements.png") });
   } finally {
     const removed = await request.delete(`/api/conversations/${id}`);
     expect(removed.ok()).toBe(true);
