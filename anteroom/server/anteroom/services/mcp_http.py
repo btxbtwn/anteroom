@@ -159,7 +159,10 @@ def _tool_allowed(name: str, permissions: dict[str, str] | None) -> bool:
     That reaches every tool except marketplace actions, which only a token or
     app the seller granted them reaches.
     """
-    area, level = TOOL_PERMISSIONS[name]
+    entry = TOOL_PERMISSIONS.get(name)
+    if entry is None:
+        return False
+    area, level = entry
     if permissions is None:
         return area not in mcp_marketplace_tools.GRANTED_ONLY_AREAS
     return mcp_tokens.allows(permissions, area, level)
@@ -730,7 +733,9 @@ def _handle_single(
             arguments = {}
         if not isinstance(arguments, dict):
             return _rpc_error(msg_id, -32602, "Invalid params: arguments must be an object"), None
-        if name in TOOL_PERMISSIONS and not _tool_allowed(name, permissions):
+        if name not in TOOL_PERMISSIONS:
+            return _rpc_error(msg_id, -32602, f"Unknown tool: {name}"), None
+        if not _tool_allowed(name, permissions):
             return _rpc_result(msg_id, _tool_error_result(_refusal(name, permissions))), None
         try:
             result_data = _dispatch_tool(

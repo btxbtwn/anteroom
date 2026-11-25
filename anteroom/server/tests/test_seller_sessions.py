@@ -351,6 +351,77 @@ def test_connected_app_token_reaches_mcp_with_its_client(client, signing_keys, m
     assert seen["hosted_token_id"] is None
 
 
+def test_mcp_access_tokens_are_refused_outside_mcp(client, monkeypatch):
+    from anteroom.services import mcp_tokens
+
+    auth_calls = []
+
+    def unexpected_auth(*args, **kwargs):
+        auth_calls.append((args, kwargs))
+        return mcp_tokens.VerifiedMcpToken(token_id="tok-1", owner_id=USER_ID)
+
+    monkeypatch.setattr(mcp_tokens, "authenticate_token", unexpected_auth)
+    token = "arm_" + "a" * 32
+    for method, path in [
+        ("GET", "/api/account"),
+        ("GET", "/api/listings"),
+        ("GET", "/api/settings/mcp-tokens"),
+        ("GET", "/api/settings/mcp-connections"),
+        ("POST", "/api/marketplace-listings/delist"),
+        ("POST", "/api/mcp/"),
+    ]:
+        response = client.request(method, path, headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 401, path
+    assert auth_calls == []
+
+
+def test_mcp_access_token_reaches_mcp_with_its_token_id(client, monkeypatch):
+    from anteroom.routes import mcp as mcp_route
+    from anteroom.services import mcp_tokens
+
+    seen = {}
+    auth_calls = []
+
+    def fake_auth(engine, raw_token, *, hosted=False):
+        auth_calls.append((raw_token, hosted))
+        return mcp_tokens.VerifiedMcpToken(token_id="tok-123", owner_id=USER_ID)
+
+    def fake_call(db, payload, **kwargs):
+        seen.update(kwargs)
+        return {"jsonrpc": "2.0", "id": 1, "result": {}}, 200, {}
+
+    async def fake_worker_session(step):
+        return step(None)
+
+    monkeypatch.setattr(mcp_tokens, "authenticate_token", fake_auth)
+    monkeypatch.setattr(mcp_route, "_run_mcp_call", fake_call)
+    monkeypatch.setattr(mcp_route, "in_worker_session", fake_worker_session)
+    token = "arm_" + "b" * 32
+    response = client.post("/api/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"},
+                           headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    assert auth_calls == [(token, True)]
+    assert seen["hosted_token_id"] == "tok-123"
+    assert seen["oauth_client_id"] is None
+
+
+def test_mcp_access_token_auth_is_rate_limited_in_hosted_middleware(client, monkeypatch):
+    from anteroom.services import mcp_tokens
+
+    mcp_tokens.clear_auth_failures()
+    monkeypatch.setattr(mcp_tokens, "authenticate_token", lambda *_a, **_kw: None)
+    auth_headers = {"Authorization": "Bearer arm_" + "c" * 32, "Fly-Client-IP": "198.51.100.42"}
+    try:
+        for _ in range(mcp_tokens.AUTH_FAIL_MAX):
+            resp = client.post("/api/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"}, headers=auth_headers)
+            assert resp.status_code == 401
+        throttled = client.post("/api/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"}, headers=auth_headers)
+        assert throttled.status_code == 429
+        assert throttled.headers["retry-after"] == "60"
+    finally:
+        mcp_tokens.clear_auth_failures()
+
+
 @pytest.mark.parametrize("client_id", ["", 7, "x" * 129])
 def test_malformed_client_claim_is_refused(client, signing_keys, client_id):
     token = session_token(signing_keys, client_id=client_id)

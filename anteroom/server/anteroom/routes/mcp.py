@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import Callable
 from threading import Event
 from time import monotonic
@@ -37,6 +38,7 @@ from anteroom.services import (
 from anteroom.services.hosted_limits import read_bounded_body
 from anteroom.services.local_requests import came_through_tailnet
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
 router.include_router(mcp_photo_uploads.router)
 
@@ -256,8 +258,12 @@ async def mcp_post(request: Request):
                         ),
                         timeout=_MCP_STORAGE_CLEANUP_TIMEOUT_SECONDS,
                     )
-                except Exception:  # noqa: BLE001 - best-effort cleanup after DB commit
-                    pass
+                except Exception as exc:  # noqa: BLE001 - best-effort cleanup after DB commit
+                    log.warning(
+                        "MCP deferred photo cleanup failed (%s) for %d object(s)",
+                        type(exc).__name__,
+                        len(deferred_deletes),
+                    )
 
     worker = asyncio.create_task(run_and_cleanup())
     # Keep the task alive after the request returns, and consume detached exceptions.
