@@ -322,3 +322,45 @@ def test_reload_marketplace_form_timeout_saves_nothing(monkeypatch):
     assert not error and result["saved"] is False and result["reason"] == "timeout", result
     listing, error = _call_tool(client, "get_listing", {"conversation_id": draft["conversation_id"]})
     assert listing["current_revision_id"] == draft["revision_id"]
+
+
+def test_reload_marketplace_form_save_past_the_request_deadline_is_not_committed(monkeypatch):
+    import threading
+    import time
+
+    from test_mcp_http import _rpc
+
+    from anteroom.services import mercari_api, native_editor
+
+    async def quotes(_category, _ounces, _dimensions):
+        return [{"id": 2553, "fee": 999, "weightRange": {"min": 1, "max": 48}, "etaForSeller": "1 - 7 days"}]
+
+    monkeypatch.setattr(mercari_api, "shipping_quotes", quotes)
+    client = TestClient(app)
+    draft = _new_draft(client, {
+        "direct_category_ids": {"mercari": "275"},
+        "mercari_specifics": {"package": {"pounds": 1, "ounces": 0, "fitsShoebox": "yes"}},
+    })
+    save = native_editor.save_refreshed_form
+    finished = threading.Event()
+
+    def slow_save(*args, **kwargs):
+        # The save waits on a locked database until after the caller was answered.
+        try:
+            time.sleep(1.5)
+            return save(*args, **kwargs)
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(native_editor, "save_refreshed_form", slow_save)
+    monkeypatch.setattr(mcp, "_MCP_RPC_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setattr(mcp, "_MCP_REPLY_MARGIN_SECONDS", 0.2)
+    response = _rpc(client, "tools/call", {"name": "reload_marketplace_form", "arguments": {
+        "conversation_id": draft["conversation_id"], "marketplace": "mercari", "expected_revision_id": draft["revision_id"],
+    }})
+    assert response.status_code == 504, response.text
+    assert finished.wait(5)
+    time.sleep(0.2)
+    monkeypatch.setattr(mcp, "_MCP_RPC_TIMEOUT_SECONDS", 30.0)
+    listing, error = _call_tool(client, "get_listing", {"conversation_id": draft["conversation_id"]})
+    assert not error and listing["current_revision_id"] == draft["revision_id"], listing

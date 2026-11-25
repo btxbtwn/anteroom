@@ -20,6 +20,7 @@ from time import monotonic
 from types import SimpleNamespace
 from typing import Any
 
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from anteroom.models.catalog import CategoryFieldSchema
@@ -652,13 +653,27 @@ def _remaining_form_gaps(db: Session, conv_id: str, market: str) -> list[dict[st
             for gap in native_contract.gaps(listing, market) if gap.get("blocking", True)]
 
 
-async def _save_reloaded_form(spec: dict, form: dict) -> dict:
-    """Save a form read by Reload: the editor's own fenced save, then what that marketplace still needs."""
-    from anteroom.database import in_worker_session
+def _save_form_in_time(db: Session, expired: Callable[[], bool], conv_id: str, market: str,
+                       revision_id: str, form: dict) -> dict:
     from anteroom.services import native_editor
 
+    def refuse_late_commit(*_args: Any) -> None:
+        # The caller was already told this call timed out and nothing more was saved.
+        if expired():
+            raise TimeoutError
+
+    event.listen(db, "before_commit", refuse_late_commit)
+    # A commit flushes after before_commit, and a flush can wait on a locked database.
+    event.listen(db, "after_flush", refuse_late_commit)
+    return native_editor.save_refreshed_form(db, conv_id, market, revision_id, form)
+
+
+async def _save_reloaded_form(spec: dict, form: dict, expired: Callable[[], bool]) -> dict:
+    """Save a form read by Reload: the editor's own fenced save, then what that marketplace still needs."""
+    from anteroom.database import in_worker_session
+
     market, conv_id = spec["marketplace"], spec["conversation_id"]
-    saved = await in_worker_session(native_editor.save_refreshed_form, conv_id, market, spec["revision_id"], form)
+    saved = await in_worker_session(_save_form_in_time, expired, conv_id, market, spec["revision_id"], form)
     remaining = await in_worker_session(_remaining_form_gaps, conv_id, market)
     return {"conversation_id": conv_id, "marketplace": market, "saved": True, "revision_id": saved["revision_id"],
             "remaining": remaining}
@@ -838,8 +853,12 @@ def _revision_matches(db: Session, conversation_id: str, revision_id: str) -> bo
     return current is not None and current.current_revision_id == revision_id
 
 
-async def finish_form_reads(reads: list[tuple[dict[str, Any], dict[str, Any]]], *, deadline: float) -> None:
-    """Complete explicit reads off the MCP database session, within the shared request budget."""
+async def finish_form_reads(reads: list[tuple[dict[str, Any], dict[str, Any]]], *, deadline: float,
+                            expired: Callable[[], bool]) -> None:
+    """Complete explicit reads off the MCP database session, within the shared request budget.
+
+    ``expired`` is the request's own check: a reload's save is refused once the caller was told it timed out.
+    """
     from anteroom.database import in_worker_session
 
     async def finish(result: dict, spec: dict) -> None:
@@ -852,10 +871,11 @@ async def finish_form_reads(reads: list[tuple[dict[str, Any], dict[str, Any]]], 
                 from anteroom.services import native_editor
 
                 # Only the marketplace read is under the deadline. The save that follows is a short,
-                # fenced database write: cancelling it part-way could commit after "Nothing was saved".
+                # fenced database write: cancelling it part-way could commit after "Nothing was saved",
+                # so it refuses its own commit instead once the request has timed out.
                 async with asyncio.timeout(min(25.0, remaining)):
                     form = await native_editor.editor_form(conv_id, market, revision_id, refresh=True)
-                data = await _save_reloaded_form(spec, form)
+                data = await _save_reloaded_form(spec, form, expired)
             else:
                 async with asyncio.timeout(remaining):
                     data = await _refresh_marketplace_form(spec, min(25.0, remaining))

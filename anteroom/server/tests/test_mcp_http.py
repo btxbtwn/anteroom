@@ -690,12 +690,13 @@ READ_TOOLS = {
     "get_sourcing_roi", "run_etsy_audit", "get_needs_attention", "get_import_matches", "get_action_status",
     "search_orders", "get_profit_and_loss", "search_expenses", "get_inventory_summary",
 }
-READ_TOOLS |= set(mcp_catalog_tools.PERMISSIONS)
+READ_TOOLS |= {name for name, (_, level) in mcp_catalog_tools.PERMISSIONS.items() if level == "read"}
 LISTING_WRITE_TOOLS = {
     "create_draft_listing", "edit_listing", "manage_listing_photos",
     "manage_labels_and_notes", "delete_draft_listing", "set_favorite", "confirm_import_match", "reject_import_match",
     "add_listing_photos", "create_photo_upload_url", "set_cover_photo",
 }
+LISTING_WRITE_TOOLS |= {name for name, (_, level) in mcp_catalog_tools.PERMISSIONS.items() if level == "write"}
 ATTENTION_WRITE_TOOLS = {"dismiss_attention_items", "resolve_attention_items", "restore_attention_items"}
 # Inventory tidying tools (services/mcp_organize_tools.py).
 READ_TOOLS |= {"get_pending_edits", "get_labels"}
