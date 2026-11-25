@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1271 — 2026-11-25
+
+- Mercari Auto-Relist no longer deletes a live Mercari listing first. Mercari could refuse the replacement after the delete and leave the item off Mercari, so Auto-Relist now leaves Mercari listings up with their price unchanged and says so in the Auto-relist log. Poshmark, eBay and Depop Auto-Relist, and listing or delisting on Mercari yourself, work as before.
+
 ## 0.1.1270 — 2026-11-25
 
 - An Auto-Relist that stops before the old listing is deleted now records the try as failed and puts back the price it lowered, so the listing is relisted again on a later pass instead of being skipped for good.

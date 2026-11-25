@@ -1,1 +1,0 @@
-- Mercari Auto-Relist no longer deletes a live Mercari listing first. Mercari could refuse the replacement after the delete and leave the item off Mercari, so Auto-Relist now leaves Mercari listings up with their price unchanged and says so in the Auto-relist log. Poshmark, eBay and Depop Auto-Relist, and listing or delisting on Mercari yourself, work as before.
