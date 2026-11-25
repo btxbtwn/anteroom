@@ -1738,6 +1738,94 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertEqual({m: price_for(saved.listing_json, m) for m in before}, before)
         self.assertNotIn("poshmark_specifics.poshmarkPrice", saved.listing_json.get("seller_fields") or [])
 
+    def _assert_prices_put_back(self, conv: Conversation, before: dict) -> None:
+        from anteroom.services.seller_overrides import price_for
+
+        self.db.expire_all()
+        current = self.db.query(Listing).filter_by(conversation_id=conv.id).one()
+        saved = self.db.get(ListingRevision, current.current_revision_id)
+        assert saved is not None
+        self.assertEqual(saved.listing_json.get("price"), 30.0)
+        self.assertEqual({m: price_for(saved.listing_json, m) for m in before}, before)
+
+    def test_a_delist_that_raises_is_recorded_failed_and_puts_the_price_back(self):
+        from fastapi import HTTPException
+
+        conv, _rev, before = self._stale_poshmark_draft(general=30.0, listed_price=38.0, drop=5)
+        delister = AsyncMock(side_effect=HTTPException(409, "Direct marketplace actions are disabled."))
+        lister = AsyncMock(return_value={"ok": True, "listing_id": "5f00000000000000000000b2"})
+
+        outcomes = asyncio.run(auto_relist.run_auto_relist(now=_now(), delister=delister, lister=lister))
+
+        self.assertEqual([o["status"] for o in outcomes], ["failed"])
+        self.assertIn("Direct marketplace actions are disabled.", outcomes[0]["reason"])
+        lister.assert_not_called()
+        self.assertEqual(self.db.query(MarketplaceRelistLog).filter_by(conversation_id=conv.id).one().status, "failed")
+        self._assert_prices_put_back(conv, before)
+
+    def test_a_relist_cancelled_while_delisting_puts_the_price_back(self):
+        conv, _rev, before = self._stale_poshmark_draft(general=30.0, listed_price=38.0, drop=5)
+        lister = AsyncMock(return_value={"ok": True, "listing_id": "5f00000000000000000000b2"})
+
+        async def scenario():
+            started = asyncio.Event()
+
+            async def delister(conv_id: str, market: str) -> dict:
+                started.set()
+                await asyncio.Event().wait()
+                return {"ok": True}
+
+            task = asyncio.create_task(auto_relist.run_auto_relist(now=_now(), delister=delister, lister=lister))
+            await started.wait()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+        asyncio.run(scenario())
+
+        lister.assert_not_called()
+        self._assert_prices_put_back(conv, before)
+
+    def test_a_relist_is_not_reserved_outside_direct_listing_mode(self):
+        from fastapi import HTTPException
+
+        conv, rev, _before = self._stale_poshmark_draft(general=30.0, listed_price=38.0, drop=5)
+        delister = AsyncMock(return_value={"ok": True})
+
+        with patch("anteroom.services.listing_mode.read", return_value="vendoo"), self.assertRaises(HTTPException):
+            asyncio.run(auto_relist.run_auto_relist(
+                now=_now(), delister=delister, lister=AsyncMock(return_value={"ok": True, "listing_id": "5f00000000000000000000b2"}),
+            ))
+
+        delister.assert_not_called()
+        self.db.expire_all()
+        self.assertIsNone(self.db.query(MarketplaceRelistLog).filter_by(conversation_id=conv.id).first())
+        self.assertEqual(self.db.query(Listing).filter_by(conversation_id=conv.id).one().current_revision_id, rev.id)
+
+    def test_a_stuck_delete_whose_listing_is_still_live_is_settled_failed(self):
+        conv, rev, before = self._stale_poshmark_draft(general=30.0, listed_price=38.0, drop=5)
+        started = _now() - timedelta(minutes=20)
+        price_rev = auto_relist._prepare_price_revision(self.db, conv.id, "poshmark", 33.0, rev.id)
+        self.assertNotEqual(price_rev, rev.id)
+        attempt = MarketplaceRelistLog(
+            id=new_id(), conversation_id=conv.id, marketplace="poshmark", old_listing_id="5f00000000000000000000a1",
+            old_price=38.0, new_price=33.0, status="relist_pending",
+            reason="stage:deleting | Delisting old listing before relist.", created_at=started,
+        )
+        self.db.add(attempt)
+        self.db.commit()
+
+        # Still inside the grace period, it waits.
+        self.assertEqual(auto_relist._reconcile_pending_relists(self.db, started + timedelta(minutes=5), "poshmark"),
+                         {(conv.id, "poshmark")})
+        self.assertEqual(attempt.status, "relist_pending")
+
+        pending = auto_relist._reconcile_pending_relists(self.db, _now(), "poshmark")
+
+        self.assertEqual(pending, set())
+        self.db.expire_all()
+        self.assertEqual(self.db.get(MarketplaceRelistLog, attempt.id).status, "failed")
+        self._assert_prices_put_back(conv, before)
 
     def _poshmark_form_draft(self, *, general: float, listed_price: float, locked_poshmark: float | None = None):
         from anteroom.services import native_contract
