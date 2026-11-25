@@ -52,7 +52,7 @@ test("the photo strip stays put while the form re-checks after a reorder", async
     // Hold the field re-check a reorder starts, so its whole window can be watched.
     let hold = false;
     let held = 0;
-    await page.route("**/native-marketplaces/preflight", async (route) => {
+    await page.route((url) => url.pathname.endsWith("/native-marketplaces/preflight"), async (route) => {
       if (hold) {
         held += 1;
         await new Promise((resolve) => setTimeout(resolve, 1500));
