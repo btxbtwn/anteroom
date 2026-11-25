@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1258 — 2026-11-25
+
+- AI assistants connected to Anteroom can now read a listing's size tag and its yardstick measurements from its saved photos, like the Read size tags and Read measurements buttons in Item Details, and save them to Item Details before generating.
+
 ## 0.1.1257 — 2026-11-25
 
 - Let a connected AI agent reload a draft's marketplace form, like Reload choices in the editor, so drafts it fixes can be listed or scheduled.
