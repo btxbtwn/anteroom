@@ -38,6 +38,7 @@ from anteroom.services import browser_bridge, direct_preflight, etsy_listings, l
 from anteroom.services.api_job_lock import (
     claim_api_job, job_cancel_requested, job_is_live, release_api_job, request_job_cancel, start_gate,
 )
+from anteroom.services.chrome_listing import poshmark_fractional_price_error
 from anteroom.services.listing_result import ERROR_CODES, failure, scrub
 from anteroom.services.seller_overrides import price_for
 log = logging.getLogger("anteroom.native_marketplaces")
@@ -387,6 +388,8 @@ def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequest) -
     with freeze_active_rules() as rules:
         snapshot = direct_preflight.prepare(db, conv, snapshot, marketplace)
         snapshot[SNAPSHOT_RULES] = rules
+    if marketplace == "poshmark" and (error := poshmark_fractional_price_error(price_for(snapshot, marketplace))):
+        raise NativeMarketplaceError(400, error)
     from anteroom.services.draft_scheduling import SchedulePublishError, verified_scheduled_media
     from anteroom.services.listing_videos import VIDEO_MARKETPLACES, selected_video
 
@@ -504,8 +507,8 @@ def _after_preview(db: Session, marketplace: str, body: ListRequest, snapshot: d
 
     if preview and apply_direct_ids(snapshot, preview.get("categories") or {}):
         remember_direct_categories(db, ListingRepo(db).get_revision(body.revision_id), snapshot.get("direct_category_ids") or {})
-    # Local field checks are advisory. The seller-confirmed attempt goes to
-    # the marketplace, whose response is recorded for correction and retry.
+    # Other local field checks are advisory. Record the marketplace's own
+    # response to the seller-confirmed attempt for correction and retry.
     options = {}
     if marketplace == "etsy":
         from anteroom.services import user_settings
@@ -631,7 +634,11 @@ def preflight_for_marketplace(
     left_off = marketplace_media.photos_for(prepared, photos, marketplace)[1]
     if left_off:
         found.append(direct_preflight.gap(f"marketplace_photos.{marketplace}", left_off, blocking=False))
-    found = [direct_preflight.with_fix(item) for item in found]
+    # The generic price command sets a cents price across all marketplaces.
+    found = [
+        item if marketplace == "poshmark" and item["field"] == "price" else direct_preflight.with_fix(item)
+        for item in found
+    ]
     rejected = listing_readiness.rejected_fields(records.get(marketplace) or {})
     return {
         "ready": not direct_preflight.blocking(found),

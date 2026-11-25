@@ -73,14 +73,14 @@ class ChromePreflightTest(unittest.TestCase):
             fields = {row["field"] for row in depop_requirements(listing, Context())}
             self.assertEqual("depop_specifics.worldwideShipping.price" not in fields, valid)
 
-    def test_poshmark_says_what_it_will_change_and_still_allows_list(self):
+    def test_poshmark_warns_about_unsupported_colors(self):
         gaps = poshmark_requirements({
-            "title": "Tee", "description": "Soft cotton", "price": "18.40", "quantity": 2,
+            "title": "Tee", "description": "Soft cotton", "price": "18.00", "quantity": 2,
             "primaryColor": "Grey", "secondaryColor": "Lilac",
             "marketplace_category_ids": {"poshmark": "abc"},
         }, Context())
         by_message = {gap["message"]: gap["blocking"] for gap in gaps}
-        self.assertIs(by_message["Poshmark lists this at $18."], False)
+        self.assertFalse(any(gap["field"] == "price" for gap in gaps))
         self.assertNotIn("Poshmark lists a quantity of 1.", by_message)
         dropped = next(message for message in by_message if "left off" in message)
         self.assertIn("Lilac", dropped)
