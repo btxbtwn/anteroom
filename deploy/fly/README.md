@@ -77,7 +77,13 @@ code one release behind it. Change the schema in two releases:
 2. **Contract.** Drop or rename the old column, table or constraint only in a
    later release, after the release that stopped using it is live. A
    destructive change always waits one release behind the code that stops
-   using it.
+   using it. Any revision that drops a column, table or function in
+   `upgrade()` (`op.drop_column`, `batch_op.drop_column`, `op.drop_table`, or
+   raw SQL `DROP COLUMN` / `DROP TABLE` / `DROP FUNCTION`) must declare a
+   module-level `CONTRACT_AFTER` naming the earlier PR or release that stopped
+   using the object (for example, `CONTRACT_AFTER = "#1234"`). CI enforces this
+   in `anteroom/server/tests/test_migration_locking.py`; dropping an index does
+   not break older queries and does not require the marker.
 
 To roll back the code, redeploy the previous image by its label. Labels are
 `v<version>-<first 8 characters of the commit>`, as the **Build the image**
