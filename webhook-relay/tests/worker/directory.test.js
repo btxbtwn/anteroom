@@ -18,6 +18,16 @@ const stored = () => runInDurableObject(directory, (instance) =>
 const BACK = "http://127.0.0.1:4318/api/marketplace-accounts/etsy/finish";
 const alarm = () => runInDurableObject(directory, (_, state) => state.storage.getAlarm());
 
+it("uses a creation-time index for sign-in expiry on an existing directory", async () => {
+  await directory.startSession("existing", "device", "ebay", BACK);
+  await runInDurableObject(directory, (instance) => { instance.sql.exec("DROP INDEX IF EXISTS sign_ins_by_creation"); });
+  await evictDurableObject(directory);
+  const plan = await runInDurableObject(directory, (instance) =>
+    instance.sql.exec("EXPLAIN QUERY PLAN DELETE FROM sign_ins WHERE created_at <= ?", now - TTL).one().detail);
+  expect(plan).toContain("USING INDEX sign_ins_by_creation");
+  expect((await stored()).map((row) => row.state)).toEqual(["existing"]);
+});
+
 it("deletes uncollected tokens on the alarm without another device request", async () => {
   await directory.startSession("idle", "device", "etsy", BACK, "verifier");
   await directory.finishSession("idle", { link: [], result: { access_token: "uncollected-test-token" } }, "claim-hash");

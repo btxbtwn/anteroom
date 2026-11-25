@@ -62,6 +62,8 @@ BACKOFF_STATUSES = (
 CAP_COUNTED_STATUSES = ("completed", "relist_pending", "failed", "down_needs_relist")
 DELIST_BLOCKERS = ("signed_out", "challenge", "chrome_unavailable", "rate_limited")
 RULE_DISABLED_AFTER_DELETE = "The relist rule was turned off after deletion. Review the listing before recreating it."
+# How long a relist cancelled mid-delete waits to put its price back.
+RESTORE_PRICE_DEADLINE_S = 30.0
 
 
 class AutoRelistError(ValueError):
@@ -782,6 +784,24 @@ def _restore_price_revision(db: Session, conv_id: str, price_revision_id: str, o
     )
 
 
+def _restore_attempt_price(db: Session, attempt: MarketplaceRelistLog) -> None:
+    """Put back the price an unsettled attempt saved, unless the listing changed since."""
+    if not attempt.price_revision_id or not attempt.original_revision_id:
+        return
+    _restore_price_revision(db, attempt.conversation_id, attempt.price_revision_id, attempt.original_revision_id)
+
+
+async def _restore_price_after_cancel(conv_id: str, price_revision_id: str, original_revision_id: str) -> None:
+    """Put the price back for a relist cancelled while deleting; the cancellation still goes on."""
+    restore = asyncio.ensure_future(
+        in_worker_session(_restore_price_revision, conv_id, price_revision_id, original_revision_id)
+    )
+    try:
+        await asyncio.wait_for(asyncio.shield(restore), RESTORE_PRICE_DEADLINE_S)
+    except (Exception, asyncio.CancelledError):  # noqa: BLE001 - reconcile settles the attempt later
+        log.warning("Auto-relist could not put back the prices of %s after a cancelled delist", conv_id, exc_info=True)
+
+
 PENDING_STAGE_DELETING = "stage:deleting"
 PENDING_STAGE_PUBLISHING = "stage:publishing"
 PENDING_NO_JOB_GRACE = timedelta(minutes=15)
@@ -902,6 +922,15 @@ def _reconcile_pending_relists(
             row.reason = "The old listing is confirmed absent and no replacement was recorded. Verify the marketplace before relisting."
             changed = True
             continue
+        if (aged_out and reason_text.startswith(PENDING_STAGE_DELETING) and ml is not None
+                and ml.state in LIVE_STATES and ml.listing_id == row.old_listing_id
+                and not _has_delete_receipt(db, row)):
+            # The delete never finished and the listing is still up: nothing was relisted.
+            _restore_attempt_price(db, row)
+            row.status = "failed"
+            row.reason = "The old listing is still live; its delete never finished. Nothing was relisted."
+            changed = True
+            continue
         if aged_out and reason_text.startswith(PENDING_STAGE_PUBLISHING) and (
             ml is None or ml.state not in LIVE_STATES or ml.listing_id != row.old_listing_id
         ):
@@ -981,6 +1010,8 @@ def _record_log(
     new_listing_url: str | None = None,
     native_job_id: str | None = None,
     attempt_id: str | None = None,
+    price_revision_id: str | None = None,
+    original_revision_id: str | None = None,
 ) -> dict[str, Any]:
     if status == "completed" and new_listing_id:
         swap_tracked_listing_id(
@@ -1001,6 +1032,9 @@ def _record_log(
         db.add(row)
     if native_job_id is not None:
         row.native_job_id = native_job_id
+    if price_revision_id is not None:
+        row.price_revision_id = price_revision_id
+        row.original_revision_id = original_revision_id
     row.new_listing_id = new_listing_id
     row.status = status
     row.reason = reason
@@ -1067,7 +1101,7 @@ def _reserve_relist_attempt(
     old_price = entry["price"]
     new_price = entry["new_price"]
     current_revision_id = entry["revision_id"]
-    with listing_mode.guard(db):
+    with listing_mode.guard(db, "direct"):
         rule = (
             db.query(MarketplaceRelistRule)
             .filter(MarketplaceRelistRule.id == rule_id)
@@ -1136,6 +1170,8 @@ def _reserve_relist_attempt(
             status="relist_pending",
             reason=f"{PENDING_STAGE_DELETING} | Delisting old listing before relist.",
             moment=moment,
+            price_revision_id=revision_id,
+            original_revision_id=current_revision_id,
         )
         return {"reserved": True, "attempt_id": attempt_id, "revision_id": revision_id,
                 "original_revision_id": current_revision_id}
@@ -1336,7 +1372,16 @@ async def run_auto_relist(
         attempt_id = reservation["attempt_id"]
         revision_id = reservation["revision_id"]
 
-        delist_res = await _run_delist(conv_id, market, old_id, rule_id, revision_id)
+        try:
+            delist_res = await _run_delist(conv_id, market, old_id, rule_id, revision_id)
+        except asyncio.CancelledError:
+            # Nothing was relisted. Reconcile settles the attempt once the delete is known.
+            await _restore_price_after_cancel(conv_id, revision_id, reservation["original_revision_id"])
+            raise
+        except Exception as exc:  # noqa: BLE001 - any refusal still settles the attempt and its price
+            log.warning("Auto-relist delist of %s on %s stopped", conv_id, market, exc_info=True)
+            delist_res = {"ok": False, "error": str(getattr(exc, "detail", None) or exc)
+                          or "Could not delist the old listing."}
         if not delist_res.get("ok"):
             if delist_res.get("error_code") in DELIST_BLOCKERS:
                 blocked_markets.add(market)

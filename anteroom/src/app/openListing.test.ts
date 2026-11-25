@@ -4,6 +4,26 @@ import { initialOpenListing, isBrowserLinkClick, listingHref, openListingReducer
 describe("open listing", () => {
   it("opens a deep-linked listing immediately", () => {
     expect(initialOpenListing("linked")).toEqual(openListingReducer(null, { type: "open", id: "linked" }));
+    expect(initialOpenListing("a1b2c3d4e5f6")).toMatchObject({ id: "a1b2c3d4e5f6" });
+    expect(initialOpenListing("11111111-1111-4111-8111-111111111111")).toMatchObject({ id: "11111111-1111-4111-8111-111111111111" });
+    expect(initialOpenListing("draft_123-ABC")).toMatchObject({ id: "draft_123-ABC" });
+  });
+  it("ignores malformed or traversal ?listing= parameters", () => {
+    for (const bad of [
+      null,
+      "",
+      ".",
+      "..",
+      "../settings/error-logs",
+      "abc/../../status",
+      "abc?confirm=true",
+      "abc#fragment",
+      "has space",
+      "%2e%2e",
+      "a".repeat(65),
+    ]) {
+      expect(initialOpenListing(bad), String(bad)).toBeNull();
+    }
   });
   it("keeps state when reopening the same listing", () => {
     let state = initialOpenListing("a");

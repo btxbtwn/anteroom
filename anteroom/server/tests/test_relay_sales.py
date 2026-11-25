@@ -442,8 +442,8 @@ class StreamTest(unittest.TestCase):
             if event["seq"] == 2:
                 raise RuntimeError("database busy")
 
-        through = asyncio.run(relay_client._process([{"seq": 1}, {"seq": 2}, {"seq": 3}], handle))
-        self.assertEqual(through, 1)
+        result = asyncio.run(relay_client._process([{"seq": 1}, {"seq": 2}, {"seq": 3}], handle))
+        self.assertEqual(result, (1, True))
 
 
 class AutodelistOptionTest(unittest.TestCase):
@@ -487,13 +487,14 @@ class AutodelistOptionTest(unittest.TestCase):
         created = self.handle(_ebay_event())
         seen = {}
 
-        async def fake_delist(conv_id, markets, confirm):
-            seen["call"] = (conv_id, list(markets), confirm)
+        async def fake_delist(conv_id, markets, confirm, *, expected, sale_id):
+            seen["call"] = (conv_id, list(markets), confirm, expected, sale_id)
             return {name: {"state": "deleted"} for name in markets}
 
         with mock.patch("anteroom.services.marketplace_delist.delist", fake_delist):
             notes = asyncio.run(marketplace_accounts.autodelist_for_sales(created, session_factory=self.Session))
-        self.assertEqual(seen["call"], (self.tee, ["etsy"], True))
+        # The first delist names the listing pinned for the sale, so it runs the same guards as its retries.
+        self.assertEqual(seen["call"], (self.tee, ["etsy"], True, {"etsy": "555"}, created[0]))
         self.assertEqual(notes[created[0]], "Delisted from Etsy.")
 
 
@@ -503,7 +504,7 @@ class AutodelistOptionTest(unittest.TestCase):
 
         calls = []
 
-        async def fake_delist(conv_id, markets, confirm):
+        async def fake_delist(conv_id, markets, confirm, **_guards):
             calls.append(markets)
             raise DelistError(409, "Connect Chrome first.")
 

@@ -9,7 +9,10 @@ export function isTimeout(error) {
 
 export async function fetchWithDeadline(label, url, init = {}, ms = CALL_TIMEOUT_MS) {
   try {
-    return await fetch(url, { ...init, signal: AbortSignal.timeout(ms) });
+    const deadline = AbortSignal.timeout(ms);
+    const signal = init.signal ? AbortSignal.any([init.signal, deadline]) : deadline;
+    signal.throwIfAborted();
+    return await fetch(url, { ...init, signal });
   } catch (error) {
     if (!isTimeout(error)) throw error;
     const timedOut = new Error(`${label} timed out after ${ms / 1000}s`);

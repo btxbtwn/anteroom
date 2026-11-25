@@ -6,6 +6,59 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1270 — 2026-11-25
+
+- An Auto-Relist that stops before the old listing is deleted now records the try as failed and puts back the price it lowered, so the listing is relisted again on a later pass instead of being skipped for good.
+
+## 0.1.1269 — 2026-11-25
+
+- Check remaining stock for new eBay and Etsy sales on the web and apply your post-sale automation settings.
+- Keep sales syncing when an event repeatedly fails or another seller's check is slow.
+
+## 0.1.1268 — 2026-11-25
+
+- Fixed duplicate entries in the sale tracker when Anteroom checks the same sale in two places at once.
+
+## 0.1.1267 — 2026-11-25
+
+- With Delist the other marketplaces on, the delist right after a sale keeps to the listings the sale left up: a listing you put up again after the sale is left alone, and the delist stops if the order is refunded or cancelled or you turn the setting off partway.
+
+## 0.1.1266 — 2026-11-25
+
+- Refuse AI agent tool calls that have no declared permission entry, and log a warning if background photo cleanup fails after an agent call.
+
+## 0.1.1265 — 2026-11-25
+
+- Retry sale events on the Mac after a temporary error so sale alerts and delist-after-sale can still run.
+- Keep the Mac connected to its existing sale inbox when Keychain access returns.
+
+## 0.1.1264 — 2026-11-25
+
+- Fix Chrome form refreshes from the web asking to update Anteroom Bridge when the extension already supports form reads.
+- Ignore invalid listing links and encode listing IDs in API requests so a bad link cannot trigger unexpected requests.
+- Clear a previous account's saved workspace and photo thumbnails from a shared browser after a session expires while the tab is closed, and remove other accounts' cached thumbnails on sign-in.
+
+## 0.1.1263 — 2026-11-25
+
+- Keep operator email moving when a diagnostic report contains malformed text or fails to save.
+- Space out operator email retries during SMTP outages and stop stalled sends before another worker can retry them.
+
+## 0.1.1262 — 2026-11-25
+
+- Guard database updates against dropping tables, columns, or functions before the previous hosted release stops using them.
+
+## 0.1.1261 — 2026-11-25
+
+- Resume cloud sale checks and scheduled promotions automatically after a temporary database outage.
+
+## 0.1.1260 — 2026-11-25
+
+- Update hosted deployment, process-lease, error-alert, and webhook-relay documentation to match current server behavior.
+
+## 0.1.1259 — 2026-11-25
+
+- AI assistants connected to Anteroom can now start generating the drafts they name, like Generate or Bulk upload's Create and generate. Generation stops at a saved draft and never publishes.
+
 ## 0.1.1258 — 2026-11-25
 
 - AI assistants connected to Anteroom can now read a listing's size tag and its yardstick measurements from its saved photos, like the Read size tags and Read measurements buttons in Item Details, and save them to Item Details before generating.

@@ -68,6 +68,44 @@ it("keeps each seller's thumbnails apart and forgets them on sign-out", async ()
   expect([...device.stores.keys()]).toEqual([]);
 });
 
+it("prunes other sellers' thumbnail caches on sign-in while keeping the current seller's", async () => {
+  const device = deviceCaches();
+  vi.stubGlobal("caches", device.api);
+  const src = "/api/photos/private/thumb?size=96&v=abc";
+  await loadPrivateImage(src);
+  await vi.waitFor(() => expect(device.stores.get("anteroom-thumbnails:alice")?.has(src)).toBe(true));
+  signIn("bob");
+  await loadPrivateImage(src);
+  await vi.waitFor(() => expect(device.stores.get("anteroom-thumbnails:bob")?.has(src)).toBe(true));
+
+  await forgetDeviceImages("bob");
+  expect([...device.stores.keys()]).toEqual(["anteroom-thumbnails:bob"]);
+});
+
+it("lets a sign-in prune supersede an earlier signed-out clear without deleting the new seller's cache", async () => {
+  const device = deviceCaches();
+  let releaseFirstKeys!: (names: string[]) => void;
+  let calls = 0;
+  vi.stubGlobal("caches", {
+    ...device.api,
+    keys: () => {
+      calls += 1;
+      if (calls === 1) return new Promise<string[]>(resolve => { releaseFirstKeys = resolve; });
+      return device.api.keys();
+    },
+  });
+  device.stores.set("anteroom-thumbnails:alice", new Map());
+  device.stores.set("anteroom-thumbnails:bob", new Map());
+
+  const staleClear = forgetDeviceImages();
+  const signInPrune = forgetDeviceImages("bob");
+  await signInPrune;
+  releaseFirstKeys(["anteroom-thumbnails:alice", "anteroom-thumbnails:bob"]);
+  await staleClear;
+
+  expect([...device.stores.keys()]).toEqual(["anteroom-thumbnails:bob"]);
+});
+
 it("does not keep full-size photos on the device", async () => {
   const device = deviceCaches();
   vi.stubGlobal("caches", device.api);
