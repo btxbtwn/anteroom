@@ -1,6 +1,8 @@
 /** Relays the seller's approved marketplace commands from the hosted API to Anteroom Bridge in this Chrome. */
-import type { CloudConnection, RelayedCommand, RelayedPhoto } from "../api/cloudExtension";
+import { RELAY_CAPABILITIES, type CloudConnection, type RelayedCommand, type RelayedPhoto } from "../api/cloudExtension";
 import { studioFetch } from "../api/transport";
+
+export { RELAY_CAPABILITIES };
 
 export interface RelayBridge {
   runMarketplaceCommand: (command: RelayedCommand, photos: RelayedPhoto[]) => Promise<Record<string, unknown>>;
@@ -23,10 +25,6 @@ function approvedPhotos(command: RelayedCommand): { id: string; mime_type: strin
   return command.payload.photos.filter((photo): photo is { id: string; mime_type: string } =>
     typeof photo?.id === "string" && typeof photo?.mime_type === "string");
 }
-
-/** What a Bridge may declare it runs for the hosted API: marketplace actions, each named read,
- * and checking the server's signed approval on every write. */
-export const RELAY_CAPABILITIES = ["marketplace.actions", "marketplace.regions", "marketplace.sessions", "marketplace.sales_history", "marketplace.promotions", "marketplace.import", "marketplace.form.read", "vendoo.drafts", "marketplace.signed_approvals", "marketplace.signed_commands"] as const;
 
 async function nextCommand(capabilities: readonly string[]): Promise<RelayedCommand | null> {
   const declared = RELAY_CAPABILITIES.filter((capability) => capabilities.includes(capability));

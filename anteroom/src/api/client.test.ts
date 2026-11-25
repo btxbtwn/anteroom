@@ -656,3 +656,45 @@ describe("Run due relists", () => {
     );
   });
 });
+
+describe("API path segment encoding", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("encodes ../ and query/fragment characters in IDs so they stay inside the target path segment", async () => {
+    const uninstall = installHostedApiSession({
+      seller: "fixture-alice", origin: "https://anteroom.test", accessToken: async () => "fixture-token", unauthorized: () => {},
+    });
+    const fetch = vi.fn().mockImplementation(async () => new Response(JSON.stringify({}), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    try {
+      await api.conversations.get("../settings/error-logs");
+      await api.conversations.messages("a/b?confirm=1#frag");
+      await api.listings.get("../status");
+      await api.jobs.cancel("../settings/reset");
+      expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+        "/api/conversations/..%2Fsettings%2Ferror-logs",
+        "/api/conversations/a%2Fb%3Fconfirm%3D1%23frag/messages",
+        "/api/conversations/..%2Fstatus/listing",
+        "/api/jobs/..%2Fsettings%2Freset/cancel",
+      ]);
+    } finally {
+      uninstall();
+    }
+  });
+
+  it("rejects bare dot segments (.. or .) that URL normalization would collapse", async () => {
+    const uninstall = installHostedApiSession({
+      seller: "fixture-alice", origin: "https://anteroom.test", accessToken: async () => "fixture-token", unauthorized: () => {},
+    });
+    const fetch = vi.fn().mockImplementation(async () => new Response(JSON.stringify({}), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    try {
+      await expect(api.conversations.get("..")).rejects.toThrow();
+      await expect(api.conversations.messages(".")).rejects.toThrow();
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      uninstall();
+    }
+  });
+});
+

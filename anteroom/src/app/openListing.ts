@@ -19,8 +19,11 @@ export type OpenListingAction =
   | { type: "message"; id: string; value: string | null }
   | { type: "clear"; id: string };
 
+/** Listing/conversation IDs are hex/UUID/slug tokens; reject traversal or query characters from URLs. */
+const VALID_LISTING_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
 export function initialOpenListing(id: string | null): OpenListing | null {
-  return id ? openListingReducer(null, { type: "open", id }) : null;
+  return id && VALID_LISTING_ID.test(id) ? openListingReducer(null, { type: "open", id }) : null;
 }
 
 function onTab(state: OpenListing, tab: string): OpenListing {
