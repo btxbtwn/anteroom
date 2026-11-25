@@ -41,6 +41,13 @@ describe("listedFromImport", () => {
   it("has nothing to say for a listing that was never imported", () => {
     expect(listedFromImport({})).toEqual([]);
   });
+
+  it("never badges Sellwild: Anteroom cannot list or delist it", () => {
+    expect(
+      listedFromImport({ vendoo_marketplaces: ["ebay", "sellwild", "poshmark"] }).map((row) => row.id),
+    ).toEqual(["ebay", "poshmark"]);
+    expect(listedFromImport({ vendoo_marketplaces: ["sellwild"] })).toEqual([]);
+  });
 });
 
 describe("inventoryStatus", () => {

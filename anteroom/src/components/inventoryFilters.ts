@@ -1,7 +1,7 @@
 /** Inventory filters and sorts over Studio's own listing rows. */
 
 import { soldAtMs } from "./sidebar/listingShelves";
-import { hasLiveListing, inventoryStatus, liveMarketplaces } from "./sidebar/listingStatus";
+import { hasLiveListing, inventoryStatus, isHiddenImportedMarketplace, liveMarketplaces } from "./sidebar/listingStatus";
 
 export type ListingSortId =
   | "recent"
@@ -179,7 +179,8 @@ function lower(value: string | null | undefined): string {
  * sold, and a sold item has nothing left to list there.
  */
 function listedOn(listing: FilterableListing): string[] {
-  return [...new Set([...liveMarketplaces(listing), ...(listing.sold_marketplaces || [])])];
+  return [...new Set([...liveMarketplaces(listing), ...(listing.sold_marketplaces || [])])]
+    .filter((id) => !isHiddenImportedMarketplace(id));
 }
 
 /** Search covers title, SKU and the labels a listing wears. */
