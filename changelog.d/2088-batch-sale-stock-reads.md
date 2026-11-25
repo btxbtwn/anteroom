@@ -1,1 +1,0 @@
-- Open the Sales Tracker and Today quickly however many recent sales you have, without slowing down the rest of the app while they load.

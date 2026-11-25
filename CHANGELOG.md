@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1241 — 2026-11-25
+
+- Open the Sales Tracker and Today quickly however many recent sales you have, without slowing down the rest of the app while they load.
+
 ## 0.1.1240 — 2026-11-24
 
 - Refresh all five marketplace forms and get Mercari prepaid shipping quotes from connected agents.
