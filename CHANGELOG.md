@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1247 — 2026-11-25
+
+- Depop Auto-Relist checks the replacement’s package size before taking down the old listing and waits for a busy publish slot to clear.
+
 ## 0.1.1246 — 2026-11-25
 
 - Kids letter sizes no longer stay stuck on Depop Other when Depop uses ages instead (Youth L becomes 14 years).
