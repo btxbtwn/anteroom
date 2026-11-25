@@ -1,1 +1,0 @@
-- When auto-relist drops a price, the new price now also saves as the item's General price. Other marketplaces keep their own prices.
