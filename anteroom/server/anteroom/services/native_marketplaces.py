@@ -735,7 +735,9 @@ async def shared_preflight(conv_id: str, revision_id: str | None = None) -> dict
         task = asyncio.ensure_future(asyncio.to_thread(_build_preflight, key, build))
         _preflight_tasks.add(task)
         task.add_done_callback(_preflight_tasks.discard)
-    return copy.deepcopy(await asyncio.wrap_future(build))
+    # Shielded: a caller that disconnects stops waiting without cancelling the build the
+    # other requests share.
+    return copy.deepcopy(await asyncio.shield(asyncio.wrap_future(build)))
 
 
 async def list_now(conv_id: str, marketplace: Marketplace, body: ListRequest, *,

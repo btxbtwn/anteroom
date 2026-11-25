@@ -26,6 +26,16 @@ def _publish_category_fills(db):
         forget_unpinned_preflight(conv_id)
 
 
+@event.listens_for(Session, "before_flush")
+def _note_saved_listings(db, _flush_context, _instances):
+    # Every writer of a revision, not only ``save_revision``: the hosted editor's save,
+    # imports and copies add rows directly, and a revert only moves the pointer.
+    saved = {row.conversation_id for row in db.new if isinstance(row, ListingRevision)}
+    saved |= {row.conversation_id for row in db.dirty if isinstance(row, Listing)}
+    if saved:
+        db.info.setdefault("saved_listings", set()).update(saved)
+
+
 @event.listens_for(Session, "after_soft_rollback")
 def _rollback_category_fills(db, previous_transaction):
     def rolled_back(transaction):
@@ -230,7 +240,6 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
         if conv and not parse_notes(conv.notes).get("titlePinned"):
             conv.title = title
 
-    db.info.setdefault("saved_listings", set()).add(conv_id)
     if commit:
         db.commit()
     else:

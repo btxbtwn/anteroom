@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 
 from anteroom.database import Base
 from anteroom.main import app
+from anteroom.models.listing import Listing, ListingRevision
 from anteroom.repositories.queries import ConversationRepo
 from anteroom.services import listing_persistence, native_marketplaces as native
 
@@ -113,8 +114,10 @@ def test_a_newer_revision_does_not_wait_on_an_older_build(listing):
     assert newer["revision_id"] == revision_id
 
 
-def test_a_request_without_a_revision_does_not_join_a_build_from_before_a_save(listing):
-    """Installed iPhone builds ask without a revision; a save must not leave them the old one."""
+@pytest.mark.parametrize("writer", ["save_revision", "direct_rows"])
+def test_a_request_without_a_revision_does_not_join_a_build_from_before_a_save(listing, writer):
+    """Installed iPhone builds ask without a revision; a save must not leave them the old one.
+    The hosted editor's save writes the revision row itself, without ``save_revision``."""
     (conv_id, revision_id), _ = listing
     started, release = threading.Event(), threading.Event()
     build = native.preflight
@@ -132,7 +135,15 @@ def test_a_request_without_a_revision_does_not_join_a_build_from_before_a_save(l
         from anteroom import database
 
         with database.SessionLocal() as db:
-            return listing_persistence.save_revision(db, conv_id, {**LISTING, "price": 45}, "user_form").id
+            if writer == "save_revision":
+                return listing_persistence.save_revision(db, conv_id, {**LISTING, "price": 45}, "user_form").id
+            revision = ListingRevision(conversation_id=conv_id, listing_json={**LISTING, "price": 45},
+                                       source="user_form")
+            db.add(revision)
+            db.flush()
+            db.get(Listing, conv_id).current_revision_id = revision.id
+            db.commit()
+            return revision.id
 
     async def run():
         before = asyncio.ensure_future(native.shared_preflight(conv_id, None))
@@ -154,4 +165,32 @@ def test_a_request_without_a_revision_does_not_join_a_build_from_before_a_save(l
 def test_a_failed_build_reaches_every_waiter_and_is_not_kept(listing):
     with pytest.raises(native.NativeMarketplaceError):
         asyncio.run(native.shared_preflight("missing-listing", None))
+    assert native._preflight_builds == {}
+
+
+def test_a_cancelled_request_does_not_cancel_the_others_waiting_on_its_build(listing):
+    """A pane that closes stops waiting; the others still get the answer it was sharing."""
+    (conv_id, revision_id), _ = listing
+    started, release = threading.Event(), threading.Event()
+    build = native.preflight
+
+    def slow_build(*args):
+        started.set()
+        release.wait(10)
+        return build(*args)
+
+    async def run():
+        closed = asyncio.ensure_future(native.shared_preflight(conv_id, revision_id))
+        open_ = asyncio.ensure_future(native.shared_preflight(conv_id, revision_id))
+        await asyncio.to_thread(started.wait, 10)
+        closed.cancel()
+        await asyncio.sleep(0)
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await closed
+        return await asyncio.wait_for(open_, 10)
+
+    with patch.object(native, "preflight", slow_build):
+        answer = asyncio.run(run())
+    assert answer["revision_id"] == revision_id
     assert native._preflight_builds == {}
