@@ -169,20 +169,30 @@ def test_mcp_confirm_that_runs_out_of_time_links_nothing(chrome, monkeypatch):  
 def test_mcp_confirm_whose_link_step_ends_after_the_deadline_reports_what_was_saved(chrome, monkeypatch):  # noqa: F811
     import time
 
-    from anteroom.services import inventory_import
+    from anteroom.services import inventory_import, mcp_import_match_tools
 
     item = _look_alike(chrome)
     _held(chrome)
     review_id = _queue(chrome)[0]["id"]
     real_link = inventory_import._link
+    real_finish = mcp_import_match_tools.finish_pending_links
+    link_deadline = []
+
+    async def finish(results, *, deadline):
+        link_deadline.append(deadline)
+        return await real_finish(results, deadline=deadline)
 
     def late_link(*args):
-        # The marketplace check passed; saving the link ends after the tool's deadline (0.5 s here).
-        time.sleep(1.0)
+        # The marketplace check passed; saving the link ends just after the link step's deadline.
+        time.sleep(max(0.0, link_deadline[0] - time.monotonic()) + 0.2)
         return real_link(*args)
 
     monkeypatch.setattr(inventory_import, "_link", late_link)
-    monkeypatch.setattr("anteroom.routes.mcp._MCP_RPC_TIMEOUT_SECONDS", 2.5)
+    monkeypatch.setattr(mcp_import_match_tools, "finish_pending_links", finish)
+    # The link step's deadline is 4 s in, so the work before it never races it on a busy CI
+    # worker, and the call as a whole has 6 s more to reply.
+    monkeypatch.setattr("anteroom.routes.mcp._MCP_RPC_TIMEOUT_SECONDS", 10.0)
+    monkeypatch.setattr("anteroom.routes.mcp._MCP_REPLY_MARGIN_SECONDS", 6.0)
     body, error = _call(chrome, "confirm_import_match", {"review_id": review_id})
     # What the assistant is told matches the database.
     assert not error, body

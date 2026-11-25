@@ -250,7 +250,7 @@ for (const recovery of ["manual retry", "returning to the tab"]) {
           await route.continue();
         }
       });
-      await page.route(`**/api/conversations/${id}/native-marketplaces/preflight`, async route => {
+      await page.route(url => url.pathname === `/api/conversations/${id}/native-marketplaces/preflight`, async route => {
         const response = await route.fetch();
         if (refreshedRevision && (await response.json()).revision_id === refreshedRevision) preflightReads += 1;
         await route.fulfill({ response });

@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+import math
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
@@ -298,6 +299,10 @@ def save_rule(db: Session, marketplace: str, body: dict[str, Any], *, confirm: b
     return rule_view(db, row)
 
 
+# Poshmark and Mercari take whole-dollar prices only.
+WHOLE_DOLLAR_RELIST = frozenset({"poshmark", "mercari"})
+
+
 def compute_relist_price(current_price: float | None, rule: MarketplaceRelistRule) -> float | None:
     """Compute adjusted price respecting the seller's floor without ever raising the price."""
     if current_price is None or current_price <= 0 or not rule.price_adjust_mode or not rule.price_adjust_value:
@@ -310,8 +315,14 @@ def compute_relist_price(current_price: float | None, rule: MarketplaceRelistRul
         next_price = current_price * (1.0 - float(rule.price_adjust_value) / 100.0)
     else:
         next_price = current_price - float(rule.price_adjust_value)
-    next_price = max(next_price, floor)
-    return round(min(next_price, current_price), 2)
+    next_price = round(min(max(next_price, floor), current_price), 2)
+    if rule.marketplace in WHOLE_DOLLAR_RELIST:
+        # Round the drop down so it is still a drop, but never under the floor.
+        whole = math.floor(next_price)
+        if whole < floor:
+            whole = math.ceil(floor)
+        return float(min(whole, current_price))
+    return next_price
 
 
 def is_due_for_relist(marketplace: str, listed_at: datetime | None, rule: MarketplaceRelistRule, now: datetime) -> bool:
@@ -695,13 +706,34 @@ def _snapshot_with_relist_price(data: dict, marketplace: str, price: float) -> d
     return updated
 
 
+def _general_with_relist_price(data: dict, marketplace: str, price: float, live_elsewhere: set[str]) -> dict:
+    """The listing with the relist price on this marketplace and General.
+
+    The other marketplaces the item is live on keep their price. The ones it is
+    not listed on keep following General, so a later cross-list sends the new price.
+    """
+    others = {market: price_for(data, market) for market in live_elsewhere if market in CANONICAL_PRICE}
+    updated = _snapshot_with_relist_price(data, marketplace, price)
+    updated["price"] = round(price, 2)
+    held = set()
+    for market, before in others.items():
+        if before is not None and price_for(updated, market) != before:
+            set_path(updated, CANONICAL_PRICE[market], before)
+            held.add(CANONICAL_PRICE[market])
+    if held:
+        _write_locks(updated, locked_paths(updated) | held)
+    return updated
+
+
 def _prepare_price_revision(
     db: Session, conv_id: str, marketplace: str, new_price: float | None, current_revision_id: str | None,
 ) -> str | None:
-    """Save the relist price as this marketplace's own price.
+    """Save the relist price as this marketplace's own price and as the General price.
 
-    The item price and the other marketplaces stay as they are. Writing General
-    would send the price back through the pricing rules and raise it again.
+    The relisted marketplace's price is locked, so the pricing rules cannot
+    raise it again from the new General price. Every other marketplace the item
+    is live on keeps the price it had: one that would move with General is held
+    where it was.
     """
     if new_price is None or current_revision_id is None:
         return current_revision_id
@@ -711,7 +743,14 @@ def _prepare_price_revision(
     current_val = price_for(rev.listing_json, marketplace)
     if current_val is not None and round(float(current_val), 2) == round(new_price, 2):
         return current_revision_id
-    updated = _snapshot_with_relist_price(rev.listing_json, marketplace, new_price)
+    live_elsewhere = {
+        market for (market,) in db.query(MarketplaceListing.marketplace).filter(
+            MarketplaceListing.conversation_id == conv_id,
+            MarketplaceListing.marketplace != marketplace,
+            MarketplaceListing.state.in_(LIVE_STATES),
+        )
+    }
+    updated = _general_with_relist_price(rev.listing_json, marketplace, new_price, live_elsewhere)
     saved = listing_persistence.save_revision(
         db,
         conv_id,

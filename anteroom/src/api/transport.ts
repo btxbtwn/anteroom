@@ -1,3 +1,4 @@
+import { noteDatabaseResponse } from "./databaseReachability";
 import { scheduleRequest } from "./requestScheduler";
 
 /** The existing API client uses this for desktop HTTP and authenticated cloud HTTP. */
@@ -38,6 +39,7 @@ async function executeStudioFetch(input: string, options: RequestInit, session: 
   const response = await fetch(url.href, { ...options, headers, cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer" });
   if (hostedSession !== session) throw new Error("Your account changed. Open the request again.");
   if (response.status === 401 && hostedSession === session) session.unauthorized();
+  noteDatabaseResponse(response, session.origin);
   return response;
 }
 
@@ -232,11 +234,13 @@ async function executeStudioUpload(
         }
         const headers = parseXhrHeaders(xhr.getAllResponseHeaders?.() ?? "");
         const nullBody = xhr.status === 204 || xhr.status === 205 || xhr.status === 304;
-        resolve(new Response(nullBody ? null : xhr.responseText, {
+        const response = new Response(nullBody ? null : xhr.responseText, {
           status: xhr.status,
           statusText: xhr.statusText,
           headers,
-        }));
+        });
+        noteDatabaseResponse(response, session.origin);
+        resolve(response);
       });
     };
     xhr.onerror = () => finish(() => reject(new TypeError("Failed to fetch")));

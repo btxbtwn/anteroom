@@ -39,7 +39,7 @@ class ListingFacetsTest(unittest.TestCase):
         conv = self.convs.create(title="Nike tee")
         listing_persistence.save_revision(self.listings.db, conv.id, {"title": "Nike tee", "sku": "NIKE-TEE-M", "price": 24.5}, "test")
         facets = inventory_facets.listing_facets(self.convs.db)
-        expected = {"sku": "NIKE-TEE-M", "price": 24.5, "etsy_eligible": False}
+        expected = {"sku": "NIKE-TEE-M", "price": 24.5, "etsy_eligible": False, "scheduled_publish_at": None}
         self.assertEqual(facets[conv.id], expected)
         self.assertEqual(inventory_facets.listing_facet(self.convs.db, conv.id), expected)
 
@@ -47,7 +47,7 @@ class ListingFacetsTest(unittest.TestCase):
         conv = self.convs.create(title="Bare draft")
         self.assertNotIn(conv.id, inventory_facets.listing_facets(self.convs.db))
         # Nothing known about the item: no reason to hide Etsy.
-        self.assertEqual(inventory_facets.listing_facet(self.convs.db, conv.id), {"sku": None, "price": None, "etsy_eligible": True})
+        self.assertEqual(inventory_facets.listing_facet(self.convs.db, conv.id), {"sku": None, "price": None, "etsy_eligible": True, "scheduled_publish_at": None})
 
     def test_facets_read_etsy_eligibility_from_the_listing(self):
         modern = self.convs.create(title="Modern tee")

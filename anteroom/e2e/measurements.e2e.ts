@@ -64,7 +64,7 @@ test("a Depop draft keeps its description measurements without an unsupported-fi
     expect(refreshed.ok(), await refreshed.text()).toBe(true);
 
     const preflightPath = `/api/conversations/${id}/native-marketplaces/preflight`;
-    await page.route(`**${preflightPath}`, async route => {
+    await page.route(url => url.pathname === preflightPath, async route => {
       const response = await route.fetch();
       expect(response.ok(), await response.text()).toBe(true);
       const result = await response.json();
@@ -74,7 +74,7 @@ test("a Depop draft keeps its description measurements without an unsupported-fi
       depop.gaps = depop.gaps.filter((gap: { field: string }) => !fixtureAliases.includes(gap.field));
       await route.fulfill({ response, json: result });
     });
-    const preflight = page.waitForResponse(response => response.url().endsWith(preflightPath));
+    const preflight = page.waitForResponse(response => new URL(response.url()).pathname === preflightPath);
     await openListing(page, phone, title);
     if (phone) await page.getByRole("tab", { name: "Listing", exact: true }).click();
     await openForm(page, phone, "Depop");

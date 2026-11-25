@@ -33,6 +33,34 @@ final class AssistantCancellationTests: XCTestCase {
         XCTAssertEqual(StubProtocol.requests.filter { $0.url?.path.hasSuffix("/generate") == true }.count, 1)
     }
 
+    func testListingRunReadsTheScheduleAgainAfterSavingAChange() async throws {
+        StubProtocol.answer([{ request in
+            switch request.url?.path {
+            case "/api/runtime":
+                return .init(status: 200, body: #"{"mode":"hosted","features":["generation"],"views":[],"marketplace_forms":[],"action_marketplaces":[]}"#)
+            case "/api/status":
+                return .init(status: 200, body: #"{"provider_configured":true}"#)
+            case "/api/conversations/listing/activity":
+                return .init(status: 200, body: #"{"busy":false,"items":[]}"#)
+            case "/api/conversations/listing":
+                // Saving the change unscheduled the draft on the server.
+                return .init(status: 200, body: #"{"id":"listing","status":"draft","created_at":"2026-11-25T10:00:00Z","updated_at":"2026-11-25T10:05:00Z","scheduled_publish_at":null}"#)
+            case "/api/conversations/listing/generate":
+                return .init(status: 200, body: "")
+            default:
+                return .init(status: 200, body: "[]")
+            }
+        }])
+        let scheduled = Date(timeIntervalSince1970: 1_800_000_000)
+        let model = ListingAssistantModel(api: StubSignIn().api(), listingID: "listing", scheduledPublishAt: scheduled)
+        await model.load()
+        XCTAssertEqual(model.scheduledPublishAt, scheduled)
+
+        await model.run(.generate)
+
+        XCTAssertNil(model.scheduledPublishAt)
+    }
+
     func testBusinessStreamCancellationDoesNotReconnect() async throws {
         StubProtocol.answer([{ request in
             if request.url?.path == "/api/assistant/messages/resume" {

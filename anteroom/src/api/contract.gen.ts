@@ -130,6 +130,8 @@ export interface Conversation {
   id: string;
   title: string | null;
   status: string;
+  /** When a pending publish is scheduled, in UTC. */
+  scheduled_publish_at?: string | null;
   /** The wholesale box this item came out of. */
   box_id?: string | null;
   settled_at?: string | null;
@@ -216,6 +218,8 @@ export interface ConversationSummary {
   id: string;
   title: string | null;
   status: string;
+  /** When a pending publish is scheduled, in UTC. */
+  scheduled_publish_at?: string | null;
   /** The wholesale box this item came out of. */
   box_id?: string | null;
   settled_at?: string | null;

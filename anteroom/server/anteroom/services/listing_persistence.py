@@ -19,6 +19,21 @@ def _publish_category_fills(db):
     from anteroom.services.native_field_fill import category_saved
     for _transaction, args in db.info.pop("category_fills", []):
         category_saved(*args)
+    from anteroom.services.native_marketplaces import forget_unpinned_preflight
+
+    # A preflight that names no revision must not join a build that read the one before.
+    for conv_id in db.info.pop("saved_listings", ()):
+        forget_unpinned_preflight(conv_id)
+
+
+@event.listens_for(Session, "before_flush")
+def _note_saved_listings(db, _flush_context, _instances):
+    # Every writer of a revision, not only ``save_revision``: the hosted editor's save,
+    # imports and copies add rows directly, and a revert only moves the pointer.
+    saved = {row.conversation_id for row in db.new if isinstance(row, ListingRevision)}
+    saved |= {row.conversation_id for row in db.dirty if isinstance(row, Listing)}
+    if saved:
+        db.info.setdefault("saved_listings", set()).update(saved)
 
 
 @event.listens_for(Session, "after_soft_rollback")

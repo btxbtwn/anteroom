@@ -45,6 +45,8 @@ final class AnteroomAPI: Sendable {
     private let runtimeCache = SharedRead<WorkspaceRuntime>(maxAge: 30)
     private let selectedCache = SharedRead<[String]>(maxAge: 30)
     private let optionsCache = SharedRead<GeneralOptions>(maxAge: .infinity)
+    /// Called when the server says the seller's data can't be reached (`DataReachability`).
+    private let databaseUnavailable: @Sendable () -> Void
 
     /// Where CSV exports are written for the share sheet; emptied on sign-out.
     static var exportsDirectory: URL {
@@ -52,8 +54,10 @@ final class AnteroomAPI: Sendable {
     }
 
     init(baseURL: URL, auth: APIAuthorization, configuration: URLSessionConfiguration = .ephemeral,
-         readRetry: ReadRetry = .standard, immutableCache: ImmutableReadCache = ImmutableReadCache()) {
+         readRetry: ReadRetry = .standard, immutableCache: ImmutableReadCache = ImmutableReadCache(),
+         databaseUnavailable: @escaping @Sendable () -> Void = {}) {
         self.baseURL = baseURL
+        self.databaseUnavailable = databaseUnavailable
         self.auth = auth
         self.readRetry = readRetry
         immutable = immutableCache
@@ -1293,6 +1297,8 @@ final class AnteroomAPI: Sendable {
             guard let http = response as? HTTPURLResponse else {
                 throw APIError(status: 0, message: "Anteroom didn't answer. Try again.")
             }
+            // Noted on the first such answer, before a read waits out its retries.
+            if DataReachability.namesDatabase(http) { databaseUnavailable() }
             return (data, http)
         }
         return (data, response.statusCode)

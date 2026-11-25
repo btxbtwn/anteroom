@@ -22,6 +22,7 @@ CATALOG_TOOLS = {
     "search_categories", "get_category_attributes", "search_attribute_options",
     "get_marketplace_form", "get_account_settings", "get_auto_relist_status",
 }
+CATALOG_WRITE_TOOLS = {"reload_marketplace_form"}
 
 
 @pytest.fixture(autouse=True)
@@ -89,7 +90,12 @@ def _tool_names(client: TestClient, extra_headers: dict | None = None) -> set[st
 def test_catalog_tools_are_listing_reads_in_the_catalog():
     definitions = {tool["name"]: tool for tool in mcp_http.tool_definitions()}
     assert CATALOG_TOOLS <= set(definitions)
-    assert set(mcp_catalog_tools.PERMISSIONS) == CATALOG_TOOLS == set(mcp_catalog_tools.HANDLERS)
+    assert set(mcp_catalog_tools.PERMISSIONS) == CATALOG_TOOLS | CATALOG_WRITE_TOOLS == set(mcp_catalog_tools.HANDLERS)
+    for name in CATALOG_WRITE_TOOLS:
+        # It saves the reloaded form to the listing: the same access as edit_listing, never a marketplace write.
+        assert mcp_http.TOOL_PERMISSIONS[name] == mcp_http.TOOL_PERMISSIONS["edit_listing"] == ("listings", "write")
+        annotations = definitions[name]["annotations"]
+        assert annotations["readOnlyHint"] is False and annotations["destructiveHint"] is False
     for name in CATALOG_TOOLS:
         assert mcp_http.TOOL_PERMISSIONS[name] == ("listings", "read")
         annotations = definitions[name]["annotations"]

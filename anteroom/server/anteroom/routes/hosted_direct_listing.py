@@ -36,8 +36,8 @@ for path, handler, methods in (
 
 
 @router.get(PREFIX + '/native-marketplaces/preflight')
-def preflight(conv_id: str, db: Session = Depends(get_db, scope="function")):
-    return native_marketplaces.preflight(conv_id, db)
+async def preflight(conv_id: str, revision_id: str | None = None):
+    return await native_marketplaces.preflight(conv_id, revision_id)
 
 
 @router.post(PREFIX + '/native-marketplaces/{marketplace}/list')

@@ -20,8 +20,11 @@ reading the listing back.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import copy
 import logging
 import re
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -672,6 +675,69 @@ def preflight(conv_id: str, db: Session) -> dict:
             "missing": result["missing"],
         }
     return {"revision_id": revision.id, "marketplaces": out}
+
+
+# Preflights being built, by seller, listing and the revision the caller asked about.
+# Opening a listing asks from the editor, the marketplace panel and the iPhone at
+# about the same time, and a save or live update asks again. Each request used to
+# hold a pooled connection for its own full build (production, 2026-11-25: five or
+# six at once, up to 3.6 s each). Requests that arrive while a build runs wait for
+# it without a session of their own. Finished results are never kept.
+_preflight_builds: dict[tuple[str, str, str | None], concurrent.futures.Future] = {}
+_preflight_lock = threading.Lock()
+_preflight_tasks: set[asyncio.Future] = set()
+
+
+def _build_preflight(key: tuple[str, str, str | None], build: concurrent.futures.Future) -> None:
+    """One preflight in one short session of its own, handed to every request waiting on ``key``."""
+    from anteroom import database
+
+    try:
+        with database.SessionLocal() as db:
+            result, error = preflight(key[1], db), None
+    except BaseException as exc:  # Every waiter gets the same failure.
+        result, error = None, exc
+    with _preflight_lock:
+        if _preflight_builds.get(key) is build:
+            del _preflight_builds[key]
+    if error is None:
+        build.set_result(result)
+    else:
+        build.set_exception(error)
+
+
+def forget_unpinned_preflight(conv_id: str) -> None:
+    """Called once a new revision of ``conv_id`` is committed. A request that names no
+    revision (installed iPhone builds) must not join a build that may have read the one
+    before it, so the next one starts fresh. A build in flight still answers its waiters."""
+    with _preflight_lock:
+        for key in [key for key in _preflight_builds if key[1] == conv_id and key[2] is None]:
+            del _preflight_builds[key]
+
+
+async def shared_preflight(conv_id: str, revision_id: str | None = None) -> dict:
+    """``preflight`` for a route: one build, in one session, for every request asking at once.
+
+    ``revision_id`` is the revision the caller is looking at. A request about a newer
+    revision never waits on a build that may have read the one before it.
+    """
+    from anteroom.services.service_context import current
+
+    context = current()
+    key = (context.seller_id if context else "", conv_id, revision_id)
+    with _preflight_lock:
+        build = _preflight_builds.get(key)
+        start = build is None
+        if start:
+            build = _preflight_builds[key] = concurrent.futures.Future()
+    if start:
+        # The build outlives a caller that disconnects: others may be waiting on it.
+        task = asyncio.ensure_future(asyncio.to_thread(_build_preflight, key, build))
+        _preflight_tasks.add(task)
+        task.add_done_callback(_preflight_tasks.discard)
+    # Shielded: a caller that disconnects stops waiting without cancelling the build the
+    # other requests share.
+    return copy.deepcopy(await asyncio.shield(asyncio.wrap_future(build)))
 
 
 async def list_now(conv_id: str, marketplace: Marketplace, body: ListRequest, *,

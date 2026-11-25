@@ -115,6 +115,7 @@ struct WorkspaceView: View {
                 startupView
             }
         }
+        .dataUnreachableBanner(session.reachability)
         .environment(appearance)
         .environment(session.changes)
         .preferredColorScheme(appearance.theme.colorScheme)

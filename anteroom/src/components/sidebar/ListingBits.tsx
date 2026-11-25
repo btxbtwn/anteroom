@@ -111,3 +111,21 @@ export function ListingTag({ tone, title, children }: { tone: "info" | "warning"
     </span>
   );
 }
+
+const publishDate = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" });
+const publishTime = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+
+export function DraftScheduleTag({ publishAt }: { publishAt: string }) {
+  const when = new Date(publishAt);
+  if (!Number.isFinite(when.getTime())) return null;
+
+  return (
+    <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+      <ListingTag tone="info">Scheduled</ListingTag>
+      <time dateTime={publishAt} className="flex flex-wrap gap-x-1 text-xs leading-tight text-muted-foreground tabular-nums">
+        <span>{publishDate.format(when)}</span>{" "}
+        <span className="whitespace-nowrap">{publishTime.format(when)}</span>
+      </time>
+    </span>
+  );
+}
