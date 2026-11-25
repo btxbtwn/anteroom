@@ -1,10 +1,11 @@
 """Shared, durable operator mail budget and outbox. No seller operation runs here."""
 import re
-import smtplib
 import time
 import uuid
 from datetime import datetime
 from typing import Any
+
+from aiosmtplib.errors import SMTPResponseException
 
 from anteroom.repositories.error_email import LIFECYCLE_ACTIVE, report_release
 
@@ -14,12 +15,14 @@ WARNING_DIGEST_INTERVAL = 86400
 HOURLY_CAP = 60
 MAX_GROUPS_PER_EMAIL = 20
 MAX_PENDING_GROUPS = 500
+MAX_RETRY_DELAY = 3600
+_INVALID_POSTGRES_TEXT = re.compile(r'[\x00\ud800-\udfff]')
 
 
 def _postgres_safe(value: Any) -> Any:
-    """Postgres text and JSONB reject NUL characters."""
+    """Postgres text and JSONB reject NUL characters and unpaired surrogates."""
     if isinstance(value, str):
-        return value.replace('\x00', '\ufffd')
+        return _INVALID_POSTGRES_TEXT.sub('\ufffd', value)
     if isinstance(value, dict):
         return {_postgres_safe(key): _postgres_safe(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
@@ -60,13 +63,12 @@ def classify_failure(exc):
     SMTP may include addresses and server identifiers. Keep a safe,
     actionable classification instead of retaining the raw response.
     """
-    code = exc.smtp_code if isinstance(exc, smtplib.SMTPResponseException) else None
-    response = exc.smtp_error if isinstance(exc, smtplib.SMTPResponseException) else ''
-    response = (response.decode('utf-8', errors='replace') if isinstance(response, bytes) else response).lower()
+    code = exc.code if isinstance(exc, SMTPResponseException) else None
+    response = exc.message.lower() if isinstance(exc, SMTPResponseException) else ''
     quota = 'daily' in response and ('limit exceeded' in response or 'quota exceeded' in response)
     return ('quota_paused' if quota else 'delivery_failed',
             f'SMTP {code}: {"relay quota exceeded" if quota else "relay rejected delivery"}' if code else type(exc).__name__,
-            DAY if quota else (3600 if code and code >= 500 else 300))
+            DAY if quota else (MAX_RETRY_DELAY if code and code >= 500 else 300))
 
 
 def reserve_direct_send(store, daily_limit: int, clock=time.time, *, keep_error_reserve: bool = True) -> bool:
@@ -274,9 +276,12 @@ class EmailDelivery:
             state.pop('lease_keys', None)
             if failure:
                 state['failure'], state['last_error'], delay = failure
-                state['paused_until'] = self.clock() + delay
+                retry_delay = min(MAX_RETRY_DELAY, max(delay, 2 * state.get('retry_delay', 0)))
+                state['retry_delay'] = retry_delay
+                state['paused_until'] = self.clock() + max(delay, retry_delay)
                 state['last_failure_at'] = self.clock()
             else:
+                state.pop('retry_delay', None)
                 state['last_success_at'] = self.clock()
                 state['paused_until'] = 0
                 state['last_error'] = None

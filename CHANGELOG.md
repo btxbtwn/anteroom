@@ -6,6 +6,27 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1263 — 2026-11-25
+
+- Keep operator email moving when a diagnostic report contains malformed text or fails to save.
+- Space out operator email retries during SMTP outages and stop stalled sends before another worker can retry them.
+
+## 0.1.1262 — 2026-11-25
+
+- Guard database updates against dropping tables, columns, or functions before the previous hosted release stops using them.
+
+## 0.1.1261 — 2026-11-25
+
+- Resume cloud sale checks and scheduled promotions automatically after a temporary database outage.
+
+## 0.1.1260 — 2026-11-25
+
+- Update hosted deployment, process-lease, error-alert, and webhook-relay documentation to match current server behavior.
+
+## 0.1.1259 — 2026-11-25
+
+- AI assistants connected to Anteroom can now start generating the drafts they name, like Generate or Bulk upload's Create and generate. Generation stops at a saved draft and never publishes.
+
 ## 0.1.1258 — 2026-11-25
 
 - AI assistants connected to Anteroom can now read a listing's size tag and its yardstick measurements from its saved photos, like the Read size tags and Read measurements buttons in Item Details, and save them to Item Details before generating.

@@ -703,6 +703,8 @@ READ_TOOLS |= {"get_pending_edits", "get_labels"}
 LISTING_WRITE_TOOLS |= {"discard_pending_edits", "rename_label", "delete_label"}
 # Item Details' read buttons (services/mcp_reading_tools.py).
 LISTING_WRITE_TOOLS |= {"read_size_tag", "read_measurements"}
+# Generate for named drafts (services/mcp_generation_tools.py).
+LISTING_WRITE_TOOLS |= {"generate_listings"}
 ATTENTION_WRITE_TOOLS |= {"mark_not_duplicate"}
 # Reaches any token or app with some access to at least one area.
 FEEDBACK_TOOLS = {"send_feedback"}

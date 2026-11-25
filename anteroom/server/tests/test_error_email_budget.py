@@ -1,9 +1,9 @@
 """Durable mail accounting, batching and relay backoff on disposable databases."""
 import logging
-import smtplib
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from aiosmtplib.errors import SMTPDataError
 from sqlalchemy import create_engine
 
 from anteroom.repositories.error_email import EmailStore
@@ -217,7 +217,7 @@ def test_quota_pause_preserves_critical_and_regression_first_alerts(store):
     delivery.add(regression)
 
     def quota(*_):
-        raise smtplib.SMTPDataError(550, b'Daily relay quota exceeded')
+        raise SMTPDataError(550, 'Daily relay quota exceeded')
 
     delivery.send = quota
     delivery.tick()
@@ -318,7 +318,7 @@ def test_quota_rejection_pauses_every_worker_without_discarding_reports(store):
 
     def reject(*args):
         attempts.append(args)
-        raise smtplib.SMTPDataError(550, b'5.7.1 Daily SMTP relay limit exceeded for this customer')
+        raise SMTPDataError(550, '5.7.1 Daily SMTP relay limit exceeded for this customer')
 
     delivery = EmailDelivery(store, reject, daily_limit=20, clock=lambda: now[0])
     delivery.add(report())
@@ -346,6 +346,77 @@ def test_rolling_budget_expires_and_failed_sends_count_conservatively(store):
     delivery.tick()
     assert delivery.status()['pending'] == 0
     assert delivery.status()['used'] == 1
+
+
+def test_consecutive_failures_back_off_across_senders_and_reset_after_success(store):
+    now = [100.0]
+
+    def fail(*_):
+        raise OSError('transient relay failure')
+
+    first = EmailDelivery(store, fail, daily_limit=20, clock=lambda: now[0])
+    second = EmailDelivery(store, fail, daily_limit=20, clock=lambda: now[0])
+    first.add(report())
+    for attempt, delay in enumerate((300, 600, 1200, 2400, 3600, 3600), 1):
+        sender = first if attempt % 2 else second
+        sender.tick()
+        assert store.read()['paused_until'] == now[0] + delay
+        assert sender.status()['used'] == attempt
+        now[0] += delay - 1
+        sender.tick()
+        assert sender.status()['used'] == attempt
+        now[0] += 1
+
+    second.send = lambda *_: None
+    second.tick()
+    assert second.status()['pending'] == 0
+    first.add(report(line=2))
+    first.tick()
+    assert store.read()['paused_until'] == now[0] + 300
+    assert first.status()['used'] == 8
+
+
+def test_smtp_deadline_closes_stalled_connection_before_lease_expires(store, monkeypatch):
+    import socket
+    import time
+
+    from anteroom.services import error_alerts
+
+    def stall_at_starttls(listener):
+        with listener.accept()[0] as peer, peer.makefile('rb') as commands:
+            peer.settimeout(3)
+            peer.sendall(b'220 localhost SMTP\r\n')
+            assert commands.readline().lower().startswith(b'ehlo ')
+            peer.sendall(b'250-localhost\r\n250 STARTTLS\r\n')
+            assert commands.readline().lower() == b'starttls\r\n'
+            assert commands.read(1) == b''
+
+    with socket.create_server(('127.0.0.1', 0)) as listener, ThreadPoolExecutor(max_workers=1) as server:
+        listener.settimeout(3)
+        monkeypatch.setattr(error_alerts, 'SMTP_HOST', '127.0.0.1')
+        monkeypatch.setattr(error_alerts, 'SMTP_PORT', listener.getsockname()[1])
+        monkeypatch.setattr(error_alerts, 'SMTP_SEND_DEADLINE', 0.2, raising=False)
+        relay = server.submit(stall_at_starttls, listener)
+        leases = []
+
+        def send(subject, body):
+            state = store.read()
+            assert len(state['attempts']) == 1
+            leases.append(state['lease_until'])
+            error_alerts.send_email(subject, body, timeout=2)
+
+        delivery = EmailDelivery(store, send, daily_limit=10)
+        delivery.add(report())
+        started = time.monotonic()
+        delivery.tick()
+        assert time.monotonic() - started < 1.5
+        assert time.time() < leases[0]
+        relay.result(timeout=3)
+
+    assert store.read()['lease_until'] == 0
+    assert delivery.status()['pending'] == 1
+    assert delivery.status()['used'] == 1
+    assert delivery.status()['last_error'] == 'TimeoutError'
 
 
 def test_slow_send_does_not_hold_a_connection_or_lose_new_occurrences(store):
@@ -835,6 +906,48 @@ def test_alert_handler_prefers_errors_over_warnings_when_queue_is_full(store):
 
     all_reports = [item for batch in seen for item in batch]
     assert any(item['severity'] == 'ERROR' and item['message'] == 'boom' for item in all_reports)
+
+
+@pytest.mark.parametrize('disconnect', [False, True])
+def test_alert_handler_drops_only_the_report_that_fails_storage(store, monkeypatch, disconnect):
+    import threading
+
+    from anteroom.repositories.error_email import EmailTransaction
+    from anteroom.services.error_alerts import AlertHandler
+
+    put_group = EmailTransaction.put_group
+    retries = []
+
+    def reject_one(transaction, key, group, last_sent, **issue):
+        if group:
+            if group['report']['message'] == 'bad data':
+                raise ValueError('invalid diagnostic')
+            if disconnect and group['report']['message'] == 'after' and not retries:
+                raise ConnectionError('lost connection while recovering the batch')
+        put_group(transaction, key, group, last_sent, **issue)
+
+    monkeypatch.setattr(EmailTransaction, 'put_group', reject_one)
+    delivered = threading.Event()
+    messages = []
+
+    def send(_subject, body):
+        messages.append(body)
+        delivered.set()
+
+    handler = AlertHandler(send, store=store, daily_limit=10)
+    try:
+        with handler._cond:
+            monkeypatch.setattr(handler.stopping, 'wait', retries.append)
+            for line, message in enumerate(('before', 'bad data', 'after'), 1):
+                handler.emit(logging.LogRecord('anteroom.test', logging.ERROR, '/test.py', line, message, (), None))
+        assert delivered.wait(3)
+    finally:
+        handler.close()
+    assert handler.dropped == 1
+    assert retries == ([30] if disconnect else [])
+    body, = messages
+    assert '2 occurrences in 2 groups' in body
+    assert 'before' in body and 'after' in body and 'bad data' not in body
 
 
 def test_error_during_inflight_warning_digest_does_not_evict_leased_warnings_or_break_completion(store):
