@@ -1,0 +1,1 @@
+- Depop Auto-Relist checks the replacement’s package size before taking down the old listing and waits for a busy publish slot to clear.

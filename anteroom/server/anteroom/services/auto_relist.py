@@ -12,11 +12,12 @@ Approved by the seller on 2026-11-22 (see AGENTS.md Invariant):
 """
 from __future__ import annotations
 
+import asyncio
 import copy
 import logging
 import time
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from sqlalchemy.orm import Session
 
@@ -987,10 +988,37 @@ def _record_log_payload(db: Session, payload: dict[str, Any]) -> dict[str, Any]:
     return _record_log(db, **payload)
 
 
+def _relist_skip(
+    db: Session, rule: MarketplaceRelistRule | None, conv_id: str, moment: datetime,
+) -> Literal["marketplace", "listing"] | None:
+    """A disabled or capped rule stops this marketplace. A pending attempt skips one listing."""
+    if rule is None or not rule.enabled:
+        return "marketplace"
+    if _relisted_last_24h(db, rule.marketplace, moment) >= min(int(rule.daily_cap), MAX_DAILY_CAP):
+        return "marketplace"
+    pending = (
+        db.query(MarketplaceRelistLog.id)
+        .filter(
+            MarketplaceRelistLog.conversation_id == conv_id,
+            MarketplaceRelistLog.marketplace == rule.marketplace,
+            MarketplaceRelistLog.status == "relist_pending",
+        )
+        .first()
+    )
+    return "listing" if pending is not None else None
+
+
+def _shipping_check_skip(
+    db: Session, rule_id: str, conv_id: str, moment: datetime,
+) -> Literal["marketplace", "listing"] | None:
+    return _relist_skip(db, db.get(MarketplaceRelistRule, rule_id), conv_id, moment)
+
+
 def _reserve_relist_attempt(
     db: Session,
     entry: dict[str, Any],
     moment: datetime,
+    readiness_error: str | None = None,
 ) -> dict[str, Any]:
     """Serialize rule-enabled check, daily-cap reservation, candidate freshness, and revision prep."""
     rule_id = entry["rule_id"]
@@ -1022,21 +1050,7 @@ def _reserve_relist_attempt(
             )
             return {"reserved": False, "outcome": outcome}
 
-        existing_pending = (
-            db.query(MarketplaceRelistLog.id)
-            .filter(
-                MarketplaceRelistLog.conversation_id == conv_id,
-                MarketplaceRelistLog.marketplace == marketplace,
-                MarketplaceRelistLog.status == "relist_pending",
-            )
-            .first()
-        )
-        if existing_pending is not None:
-            return {"reserved": False, "outcome": None}
-
-        done_today = _relisted_last_24h(db, marketplace, moment)
-        cap = min(int(rule.daily_cap), MAX_DAILY_CAP)
-        if done_today >= cap:
+        if _relist_skip(db, rule, conv_id, moment) is not None:
             return {"reserved": False, "outcome": None}
 
         # Re-check only this single item under the rule lock instead of scanning the catalog.
@@ -1051,7 +1065,8 @@ def _reserve_relist_attempt(
             return {"reserved": False, "outcome": None}
 
         price_error = poshmark_fractional_price_error(new_price) if marketplace == "poshmark" else None
-        revision_id = None if price_error else _prepare_price_revision(
+        preflight_error = readiness_error or price_error
+        revision_id = None if preflight_error else _prepare_price_revision(
             db, conv_id, marketplace, new_price, current_revision_id,
         )
         if not revision_id:
@@ -1064,7 +1079,7 @@ def _reserve_relist_attempt(
                 old_price=old_price,
                 new_price=new_price,
                 status="failed",
-                reason=price_error or "Listing has no saved revision to relist.",
+                reason=preflight_error or "Listing has no saved revision to relist.",
                 moment=moment,
             )
             return {"reserved": False, "outcome": outcome}
@@ -1150,7 +1165,7 @@ async def run_auto_relist(
         ]
 
     async def _run_delist(
-        conv_id: str, marketplace: str, expected_listing_id: str, rule_id: str
+        conv_id: str, marketplace: str, expected_listing_id: str, rule_id: str, revision_id: str
     ) -> dict[str, Any]:
         if not await in_worker_session(_rule_enabled, rule_id):
             return {
@@ -1169,6 +1184,7 @@ async def run_auto_relist(
                 confirm=True,
                 expected={marketplace: expected_listing_id},
                 relist_rule_id=rule_id,
+                expected_revision_id=revision_id if marketplace == "depop" else None,
             )
         except DelistError as exc:
             if exc.reason == "relist_rule_disabled":
@@ -1188,24 +1204,34 @@ async def run_auto_relist(
             if not await in_worker_session(_rule_enabled, rule_id):
                 return {"ok": False, "skipped": True, "error": RULE_DISABLED_AFTER_DELETE}
             return await lister(conv_id, marketplace, revision_id)
-        from anteroom.services.automation_actions import _turn, wait_for_native_result
-        from anteroom.services.native_marketplaces import ListRequest, NativeMarketplaceError, list_now
+        from anteroom.services.automation_actions import IDLE_TIMEOUT_S, _turn, _wait_until_free, wait_for_native_result
+        from anteroom.services.native_marketplaces import BUSY, ListRequest, NativeMarketplaceError, list_now
 
         try:
             async with _turn(marketplace):
-                if not await in_worker_session(_rule_enabled, rule_id):
-                    return {"ok": False, "skipped": True, "error": RULE_DISABLED_AFTER_DELETE}
-                try:
-                    res = await list_now(
-                        conv_id,
-                        cast(Any, marketplace),
-                        ListRequest(revision_id=revision_id, confirm=True),
-                        relist_rule_id=rule_id,
-                    )
-                except NativeMarketplaceError as exc:
-                    if exc.reason == "relist_rule_disabled":
+                loop = asyncio.get_running_loop()
+                deadline = loop.time() + IDLE_TIMEOUT_S
+                while loop.time() < deadline and await _wait_until_free(marketplace, deadline=deadline):
+                    if not await in_worker_session(_rule_enabled, rule_id):
                         return {"ok": False, "skipped": True, "error": RULE_DISABLED_AFTER_DELETE}
-                    return {"ok": False, "error": str(exc)}
+                    try:
+                        res = await list_now(
+                            conv_id,
+                            cast(Any, marketplace),
+                            ListRequest(revision_id=revision_id, confirm=True),
+                            relist_rule_id=rule_id,
+                        )
+                    except NativeMarketplaceError as exc:
+                        if exc.reason == "relist_rule_disabled":
+                            return {"ok": False, "skipped": True, "error": RULE_DISABLED_AFTER_DELETE}
+                        if exc.reason != BUSY:
+                            return {"ok": False, "error": str(exc)}
+                        # The job gate refused before any marketplace write.
+                        await asyncio.sleep(0.5)
+                    else:
+                        break
+                else:
+                    return {"ok": False, "error": f"The {marketplace} publish slot stayed busy after delisting."}
                 dispatched_job_id = res.get("job_id")
                 if dispatched_job_id:
                     await in_worker_session(
@@ -1228,6 +1254,8 @@ async def run_auto_relist(
             "native_job_id": res.get("job_id"),
         }
 
+    from anteroom.services.native_marketplaces import NativeMarketplaceError, check_depop_relist_shipping
+
     outcomes: list[dict[str, Any]] = []
     blocked_markets: set[str] = set()
     started = time.monotonic()
@@ -1243,9 +1271,24 @@ async def run_auto_relist(
         rule_id = entry["rule_id"]
         step_now = moment if now is not None else _now()
 
-        # Atomically lock the rule, re-check rule.enabled and daily cap, prepare revision,
+        # A shipping read can be cancelled without leaving a pending delete or new price.
+        shipping_error = None
+        if delister is None and market == "depop" and entry["revision_id"]:
+            skip = await in_worker_session(_shipping_check_skip, rule_id, conv_id, step_now)
+            if skip is not None:
+                if skip == "marketplace":
+                    blocked_markets.add(market)
+                continue
+            try:
+                await check_depop_relist_shipping(conv_id, entry["revision_id"], entry["new_price"])
+            except NativeMarketplaceError as exc:
+                shipping_error = str(exc)
+                if exc.reason in DELIST_BLOCKERS:
+                    blocked_markets.add(market)
+
+        # Atomically lock the rule, re-check rule.enabled, daily cap and freshness, prepare revision,
         # and commit a relist_pending row before dispatching either external write.
-        reservation = await in_worker_session(_reserve_relist_attempt, entry, step_now)
+        reservation = await in_worker_session(_reserve_relist_attempt, entry, step_now, shipping_error)
         if not reservation["reserved"]:
             if reservation.get("outcome") is not None:
                 outcomes.append(reservation["outcome"])
@@ -1254,7 +1297,7 @@ async def run_auto_relist(
         attempt_id = reservation["attempt_id"]
         revision_id = reservation["revision_id"]
 
-        delist_res = await _run_delist(conv_id, market, old_id, rule_id)
+        delist_res = await _run_delist(conv_id, market, old_id, rule_id, revision_id)
         if not delist_res.get("ok"):
             if delist_res.get("error_code") in DELIST_BLOCKERS:
                 blocked_markets.add(market)

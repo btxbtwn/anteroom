@@ -157,9 +157,11 @@
     }
     if (PROMOTION_COMMANDS.has(value.type)) return promotion(value) ? value : null;
     if (value.type === 'marketplace.form') {
-      const fields = ['marketplace', 'listing', 'refresh', 'request_id', 'approval'];
+      const fields = ['marketplace', 'listing', 'refresh', 'request_id', 'approval', 'check_relist_shipping'];
       return value.job_id === null && ['poshmark', 'depop'].includes(payload.marketplace)
         && payload.refresh === true && plain(payload.listing) && size(value) <= 200_000
+        && (!Object.hasOwn(payload, 'check_relist_shipping')
+          || (payload.marketplace === 'depop' && payload.check_relist_shipping === true))
         && Object.keys(payload).every(key => fields.includes(key)) ? value : null;
     }
     if (Object.hasOwn(READS, value.type)) {
