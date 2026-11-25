@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1253 — 2026-11-25
+
+- When Anteroom's cloud database can't be reached, the website and iPhone app now say "Can't reach your data right now — retrying" instead of loading forever, and reload on their own once it's back.
+- The operator now gets one email when the cloud database stays unreachable for two minutes, and one when it's reachable again.
+
 ## 0.1.1252 — 2026-11-25
 
 - Keep web app updates from stalling on a test that timed out on busy build machines.
