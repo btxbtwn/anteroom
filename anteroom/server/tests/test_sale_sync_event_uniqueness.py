@@ -117,7 +117,25 @@ def test_upgrade_keeps_confirmed_then_oldest_tracker_row(migration_engine):  # n
             {**base, "id": "other-marketplace", "target_marketplace": "etsy"},
         ])
 
-    command.upgrade(config, "head")
+    if engine.dialect.name == "postgresql":
+        # A legacy process can still create a duplicate between cleanup and
+        # the concurrent index build. Force that race on the first build.
+        builds = 0
+        with engine.connect() as migration:
+            @event.listens_for(migration, "before_cursor_execute")
+            def insert_while_building(connection, cursor, statement, parameters, context, executemany):
+                nonlocal builds
+                if statement.startswith("CREATE UNIQUE INDEX CONCURRENTLY uq_sale_sync_events_seller_sale_target_action"):
+                    builds += 1
+                    if builds == 1:
+                        with engine.begin() as legacy:
+                            legacy.execute(events.insert(), {**base, "id": "late-duplicate", "status": "pending"})
+
+            config.attributes["connection"] = migration
+            command.upgrade(config, "head")
+        assert builds == 2
+    else:
+        command.upgrade(config, "head")
     with engine.begin() as connection:
         kept = {row.id: row.new_listing_id
                 for row in connection.execute(select(events.c.id, events.c.new_listing_id))}
