@@ -112,7 +112,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    context = op.get_context()
-    postgres = context.dialect.name == 'postgresql'
-    with context.autocommit_block() if postgres else nullcontext():
-        op.drop_index(INDEX_NAME, table_name='sale_sync_events', postgresql_concurrently=True)
+    # Stay inside the downgrade transaction: an autocommit block here would commit the
+    # revisions above this one before a later step (such as the account-deletion fence)
+    # refuses the downgrade, leaving the database part-way down.
+    op.drop_index(INDEX_NAME, table_name='sale_sync_events', if_exists=True)
