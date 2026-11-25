@@ -4,11 +4,11 @@ Fly's blue-green deploy starts the new Machine and moves traffic to it before
 it stops the old one. The schedulers assume a newly started process means the
 previous one is gone: they close rounds and mark sends a restart cut off. So
 only the Machine holding the ``schedulers`` lease runs them. When a Machine is
-told to stop, its schedulers start no new marketplace work; one already
-talking to a marketplace gets up to ``DRAIN_GRACE_S`` to finish while this
-Machine keeps renewing the lease. Then it stops its schedulers, releases the
-lease and its Mac and Chrome routes, and the new Machine takes both over
-within seconds.
+told to stop, it releases its Mac and Chrome routes at once (its listening
+socket is already closed), and its schedulers start no new marketplace work;
+one already talking to a marketplace gets up to ``DRAIN_GRACE_S`` to finish
+while this Machine keeps renewing the lease. Then it stops its schedulers and
+releases the lease, and the new Machine takes it over within seconds.
 Without a Fly Machine id (the Mac, the sandbox, tests) there is one process,
 and it runs the schedulers without a lease.
 
@@ -93,6 +93,22 @@ def hold(engine, name: str = LEASE) -> bool:
         ))
 
 
+def release_routes(engine) -> None:
+    """Hand this Machine's Mac and Chrome routes over while it keeps its lease."""
+    clear_route_cache()
+    if not routing_enabled():
+        return
+    try:
+        with engine.begin() as connection:
+            connection.execute(text('SELECT anteroom_private.release_machine_routes(:machine)'),
+                               {'machine': machine_id()})
+    except SQLAlchemyError:
+        # The routes still expire on their own, and ``release`` tries again.
+        log.warning('Could not release this Machine\'s device routes while draining')
+    finally:
+        clear_route_cache()  # Fence claims concurrent with the release transaction.
+
+
 def release(engine) -> None:
     clear_route_cache()
     if not routing_enabled():
@@ -114,7 +130,7 @@ async def lead(engine, starts: dict[str, Callable[[], Callable[[], None]]],
     ``starts`` maps a lease name to what starts its schedulers and returns what
     stops them. A renewal that fails for a whole lease period stops them too,
     since another Machine may take the lease once it expires. On drain, the
-    leases are renewed for up to ``grace_s`` while ``marketplace_work`` is in
+    device routes are released at once and the leases are renewed for up to ``grace_s`` while ``marketplace_work`` is in
     flight. Every set stops before the leases are released, so the next
     Machine never overlaps one.
     """
@@ -142,7 +158,8 @@ async def lead(engine, starts: dict[str, Callable[[], Callable[[], None]]],
         while not _draining.is_set():
             await renew()
             await asyncio.to_thread(_draining.wait, RENEW_S)
-        clear_route_cache()
+        # The socket is closed: move the devices now, not after the grace.
+        await asyncio.to_thread(release_routes, engine)
         drained = True
         on_drain()
         deadline = time.monotonic() + (DRAIN_GRACE_S if grace_s is None else grace_s)

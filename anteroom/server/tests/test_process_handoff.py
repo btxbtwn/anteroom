@@ -84,20 +84,21 @@ def run_lead(holds, *, until):
         process_handoff.begin_draining()
         await asyncio.wait_for(task, 2)
 
-    original = process_handoff.hold, process_handoff.release
+    original = process_handoff.hold, process_handoff.release, process_handoff.release_routes
     process_handoff.hold = hold
     process_handoff.release = lambda _engine: events.append('release')
+    process_handoff.release_routes = lambda _engine: events.append('routes')
     try:
         asyncio.run(exercise())
     finally:
-        process_handoff.hold, process_handoff.release = original
+        process_handoff.hold, process_handoff.release, process_handoff.release_routes = original
     return events
 
 
 def test_schedulers_wait_for_the_lease_and_hand_it_over_after_stopping():
     events = run_lead([False, False, True], until=lambda events: 'start' in events)
     assert events[:4] == [('hold', False), ('hold', False), ('hold', True), 'start']
-    assert events[-3:] == ['drain', 'stop', 'release']
+    assert events[-4:] == ['routes', 'drain', 'stop', 'release']
 
 
 def test_losing_the_lease_stops_the_schedulers():
@@ -149,13 +150,14 @@ def drain_with_work(*, finish_after, grace_s=5):
             finish.set()
         await asyncio.wait_for(task, 5)
 
-    original = process_handoff.hold, process_handoff.release
+    original = process_handoff.hold, process_handoff.release, process_handoff.release_routes
     process_handoff.hold = hold
     process_handoff.release = lambda _engine: events.append('release')
+    process_handoff.release_routes = lambda _engine: events.append('routes')
     try:
         asyncio.run(exercise())
     finally:
-        process_handoff.hold, process_handoff.release = original
+        process_handoff.hold, process_handoff.release, process_handoff.release_routes = original
     return events
 
 
@@ -165,6 +167,29 @@ def test_a_running_relist_finishes_during_the_drain_while_the_lease_is_held():
     assert ('hold', True) in drained, 'the stopping Machine keeps renewing the lease'
     assert drained[-3:] == ['job finished', 'stop', 'release']
     assert ('hold', True) not in drained[drained.index('job finished'):]
+
+
+def test_a_draining_machine_hands_its_devices_over_before_the_grace():
+    events = drain_with_work(finish_after=0.2)
+    routes = events.index('routes')
+    assert routes < events.index('drain')
+    assert ('hold', True) in events[routes:events.index('job finished')], 'the lease is still renewed after the routes go'
+    assert events.count('routes') == 1
+
+
+def test_releasing_routes_keeps_the_scheduler_lease(storage, monkeypatch):  # noqa: F811
+    engine, sessions = storage
+    owner = str(uuid.uuid4())
+    machine(monkeypatch, 'blue', 8080)
+    assert process_handoff.hold(engine)
+    assert device_routes.claim(owner, 'chrome', engine).owned
+    process_handoff.release_routes(engine)
+
+    machine(monkeypatch, 'green', 8081)
+    assert device_routes.claim(owner, 'chrome', engine).owned, 'the Chrome route moves while blue drains'
+    assert not process_handoff.hold(engine), 'blue still holds the scheduler lease'
+    with sessions(owner)() as db, pytest.raises(DBAPIError):
+        db.execute(text("SELECT anteroom_private.release_machine_routes('green')")).all()
 
 
 def test_the_drain_grace_is_bounded():
@@ -178,7 +203,7 @@ def test_a_drain_with_nothing_running_hands_over_at_once():
     started = time.monotonic()
     events = run_lead([True], until=lambda events: 'start' in events)
     assert time.monotonic() - started < process_handoff.DRAIN_GRACE_S
-    assert events[-3:] == ['drain', 'stop', 'release']
+    assert events[-4:] == ['routes', 'drain', 'stop', 'release']
 
 
 def test_the_shutdown_waits_stay_under_fly_kill_timeout():
@@ -242,13 +267,14 @@ def test_a_machine_without_background_work_still_releases_its_devices():
         process_handoff.begin_draining()
         await asyncio.wait_for(task, 2)
 
-    release = process_handoff.release
+    release, release_routes = process_handoff.release, process_handoff.release_routes
     process_handoff.release = lambda _engine: events.append('release')
+    process_handoff.release_routes = lambda _engine: events.append('routes')
     try:
         asyncio.run(exercise())
     finally:
-        process_handoff.release = release
-    assert events == ['drain', 'release']
+        process_handoff.release, process_handoff.release_routes = release, release_routes
+    assert events == ['routes', 'drain', 'release']
 
 
 def test_a_machine_waiting_for_the_lease_runs_drafts_and_offers_every_feature(monkeypatch):

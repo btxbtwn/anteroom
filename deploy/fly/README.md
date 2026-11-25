@@ -139,12 +139,13 @@ move a running Machine.
 
 ## Shutdown during deployments
 
-Fly sends SIGTERM with a 300-second grace period. On the signal, the draft
-worker stops claiming tasks, and Auto-Relist and scheduled publishing start no
-new listing. A relist or scheduled publish already talking to a marketplace gets
+Fly sends SIGTERM with a 300-second grace period. On the signal, the Machine
+releases its Mac and Chrome routes at once (its listening socket is closed), the
+draft worker stops claiming tasks, and Auto-Relist and scheduled publishing start
+no new listing. A relist or scheduled publish already talking to a marketplace gets
 up to 75 seconds to finish while this Machine keeps renewing the scheduler lease,
 so the new Machine does not start its schedulers until the old one hands over.
-Then the schedulers stop and the lease and Mac and Chrome routes are released.
+Then the schedulers stop and the lease is released.
 Meanwhile Uvicorn allows active requests 120 seconds to finish. After that the
 app waits, side by side, up to 120 seconds for the handoff and up to 120
 seconds for the draft worker to save its current draft, then stops the
