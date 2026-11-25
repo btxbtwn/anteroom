@@ -26,6 +26,8 @@ final class SessionStore {
     var marketplaceSignInMessage: String?
     let api: AnteroomAPI?
     let changes = LiveChanges()
+    /// "Can't reach your data right now" while the hosted database is down.
+    let reachability: DataReachability
     private let client: SupabaseClient?
     /// Lets the API client sign out once the store exists.
     private let ended: SignInEndedRelay
@@ -35,6 +37,8 @@ final class SessionStore {
     init() {
         let ended = SignInEndedRelay()
         self.ended = ended
+        let reachability = DataReachability { await DataReachability.ready(at: AppConfig.apiBaseURL) }
+        self.reachability = reachability
         guard let key = AppConfig.supabasePublishableKey else {
             client = nil
             api = nil
@@ -62,7 +66,8 @@ final class SessionStore {
         api = AnteroomAPI(baseURL: AppConfig.apiBaseURL, auth: APIAuthorization(
             accessToken: { try await SessionStore.renewing { try await client.auth.session.accessToken } },
             refreshedToken: { try await SessionStore.renewing { try await client.auth.refreshSession().accessToken } },
-            signedOut: { await ended.fire() }))
+            signedOut: { await ended.fire() }),
+            databaseUnavailable: { Task { @MainActor in reachability.note() } })
         ended.handler = { [weak self] in await self?.sessionEnded() }
     }
 
@@ -251,6 +256,7 @@ final class SessionStore {
 
     /// Nothing of this seller's stays on the phone after sign-out.
     private func forgetSeller() async {
+        reachability.reset()
         await api?.forgetSeller()
         URLCache.shared.removeAllCachedResponses()
         PhotoCache.images.removeAllObjects()

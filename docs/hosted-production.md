@@ -425,6 +425,16 @@ workflow instead waits for `/api/ready` after the new version is live and
 fails the run if it never becomes ready. A model outage does not fail
 `/api/health`.
 
+Because nothing outside calls `/api/ready`, the web process watches it itself
+where error emails are on (`services/database_watch.py`): every 30 seconds,
+with a 10-second deadline, and after two minutes of continuous failure one
+"Hosted database unreachable" email to the operator, then one "reachable
+again" email. The outage email goes even though the mail budget (kept in the
+same database) cannot be read; a failed send is tried again after five
+minutes. The database 503s carry `X-Anteroom-Reason: database_unavailable`;
+the web and iPhone apps then check `/api/ready` and, while it fails, say
+"Can't reach your data right now — retrying" instead of loading forever.
+
 `migrations/env.py` sets `lock_timeout = '5s'` on the migration connection.
 `ANTEROOM_MIGRATION_LOCK_TIMEOUT` overrides it. The test suite sets `0`
 because its workers migrate fresh databases in parallel. The hosted

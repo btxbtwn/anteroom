@@ -1,0 +1,2 @@
+- When Anteroom's cloud database can't be reached, the website and iPhone app now say "Can't reach your data right now — retrying" instead of loading forever, and reload on their own once it's back.
+- The operator now gets one email when the cloud database stays unreachable for two minutes, and one when it's reachable again.

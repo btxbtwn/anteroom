@@ -38,6 +38,18 @@ describe("shared desktop and cloud API transport", () => {
     await expect(studioFetch("/api/conversations")).rejects.toThrow("Sign in");
     expect(request).not.toHaveBeenCalled();
   });
+  it("asks /api/ready after a database-unavailable answer and says unreachable only when it fails too", async () => {
+    const { reachability } = await import("./databaseReachability");
+    const request = vi.fn(async (input: string) => input.endsWith("/api/ready")
+      ? new Response("{}", { status: 503 })
+      : new Response("{}", { status: 503, headers: { "X-Anteroom-Reason": "database_unavailable" } }));
+    vi.stubGlobal("fetch", request);
+    dispose = installHostedApiSession({ seller: "seller", origin: ORIGIN, accessToken: async () => "token", unauthorized: vi.fn() });
+    await studioFetch("/api/conversations");
+    await vi.waitFor(() => expect(reachability.get()).toBe("unreachable"));
+    expect(request).toHaveBeenCalledWith(`${ORIGIN}/api/ready`, expect.objectContaining({ credentials: "omit" }));
+    reachability.reset();
+  });
   it("reports expired sessions without retrying a mutation", async () => {
     const unauthorized = vi.fn(); const request = vi.fn(async () => new Response("{}", { status: 401 })); vi.stubGlobal("fetch", request);
     dispose = installHostedApiSession({ seller: "seller", origin: ORIGIN, accessToken: async () => "expired", unauthorized });

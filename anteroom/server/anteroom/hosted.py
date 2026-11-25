@@ -371,7 +371,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         give_threads(asyncio.get_running_loop())
         from anteroom.services import shared_http
         from anteroom.services.error_alerts import install_alerts, uninstall_alerts
-        install_alerts()
+        alerting = install_alerts() is not None
         from anteroom.services.error_log import install_assistant_timings
         install_assistant_timings()
         # ORM relationship names must resolve before a route constructs its
@@ -406,6 +406,12 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         if app.state.process_role != 'worker' and database_engine.dialect.name == 'postgresql':
             # Open draft and assistant streams wait for Postgres to announce new progress.
             task_signals.start(database_engine.url)
+        stop_database_watch = None
+        if alerting and app.state.process_role != 'worker' and database_engine.dialect.name == 'postgresql':
+            # Fly routes on /api/health, which never reads the database: email the
+            # operator when /api/ready keeps failing (where error emails are on).
+            from anteroom.services import database_watch
+            stop_database_watch = database_watch.start(database_engine, built_revision)
         worker = None
         # Lease name -> what starts that set of schedulers (process_handoff.lead).
         starts: dict[str, Callable[[], Callable[[], None]]] = {}
@@ -519,6 +525,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             finally:
                 await asyncio.gather(*(asyncio.to_thread(background.stop) for background in backgrounds))
                 await asyncio.to_thread(task_signals.stop)
+                if stop_database_watch is not None:
+                    await asyncio.to_thread(stop_database_watch)
                 await asyncio.to_thread(uninstall_alerts)
                 await shared_http.close_connection()
                 await asyncio.to_thread(app.state.mcp_auth_threads.shutdown, wait=True, cancel_futures=True)
@@ -572,7 +580,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         return JSONResponse(
             {'detail': 'Cloud data is temporarily unavailable'},
             status_code=503,
-            headers={'Retry-After': '5', 'Cache-Control': 'no-store'},
+            # The web and iPhone apps check /api/ready on this and say the data is unreachable.
+            headers={'Retry-After': '5', 'Cache-Control': 'no-store', 'X-Anteroom-Reason': 'database_unavailable'},
         )
 
     @app.exception_handler(RequestValidationError)
@@ -762,24 +771,15 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         liveness check until a second machine can take traffic. The deploy
         workflow checks this after the new version is live.
         """
-        from sqlalchemy import text
-        from sqlalchemy.exc import SQLAlchemyError
-
         from anteroom.database import engine
-        if engine.dialect.name != "postgresql":
-            return {"status": "ok"}
-        try:
-            with engine.connect() as connection, connection.begin():
-                # LOCAL so a reused connection does not keep the one-second limit.
-                connection.execute(text("SET LOCAL statement_timeout = '1000'"))
-                revision = connection.scalar(text("SELECT anteroom_private.schema_revision()"))
-        except SQLAlchemyError as exc:
+        from anteroom.services.database_watch import readiness
+        status, error = readiness(engine, built_revision)
+        if error is not None:
             from anteroom.services.error_alerts import note_cause
-            note_cause(exc)
-            return JSONResponse({"status": "unavailable"}, status_code=503, headers={"Cache-Control": "no-store"})
-        if revision != built_revision():
+            note_cause(error)
+        if status != "ok":
             # Revisions are not echoed: this route needs no session.
-            return JSONResponse({"status": "schema_mismatch"}, status_code=503, headers={"Cache-Control": "no-store"})
+            return JSONResponse({"status": status}, status_code=503, headers={"Cache-Control": "no-store"})
         return {"status": "ok"}
 
     @app.get("/api/account", response_model=AccountResponse)
