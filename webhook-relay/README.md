@@ -12,7 +12,7 @@ ship: eBay's Cert ID and Etsy's shared secret.
 - **Checks every webhook is genuine.** eBay: ECDSA signature in
   `X-EBAY-SIGNATURE`, verified against the key from eBay's Notification API.
   Key IDs must be UUIDs; key lookups that miss the cache are rate-limited per
-  IP (`EBAY_KEY_LIMITER`), and failed lookups are remembered briefly.
+  IP (`EBAY_KEY_LIMITER`), and keys eBay reports as not found are cached briefly.
   Notifications published more than 24 hours ago are refused.
   Etsy: Standard Webhooks HMAC with a 300 s replay window.
 - **Keeps IDs only** (order, line item, listing, shop, receipt, seller user ID).
@@ -32,7 +32,7 @@ ship: eBay's Cert ID and Etsy's shared secret.
   the account is linked to the device then. Someone who sends a seller a
   sign-in link they started cannot collect the seller's tokens. Refreshes go
   through the relay for the same reason. For eBay it also subscribes the seller
-  to `ORDER_CONFIRMATION`.
+  to `ORDER_CONFIRMATION` and retries setup in the background on token refresh.
 - **Forwards Etsy API calls** with the app's `x-api-key`, only for Etsy
   accounts linked to the calling device. Request and response bodies pass
   through without being stored.
@@ -64,8 +64,10 @@ ship: eBay's Cert ID and Etsy's shared secret.
 | `POST /studio/ebay/research` | Linked Anteroom device | Allowlisted public research; never returns an app token |
 | `* /studio/etsy/v3/application/...` | Anteroom | Etsy API, with `X-Etsy-Authorization: Bearer <Etsy token>` |
 
-`/studio/*` needs `Authorization: Bearer <device token>`. An event can arrive
-twice (live, then again after an ack); dedupe by `seq`.
+`/studio/*` needs `Authorization: Bearer <device token>`. The relay limits
+bearer lookups, sign-in starts, and callbacks per connecting IP and sends
+`429` with `Retry-After` when the corresponding limit is exceeded. An event can
+arrive twice (live, then again after an ack); dedupe by `seq`.
 
 ## Etsy quota diagnostics
 
