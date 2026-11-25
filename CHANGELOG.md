@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1243 — 2026-11-25
+
+- Clear the false Depop warning for measurements copied from Item Details.
+
 ## 0.1.1242 — 2026-11-25
 
 - Poshmark's Listing Price must be in whole dollars. Auto-Relist leaves the current listing live if the replacement price has cents.
