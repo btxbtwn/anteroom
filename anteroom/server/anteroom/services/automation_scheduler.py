@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from anteroom.database import SessionLocal, end_read, in_worker_session
 from anteroom.models.automation import Automation, AutomationRun
 from anteroom.repositories.queries import JobRepo
+from anteroom.services import process_handoff
 from anteroom.services.automation_schedule import as_utc
 from anteroom.services.automations import (
     STALE_RUN,
@@ -499,7 +500,9 @@ async def _run_scheduled_drafts(moment: datetime) -> int:
     from anteroom.services.draft_scheduling import run_due_scheduled_publishes
 
     try:
-        results = await run_due_scheduled_publishes(now=moment)
+        # A stopping Machine lets the publish in flight finish (process_handoff.DRAIN_GRACE_S).
+        with process_handoff.marketplace_work():
+            results = await run_due_scheduled_publishes(now=moment)
         return len(results)
     except Exception:  # noqa: BLE001
         log.exception("scheduled draft publish sweep failed")
@@ -512,7 +515,8 @@ async def _run_auto_relist(moment: datetime) -> int:
     try:
         # Relists run one at a time inside the tick, so scheduled publishes and
         # automations never wait more than one pass's budget plus one relist.
-        results = await run_auto_relist(now=moment, scheduled=True, time_budget=RELIST_PASS_BUDGET)
+        with process_handoff.marketplace_work():
+            results = await run_auto_relist(now=moment, scheduled=True, time_budget=RELIST_PASS_BUDGET)
         return sum(1 for item in results if item.get("status") in {"completed", "failed"})
     except Exception:  # noqa: BLE001
         log.exception("auto-relist sweep failed")

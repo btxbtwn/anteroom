@@ -440,8 +440,8 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         now = _now()
         ids = {}
         for index, (market, url, old_id) in enumerate([
-            ("mercari", "https://www.mercari.com/us/item/m123456789/", "m123456789"),
-            ("mercari", "https://www.mercari.com/us/item/m123456790/", "m123456790"),
+            ("poshmark", "https://poshmark.com/listing/5f00000000000000000000a1", "5f00000000000000000000a1"),
+            ("poshmark", "https://poshmark.com/listing/5f00000000000000000000a2", "5f00000000000000000000a2"),
             ("depop", "https://www.depop.com/products/seller-fleece/", "seller-fleece"),
         ]):
             conv, _, rev = self._create_draft(f"Connection Check {index}")
@@ -455,15 +455,15 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.db.add_all(
             MarketplaceRelistRule(id=new_id(), marketplace=market, enabled=True,
                                   price_adjust_mode="percent", price_adjust_value=10)
-            for market in ("mercari", "depop")
+            for market in ("poshmark", "depop")
         )
         self.db.commit()
 
         async def delete(market, command, **_kwargs):
             if command["type"] == "marketplace.form":
                 return {"ok": True, "relist_shipping_checked": True}
-            if market == "mercari":
-                return {"ok": False, "error_code": "challenge", "error": "Mercari asked for a browser check."}
+            if market == "poshmark":
+                return {"ok": False, "error_code": "challenge", "error": "Poshmark asked for a browser check."}
             return {"ok": True, "state": "deleted"}
 
         with (
@@ -477,20 +477,20 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
             outcomes = asyncio.run(auto_relist.run_auto_relist(now=now))
 
         self.assertEqual([(call.args[0], call.args[1]["type"]) for call in execute.await_args_list], [
-            ("mercari", "marketplace.delete"), ("depop", "marketplace.form"), ("depop", "marketplace.delete"),
+            ("poshmark", "marketplace.delete"), ("depop", "marketplace.form"), ("depop", "marketplace.delete"),
         ])
         self.assertEqual(execute.await_args_list[-1].args[1]["payload"]["action"], "relist")
         self.assertEqual([row["status"] for row in outcomes], ["failed", "completed"])
         self.assertEqual(publish.await_count, 1)
         self.assertEqual(publish.await_args.args[:2], (ids["seller-fleece"][0], "depop"))
         self.db.expire_all()
-        for old_id in ("m123456789", "m123456790"):
+        for old_id in ("5f00000000000000000000a1", "5f00000000000000000000a2"):
             conv_id, revision_id = ids[old_id]
             current = self.db.query(Listing).filter_by(conversation_id=conv_id).one()
             prices = self.db.get(ListingRevision, current.current_revision_id)
             assert prices is not None
-            self.assertEqual(auto_relist.price_for(prices.listing_json, "mercari"), 58.0)
-            if old_id == "m123456790":
+            self.assertEqual(auto_relist.price_for(prices.listing_json, "poshmark"), 58.0)
+            if old_id == "5f00000000000000000000a2":
                 self.assertEqual(current.current_revision_id, revision_id)
 
     def test_depop_relist_refuses_unavailable_shipping_before_delisting(self):
@@ -1951,6 +1951,51 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertEqual([o["status"] for o in outcomes], ["completed", "completed"])
         self.assertEqual(len(set(delisted)), 3)
 
+    def test_a_stopping_machine_starts_no_new_relist(self):
+        from anteroom.services import process_handoff
+
+        conv, _listing, _rev = self._create_draft("Drain Coat", price=50.0)
+        self.db.add(MarketplaceListing(
+            id=new_id(), conversation_id=conv.id, marketplace="poshmark", state="published",
+            listing_id="5f00000000000000000000e1", listing_url="https://poshmark.com/listing/5f00000000000000000000e1",
+            listed_at=_now() - timedelta(days=45), listed_price=50.0,
+        ))
+        self.db.commit()
+        auto_relist.save_rule(self.db, "poshmark", {"enabled": True, "min_age_days": 30, "daily_cap": 10}, confirm=True)
+        delister, lister = AsyncMock(return_value={"ok": True}), AsyncMock(return_value={"ok": True, "listing_id": "x"})
+
+        process_handoff.begin_draining()
+        try:
+            outcomes = asyncio.run(auto_relist.run_auto_relist(now=_now(), delister=delister, lister=lister))
+        finally:
+            process_handoff.reset()
+        self.assertEqual(outcomes, [])
+        delister.assert_not_awaited()
+        self.assertEqual(self.db.query(MarketplaceRelistLog).count(), 0)
+
+    def test_a_stopping_machine_starts_no_new_scheduled_publish(self):
+        from anteroom.services import process_handoff
+
+        conv, _listing, _rev = self._create_draft("Drain Scheduled")
+        base_now = _now()
+        draft_scheduling.schedule_draft(
+            self.db, conv.id, publish_at=base_now + timedelta(minutes=10), marketplaces=["poshmark"],
+            confirm=True, now=base_now,
+        )
+        publisher = AsyncMock(return_value={"ok": True})
+
+        process_handoff.begin_draining()
+        try:
+            outcomes = asyncio.run(draft_scheduling.run_due_scheduled_publishes(
+                now=base_now + timedelta(minutes=11), publisher=publisher,
+            ))
+        finally:
+            process_handoff.reset()
+        self.assertEqual(outcomes, [])
+        publisher.assert_not_awaited()
+        self.db.expire_all()
+        self.assertEqual(self.db.query(Listing).filter_by(conversation_id=conv.id).one().scheduled_status, "scheduled")
+
     def test_the_scheduler_gives_each_relist_pass_a_time_budget(self):
         from unittest.mock import AsyncMock
 
@@ -1967,7 +2012,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         old_time = _now() - timedelta(days=40)
         for market, age, listing_id, url in (
             ("poshmark", timedelta(0), "5f00000000000000000000d1", "https://poshmark.com/listing/5f00000000000000000000d1"),
-            ("mercari", timedelta(days=10), "m12345678902", "https://www.mercari.com/us/item/m12345678902/"),
+            ("depop", timedelta(days=10), "seller-coat", "https://www.depop.com/products/seller-coat/"),
         ):
             conv, _listing, _rev = self._create_draft(f"{market} coat", price=50.0)
             self.db.add(MarketplaceListing(
@@ -1989,7 +2034,119 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         outcomes = asyncio.run(auto_relist.run_auto_relist(
             now=_now(), delister=delister, lister=lister, time_budget=timedelta(0),
         ))
-        self.assertEqual(delisted, ["mercari"], outcomes)
+        self.assertEqual(delisted, ["depop"], outcomes)
+
+    def _mercari_due(self, title: str, old_id: str, *, age_days: int = 45) -> tuple[str, str]:
+        conv, _, rev = self._create_draft(title, price=58.0)
+        conv.status = "listed"
+        self.db.add(MarketplaceListing(
+            id=new_id(), conversation_id=conv.id, marketplace="mercari", state="published",
+            listing_id=old_id, listing_url=f"https://www.mercari.com/us/item/{old_id}/",
+            listed_price=58.0, listed_at=_now() - timedelta(days=age_days),
+        ))
+        self.db.commit()
+        return conv.id, rev.id
+
+    def _assert_mercari_left_up(self, conv_id: str, revision_id: str, old_id: str) -> None:
+        self.db.expire_all()
+        live = self.db.query(MarketplaceListing).filter_by(conversation_id=conv_id, marketplace="mercari").one()
+        self.assertEqual((live.state, live.listing_id, live.listed_price), ("published", old_id, 58.0))
+        current = self.db.query(Listing).filter_by(conversation_id=conv_id).one()
+        self.assertEqual(current.current_revision_id, revision_id)
+        prices = self.db.get(ListingRevision, current.current_revision_id)
+        assert prices is not None
+        self.assertEqual(auto_relist.price_for(prices.listing_json, "mercari"), 58.0)
+
+    def test_mercari_relist_never_deletes_before_mercari_accepts_a_replacement(self):
+        """Production 2026-11-25: the delete ran, then Mercari refused the replacement draft."""
+        first = self._mercari_due("Mercari coat", "m123456781", age_days=50)
+        second = self._mercari_due("Mercari vest", "m123456782", age_days=45)
+        auto_relist.save_rule(self.db, "mercari", {"enabled": True, "min_age_days": 30, "daily_cap": 10,
+                                                    "price_adjust_mode": "percent", "price_adjust_value": 10},
+                              confirm=True)
+        refused = {"state": "not_saved", "error": "Mercari could not save this listing.", "error_code": "rejected"}
+        with (
+            patch("anteroom.services.marketplace_delist.delist", AsyncMock(return_value={
+                "mercari": {"state": "deleted"},
+            })) as delete,
+            patch("anteroom.services.native_marketplaces.list_now", AsyncMock(return_value=refused)) as publish,
+            patch("anteroom.services.native_marketplaces.save_draft", AsyncMock(return_value=refused)) as draft,
+        ):
+            outcomes = asyncio.run(auto_relist.run_auto_relist(now=_now()))
+            again = asyncio.run(auto_relist.run_auto_relist(now=_now(), respect_backoff=False))
+
+        delete.assert_not_awaited()
+        publish.assert_not_awaited()
+        draft.assert_not_awaited()
+        # One refusal per pass: the oldest listing says why and the rest of Mercari waits.
+        self.assertEqual([(row["conversation_id"], row["status"]) for row in outcomes], [(first[0], "skipped_paused")])
+        self.assertIn("leaves Mercari listings up", outcomes[0]["reason"])
+        self.assertEqual([row["status"] for row in again], ["skipped_paused"])
+        self._assert_mercari_left_up(*first, "m123456781")
+        self._assert_mercari_left_up(*second, "m123456782")
+        self.assertEqual(self.db.query(MarketplaceRelistLog).filter_by(status="relist_pending").count(), 0)
+        # The second pass reports the pause without logging it again.
+        logged = self.db.query(MarketplaceRelistLog).filter_by(marketplace="mercari").all()
+        self.assertEqual([(row.status, row.old_price, row.new_price, row.price_revision_id) for row in logged],
+                         [("skipped_paused", 58.0, 58.0, None)])
+
+    def test_a_paused_mercari_rule_logs_once_a_day_and_uses_none_of_its_cap(self):
+        self._mercari_due("Mercari boots", "m123456785", age_days=50)
+        self._mercari_due("Mercari belt", "m123456786", age_days=45)
+        auto_relist.save_rule(self.db, "mercari", {"enabled": True, "min_age_days": 30, "daily_cap": 1}, confirm=True)
+        start = _now()
+        delete = AsyncMock(return_value={"mercari": {"state": "deleted"}})
+        with patch("anteroom.services.marketplace_delist.delist", delete):
+            for minutes in (0, 5, 10, 60 * 23):
+                asyncio.run(auto_relist.run_auto_relist(now=start + timedelta(minutes=minutes), scheduled=True))
+            self.assertEqual(self.db.query(MarketplaceRelistLog).count(), 1)
+            asyncio.run(auto_relist.run_auto_relist(now=start + timedelta(hours=24, minutes=5), scheduled=True))
+        delete.assert_not_awaited()
+        self.assertEqual(self.db.query(MarketplaceRelistLog).filter_by(status="skipped_paused").count(), 2)
+        rule = next(row for row in auto_relist.list_rules(self.db, now=start + timedelta(hours=24, minutes=6))
+                    if row["marketplace"] == "mercari")
+        self.assertEqual((rule["relisted_today"], rule["remaining_today"]), (0, 1))
+        self.assertIn("leaves Mercari listings up", rule["paused_reason"])
+
+    def test_mercari_relist_refuses_even_an_injected_runner_and_other_marketplaces_still_relist(self):
+        mercari = self._mercari_due("Mercari scarf", "m123456783", age_days=60)
+        conv, _, _ = self._create_draft("Poshmark scarf", price=50.0)
+        posh_old = "5f00000000000000000000e1"
+        self.db.add(MarketplaceListing(
+            id=new_id(), conversation_id=conv.id, marketplace="poshmark", state="published",
+            listing_id=posh_old, listing_url=f"https://poshmark.com/listing/{posh_old}",
+            listed_price=50.0, listed_at=_now() - timedelta(days=40),
+        ))
+        self.db.commit()
+        for market in ("mercari", "poshmark"):
+            auto_relist.save_rule(self.db, market, {"enabled": True, "min_age_days": 30, "daily_cap": 10}, confirm=True)
+        delisted: list[str] = []
+        listed: list[str] = []
+
+        async def delister(conv_id: str, market: str) -> dict:
+            delisted.append(market)
+            return {"ok": True}
+
+        async def lister(conv_id: str, market: str, rev_id: str) -> dict:
+            listed.append(market)
+            return {"ok": True, "listing_id": "5f00000000000000000000e2"}
+
+        outcomes = asyncio.run(auto_relist.run_auto_relist(now=_now(), scheduled=True,
+                                                           delister=delister, lister=lister))
+        self.assertEqual((delisted, listed), (["poshmark"], ["poshmark"]))
+        self.assertEqual(sorted((row["marketplace"], row["status"]) for row in outcomes),
+                         [("mercari", "skipped_paused"), ("poshmark", "completed")])
+        self._assert_mercari_left_up(*mercari, "m123456783")
+
+    def test_mercari_relist_pause_shows_in_the_preview_and_dry_run(self):
+        self._mercari_due("Mercari hat", "m123456784")
+        auto_relist.save_rule(self.db, "mercari", {"enabled": True, "min_age_days": 30}, confirm=True)
+        preview = auto_relist.preview_status(self.db, marketplace="mercari")
+        self.assertIn("leaves Mercari listings up", preview["rules"][0]["paused_reason"])
+        self.assertIsNone(auto_relist.preview_status(self.db, marketplace="poshmark")["rules"][0]["paused_reason"])
+        dry = asyncio.run(auto_relist.run_auto_relist(now=_now(), dry_run=True))
+        self.assertEqual([(row["marketplace"], row["status"]) for row in dry], [("mercari", "dry_run")])
+        self.assertIn("leaves Mercari listings up", dry[0]["reason"])
 
 
 if __name__ == "__main__":

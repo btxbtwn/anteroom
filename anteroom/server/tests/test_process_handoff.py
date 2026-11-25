@@ -3,7 +3,9 @@ import asyncio
 import logging
 import socket
 import threading
+import time
 import uuid
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -83,26 +85,178 @@ def run_lead(holds, *, until):
         process_handoff.begin_draining()
         await asyncio.wait_for(task, 2)
 
-    original = process_handoff.hold, process_handoff.release
+    original = process_handoff.hold, process_handoff.release, process_handoff.release_routes
     process_handoff.hold = hold
     process_handoff.release = lambda _engine: events.append('release')
+    process_handoff.release_routes = lambda _engine: events.append('routes')
     try:
         asyncio.run(exercise())
     finally:
-        process_handoff.hold, process_handoff.release = original
+        process_handoff.hold, process_handoff.release, process_handoff.release_routes = original
     return events
 
 
 def test_schedulers_wait_for_the_lease_and_hand_it_over_after_stopping():
     events = run_lead([False, False, True], until=lambda events: 'start' in events)
     assert events[:4] == [('hold', False), ('hold', False), ('hold', True), 'start']
-    assert events[-3:] == ['drain', 'stop', 'release']
+    assert events[-4:] == ['routes', 'drain', 'stop', 'release']
 
 
 def test_losing_the_lease_stops_the_schedulers():
     events = run_lead([True, False], until=lambda events: 'stop' in events)
     assert events[:4] == [('hold', True), 'start', ('hold', False), 'stop']
     assert events.count('stop') == 1
+
+
+def drain_with_work(*, finish_after, grace_s=5):
+    """Drain ``lead`` while scheduled marketplace work runs; returns the ordered events.
+
+    The work ends ``finish_after`` seconds into the drain (``None``: never), and
+    the scheduler set's stop cancels it, like ``BackgroundLoop.stop``.
+    """
+    events = []
+    started = threading.Event()
+    finish = threading.Event()
+
+    def hold(_engine, _name='schedulers'):
+        events.append(('hold', process_handoff.draining()))
+        return True
+
+    def start():
+        def job():
+            with process_handoff.marketplace_work():
+                started.set()
+                finish.wait(5)
+                events.append('job finished' if not cancelled.is_set() else 'job cancelled')
+
+        cancelled = threading.Event()
+        thread = threading.Thread(target=job)
+        thread.start()
+
+        def stop():
+            cancelled.set()
+            finish.set()
+            thread.join()
+            events.append('stop')
+        return stop
+
+    async def exercise():
+        task = asyncio.create_task(process_handoff.lead(
+            'engine', {'schedulers': start}, lambda: events.append('drain'), grace_s=grace_s,
+        ))
+        assert await asyncio.to_thread(started.wait, 2)
+        process_handoff.begin_draining()
+        if finish_after is not None:
+            await asyncio.sleep(finish_after)
+            finish.set()
+        await asyncio.wait_for(task, 5)
+
+    original = process_handoff.hold, process_handoff.release, process_handoff.release_routes
+    process_handoff.hold = hold
+    process_handoff.release = lambda _engine: events.append('release')
+    process_handoff.release_routes = lambda _engine: events.append('routes')
+    try:
+        asyncio.run(exercise())
+    finally:
+        process_handoff.hold, process_handoff.release, process_handoff.release_routes = original
+    return events
+
+
+def test_a_running_relist_finishes_during_the_drain_while_the_lease_is_held():
+    events = drain_with_work(finish_after=0.2)
+    drained = events[events.index('drain'):]
+    assert ('hold', True) in drained, 'the stopping Machine keeps renewing the lease'
+    assert drained[-3:] == ['job finished', 'stop', 'release']
+    assert ('hold', True) not in drained[drained.index('job finished'):]
+
+
+def test_a_draining_machine_hands_its_devices_over_before_the_grace():
+    events = drain_with_work(finish_after=0.2)
+    routes = events.index('routes')
+    assert routes < events.index('drain')
+    assert ('hold', True) in events[routes:events.index('job finished')], 'the lease is still renewed after the routes go'
+    assert events.count('routes') == 1
+
+
+def test_releasing_routes_keeps_the_scheduler_lease(storage, monkeypatch):  # noqa: F811
+    engine, sessions = storage
+    owner = str(uuid.uuid4())
+    machine(monkeypatch, 'blue', 8080)
+    assert process_handoff.hold(engine)
+    assert device_routes.claim(owner, 'chrome', engine).owned
+    process_handoff.release_routes(engine)
+
+    machine(monkeypatch, 'green', 8081)
+    assert device_routes.claim(owner, 'chrome', engine).owned, 'the Chrome route moves while blue drains'
+    assert not process_handoff.hold(engine), 'blue still holds the scheduler lease'
+    with sessions(owner)() as db, pytest.raises(DBAPIError):
+        db.execute(text("SELECT anteroom_private.release_machine_routes('green')")).all()
+
+
+def test_the_drain_grace_is_bounded():
+    started = time.monotonic()
+    events = drain_with_work(finish_after=None, grace_s=0.2)
+    assert time.monotonic() - started < 2
+    assert events[-3:] == ['job cancelled', 'stop', 'release']
+
+
+def test_a_drain_with_nothing_running_hands_over_at_once():
+    started = time.monotonic()
+    events = run_lead([True], until=lambda events: 'start' in events)
+    assert time.monotonic() - started < process_handoff.DRAIN_GRACE_S
+    assert events[-4:] == ['routes', 'drain', 'stop', 'release']
+
+
+def test_the_shutdown_waits_stay_under_fly_kill_timeout():
+    import re
+    from pathlib import Path
+
+    fly = (Path(__file__).resolve().parents[3] / 'deploy' / 'fly' / 'fly.toml').read_text()
+    kill_timeout = int(re.search(r'^kill_timeout = (\d+)', fly, re.M).group(1))
+    # Uvicorn drains requests (120 s), then hosted.py waits for the handoff and
+    # the draft worker (120 s) side by side, then stops each loop (up to 20 s).
+    assert 120 + max(process_handoff.HANDOFF_WAIT_S, 120) + 20 < kill_timeout
+    assert process_handoff.HANDOFF_WAIT_S >= process_handoff.DRAIN_GRACE_S + 40, "two scheduler sets stop one after the other"
+
+
+def test_scheduled_publishes_and_relists_count_as_marketplace_work(monkeypatch):
+    from anteroom.services import auto_relist, automation_scheduler, draft_scheduling
+
+    seen = []
+
+    async def run(**_kwargs):
+        seen.append(process_handoff._idle.is_set())
+        return []
+
+    monkeypatch.setattr(auto_relist, 'run_auto_relist', run)
+    monkeypatch.setattr(draft_scheduling, 'run_due_scheduled_publishes', run)
+    asyncio.run(automation_scheduler._run_auto_relist(automation_scheduler.as_utc(datetime.now(UTC))))
+    asyncio.run(automation_scheduler._run_scheduled_drafts(automation_scheduler.as_utc(datetime.now(UTC))))
+    assert seen == [False, False]
+    assert process_handoff._idle.is_set()
+
+
+def test_a_stopping_machine_starts_no_new_automation_tick(monkeypatch):
+    from anteroom.services import hosted_automation_scheduler
+
+    ticked = []
+    monkeypatch.setattr(hosted_automation_scheduler, 'due_owners', lambda _engine: ['seller'])
+    monkeypatch.setattr(hosted_automation_scheduler, 'TICK_SECONDS', 0.01)
+
+    async def run_owner(owner):
+        ticked.append(owner)
+
+    monkeypatch.setattr(hosted_automation_scheduler, 'run_owner', run_owner)
+    process_handoff.begin_draining()
+
+    async def exercise():
+        task = asyncio.create_task(hosted_automation_scheduler.serve('engine'))
+        await asyncio.sleep(0.1)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(exercise())
+    assert ticked == []
 
 
 def test_a_machine_without_background_work_still_releases_its_devices():
@@ -114,13 +268,14 @@ def test_a_machine_without_background_work_still_releases_its_devices():
         process_handoff.begin_draining()
         await asyncio.wait_for(task, 2)
 
-    release = process_handoff.release
+    release, release_routes = process_handoff.release, process_handoff.release_routes
     process_handoff.release = lambda _engine: events.append('release')
+    process_handoff.release_routes = lambda _engine: events.append('routes')
     try:
         asyncio.run(exercise())
     finally:
-        process_handoff.release = release
-    assert events == ['drain', 'release']
+        process_handoff.release, process_handoff.release_routes = release, release_routes
+    assert events == ['routes', 'drain', 'release']
 
 
 def test_a_machine_waiting_for_the_lease_runs_drafts_and_offers_every_feature(monkeypatch):

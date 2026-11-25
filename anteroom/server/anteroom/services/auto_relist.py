@@ -64,6 +64,20 @@ DELIST_BLOCKERS = ("signed_out", "challenge", "chrome_unavailable", "rate_limite
 RULE_DISABLED_AFTER_DELETE = "The relist rule was turned off after deletion. Review the listing before recreating it."
 # How long a relist cancelled mid-delete waits to put its price back.
 RESTORE_PRICE_DEADLINE_S = 30.0
+# Marketplaces whose replacement is first saved as a native draft, which the marketplace
+# can refuse. Relisting deletes the old listing first, so a refused draft left the item
+# down (production 2026-11-25: Mercari refused native_mercari_save_draft after the delete).
+# A replacement draft cannot be saved and verified before that delete: the item's one
+# marketplace_listings row holds the live listing, and a draft is refused while it is live.
+# Until it can, Auto-Relist leaves these listings up rather than delete one first.
+REPLACEMENT_UNVERIFIED = {
+    "mercari": ("Mercari Auto-Relist is paused: Mercari can refuse the replacement after the old listing is "
+                "deleted, so Anteroom leaves Mercari listings up with their price unchanged."),
+}
+# A paused marketplace logs why at most once a day. The row neither counts toward the
+# daily cap nor starts the retry wait, since nothing was tried.
+PAUSED_STATUS = "skipped_paused"
+PAUSED_LOG_INTERVAL = timedelta(hours=24)
 
 
 class AutoRelistError(ValueError):
@@ -132,6 +146,7 @@ def _default_rule_view(marketplace: str, relisted_today: int = 0) -> dict[str, A
         "relisted_today": relisted_today,
         "remaining_today": max(DEFAULT_DAILY_CAP - relisted_today, 0),
         "last_run_at": None,
+        "paused_reason": REPLACEMENT_UNVERIFIED.get(marketplace),
     }
 
 
@@ -152,6 +167,7 @@ def rule_view(db: Session, row: MarketplaceRelistRule, moment: datetime | None =
         "relisted_today": done,
         "remaining_today": max(int(row.daily_cap) - done, 0),
         "last_run_at": _iso(row.last_run_at),
+        "paused_reason": REPLACEMENT_UNVERIFIED.get(row.marketplace),
     }
 
 
@@ -1138,6 +1154,9 @@ def _reserve_relist_attempt(
             return {"reserved": False, "outcome": None}
 
         price_error = poshmark_fractional_price_error(new_price) if marketplace == "poshmark" else None
+        if (paused := REPLACEMENT_UNVERIFIED.get(marketplace)) is not None:
+            return {"reserved": False, "outcome": _record_pause(db, entry, paused, moment)}
+
         preflight_error = readiness_error or price_error
         revision_id = None if preflight_error else _prepare_price_revision(
             db, conv_id, marketplace, new_price, current_revision_id,
@@ -1175,6 +1194,32 @@ def _reserve_relist_attempt(
         )
         return {"reserved": True, "attempt_id": attempt_id, "revision_id": revision_id,
                 "original_revision_id": current_revision_id}
+
+
+def _record_pause(db: Session, entry: dict[str, Any], reason: str, moment: datetime) -> dict[str, Any]:
+    """Log that a paused marketplace left this listing up, at most once a day.
+
+    Nothing is deleted, priced or sent. A pass within the interval reports the
+    reason without writing another row.
+    """
+    marketplace = entry["marketplace"]
+    outcome = {
+        "conversation_id": entry["conversation_id"], "marketplace": marketplace,
+        "old_listing_id": entry["listing_id"], "new_listing_id": None, "status": PAUSED_STATUS, "reason": reason,
+    }
+    logged = (
+        db.query(MarketplaceRelistLog.id)
+        .filter(MarketplaceRelistLog.marketplace == marketplace, MarketplaceRelistLog.status == PAUSED_STATUS,
+                MarketplaceRelistLog.created_at > moment - PAUSED_LOG_INTERVAL)
+        .first()
+    )
+    if logged is not None:
+        return outcome
+    return _record_log(
+        db, conv_id=entry["conversation_id"], marketplace=marketplace, old_listing_id=entry["listing_id"],
+        new_listing_id=None, old_price=entry["price"], new_price=entry["price"], status=PAUSED_STATUS,
+        reason=reason, moment=moment,
+    )
 
 
 def _update_attempt_stage(
@@ -1234,7 +1279,7 @@ async def run_auto_relist(
                 "old_price": entry["price"],
                 "new_price": entry["new_price"],
                 "status": "dry_run",
-                "reason": None,
+                "reason": REPLACEMENT_UNVERIFIED.get(entry["marketplace"]),
             }
             for entry in plan
         ]
@@ -1242,6 +1287,8 @@ async def run_auto_relist(
     async def _run_delist(
         conv_id: str, marketplace: str, expected_listing_id: str, rule_id: str, revision_id: str
     ) -> dict[str, Any]:
+        if marketplace in REPLACEMENT_UNVERIFIED:
+            return {"ok": False, "error": REPLACEMENT_UNVERIFIED[marketplace]}
         if not await in_worker_session(_rule_enabled, rule_id):
             return {
                 "ok": False,
@@ -1329,12 +1376,16 @@ async def run_auto_relist(
             "native_job_id": res.get("job_id"),
         }
 
+    from anteroom.services import process_handoff
     from anteroom.services.native_marketplaces import NativeMarketplaceError, check_depop_relist_shipping
 
     outcomes: list[dict[str, Any]] = []
     blocked_markets: set[str] = set()
     started = time.monotonic()
     for index, entry in enumerate(plan):
+        if process_handoff.draining():
+            log.info("Auto-relist stops for this Machine's shutdown; %d due listings wait for the next one.", len(plan) - index)
+            break
         if time_budget is not None and index and time.monotonic() - started >= time_budget.total_seconds():
             log.info("Auto-relist pass used its %s; %d due listings wait for the next pass.", time_budget, len(plan) - index)
             break
@@ -1367,6 +1418,9 @@ async def run_auto_relist(
         if not reservation["reserved"]:
             if reservation.get("outcome") is not None:
                 outcomes.append(reservation["outcome"])
+                if market in REPLACEMENT_UNVERIFIED:
+                    # One refusal per pass says why; the rest of this marketplace waits.
+                    blocked_markets.add(market)
             continue
 
         attempt_id = reservation["attempt_id"]
