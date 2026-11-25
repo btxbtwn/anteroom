@@ -700,6 +700,8 @@ ATTENTION_WRITE_TOOLS = {"dismiss_attention_items", "resolve_attention_items", "
 # Inventory tidying tools (services/mcp_organize_tools.py).
 READ_TOOLS |= {"get_pending_edits", "get_labels"}
 LISTING_WRITE_TOOLS |= {"discard_pending_edits", "rename_label", "delete_label"}
+# Item Details' read buttons (services/mcp_reading_tools.py).
+LISTING_WRITE_TOOLS |= {"read_size_tag", "read_measurements"}
 ATTENTION_WRITE_TOOLS |= {"mark_not_duplicate"}
 # Reaches any token or app with some access to at least one area.
 FEEDBACK_TOOLS = {"send_feedback"}
@@ -1362,7 +1364,7 @@ def test_mcp_listing_photos_load_after_db_session_closes(monkeypatch):
 
     monkeypatch.setattr(mcp_route, "in_worker_session", fake_in_worker)
     monkeypatch.setattr(mcp_route, "_run_mcp_call", fake_run_call)
-    monkeypatch.setattr(mcp_http, "_read_photo", fake_read)
+    monkeypatch.setattr(mcp_http, "read_photo", fake_read)
 
     resp = _rpc(TestClient(app), "ping")
     assert resp.status_code == 200
@@ -1380,7 +1382,7 @@ def test_mcp_listing_photos_apply_exif_orientation(monkeypatch):
     exif[0x0112] = 6
     buf = io.BytesIO()
     Image.new("RGB", (1000, 500), "white").save(buf, "JPEG", exif=exif)
-    monkeypatch.setattr(mcp_http, "_read_photo", lambda _key, *, timeout: buf.getvalue())
+    monkeypatch.setattr(mcp_http, "read_photo", lambda _key, *, timeout: buf.getvalue())
 
     content = [mcp_http._photo_placeholder("p1", "conv/key.jpg", 400)]
     mcp_http.load_pending_photos([(content, 0)], deadline=float("inf"))
