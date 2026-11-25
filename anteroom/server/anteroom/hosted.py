@@ -1,6 +1,10 @@
-"""Hosted API entry point. Seller data routes join after tenant isolation ships.
+"""Hosted API entry point.
 
-Unlike the desktop app, this starts no Chrome, Keychain or automation services.
+Unlike the desktop app, this starts no local Chrome or Keychain. When
+``ANTEROOM_BACKGROUND_WORKER=1``, its lifespan starts the durable draft worker
+and scheduled services under ``process_handoff`` leases, split by
+``ANTEROOM_PROCESS_ROLE`` (``schedulers`` on ``worker``/``all``; ``chrome`` on
+``web``/``all``).
 """
 
 from __future__ import annotations

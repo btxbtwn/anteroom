@@ -1,0 +1,1 @@
+- Update hosted deployment, process-lease, error-alert, and webhook-relay documentation to match current server behavior.
