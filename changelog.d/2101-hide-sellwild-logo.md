@@ -1,1 +1,0 @@
-- Inventory no longer shows Sellwild as a marketplace logo or filter. Anteroom cannot list or delist there; that history stays in the import only.
