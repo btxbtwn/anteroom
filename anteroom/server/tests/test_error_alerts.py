@@ -136,12 +136,15 @@ def test_handled_http_refusal_is_logged_without_private_url_or_body():
 
 def test_email_goes_to_operator_over_tls(monkeypatch):
     monkeypatch.delenv("ANTEROOM_OPERATOR_EMAIL", raising=False)
-    with patch("smtplib.SMTP") as factory:
+    with patch("aiosmtplib.SMTP", autospec=True) as factory:
+        smtp = factory.return_value
+        smtp.transport = None
         send_email("subject", "body")
-    factory.assert_called_once_with("smtp-relay.gmail.com", 587, local_hostname="myanteroom.com", timeout=20)
-    smtp = factory.return_value.__enter__.return_value
-    smtp.starttls.assert_called_once()
-    message = smtp.send_message.call_args.args[0]
+    factory.assert_called_once_with(hostname="smtp-relay.gmail.com", port=587, local_hostname="myanteroom.com",
+                                    timeout=20, start_tls=True)
+    smtp.connect.assert_awaited_once()
+    smtp.close.assert_called_once()
+    message = smtp.send_message.await_args.args[0]
     assert message["To"] == "ccanizares@myanteroom.com"
 
 
@@ -715,37 +718,18 @@ def test_expected_client_4xx_and_fly_replay_do_not_warn():
 
 
 def test_operator_email_reads_env_and_falls_back(monkeypatch):
-    import smtplib
-
     monkeypatch.delenv("ANTEROOM_OPERATOR_EMAIL", raising=False)
     assert error_alerts.operator_email() == error_alerts.OPERATOR
 
     monkeypatch.setenv("ANTEROOM_OPERATOR_EMAIL", "ops@example.com")
     assert error_alerts.operator_email() == "ops@example.com"
 
-    sent = []
-
-    class FakeSMTP:
-        def __init__(self, host, port, *, local_hostname, timeout):
-            self.local_hostname = local_hostname
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def starttls(self, *, context):
-            pass
-
-        def send_message(self, message):
-            sent.append((self.local_hostname, message))
-
-    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
-    error_alerts.send_email("Subject", "Body")
-    assert len(sent) == 1
-    local_hostname, message = sent[0]
-    assert local_hostname == "example.com"
+    with patch("aiosmtplib.SMTP", autospec=True) as factory:
+        smtp = factory.return_value
+        smtp.transport = None
+        error_alerts.send_email("Subject", "Body")
+    assert factory.call_args.kwargs["local_hostname"] == "example.com"
+    message = smtp.send_message.await_args.args[0]
     assert message["To"] == "ops@example.com"
     assert message["From"] == "Anteroom Errors <ops@example.com>"
     assert message["Message-ID"].endswith("@example.com>")
