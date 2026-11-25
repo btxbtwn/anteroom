@@ -503,14 +503,18 @@ def normalize_listing_dropdowns(listing: dict) -> bool:
             values = as_list(raw_value)
             if not values:
                 continue
-            mapped: list[str] = []
+            canonical_values: list[str] = []
             for item in values:
                 hit = canonical_option(item, allowed)
-                if hit and hit not in mapped:
-                    mapped.append(hit)
-            if not mapped:
+                if hit and hit not in canonical_values:
+                    canonical_values.append(hit)
+            if not canonical_values:
                 continue
-            new_value: object = mapped if isinstance(raw_value, list) else mapped[0]
+            new_value: object = (
+                canonical_values
+                if isinstance(raw_value, list) or len(canonical_values) > 1
+                else canonical_values[0]
+            )
             if new_value != raw_value:
                 depop[key] = new_value
                 depop_changed = True

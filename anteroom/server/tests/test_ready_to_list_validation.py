@@ -82,6 +82,13 @@ def test_normalize_keeps_depop_source_list_shape_and_canonical_labels():
     assert listing["depop_specifics"]["age"] == ["y2k"]
 
 
+def test_normalize_keeps_every_depop_source_from_a_comma_separated_scalar():
+    listing = {"depop_specifics": {"source": "vintage, preloved"}}
+
+    assert normalize_listing_dropdowns(listing) is True
+    assert listing["depop_specifics"]["source"] == ["Vintage", "Preloved"]
+
+
 def test_ready_to_list_uses_saved_mercari_shoebox_default(settings_file):
     listing = copy.deepcopy(VALID)
     listing["direct_category_ids"] = {"mercari": "303"}
