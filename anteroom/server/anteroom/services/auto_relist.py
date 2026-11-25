@@ -694,13 +694,29 @@ def _snapshot_with_relist_price(data: dict, marketplace: str, price: float) -> d
     return updated
 
 
+def _general_with_relist_price(data: dict, marketplace: str, price: float) -> dict:
+    """The listing with the relist price on this marketplace and General, the others unchanged."""
+    others = {market: price_for(data, market) for market in CANONICAL_PRICE if market != marketplace}
+    updated = _snapshot_with_relist_price(data, marketplace, price)
+    updated["price"] = round(price, 2)
+    held = set()
+    for market, before in others.items():
+        if before is not None and price_for(updated, market) != before:
+            set_path(updated, CANONICAL_PRICE[market], before)
+            held.add(CANONICAL_PRICE[market])
+    if held:
+        _write_locks(updated, locked_paths(updated) | held)
+    return updated
+
+
 def _prepare_price_revision(
     db: Session, conv_id: str, marketplace: str, new_price: float | None, current_revision_id: str | None,
 ) -> str | None:
-    """Save the relist price as this marketplace's own price.
+    """Save the relist price as this marketplace's own price and as the General price.
 
-    The item price and the other marketplaces stay as they are. Writing General
-    would send the price back through the pricing rules and raise it again.
+    The relisted marketplace's price is locked, so the pricing rules cannot
+    raise it again from the new General price. Every other marketplace keeps
+    the price it had: one that would move with General is held where it was.
     """
     if new_price is None or current_revision_id is None:
         return current_revision_id
@@ -710,7 +726,7 @@ def _prepare_price_revision(
     current_val = price_for(rev.listing_json, marketplace)
     if current_val is not None and round(float(current_val), 2) == round(new_price, 2):
         return current_revision_id
-    updated = _snapshot_with_relist_price(rev.listing_json, marketplace, new_price)
+    updated = _general_with_relist_price(rev.listing_json, marketplace, new_price)
     saved = listing_persistence.save_revision(
         db,
         conv_id,

@@ -1513,9 +1513,28 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         published = self.db.get(ListingRevision, listed[0])
         assert published is not None
         self.assertEqual(price_for(published.listing_json, "poshmark"), 33)
-        self.assertEqual(published.listing_json["price"], 30.0)
+        # General saves the relist price; the other marketplaces keep theirs.
+        self.assertEqual(published.listing_json["price"], 33.0)
         self.assertEqual(price_for(published.listing_json, "ebay"), before["ebay"])
         self.assertEqual(price_for(published.listing_json, "mercari"), before["mercari"])
+        listing = self.db.query(Listing).filter_by(conversation_id=conv.id).one()
+        self.assertEqual(listing.current_revision_id, published.id)
+
+    def test_relist_price_drop_saves_general_without_pricing_rules(self):
+        from anteroom.services.seller_overrides import price_for
+
+        conv, rev, before = self._stale_poshmark_draft(general=38.0, listed_price=38.0, drop=5)
+        self.assertEqual(before, {"poshmark": 38, "ebay": 38, "mercari": 38})
+
+        outcomes, listed = self._relist()
+
+        self.assertEqual([o["status"] for o in outcomes], ["completed"])
+        published = self.db.get(ListingRevision, listed[0])
+        assert published is not None
+        self.assertEqual(published.listing_json["price"], 33.0)
+        self.assertEqual(price_for(published.listing_json, "poshmark"), 33)
+        self.assertEqual(price_for(published.listing_json, "ebay"), 38)
+        self.assertEqual(price_for(published.listing_json, "mercari"), 38)
 
     def test_relist_without_a_recorded_live_price_starts_from_the_marketplace_price(self):
         from anteroom.services.seller_overrides import price_for
@@ -1585,7 +1604,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         published = self.db.get(ListingRevision, listed[0])
         assert published is not None
         self.assertEqual(price_for(published.listing_json, "poshmark"), 33)
-        self.assertEqual(published.listing_json["price"], 30.0)
+        self.assertEqual(published.listing_json["price"], 33.0)
         self.assertEqual(published.listing_json["poshmark_specifics"]["brand"], "Patagonia")
 
     def test_relist_price_replaces_a_price_the_seller_locked_on_that_marketplace(self):
