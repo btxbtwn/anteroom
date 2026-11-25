@@ -429,12 +429,23 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             # or the request loop while it waits for the database.
             def start():
                 loops = []
+                stop_requested = threading.Event()
+
+                def watch_scheduler(done_future, name: str) -> None:
+                    if stop_requested.is_set() or stopping.is_set() or process_handoff.draining():
+                        return
+                    exc = None if done_future.cancelled() else done_future.exception()
+                    logging.getLogger(__name__).critical(
+                        'Background scheduler %s stopped unexpectedly', name, exc_info=exc,
+                    )
+
                 for serve, name in jobs:
                     loop = BackgroundLoop(name)
-                    loop.run(serve())
+                    loop.run(serve()).add_done_callback(lambda done, name=name: watch_scheduler(done, name))
                     loops.append(loop)
 
                 def stop():
+                    stop_requested.set()
                     threads = [threading.Thread(target=loop.stop) for loop in loops]
                     for thread in threads:
                         thread.start()

@@ -1,5 +1,6 @@
 """A deploy runs two Machines for a few minutes; only one runs the schedulers."""
 import asyncio
+import logging
 import socket
 import threading
 import uuid
@@ -230,6 +231,87 @@ def test_each_role_runs_the_schedulers_its_connections_need(monkeypatch, role, j
         ran.clear()
         start()()
         assert ran == jobs[lease], lease
+
+
+def test_unexpected_scheduler_exits_log_critical(monkeypatch, caplog):
+    from anteroom.hosted import create_app
+    from anteroom.services import hosted_promotion_scheduler, hosted_sale_checks
+
+    monkeypatch.setenv('ANTEROOM_BACKGROUND_WORKER', '1')
+    monkeypatch.setenv('ANTEROOM_PROCESS_ROLE', 'web')
+    monkeypatch.setattr(process_handoff, 'hold', lambda _engine, _name: True)
+    monkeypatch.setattr(process_handoff, 'release', lambda _engine: None)
+
+    failure = RuntimeError('sale scheduler crashed')
+
+    async def crash():
+        raise failure
+
+    async def finish():
+        return
+
+    monkeypatch.setattr(hosted_sale_checks, 'serve', crash)
+    monkeypatch.setattr(hosted_promotion_scheduler, 'serve', finish)
+
+    reported = threading.Event()
+    records = []
+    emit = caplog.handler.emit
+
+    def capture(record):
+        emit(record)
+        if record.name == 'anteroom.hosted' and record.levelno == logging.CRITICAL:
+            records.append(record)
+            if len(records) == 2:
+                reported.set()
+
+    monkeypatch.setattr(caplog.handler, 'emit', capture)
+    with TestClient(create_app('https://example.supabase.co')):
+        assert reported.wait(5), 'both scheduler exits must be logged while the host is running'
+
+    crashed = next(record for record in records if 'anteroom-chrome-sales' in record.getMessage())
+    finished = next(record for record in records if 'anteroom-promotions' in record.getMessage())
+    assert crashed.exc_info and crashed.exc_info[1] is failure
+    assert not finished.exc_info or finished.exc_info[1] is None
+
+
+def test_scheduler_lease_loss_does_not_log_critical(monkeypatch, caplog):
+    from anteroom.hosted import create_app
+    from anteroom.services import hosted_promotion_scheduler, hosted_sale_checks
+
+    monkeypatch.setenv('ANTEROOM_BACKGROUND_WORKER', '1')
+    monkeypatch.setenv('ANTEROOM_PROCESS_ROLE', 'web')
+    lost_lease = threading.Event()
+    started = threading.Event()
+    stopped = threading.Event()
+    checked_after_stop = threading.Event()
+
+    def hold(_engine, _name):
+        if stopped.is_set():
+            checked_after_stop.set()
+        return not lost_lease.is_set()
+
+    monkeypatch.setattr(process_handoff, 'hold', hold)
+    monkeypatch.setattr(process_handoff, 'release', lambda _engine: None)
+
+    async def idle():
+        await asyncio.Future()
+
+    async def monitor_sales():
+        started.set()
+        try:
+            await idle()
+        finally:
+            stopped.set()
+
+    monkeypatch.setattr(hosted_sale_checks, 'serve', monitor_sales)
+    monkeypatch.setattr(hosted_promotion_scheduler, 'serve', idle)
+    with TestClient(create_app('https://example.supabase.co')):
+        assert started.wait(5)
+        lost_lease.set()
+        assert checked_after_stop.wait(5)
+
+    assert not any(record.name == 'anteroom.hosted' and record.levelno == logging.CRITICAL
+                   for record in caplog.records)
 
 
 def test_dead_draft_worker_outside_shutdown_triggers_server_exit_and_nonzero_status(monkeypatch):
