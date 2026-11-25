@@ -29,6 +29,7 @@ log = logging.getLogger("anteroom.relay")
 RECONNECT_BASE_S = 2
 RECONNECT_MAX_S = 300
 PING_INTERVAL_S = 30
+MAX_EVENT_ATTEMPTS = 5
 
 
 class RelayError(RuntimeError):
@@ -43,9 +44,12 @@ class StreamState:
     last_error: str | None = None
     last_event_at: float | None = None
     connected_at: float | None = None
+    skipped_error: str | None = None
 
 
 _state = StreamState()
+# Consecutive failures per relay seq, so an event that always fails is eventually skipped.
+_event_failures: dict[Any, int] = {}
 _task: asyncio.Task | None = None
 
 
@@ -53,7 +57,7 @@ def stream_state() -> dict[str, Any]:
     return {
         "running": bool(_task and not _task.done()),
         "connected": _state.connected,
-        "lastError": _state.last_error,
+        "lastError": _state.last_error or _state.skipped_error,
         "lastEventAt": _state.last_event_at,
     }
 
@@ -103,7 +107,12 @@ async def relay_request(method: str, path: str, *, json_body: Any = None, header
 
 
 async def _process(events: list[dict], handle) -> tuple[int | None, bool]:
-    """Return the highest seq safe to acknowledge and whether a handler failed."""
+    """Return the highest seq safe to acknowledge and whether a handler failed.
+
+    A failed event is retried on reconnect. One that fails MAX_EVENT_ATTEMPTS
+    times in a row is skipped (acknowledged unrecorded and named in last_error),
+    so an event that can never succeed does not hold back every later sale.
+    """
     through = None
     for event in events:
         seq = event.get("seq")
@@ -111,7 +120,17 @@ async def _process(events: list[dict], handle) -> tuple[int | None, bool]:
             await handle(event)
         except Exception:  # noqa: BLE001 - stop at the first unrecorded event
             log.exception("relay event %s could not be recorded", seq)
-            return through, True
+            failures = _event_failures.get(seq, 0) + 1
+            if failures < MAX_EVENT_ATTEMPTS:
+                _event_failures[seq] = failures
+                return through, True
+            _event_failures.pop(seq, None)
+            skipped = f"{event.get('source') or 'marketplace'} {event.get('eventType') or 'event'}"
+            log.error("skipping relay event %s (%s) after %d failed attempts", seq, skipped, failures)
+            _state.skipped_error = f"Could not record a {skipped} after {failures} attempts; skipped it."
+            through = seq
+            continue
+        _event_failures.pop(seq, None)
         through = seq
         _state.last_event_at = time.time()
     return through, False
