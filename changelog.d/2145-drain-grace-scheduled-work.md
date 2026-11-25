@@ -1,1 +1,0 @@
-- An update to myanteroom.com no longer cuts off an Auto-Relist or scheduled publish that is already running, so a listing is no longer left down by a deploy. A running one gets up to 75 seconds to finish, and the next ones wait for the new version.
