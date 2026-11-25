@@ -90,24 +90,30 @@ class DatabaseWatch:
         self.pending: str | None = None
         self.retry_at = 0.0
         self.outage_seconds = 0.0
-        self._checking: threading.Thread | None = None
+        self._running: dict[str, threading.Thread] = {}
 
-    def _check(self) -> str:
-        """The check's answer within its deadline; one still running counts as a failure."""
-        if self._checking is not None and self._checking.is_alive():
-            return "unavailable"
-        result: list[str] = []
+    def _within_deadline[T](self, name: str, fn: Callable[[], T], failed: T) -> T:
+        """``fn()`` within the deadline; ``failed`` when it raises, times out or is still running."""
+        running = self._running.get(name)
+        if running is not None and running.is_alive():
+            return failed
+        result: list[T] = []
 
         def run():
             try:
-                result.append(self.check())
-            except Exception:  # noqa: BLE001 - any failure to answer is a failed check
-                result.append("unavailable")
+                result.append(fn())
+            except Exception:  # noqa: BLE001 - any failure to answer counts as failed
+                result.append(failed)
 
-        self._checking = threading.Thread(target=run, name="database-watch-check", daemon=True)
-        self._checking.start()
-        self._checking.join(self.check_deadline)
-        return result[0] if result else "unavailable"
+        thread = threading.Thread(target=run, name=f"database-watch-{name}", daemon=True)
+        self._running[name] = thread
+        thread.start()
+        thread.join(self.check_deadline)
+        return result[0] if result else failed
+
+    def _check(self) -> str:
+        """The check's answer within its deadline; one still running counts as a failure."""
+        return self._within_deadline("check", self.check, "unavailable")
 
     def tick(self) -> None:
         status = self._check()
@@ -155,10 +161,8 @@ class DatabaseWatch:
         ]))
 
     def _deliver(self, now: float) -> None:
-        try:
-            allowed = self.budget()
-        except Exception:  # noqa: BLE001 - an unreadable budget is the outage itself
-            allowed = None
+        # The budget lives on the same engine as the check, so it can hang the same way.
+        allowed: bool | None = self._within_deadline("budget", self.budget, None)
         if allowed is None:
             # The budget lives in the unreachable database; an outage email still goes, once.
             allowed = self.pending == OUTAGE

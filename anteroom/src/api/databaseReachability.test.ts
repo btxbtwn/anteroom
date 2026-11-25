@@ -49,4 +49,19 @@ describe("database reachability", () => {
     expect(store.get()).toBe("ok");
     expect(timers).toHaveLength(0);
   });
+
+  it("ignores an /api/ready answer that arrives after the session ends", async () => {
+    let answer: (ready: boolean) => void = () => {};
+    const timers: Array<() => void> = [];
+    const store = createReachability(
+      () => new Promise<boolean>(resolve => { answer = resolve; }),
+      run => { timers.push(run); return () => { timers.splice(timers.indexOf(run), 1); }; },
+    );
+    store.note("https://myanteroom.com");
+    store.reset();
+    answer(false);
+    await settle();
+    expect(store.get()).toBe("ok");
+    expect(timers).toHaveLength(0);
+  });
 });

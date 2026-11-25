@@ -45,9 +45,14 @@ export function createReachability(probe: Probe = probeReady, schedule = (run: (
     listeners.forEach(listener => listener());
   };
 
+  // Bumped by reset(), so an answer that arrives after it is dropped.
+  let generation = 0;
+
   async function check() {
     cancel = null;
+    const started = generation;
     const ready = await probe(origin);
+    if (started !== generation) return;
     if (ready) {
       const wasUnreachable = state === "unreachable";
       set("ok");
@@ -77,6 +82,7 @@ export function createReachability(probe: Probe = probeReady, schedule = (run: (
       void check();
     },
     reset() {
+      generation += 1;
       cancel?.();
       cancel = null;
       set("ok");

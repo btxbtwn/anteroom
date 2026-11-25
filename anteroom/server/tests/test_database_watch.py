@@ -112,6 +112,28 @@ def test_a_check_that_hangs_counts_as_a_failure_within_its_deadline():
         release.set()
 
 
+def test_a_budget_read_that_hangs_still_sends_the_outage_email_once():
+    release = threading.Event()
+    reads = []
+
+    def hangs():
+        reads.append(1)
+        release.wait(5)
+        return False
+
+    clock, sent = Clock(), []
+    watch = DatabaseWatch(
+        lambda: "unavailable", lambda subject, body: sent.append(subject), hangs,
+        clock=clock, wall=lambda: 1_795_000_000.0, check_deadline=0.05,
+    )
+    try:
+        run(watch, clock, 10)
+        assert sent == ["[Anteroom hosted] Hosted database unreachable"]
+        assert len(reads) == 1  # The hung read is never stacked by later rounds.
+    finally:
+        release.set()
+
+
 def test_schema_mismatch_is_named_in_the_alert():
     watch, clock, sent = make_watch(["schema_mismatch"] * 6)
     run(watch, clock, 6)
