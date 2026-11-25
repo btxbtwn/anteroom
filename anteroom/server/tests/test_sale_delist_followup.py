@@ -346,3 +346,82 @@ class SaleDelistFollowupTest(unittest.TestCase):
         self._age_records(6)
         with self.assertNoLogs("anteroom", level="WARNING"):
             self._run()
+
+    # The first delist after a sale (``autodelist_for_sales``) runs the same guards as its retries.
+
+    def _first_delist(self, sale_id, *, enabled=None):
+        from anteroom.services import marketplace_accounts
+
+        with patch("anteroom.services.user_settings.autodelist_enabled", side_effect=enabled or (lambda **_: True)), \
+                patch("anteroom.services.mac_workspace.account_shown", return_value=False):
+            return asyncio.run(marketplace_accounts.autodelist_for_sales(
+                [sale_id], session_factory=sessionmaker(bind=self.db.get_bind())))
+
+    def _touched(self):
+        return sorted(call.args[2]["marketplace"] for call in self.bridge.call_args_list)
+
+    def test_the_first_delist_pins_what_the_sale_left_and_never_deletes_a_listing_put_up_after_it(self):
+        sale_id = self._sold()
+        self._relist_on_mercari()
+        notes = self._first_delist(sale_id)
+        self.assertEqual(self._touched(), ["poshmark"])
+        self.ebay.assert_awaited_once()
+        self.etsy.assert_awaited_once()
+        self.assertEqual(self._states()["mercari"], "live")
+        self.assertEqual(notes[sale_id], "Delisted from eBay, Etsy, and Poshmark.")
+        self.db.expire_all()
+        pin = parse_notes(self.conv.notes)["saleDelistTargets"][sale_id]["targets"]
+        self.assertEqual(sorted(pin), ["ebay", "etsy", "poshmark"])
+        # The retries keep to that pin: the relisted Mercari listing is shown, never delisted.
+        self._run()
+        self.assertEqual(self._touched(), ["poshmark"])
+        [item] = self._still()
+        self.assertEqual([(e["marketplace"], e["followed"]) for e in item["stillListed"]], [("mercari", False)])
+
+    def test_turning_the_setting_off_stops_the_first_delist_before_its_next_marketplace(self):
+        sale_id = self._sold()
+
+        def enabled(*, fresh=False):
+            return not (self.ebay.await_count or self.etsy.await_count or self.bridge.await_count)
+
+        notes = self._first_delist(sale_id, enabled=enabled)
+        self.assertEqual(self.ebay.await_count + self.etsy.await_count + self.bridge.await_count, 1)
+        states = self._states()
+        self.assertEqual((states["ebay"], states["etsy"], states["poshmark"], states["mercari"]),
+                         ("deleted", "live", "live", "live"))
+        self.assertTrue(notes[sale_id].startswith("Delisted from eBay. "), notes[sale_id])
+        self.assertNotIn("Etsy could not", notes[sale_id])
+
+    def test_a_refund_during_the_first_delist_stops_the_remaining_marketplaces(self):
+        sale_id = self._sold()
+
+        async def end_ebay(*_args):
+            from anteroom.services.api_job_lock import start_gate
+
+            with start_gate(), sessionmaker(bind=self.db.get_bind())() as db:
+                db.get(MarketplaceSale, sale_id).order_status = "refunded"
+                db.commit()
+            return {"ok": True, "state": "deleted"}
+
+        self.ebay.side_effect = end_ebay
+        notes = self._first_delist(sale_id)
+        self.ebay.assert_awaited_once()
+        self.etsy.assert_not_awaited()
+        self.bridge.assert_not_awaited()
+        states = self._states()
+        self.assertEqual((states["ebay"], states["etsy"], states["poshmark"], states["mercari"]),
+                         ("deleted", "live", "live", "live"))
+        self.assertTrue(notes[sale_id].startswith("Delisted from eBay. "), notes[sale_id])
+
+    def test_a_first_delist_left_only_with_listings_put_up_after_the_sale_deletes_nothing(self):
+        sale_id = self._sold()
+        self._relist_on_mercari()
+        self._first_delist(sale_id)
+        self.bridge.reset_mock()
+        self.ebay.reset_mock()
+        self.etsy.reset_mock()
+        # The same sale read again (a Chrome read and a relay event) finds only the relist left.
+        notes = self._first_delist(sale_id)
+        self.ebay.assert_not_awaited()
+        self.bridge.assert_not_awaited()
+        self.assertIn("Nothing was delisted", notes[sale_id])

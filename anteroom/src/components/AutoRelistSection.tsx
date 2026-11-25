@@ -217,6 +217,7 @@ export function AutoRelistSection() {
                     {rule.marketplace === "ebay" ? " · Auto-recreate" : " · Auto-relist"}
                   </p>
                   <p className="text-xs text-muted-foreground">{ruleSummary(rule)}</p>
+                  {rule.paused_reason ? <p className="text-xs text-warning-foreground">{rule.paused_reason}</p> : null}
                 </div>
                 <div className="flex items-center gap-3">
                   <Button size="xs" variant="ghost" disabled={busy} onClick={() => openEditor(rule)}>

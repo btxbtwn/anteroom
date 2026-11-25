@@ -55,6 +55,51 @@ def migrate(engine):
     command.upgrade(alembic_config(engine.url.render_as_string(hide_password=False)), 'head')
 
 
+def test_postgres_surrogate_does_not_poison_next_transaction(previous_engine):
+    if previous_engine.dialect.name != 'postgresql':
+        pytest.skip('Postgres JSONB rejects unpaired surrogates')
+    migrate(previous_engine)
+    store = EmailStore(previous_engine)
+    delivery = EmailDelivery(store, lambda *_: None, daily_limit=0, enable_lifecycle=False)
+    broken = report(1)
+    broken['message'] = 'Incomplete emoji \ud83d'
+    broken['exception'] = {'type': 'TypeError', 'message': 'Broken \udfff, intact 😀'}
+    delivery.add(broken)
+
+    # A second process uses this same metadata read before writing or sending.
+    with EmailStore(previous_engine).transaction() as transaction:
+        group, _ = transaction.get_group('ERROR:' + broken['fingerprint'])
+        assert group['report']['message'] == 'Incomplete emoji �'
+        assert group['report']['exception']['message'] == 'Broken �, intact 😀'
+
+
+def test_postgres_upgrade_repairs_already_queued_surrogates(previous_engine):
+    if previous_engine.dialect.name != 'postgresql':
+        pytest.skip('Postgres JSONB rejects unpaired surrogates')
+    config = alembic_config(previous_engine.url.render_as_string(hide_password=False))
+    command.upgrade(config, 'c7a3e9f41b28')
+    store = EmailStore(previous_engine)
+    broken = report(1)
+    broken['message'] = 'bad \ud83d and \udfff, valid 😀 and literal \\ud83d'
+    key = 'ERROR:' + broken['fingerprint']
+    with store.transaction() as transaction:
+        # Bypass the new ingress sanitizer to represent an older writer.
+        transaction.put_group(key, {'report': broken, 'count': 2,
+                                    'first': broken['occurred_at'], 'due': 200}, None)
+        transaction.state.update(attempts=[90], lease='old-attempt', lease_until=220)
+    before = store.read()
+
+    migrate(previous_engine)
+
+    repaired = before['groups'][key]
+    repaired['report']['message'] = 'bad � and �, valid 😀 and literal \\ud83d'
+    assert store.read() == before
+    with store.transaction() as transaction:
+        assert transaction.get_group(key) == (repaired, None)
+        assert transaction.state['attempts'] == [90]
+        assert transaction.state['lease_until'] == 220
+
+
 def test_lifecycle_migration_initializes_history_from_pending_reports(previous_engine):
     legacy = LegacyDelivery(LegacyStore(previous_engine), lambda *args: None, daily_limit=0, clock=lambda: 100)
     item = report(1)

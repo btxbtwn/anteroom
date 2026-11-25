@@ -721,6 +721,59 @@ def test_every_mcp_tool_needs_a_named_permission():
     assert {tool["name"] for tool in mcp_http.tool_definitions()} == set(mcp_http.TOOL_PERMISSIONS)
 
 
+def test_every_mcp_tool_handler_has_a_permission_entry():
+    import importlib
+
+    services_dir = Path(mcp_http.__file__).parent
+    tool_modules = sorted(services_dir.glob("mcp_*_tools.py"))
+    assert tool_modules, "Expected at least one mcp_*_tools module"
+
+    missing: dict[str, list[str]] = {}
+    for module_path in tool_modules:
+        mod = importlib.import_module(f"anteroom.services.{module_path.stem}")
+        handlers = getattr(mod, "HANDLERS", None)
+        assert isinstance(handlers, dict) and handlers, f"{module_path.name} should define non-empty HANDLERS"
+        unlisted = sorted(name for name in handlers if name not in mcp_http.TOOL_PERMISSIONS)
+        if unlisted:
+            missing[module_path.name] = unlisted
+    assert not missing, f"MCP tool handlers missing from TOOL_PERMISSIONS: {missing}"
+
+
+def test_mcp_handler_without_permission_entry_is_refused(monkeypatch):
+    from anteroom.services import mcp_favorite_tools
+
+    called: list[str] = []
+
+    def rogue_handler(_db, _args, **_kwargs):
+        called.append("ran")
+        return {"pwned": True}
+
+    monkeypatch.setitem(mcp_favorite_tools.HANDLERS, "unlisted_tool", rogue_handler)
+    assert "unlisted_tool" not in mcp_http.TOOL_PERMISSIONS
+
+    client = TestClient(app)
+    created = client.post(
+        "/api/settings/mcp-tokens",
+        json={
+            "name": "Locked down",
+            "permissions": {"listings": "none", "analytics": "none", "attention": "none", "marketplaces": "none"},
+        },
+    )
+    assert created.status_code == 201, created.text
+    bearer = {"Authorization": f"Bearer {created.json()['token']}"}
+
+    for extra_headers in (bearer, None):
+        resp = _rpc(client, "tools/call", {"name": "unlisted_tool", "arguments": {}}, extra_headers=extra_headers)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body == {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "error": {"code": -32602, "message": "Unknown tool: unlisted_tool"},
+        }
+    assert called == []
+
+
 def test_desktop_mcp_token_permissions_limit_tools_and_apply_on_the_next_call():
     client = TestClient(app)
 
@@ -822,6 +875,100 @@ def test_hosted_mcp_token_permissions_are_enforced_and_seller_scoped(cloud, sign
         f"/api/settings/mcp-tokens/{token['id']}", headers=bearer, json={"permissions": {"analytics": "none"}},
     ).status_code == 401
     assert _tool_names(client, alice) == ALL_TOOLS
+
+
+def test_hosted_arm_token_is_scoped_to_mcp_only(cloud, signing_keys):  # noqa: F811
+    client, _ = cloud
+    alice = headers(signing_keys, USER_ID)
+    created = client.post("/api/settings/mcp-tokens", headers=alice, json={"name": "Scoped agent"})
+    assert created.status_code == 201, created.text
+    bearer = {"Authorization": f"Bearer {created.json()['token']}"}
+
+    assert _rpc(client, "ping", extra_headers=bearer).status_code == 200
+    for method, path in [
+        ("GET", "/api/account"),
+        ("GET", "/api/listings"),
+        ("GET", "/api/drafts"),
+        ("GET", "/api/settings/mcp-tokens"),
+        ("GET", "/api/settings/mcp-connections"),
+        ("POST", "/api/marketplace-listings/delist"),
+        ("POST", "/api/mcp/"),
+    ]:
+        response = client.request(method, path, headers=bearer)
+        assert response.status_code == 401, path
+
+
+def test_hosted_authenticate_mcp_token_refuses_revoked_expired_and_fenced_accounts(cloud, signing_keys):  # noqa: F811
+    from anteroom.services import mcp_tokens
+
+    client, engine = cloud
+    alice = headers(signing_keys, USER_ID)
+    mcp_tokens.clear_auth_failures()
+    try:
+        active_tok = client.post("/api/settings/mcp-tokens", headers=alice, json={"name": "Active"}).json()
+        revoked_tok = client.post("/api/settings/mcp-tokens", headers=alice, json={"name": "Revoked"}).json()
+        expired_tok = client.post("/api/settings/mcp-tokens", headers=alice, json={"name": "Expired"}).json()
+
+        verified = mcp_tokens.authenticate_token(engine, active_tok["token"], hosted=True)
+        assert verified == mcp_tokens.VerifiedMcpToken(token_id=active_tok["id"], owner_id=USER_ID)
+        with engine.connect() as db:
+            last_used = db.execute(
+                sa.text("SELECT last_used_at FROM public.mcp_access_tokens WHERE id = :id"),
+                {"id": active_tok["id"]},
+            ).scalar_one()
+            assert last_used is not None
+            # Reject null or wrong-length hashes directly in the SQL function.
+            for bad_hash in (None, "", "a" * 63, "a" * 65):
+                row = db.execute(
+                    sa.text("SELECT token_id, owner_id FROM anteroom_private.authenticate_mcp_token(:hash)"),
+                    {"hash": bad_hash},
+                ).first()
+                assert row is None
+
+        # Revoked token is refused by the SQL function, authenticate_token, and /api/mcp.
+        assert client.delete(f"/api/settings/mcp-tokens/{revoked_tok['id']}", headers=alice).status_code == 200
+        with engine.begin() as db:
+            row = db.execute(
+                sa.text("SELECT token_id, owner_id FROM anteroom_private.authenticate_mcp_token(:hash)"),
+                {"hash": mcp_tokens.hash_token(revoked_tok["token"])},
+            ).first()
+            assert row is None
+        assert mcp_tokens.authenticate_token(engine, revoked_tok["token"], hosted=True) is None
+        assert _rpc(client, "ping", extra_headers={"Authorization": f"Bearer {revoked_tok['token']}"}).status_code == 401
+
+        # Expired token is refused by the SQL function, authenticate_token, and /api/mcp.
+        with engine.begin() as db:
+            db.execute(
+                sa.text("UPDATE public.mcp_access_tokens SET expires_at = now() - interval '1 minute' WHERE id = :id"),
+                {"id": expired_tok["id"]},
+            )
+            row = db.execute(
+                sa.text("SELECT token_id, owner_id FROM anteroom_private.authenticate_mcp_token(:hash)"),
+                {"hash": mcp_tokens.hash_token(expired_tok["token"])},
+            ).first()
+            assert row is None
+        assert mcp_tokens.authenticate_token(engine, expired_tok["token"], hosted=True) is None
+        assert _rpc(client, "ping", extra_headers={"Authorization": f"Bearer {expired_tok['token']}"}).status_code == 401
+
+        # Token for an account with account_write_allowed=false is refused.
+        with engine.begin() as db:
+            db.execute(
+                sa.text("INSERT INTO anteroom_private.account_cleanup (user_id, object_keys) VALUES (:owner, :keys)"),
+                {"owner": USER_ID, "keys": []},
+            )
+            assert db.scalar(
+                sa.text("SELECT anteroom_private.account_write_allowed(:owner)"),
+                {"owner": USER_ID},
+            ) is False
+            row = db.execute(
+                sa.text("SELECT token_id, owner_id FROM anteroom_private.authenticate_mcp_token(:hash)"),
+                {"hash": mcp_tokens.hash_token(active_tok["token"])},
+            ).first()
+            assert row is None
+        assert mcp_tokens.authenticate_token(engine, active_tok["token"], hosted=True) is None
+        assert _rpc(client, "ping", extra_headers={"Authorization": f"Bearer {active_tok['token']}"}).status_code == 401
+    finally:
+        mcp_tokens.clear_auth_failures()
 
 
 def test_hosted_connected_app_permissions_are_seller_scoped_and_can_be_turned_off(cloud, signing_keys, monkeypatch):  # noqa: F811
@@ -1076,6 +1223,41 @@ def test_mcp_m7_hosted_photo_delete_runs_after_db_session_closes(monkeypatch):
         "session_exit",
         f"storage_delete:user/conv/photo1.jpg:{mcp_route._MCP_STORAGE_CLEANUP_TIMEOUT_SECONDS}",
     ]
+
+
+def test_mcp_deferred_storage_cleanup_failure_logs_warning_without_secrets(monkeypatch, caplog):
+    import logging
+
+    from anteroom.routes import mcp as mcp_route
+
+    async def fake_in_worker(fn):
+        return fn(object())
+
+    def fake_run_call(_db, _payload, *, deferred_deletes, **_kwargs):
+        deferred_deletes.extend(["seller-secret-uid/conv-9/photo1.jpg", "seller-secret-uid/conv-9/photo2.jpg"])
+        return {"jsonrpc": "2.0", "id": 1, "result": {"ok": True}}, 200, {}
+
+    def failing_delete(keys, **_kwargs):
+        raise RuntimeError("secret-storage-token-arm_should_not_leak")
+
+    monkeypatch.setattr(mcp_route, "in_worker_session", fake_in_worker)
+    monkeypatch.setattr(mcp_route, "_run_mcp_call", fake_run_call)
+    monkeypatch.setattr(mcp_http, "delete_hosted_storage_keys", failing_delete)
+
+    client = TestClient(app)
+    with caplog.at_level(logging.WARNING, logger="anteroom.routes.mcp"):
+        resp = _rpc(client, "ping", extra_headers={"Authorization": "Bearer arm_secret_token_never_log_me"})
+
+    assert resp.status_code == 200
+    warnings = [r for r in caplog.records if r.name == "anteroom.routes.mcp" and r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    msg = warnings[0].getMessage()
+    assert "RuntimeError" in msg
+    assert "2" in msg
+    assert "secret-storage-token" not in msg
+    assert "seller-secret-uid" not in msg
+    assert "photo1.jpg" not in msg
+    assert "arm_secret_token_never_log_me" not in msg
 
 
 def test_batch_does_not_dispatch_later_items_after_deadline(monkeypatch):

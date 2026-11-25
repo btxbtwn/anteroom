@@ -175,5 +175,11 @@ async def serve_cloud(engine) -> None:
     startup = True
     while True:
         await asyncio.sleep(promotion_automations.TICK_S)
-        await check_cloud_sellers(engine, recovered, like_checks, startup=startup)
-        startup = False
+        try:
+            await check_cloud_sellers(engine, recovered, like_checks, startup=startup)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - a failed pass must not stop the scheduler
+            log.exception('Cloud promotion check pass failed. The next scheduled pass will run.')
+        else:
+            startup = False

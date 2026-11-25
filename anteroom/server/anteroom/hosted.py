@@ -1,6 +1,10 @@
-"""Hosted API entry point. Seller data routes join after tenant isolation ships.
+"""Hosted API entry point.
 
-Unlike the desktop app, this starts no Chrome, Keychain or automation services.
+Unlike the desktop app, this starts no local Chrome or Keychain. When
+``ANTEROOM_BACKGROUND_WORKER=1``, its lifespan starts the durable draft worker
+and scheduled services under ``process_handoff`` leases, split by
+``ANTEROOM_PROCESS_ROLE`` (``schedulers`` on ``worker``/``all``; ``chrome`` on
+``web``/``all``).
 """
 
 from __future__ import annotations
@@ -73,7 +77,11 @@ def _skip_client_warning(scope, route, status: int, *, fly_replay: bool) -> bool
         return True
     if scope["method"] == "HEAD" and status == 405:
         return True
-    if getattr(route, "path", None) == "/api/marketplaces/sessions" and status == 409:
+    template = getattr(route, "path", None)
+    if template == "/api/mcp" and scope["method"] == "GET" and status == 405:
+        # MCP explicitly returns 405 when unsolicited SSE is unsupported.
+        return True
+    if template == "/api/marketplaces/sessions" and status == 409:
         return True
     return False
 
@@ -429,12 +437,23 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             # or the request loop while it waits for the database.
             def start():
                 loops = []
+                stop_requested = threading.Event()
+
+                def watch_scheduler(done_future, name: str) -> None:
+                    if stop_requested.is_set() or stopping.is_set() or process_handoff.draining():
+                        return
+                    exc = None if done_future.cancelled() else done_future.exception()
+                    logging.getLogger(__name__).critical(
+                        'Background scheduler %s stopped unexpectedly', name, exc_info=exc,
+                    )
+
                 for serve, name in jobs:
                     loop = BackgroundLoop(name)
-                    loop.run(serve())
+                    loop.run(serve()).add_done_callback(lambda done, name=name: watch_scheduler(done, name))
                     loops.append(loop)
 
                 def stop():
+                    stop_requested.set()
                     threads = [threading.Thread(target=loop.stop) for loop in loops]
                     for thread in threads:
                         thread.start()

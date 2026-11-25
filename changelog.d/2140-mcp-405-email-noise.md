@@ -1,0 +1,1 @@
+- Keep expected MCP connection checks out of operator error emails.

@@ -31,7 +31,9 @@ kill_timeout = 300
 [env]
   ANTEROOM_BACKGROUND_WORKER = '1'
   ANTEROOM_CLOUD_MARKETPLACES = 'poshmark,depop'
-  # Email every distinct error to the operator (services/error_alerts.py).
+  # Record distinct errors for operator email (services/error_alerts.py).
+  # ANTEROOM_ERROR_EMAIL_DAILY_LIMIT defaults to 0 (retain without sending) and
+  # is not set here; set it as a Fly secret to a positive allowance for mail to go out.
   ANTEROOM_ERROR_EMAIL = '1'
   SUPABASE_URL = 'https://ytoqdgtzvutdltfkpxbu.supabase.co'
 

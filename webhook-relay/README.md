@@ -37,8 +37,10 @@ ship: eBay's Cert ID and Etsy's shared secret.
   accounts linked to the calling device. Request and response bodies pass
   through without being stored.
 - **Forwards public eBay research** for linked devices: active keyword/image
-  search, category suggestions, item specifics, and ad-report metadata. Requests and responses pass
-  through unstored. The shared application token stays inside the relay.
+  search, US and regional (`EBAY_CA`, `EBAY_GB`, `EBAY_AU`) category trees,
+  category suggestions and item specifics, and ad-report metadata. Requests and
+  responses pass through unstored. The shared application token stays inside the
+  relay.
 - **Never acts.** It records that something happened. Marking an item sold or
   delisting stays in Anteroom, and delisting still needs the seller to ask.
 
@@ -51,7 +53,7 @@ ship: eBay's Cert ID and Etsy's shared secret.
 | `POST /etsy` | Etsy | Order, listing and inventory webhooks |
 | `GET /oauth/{ebay,etsy}/callback` | Seller's browser | Exchanges the code, then redirects to `returnTo?marketplace=&state=&claim=` |
 | `GET /privacy` | Anyone | What the relay keeps |
-| `POST /devices` | Anteroom | Registers a device: `{deviceId, token}`. 5 per minute per IP |
+| `POST /devices` | Anteroom | Registers a device: `{deviceId, token}`. 5 per minute per IP (bypassed when `X-Anteroom-Register-Secret` matches `HOSTED_REGISTER_SECRET`) |
 | `GET /studio/stream?after=<seq>` | Anteroom | WebSocket: backlog, then live events. Send `{"type":"ack","through":<seq>}` |
 | `GET /studio/events?after=<seq>` | Anteroom | Same events, pulled |
 | `POST /studio/ack` `{"through":<seq>}` | Anteroom | Drops events up to `seq` |
@@ -66,8 +68,12 @@ ship: eBay's Cert ID and Etsy's shared secret.
 
 `/studio/*` needs `Authorization: Bearer <device token>`. The relay limits
 bearer lookups, sign-in starts, and callbacks per connecting IP and sends
-`429` with `Retry-After` when the corresponding limit is exceeded. An event can
-arrive twice (live, then again after an ack); dedupe by `seq`.
+`429` with `Retry-After` when the corresponding limit is exceeded. Delivery is
+at-least-once — an event can arrive twice (for example, live and again in a
+backlog page after an ack, or on reconnect before an ack is recorded). Clients
+use `seq` to acknowledge processed events (`through`) and rely on idempotent
+event handlers (such as deduplicating sales by marketplace order and line ID)
+rather than tracking `seq` locally.
 
 ## Etsy quota diagnostics
 
@@ -86,8 +92,12 @@ and an upstream 429 may carry only `Retry-After`.
 
 ## Configuration
 
-Vars live in `wrangler.jsonc`: `EBAY_ENV` and `EBAY_RUNAME` (the eBay RuName
-whose accept and decline URLs are `/oauth/ebay/callback`).
+Vars live in `wrangler.jsonc`:
+
+- `EBAY_ENV`: `production` or `sandbox`.
+- `EBAY_RUNAME`: the eBay RuName whose accept and decline URLs are `/oauth/ebay/callback`.
+- `ANTEROOM_WEB_ORIGINS`: comma-separated HTTPS origins where a finished web sign-in may redirect with the one-time claim (for example, `https://myanteroom.com`).
+
 Etsy's app must list `https://relay.anteroom.workers.dev/oauth/etsy/callback`
 as a callback URL.
 
@@ -101,6 +111,7 @@ macOS Keychain under service `anteroom-relay`.
 | `ETSY_KEYSTRING` | Etsy app keystring. Public by design, but kept out of the repo |
 | `ETSY_SHARED_SECRET` | Etsy app shared secret |
 | `ETSY_WEBHOOK_SECRET` | `whsec_...` from Etsy's webhook portal |
+| `HOSTED_REGISTER_SECRET` | Optional shared secret letting the hosted server bypass the per-IP `POST /devices` rate limit via `X-Anteroom-Register-Secret`. Set the matching value on the hosted Python API as `ANTEROOM_RELAY_REGISTER_SECRET` (`anteroom/server/anteroom/services/relay_client.py`) |
 
 A marketplace whose secrets are missing answers 503.
 
@@ -140,8 +151,10 @@ withdrawals, purchases, loan repayments, and other business expenses are not
 order proceeds. Missing transaction data or ambiguous item costs stay unknown.
 
 Seller data and writes go directly between the Mac and eBay. The relay research
-endpoint accepts only `categories`, `aspects`, `search`, `image`, and `ad_metadata`, with fixed
-paths and parameter allowlists. It cannot administer notifications or send
+endpoint accepts only `categories`, `aspects`, `category_tree`,
+`regional_categories`, `regional_aspects` (the three regional operations for
+`EBAY_CA`, `EBAY_GB`, and `EBAY_AU`), `search`, `image`, and `ad_metadata`,
+with fixed paths and parameter allowlists. It cannot administer notifications or send
 seller actions. Images for public comps pass through without storage. Sold
 comps are not included: eBay's restricted Marketplace Insights API requires
 separate access.

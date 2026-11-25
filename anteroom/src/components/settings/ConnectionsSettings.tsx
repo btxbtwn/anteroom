@@ -764,6 +764,7 @@ function MarketplaceSection() {
           }
         >
           {saveDetection.error ? <SettingsNote tone="error">{saveDetection.error.message}</SettingsNote> : null}
+          {relay?.skippedEvent ? <SettingsNote tone="error">{relay.skippedEvent}</SettingsNote> : null}
         </SettingsRow>
         {autodelistRow}
         {autoAdjustRow}

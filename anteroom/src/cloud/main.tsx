@@ -30,7 +30,7 @@ import { ConnectorPage } from "./ConnectorPage";
 import { AppConsentPage } from "./AppConsentPage";
 import { isConsentPage } from "./appConsent";
 import { clearImportAll } from "../importAll";
-import { DEVICE_BUSTER, DEVICE_MAX_AGE_MS, devicePersister, forgetDeviceWorkspace, keepReadsForDevice, keepsOnDevice, saveRuntime, savedRuntime } from "./deviceCache";
+import { DEVICE_BUSTER, DEVICE_MAX_AGE_MS, clearDeviceWorkspace, devicePersister, forgetDeviceWorkspace, keepReadsForDevice, keepsOnDevice, saveRuntime, savedRuntime } from "./deviceCache";
 import "./workspace.css";
 
 const url = import.meta.env.VITE_SUPABASE_URL;
@@ -70,6 +70,7 @@ function CloudApp() {
   useEffect(() => {
     let active = true;
     let received = false;
+    let resolved = false;
     let previous: string | undefined;
     const accept = (value: Session | null) => {
       if (!active) return;
@@ -85,6 +86,14 @@ function CloudApp() {
         });
         return;
       }
+      if (!value && !resolved) {
+        // A previous seller's session ended while the tab was closed: erase any kept workspace and thumbnails.
+        void Promise.allSettled([clearDeviceWorkspace(), forgetDeviceImages()]);
+      } else if (value && previous !== value.user.id) {
+        // Keep this seller's caches and prune any other seller's leftover caches on this browser.
+        void Promise.allSettled([clearDeviceWorkspace(value.user.id), forgetDeviceImages(value.user.id)]);
+      }
+      resolved = true;
       previous = value?.user.id;
       if (recovering && value) { recovering = false; setNewPassword(true); }
       setSession(value); setReady(true);
@@ -95,7 +104,12 @@ function CloudApp() {
       if (openedElsewhere && !data.session && active) setError("That email link opened in a different browser or app than the one that asked for it. If you just confirmed your email, sign in with your password.");
       else if (error && active) setError("Could not restore your session. Please sign in again.");
       if (!received) accept(data.session);
-    }).catch(() => { if (active) { setError("Could not restore your session. Please sign in again."); setReady(true); } });
+    }).catch(() => {
+      if (!active) return;
+      setError("Could not restore your session. Please sign in again.");
+      if (!received) accept(null);
+      else setReady(true);
+    });
     return () => { active = false; subscription.unsubscribe(); };
   }, []);
   if (!ready) return <StartupScreen/>;
