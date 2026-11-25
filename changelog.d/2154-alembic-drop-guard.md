@@ -1,1 +1,0 @@
-- Guard database updates against dropping tables, columns, or functions before the previous hosted release stops using them.

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1262 — 2026-11-25
+
+- Guard database updates against dropping tables, columns, or functions before the previous hosted release stops using them.
+
 ## 0.1.1261 — 2026-11-25
 
 - Resume cloud sale checks and scheduled promotions automatically after a temporary database outage.
