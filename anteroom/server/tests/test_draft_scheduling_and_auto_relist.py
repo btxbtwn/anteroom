@@ -2035,7 +2035,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         draft.assert_not_awaited()
         # One refusal per pass: the oldest listing says why and the rest of Mercari waits.
         self.assertEqual([(row["conversation_id"], row["status"]) for row in outcomes], [(first[0], "skipped_paused")])
-        self.assertIn("left this listing up", outcomes[0]["reason"])
+        self.assertIn("leaves Mercari listings up", outcomes[0]["reason"])
         self.assertEqual([row["status"] for row in again], ["skipped_paused"])
         self._assert_mercari_left_up(*first, "m123456781")
         self._assert_mercari_left_up(*second, "m123456782")
@@ -2061,7 +2061,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         rule = next(row for row in auto_relist.list_rules(self.db, now=start + timedelta(hours=24, minutes=6))
                     if row["marketplace"] == "mercari")
         self.assertEqual((rule["relisted_today"], rule["remaining_today"]), (0, 1))
-        self.assertIn("left this listing up", rule["paused_reason"])
+        self.assertIn("leaves Mercari listings up", rule["paused_reason"])
 
     def test_mercari_relist_refuses_even_an_injected_runner_and_other_marketplaces_still_relist(self):
         mercari = self._mercari_due("Mercari scarf", "m123456783", age_days=60)
@@ -2097,11 +2097,11 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self._mercari_due("Mercari hat", "m123456784")
         auto_relist.save_rule(self.db, "mercari", {"enabled": True, "min_age_days": 30}, confirm=True)
         preview = auto_relist.preview_status(self.db, marketplace="mercari")
-        self.assertIn("left this listing up", preview["rules"][0]["paused_reason"])
+        self.assertIn("leaves Mercari listings up", preview["rules"][0]["paused_reason"])
         self.assertIsNone(auto_relist.preview_status(self.db, marketplace="poshmark")["rules"][0]["paused_reason"])
         dry = asyncio.run(auto_relist.run_auto_relist(now=_now(), dry_run=True))
         self.assertEqual([(row["marketplace"], row["status"]) for row in dry], [("mercari", "dry_run")])
-        self.assertIn("left this listing up", dry[0]["reason"])
+        self.assertIn("leaves Mercari listings up", dry[0]["reason"])
 
 
 if __name__ == "__main__":

@@ -72,7 +72,7 @@ RESTORE_PRICE_DEADLINE_S = 30.0
 # Until it can, Auto-Relist leaves these listings up rather than delete one first.
 REPLACEMENT_UNVERIFIED = {
     "mercari": ("Mercari Auto-Relist is paused: Mercari can refuse the replacement after the old listing is "
-                "deleted, so Anteroom left this listing up with its price unchanged."),
+                "deleted, so Anteroom leaves Mercari listings up with their price unchanged."),
 }
 # A paused marketplace logs why at most once a day. The row neither counts toward the
 # daily cap nor starts the retry wait, since nothing was tried.
