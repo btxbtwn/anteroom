@@ -42,6 +42,7 @@ from anteroom.services import (
     mcp_favorite_tools,
     mcp_feedback_tools,
     mcp_finance_tools,
+    mcp_generation_tools,
     mcp_import_match_tools,
     mcp_marketplace_tools,
     mcp_organize_tools,
@@ -133,6 +134,7 @@ TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
     **mcp_finance_tools.PERMISSIONS,
     **mcp_feedback_tools.PERMISSIONS,
     **mcp_photo_tools.PERMISSIONS,
+    **mcp_generation_tools.PERMISSIONS,
 }
 
 MAX_ATTENTION_KEYS = 100
@@ -571,6 +573,7 @@ def tool_definitions() -> list[dict[str, Any]]:
     tools.extend(mcp_finance_tools.TOOLS)
     tools.extend(mcp_feedback_tools.TOOLS)
     tools.extend(mcp_photo_tools.TOOLS)
+    tools.extend(mcp_generation_tools.TOOLS)
     return [{**tool, "annotations": {**tool["annotations"], "title": tool["title"]}} for tool in tools]
 
 
@@ -821,6 +824,7 @@ def _dispatch_tool(
         **mcp_import_match_tools.HANDLERS,
         **mcp_finance_tools.HANDLERS,
         **mcp_photo_tools.HANDLERS,
+        **mcp_generation_tools.HANDLERS,
     }
     handler = handlers.get(name)
     if handler is None:

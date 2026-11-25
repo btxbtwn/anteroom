@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import Callable
 from threading import Event
 from time import monotonic
@@ -26,6 +27,7 @@ from anteroom.routes import mcp_photo_uploads
 from anteroom.services import (
     mcp_catalog_tools,
     mcp_feedback_tools,
+    mcp_generation_tools,
     mcp_http,
     mcp_import_match_tools,
     mcp_marketplace_tools,
@@ -33,7 +35,7 @@ from anteroom.services import (
     mcp_photo_tools,
     mcp_tokens,
 )
-from anteroom.services.hosted_limits import read_bounded_body
+from anteroom.services.hosted_limits import limit_seller_submissions, read_bounded_body
 from anteroom.services.local_requests import came_through_tailnet
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
@@ -177,6 +179,8 @@ async def mcp_post(request: Request):
     deferred_deletes: list[str] = []
     # Upload links a tool call makes point back at the server the client reached.
     mcp_photo_tools.request_origin.set(mcp_photo_tools.origin_for(request, hosted=is_hosted))
+    if is_hosted:
+        mcp_generation_tools.submission_limit.set(lambda: limit_seller_submissions(request))
 
     deadline = monotonic() + _MCP_RPC_TIMEOUT_SECONDS
     stopped = Event()
@@ -228,6 +232,9 @@ async def mcp_post(request: Request):
             forms = mcp_catalog_tools.pending_form_reads(outcome[0])
             if forms:
                 await mcp_catalog_tools.finish_form_reads(forms, deadline=deadline - _MCP_REPLY_MARGIN_SECONDS)
+            for generation_result, spec in mcp_generation_tools.pending_generations(outcome[0]):
+                # On the Mac each generation runs in this process; it keeps going after the call answers.
+                await _start_generations(generation_result, spec)
             if not result.done():
                 result.set_result(outcome)
         except Exception as exc:
@@ -280,6 +287,26 @@ async def mcp_post(request: Request):
             headers=headers,
         )
     return JSONResponse(body, status_code=status_code, headers=headers)
+
+
+async def _start_generations(result: dict, spec: dict) -> None:
+    """Start Generate for each draft, as the editor does, without waiting for it to finish."""
+    from anteroom.routes.chat import generate_listing
+
+    started: list[str] = []
+    skipped: list[dict[str, str]] = []
+    for conv_id in spec["ready"]:
+        try:
+            # The run is registered and keeps going; its stream is not followed here.
+            await generate_listing(conv_id)
+        except HTTPException as exc:
+            skipped.append({"conversation_id": conv_id, "reason": str(exc.detail)})
+        except Exception:  # noqa: BLE001 - one draft that cannot start must not stop the others
+            logging.getLogger(__name__).exception("MCP generate_listings could not start %s", conv_id)
+            skipped.append({"conversation_id": conv_id, "reason": "Generation did not start. Try Generate in Anteroom."})
+        else:
+            started.append(conv_id)
+    mcp_generation_tools.finish(result, spec, started, skipped)
 
 
 @router.get("")
