@@ -63,7 +63,7 @@ def test_a_closed_ebay_account_is_purged_from_its_seller_only(cloud, monkeypatch
     monkeypatch.setattr(relay_client, 'relay_request', relay)
     monkeypatch.setattr(recent_orders, 'refresh', no_orders)
 
-    asyncio.run(hosted_sales_scheduler.check_owner(USER_ID))
+    asyncio.run(hosted_sales_scheduler.check_owner(USER_ID, {}))
     assert acks == [{'through': 7}]
     assert counts(USER_ID) == {'ebay_actions': 0, 'ebay_offer_policies': 0, 'ebay_offer_rules': 0,
                                'ebay_offer_attempts': 0, 'marketplace_listings': 1, 'marketplace_sales': 2}
@@ -81,6 +81,6 @@ def test_a_closed_ebay_account_is_purged_from_its_seller_only(cloud, monkeypatch
 
     # The relay hands the same notice back: nothing more happens.
     after = counts(USER_ID)
-    asyncio.run(hosted_sales_scheduler.check_owner(USER_ID))
+    asyncio.run(hosted_sales_scheduler.check_owner(USER_ID, {}))
     assert counts(USER_ID) == after
     assert counts(BOB) == bob_before
