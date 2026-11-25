@@ -12,7 +12,6 @@ struct ListingAssistantView: View {
     @State private var hasCopy: Bool
     @State private var autoGenerate: Bool
     private let photoCount: Int
-    private let scheduledPublishAt: Date?
     private let onClose: () -> Void
 
     /// `text` starts the composer, e.g. an Ask chat about a marketplace refusal; the seller sends it.
@@ -20,11 +19,11 @@ struct ListingAssistantView: View {
     /// editor's Generate listing button has already asked when it had to.
     init(api: AnteroomAPI, listingID: String, photoCount: Int, hasCopy: Bool, scheduledPublishAt: Date?, generate: Bool = false,
          text: String = "", onClose: @escaping () -> Void) {
-        _model = State(initialValue: ListingAssistantModel(api: api, listingID: listingID, text: text))
+        _model = State(initialValue: ListingAssistantModel(api: api, listingID: listingID,
+                                                            scheduledPublishAt: scheduledPublishAt, text: text))
         _hasCopy = State(initialValue: hasCopy)
         _autoGenerate = State(initialValue: generate)
         self.photoCount = photoCount
-        self.scheduledPublishAt = scheduledPublishAt
         self.onClose = onClose
     }
 
@@ -78,7 +77,7 @@ struct ListingAssistantView: View {
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
-                if let publishAt = scheduledPublishAt {
+                if let publishAt = model.scheduledPublishAt {
                     ScheduledDraftLabel(publishAt: publishAt)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
