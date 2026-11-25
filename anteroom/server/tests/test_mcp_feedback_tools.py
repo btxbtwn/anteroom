@@ -362,3 +362,19 @@ def test_hosted_connected_app_is_named_by_its_app_name(hosted, signing_keys, mon
     data, is_error = _send(client, {"message": "Hello from ChatGPT", "kind": "question"}, connected)
     assert not is_error, data
     assert _hosted_row(engine, data["feedback_id"]).source == "AI assistant “ChatGPT”"
+
+
+def test_privacy_policy_tells_sellers_what_feedback_from_their_app_keeps_and_sends():
+    """The connected-apps section promises Anteroom keeps nothing of the conversation.
+    ``send_feedback`` keeps the assistant's message and emails it from hosted, so
+    the policy has to say so wherever that tool is offered (#2133)."""
+    from pathlib import Path
+
+    assert any(tool["name"] == "send_feedback" for tool in mcp_feedback_tools.TOOLS)
+    policy = (Path(__file__).resolve().parents[2] / "public" / "privacy.html").read_text()
+    section = policy[policy.index("What Anteroom keeps about the connection"):]
+    section = " ".join(section[: section.index("</ul>")].split())
+    assert "Feedback your app sends" in section
+    assert "emailed to the Anteroom team" in section
+    assert "only when you ask" in section
+    assert "Mac app keeps it on your Mac" in section
