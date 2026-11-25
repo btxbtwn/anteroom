@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1274 — 2026-11-25
+
+- Connecting eBay or Etsy on the web no longer fails with "not started here" when Anteroom updates while you are signing in.
+- An eBay or Etsy sign-in link now works for 15 minutes, as long as the relay keeps it, and can't be used twice.
+
 ## 0.1.1273 — 2026-11-25
 
 - An update to myanteroom.com no longer cuts off an Auto-Relist or scheduled publish that is already running, so a listing is no longer left down by a deploy. A running one gets up to 75 seconds to finish, and the next ones wait for the new version.
