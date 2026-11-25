@@ -8,6 +8,7 @@ struct AnteroomApp: App {
         WindowGroup {
             RootView()
                 .environment(session)
+                .environment(session.reachability)
                 .tint(WorkspaceStyle.accent)
                 .toggleStyle(WorkspaceSwitchStyle())
                 .task { await session.start() }
