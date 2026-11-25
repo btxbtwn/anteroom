@@ -74,6 +74,10 @@ REPLACEMENT_UNVERIFIED = {
     "mercari": ("Mercari Auto-Relist is paused: Mercari can refuse the replacement after the old listing is "
                 "deleted, so Anteroom left this listing up with its price unchanged."),
 }
+# A paused marketplace logs why at most once a day. The row neither counts toward the
+# daily cap nor starts the retry wait, since nothing was tried.
+PAUSED_STATUS = "skipped_paused"
+PAUSED_LOG_INTERVAL = timedelta(hours=24)
 
 
 class AutoRelistError(ValueError):
@@ -142,6 +146,7 @@ def _default_rule_view(marketplace: str, relisted_today: int = 0) -> dict[str, A
         "relisted_today": relisted_today,
         "remaining_today": max(DEFAULT_DAILY_CAP - relisted_today, 0),
         "last_run_at": None,
+        "paused_reason": REPLACEMENT_UNVERIFIED.get(marketplace),
     }
 
 
@@ -162,6 +167,7 @@ def rule_view(db: Session, row: MarketplaceRelistRule, moment: datetime | None =
         "relisted_today": done,
         "remaining_today": max(int(row.daily_cap) - done, 0),
         "last_run_at": _iso(row.last_run_at),
+        "paused_reason": REPLACEMENT_UNVERIFIED.get(row.marketplace),
     }
 
 
@@ -660,7 +666,6 @@ def preview_status(db: Session, *, marketplace: str | None = None, limit: int = 
             connection = "Connected eBay API account"
         previews.append({
             **view, "candidate_counts": counts, "pending_items": len(pending[market]), "candidates": details,
-            "paused_reason": REPLACEMENT_UNVERIFIED.get(market),
             "connection_requirement": connection,
         })
     return {"as_of": _iso(moment), "rules": previews, "connection_verified": False, "listing_mode": listing_mode.read(db),
@@ -1149,7 +1154,10 @@ def _reserve_relist_attempt(
             return {"reserved": False, "outcome": None}
 
         price_error = poshmark_fractional_price_error(new_price) if marketplace == "poshmark" else None
-        preflight_error = REPLACEMENT_UNVERIFIED.get(marketplace) or readiness_error or price_error
+        if (paused := REPLACEMENT_UNVERIFIED.get(marketplace)) is not None:
+            return {"reserved": False, "outcome": _record_pause(db, entry, paused, moment)}
+
+        preflight_error = readiness_error or price_error
         revision_id = None if preflight_error else _prepare_price_revision(
             db, conv_id, marketplace, new_price, current_revision_id,
         )
@@ -1161,8 +1169,7 @@ def _reserve_relist_attempt(
                 old_listing_id=old_listing_id,
                 new_listing_id=None,
                 old_price=old_price,
-                # A paused marketplace never priced the relist, so its log shows no price change.
-                new_price=old_price if marketplace in REPLACEMENT_UNVERIFIED else new_price,
+                new_price=new_price,
                 status="failed",
                 reason=preflight_error or "Listing has no saved revision to relist.",
                 moment=moment,
@@ -1187,6 +1194,32 @@ def _reserve_relist_attempt(
         )
         return {"reserved": True, "attempt_id": attempt_id, "revision_id": revision_id,
                 "original_revision_id": current_revision_id}
+
+
+def _record_pause(db: Session, entry: dict[str, Any], reason: str, moment: datetime) -> dict[str, Any]:
+    """Log that a paused marketplace left this listing up, at most once a day.
+
+    Nothing is deleted, priced or sent. A pass within the interval reports the
+    reason without writing another row.
+    """
+    marketplace = entry["marketplace"]
+    outcome = {
+        "conversation_id": entry["conversation_id"], "marketplace": marketplace,
+        "old_listing_id": entry["listing_id"], "new_listing_id": None, "status": PAUSED_STATUS, "reason": reason,
+    }
+    logged = (
+        db.query(MarketplaceRelistLog.id)
+        .filter(MarketplaceRelistLog.marketplace == marketplace, MarketplaceRelistLog.status == PAUSED_STATUS,
+                MarketplaceRelistLog.created_at > moment - PAUSED_LOG_INTERVAL)
+        .first()
+    )
+    if logged is not None:
+        return outcome
+    return _record_log(
+        db, conv_id=entry["conversation_id"], marketplace=marketplace, old_listing_id=entry["listing_id"],
+        new_listing_id=None, old_price=entry["price"], new_price=entry["price"], status=PAUSED_STATUS,
+        reason=reason, moment=moment,
+    )
 
 
 def _update_attempt_stage(

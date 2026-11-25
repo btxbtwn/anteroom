@@ -2034,14 +2034,34 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         publish.assert_not_awaited()
         draft.assert_not_awaited()
         # One refusal per pass: the oldest listing says why and the rest of Mercari waits.
-        self.assertEqual([(row["conversation_id"], row["status"]) for row in outcomes], [(first[0], "failed")])
+        self.assertEqual([(row["conversation_id"], row["status"]) for row in outcomes], [(first[0], "skipped_paused")])
         self.assertIn("left this listing up", outcomes[0]["reason"])
-        self.assertEqual([row["status"] for row in again], ["failed"])
+        self.assertEqual([row["status"] for row in again], ["skipped_paused"])
         self._assert_mercari_left_up(*first, "m123456781")
         self._assert_mercari_left_up(*second, "m123456782")
         self.assertEqual(self.db.query(MarketplaceRelistLog).filter_by(status="relist_pending").count(), 0)
+        # The second pass reports the pause without logging it again.
         logged = self.db.query(MarketplaceRelistLog).filter_by(marketplace="mercari").all()
-        self.assertEqual({(row.old_price, row.new_price, row.price_revision_id) for row in logged}, {(58.0, 58.0, None)})
+        self.assertEqual([(row.status, row.old_price, row.new_price, row.price_revision_id) for row in logged],
+                         [("skipped_paused", 58.0, 58.0, None)])
+
+    def test_a_paused_mercari_rule_logs_once_a_day_and_uses_none_of_its_cap(self):
+        self._mercari_due("Mercari boots", "m123456785", age_days=50)
+        self._mercari_due("Mercari belt", "m123456786", age_days=45)
+        auto_relist.save_rule(self.db, "mercari", {"enabled": True, "min_age_days": 30, "daily_cap": 1}, confirm=True)
+        start = _now()
+        delete = AsyncMock(return_value={"mercari": {"state": "deleted"}})
+        with patch("anteroom.services.marketplace_delist.delist", delete):
+            for minutes in (0, 5, 10, 60 * 23):
+                asyncio.run(auto_relist.run_auto_relist(now=start + timedelta(minutes=minutes), scheduled=True))
+            self.assertEqual(self.db.query(MarketplaceRelistLog).count(), 1)
+            asyncio.run(auto_relist.run_auto_relist(now=start + timedelta(hours=24, minutes=5), scheduled=True))
+        delete.assert_not_awaited()
+        self.assertEqual(self.db.query(MarketplaceRelistLog).filter_by(status="skipped_paused").count(), 2)
+        rule = next(row for row in auto_relist.list_rules(self.db, now=start + timedelta(hours=24, minutes=6))
+                    if row["marketplace"] == "mercari")
+        self.assertEqual((rule["relisted_today"], rule["remaining_today"]), (0, 1))
+        self.assertIn("left this listing up", rule["paused_reason"])
 
     def test_mercari_relist_refuses_even_an_injected_runner_and_other_marketplaces_still_relist(self):
         mercari = self._mercari_due("Mercari scarf", "m123456783", age_days=60)
@@ -2070,7 +2090,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
                                                            delister=delister, lister=lister))
         self.assertEqual((delisted, listed), (["poshmark"], ["poshmark"]))
         self.assertEqual(sorted((row["marketplace"], row["status"]) for row in outcomes),
-                         [("mercari", "failed"), ("poshmark", "completed")])
+                         [("mercari", "skipped_paused"), ("poshmark", "completed")])
         self._assert_mercari_left_up(*mercari, "m123456783")
 
     def test_mercari_relist_pause_shows_in_the_preview_and_dry_run(self):
