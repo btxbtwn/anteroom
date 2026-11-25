@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1267 — 2026-11-25
+
+- With Delist the other marketplaces on, the delist right after a sale keeps to the listings the sale left up: a listing you put up again after the sale is left alone, and the delist stops if the order is refunded or cancelled or you turn the setting off partway.
+
 ## 0.1.1266 — 2026-11-25
 
 - Refuse AI agent tool calls that have no declared permission entry, and log a warning if background photo cleanup fails after an agent call.

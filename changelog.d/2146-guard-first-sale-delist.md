@@ -1,1 +1,0 @@
-- With Delist the other marketplaces on, the delist right after a sale keeps to the listings the sale left up: a listing you put up again after the sale is left alone, and the delist stops if the order is refunded or cancelled or you turn the setting off partway.
