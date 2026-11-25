@@ -92,7 +92,9 @@ class SaleDelistFollowupTest(unittest.TestCase):
         self.db.commit()
         self._sold(days_ago=30)
         self.assertEqual(self._still(), [])
-        with patch("anteroom.services.sale_inventory.stock_after_sale", return_value={"status": "remaining", "remaining": 2}):
+        remaining = {"status": "remaining", "remaining": 2}
+        with patch("anteroom.services.sale_inventory.stocks_after_sales",
+                   side_effect=lambda _db, keys: {key: dict(remaining) for key in keys}):
             self.db.query(MarketplaceSale).delete()
             self.db.commit()
             self._sold()

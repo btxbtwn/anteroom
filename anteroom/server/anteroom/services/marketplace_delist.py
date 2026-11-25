@@ -67,16 +67,17 @@ def _time(value) -> datetime | None:
 
 def _sold_on(db: Session, conv_id: str, notes: dict, native: dict) -> dict[str, datetime | None]:
     """Where the item sold, and when that was last reported (None when unknown)."""
-    sold = reported_sales(notes)
+    from anteroom.services.sale_inventory import stocks_after_sales
 
-    def add(marketplace: str, when) -> None:
-        stamp, known = _time(when), sold.get(marketplace)
-        sold[marketplace] = max(filter(None, (stamp, known)), default=None)
+    sales = _current_sales(conv_id, db.query(MarketplaceSale).filter(
+        MarketplaceSale.conversation_id == conv_id, MarketplaceSale.order_status.in_(PAID_STATUSES)), notes, native)
+    return _sold_from(notes, sales, stocks_after_sales(db, [key for _row, key in sales]))
 
-    from anteroom.services.sale_inventory import stock_after_sale
 
-    stocks = {}
-    for row in db.query(MarketplaceSale).filter(MarketplaceSale.conversation_id == conv_id, MarketplaceSale.order_status.in_(PAID_STATUSES)):
+def _current_sales(conv_id: str, rows, notes: dict, native: dict) -> list[tuple[MarketplaceSale, tuple]]:
+    """Paid sale lines of the listing each marketplace has now, with their stock keys; a replaced listing's sales are left out."""
+    current = []
+    for row in rows:
         mark = _notes_dict(notes, "marketplaceMarks").get(row.marketplace) or {}
         deleted = _notes_dict(notes, "marketplaceDelists").get(row.marketplace)
         url, _source = current_listing(row.marketplace, (native.get(row.marketplace) or {}).get("listing_url"),
@@ -85,11 +86,16 @@ def _sold_on(db: Session, conv_id: str, notes: dict, native: dict) -> dict[str, 
         current_id = listing_id(row.marketplace, url)
         if current_id and row.listing_id and current_id != row.listing_id:
             continue
-        key = (row.marketplace, row.listing_id)
-        if key not in stocks:
-            stocks[key] = stock_after_sale(db, conv_id, row.marketplace, row.listing_id)
+        current.append((row, (conv_id, row.marketplace, row.listing_id)))
+    return current
+
+
+def _sold_from(notes: dict, sales: list[tuple[MarketplaceSale, tuple]], stocks: dict) -> dict[str, datetime | None]:
+    sold = reported_sales(notes)
+    for row, key in sales:
         if stocks[key]["status"] == "sold_out":
-            add(row.marketplace, row.received_at)
+            stamp, known = _time(row.received_at), sold.get(row.marketplace)
+            sold[row.marketplace] = max(filter(None, (stamp, known)), default=None)
     return sold
 
 
@@ -176,28 +182,34 @@ def listings(db: Session, conv_id: str, *, conv: Conversation | None = None, nat
     return known_listings(notes, native, _sold_on(db, conv_id, notes, native))
 
 
-def listings_for(db: Session, convs: list[Conversation]) -> dict[str, dict]:
-    """``listings`` for many loaded items, in a fixed number of queries.
-
-    Only items with a paid sale read their sale records one by one, because
-    whether that sale ended the listing depends on stock read per listing.
-    """
+def native_for(db: Session, conv_ids) -> dict[str, dict[str, dict]]:
+    """Each item's direct marketplace listing records, by marketplace, in one query."""
     from anteroom.models.marketplace_listing import MarketplaceListing
     from anteroom.repositories.marketplace_listings import as_dict
 
-    ids = [conv.id for conv in convs]
     native: dict[str, dict[str, dict]] = {}
-    for row in db.query(MarketplaceListing).filter(MarketplaceListing.conversation_id.in_(ids)).populate_existing():
+    for row in db.query(MarketplaceListing).filter(MarketplaceListing.conversation_id.in_(set(conv_ids))).populate_existing():
         native.setdefault(row.conversation_id, {})[row.marketplace] = as_dict(row)
-    with_sales = {conv_id for (conv_id,) in db.query(MarketplaceSale.conversation_id).filter(
-        MarketplaceSale.conversation_id.in_(ids), MarketplaceSale.order_status.in_(PAID_STATUSES)).distinct()}
-    result = {}
-    for conv in convs:
-        notes = parse_notes(conv.notes)
-        bindings = native.get(conv.id, {})
-        sold = _sold_on(db, conv.id, notes, bindings) if conv.id in with_sales else reported_sales(notes)
-        result[conv.id] = known_listings(notes, bindings, sold)
-    return result
+    return native
+
+
+def listings_for(db: Session, convs: list[Conversation], *, native: dict[str, dict[str, dict]] | None = None) -> dict[str, dict]:
+    """``listings`` for many loaded items, in a fixed number of queries however many items or sales there are."""
+    from anteroom.services.sale_inventory import stocks_after_sales
+
+    ids = [conv.id for conv in convs]
+    if native is None:
+        native = native_for(db, ids)
+    rows: dict[str | None, list[MarketplaceSale]] = {}
+    for row in db.query(MarketplaceSale).filter(MarketplaceSale.conversation_id.in_(ids),
+                                                MarketplaceSale.order_status.in_(PAID_STATUSES)):
+        rows.setdefault(row.conversation_id, []).append(row)
+    notes = {conv.id: parse_notes(conv.notes) for conv in convs}
+    sales = {conv.id: _current_sales(conv.id, rows.get(conv.id, ()), notes[conv.id], native.get(conv.id, {}))
+             for conv in convs}
+    stocks = stocks_after_sales(db, [key for current in sales.values() for _row, key in current])
+    return {conv.id: known_listings(notes[conv.id], native.get(conv.id, {}), _sold_from(notes[conv.id], sales[conv.id], stocks))
+            for conv in convs}
 
 
 def known_listings(notes: dict, native: dict, sold: dict) -> dict:
