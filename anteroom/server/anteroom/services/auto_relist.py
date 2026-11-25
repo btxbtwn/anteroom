@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+import math
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
@@ -298,6 +299,10 @@ def save_rule(db: Session, marketplace: str, body: dict[str, Any], *, confirm: b
     return rule_view(db, row)
 
 
+# Poshmark and Mercari take whole-dollar prices only.
+WHOLE_DOLLAR_RELIST = frozenset({"poshmark", "mercari"})
+
+
 def compute_relist_price(current_price: float | None, rule: MarketplaceRelistRule) -> float | None:
     """Compute adjusted price respecting the seller's floor without ever raising the price."""
     if current_price is None or current_price <= 0 or not rule.price_adjust_mode or not rule.price_adjust_value:
@@ -310,8 +315,14 @@ def compute_relist_price(current_price: float | None, rule: MarketplaceRelistRul
         next_price = current_price * (1.0 - float(rule.price_adjust_value) / 100.0)
     else:
         next_price = current_price - float(rule.price_adjust_value)
-    next_price = max(next_price, floor)
-    return round(min(next_price, current_price), 2)
+    next_price = round(min(max(next_price, floor), current_price), 2)
+    if rule.marketplace in WHOLE_DOLLAR_RELIST:
+        # Round the drop down so it is still a drop, but never under the floor.
+        whole = math.floor(next_price)
+        if whole < floor:
+            whole = math.ceil(floor)
+        return float(min(whole, current_price))
+    return next_price
 
 
 def is_due_for_relist(marketplace: str, listed_at: datetime | None, rule: MarketplaceRelistRule, now: datetime) -> bool:

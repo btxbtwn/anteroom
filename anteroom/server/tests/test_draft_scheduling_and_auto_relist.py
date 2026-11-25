@@ -1438,6 +1438,31 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertEqual(auto_relist.compute_relist_price(40.0, rule_floor), 40.0)
         self.assertEqual(auto_relist.compute_relist_price(52.0, rule_floor), 50.0)
 
+        # Poshmark only takes whole dollars: a drop rounds down, never under the floor.
+        posh_pct = MarketplaceRelistRule(
+            id=new_id(), marketplace="poshmark", enabled=True,
+            price_adjust_mode="percent", price_adjust_value=10.0, price_floor=None,
+        )
+        self.assertEqual(auto_relist.compute_relist_price(9.0, posh_pct), 8.0)
+        self.assertEqual(auto_relist.compute_relist_price(5.0, posh_pct), 4.0)
+        self.assertEqual(auto_relist.compute_relist_price(4.0, posh_pct), 3.0)
+        posh_pct.price_floor = 7.5
+        self.assertEqual(auto_relist.compute_relist_price(8.0, posh_pct), 8.0)
+        self.assertEqual(auto_relist.compute_relist_price(9.0, posh_pct), 8.0)
+        # Mercari's form takes whole dollars too.
+        mercari_pct = MarketplaceRelistRule(
+            id=new_id(), marketplace="mercari", enabled=True,
+            price_adjust_mode="percent", price_adjust_value=10.0, price_floor=None,
+        )
+        self.assertEqual(auto_relist.compute_relist_price(6.0, mercari_pct), 5.0)
+        self.assertEqual(auto_relist.compute_relist_price(30.0, mercari_pct), 27.0)
+        # Marketplaces that take cents keep them.
+        ebay_pct = MarketplaceRelistRule(
+            id=new_id(), marketplace="ebay", enabled=True,
+            price_adjust_mode="percent", price_adjust_value=10.0, price_floor=None,
+        )
+        self.assertEqual(auto_relist.compute_relist_price(9.0, ebay_pct), 8.1)
+
         # M5: eBay GTC 30-day cycle triggers near end of cycle 1 (29d23h30m) and cycle 2 (59d23h30m), not day 31.
         ebay_rule = MarketplaceRelistRule(
             id=new_id(), marketplace="ebay", enabled=True, ebay_recreate_before_gtc_minutes=60,
@@ -1581,27 +1606,23 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.db.expire_all()
         return outcomes, listed
 
-    def test_auto_relist_rejects_fractional_poshmark_replacement_before_delist(self):
+    def test_poshmark_percent_drop_relists_at_a_whole_dollar_price(self):
+        from anteroom.services.seller_overrides import price_for
+
         self._pricing_rules_on()
-        conv, rev, _before = self._stale_poshmark_draft(general=12, listed_price=13, drop=10, mode="percent")
-        message = "Enter a whole-dollar price for Poshmark."
+        conv, rev, before = self._stale_poshmark_draft(general=12, listed_price=13, drop=10, mode="percent")
         preview = auto_relist.preview_status(self.db, marketplace="poshmark")["rules"][0]["candidates"][0]
-        self.assertEqual(preview["proposed_price"], 11.70)
-        delister = AsyncMock(return_value={"ok": True})
-        lister = AsyncMock(return_value={"ok": True, "listing_id": "5f00000000000000000000b2"})
+        # 10% off $13 is $11.70; Poshmark takes whole dollars, so the drop lands on $11.
+        self.assertEqual(preview["proposed_price"], 11)
+        self.assertNotIn("price", [gap["field"] for gap in preview["listing_gaps"]])
 
-        outcomes = asyncio.run(auto_relist.run_auto_relist(now=_now(), scheduled=True, delister=delister, lister=lister))
+        outcomes, listed = self._relist()
 
-        delister.assert_not_called()
-        lister.assert_not_called()
-        self.assertFalse(preview["local_fields_ready"])
-        self.assertIn({"field": "price", "message": message, "blocking": True}, preview["listing_gaps"])
-        self.assertEqual([(row["status"], row["reason"]) for row in outcomes], [("failed", message)])
-        self.db.expire_all()
-        current = self.db.query(Listing).filter_by(conversation_id=conv.id).one()
-        self.assertEqual(current.current_revision_id, rev.id)
-        live = self.db.query(MarketplaceListing).filter_by(conversation_id=conv.id, marketplace="poshmark").one()
-        self.assertEqual((live.state, live.listing_id, live.listed_price), ("published", "5f00000000000000000000a1", 13))
+        self.assertEqual([o["status"] for o in outcomes], ["completed"])
+        published = self.db.get(ListingRevision, listed[0])
+        assert published is not None
+        self.assertEqual(price_for(published.listing_json, "poshmark"), 11)
+        self.assertEqual(price_for(published.listing_json, "mercari"), before["mercari"])
 
     def test_relist_with_pricing_rules_keeps_the_live_price(self):
         from anteroom.services.seller_overrides import price_for

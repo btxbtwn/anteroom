@@ -1,0 +1,1 @@
+- Auto-relist price drops on Poshmark and Mercari now land on whole dollars (rounded down), so relists no longer fail with "Enter a whole-dollar price".
