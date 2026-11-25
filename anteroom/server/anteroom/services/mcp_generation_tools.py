@@ -42,8 +42,8 @@ TOOLS: list[dict[str, Any]] = [
             "labels, notes) are used as the seller's facts, so set them first (read_size_tag, read_measurements, "
             "edit_listing sku, manage_labels_and_notes). Only drafts with photos are generated; a draft "
             "already generating, live or sold is skipped with the reason. Returns once each one has started; "
-            "follow each with get_listing's generation field (queued, running, completed or failed with the "
-            "reason). Generation "
+            "follow each with get_listing's generation field (queued, running, completed, cancelled or "
+            "failed with the reason). Generation "
             "stops at a saved draft: it never publishes or reaches a marketplace."
         ),
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
@@ -69,7 +69,7 @@ PERMISSIONS: dict[str, tuple[str, str]] = {"generate_listings": ("listings", "wr
 
 _NOTE = (
     "Generating in Anteroom. Each draft is saved when it finishes, and nothing is published. "
-    "Follow each with get_listing: its generation field says queued, running, completed or failed."
+    "Follow each with get_listing: its generation field says queued, running, completed, cancelled or failed."
 )
 
 
@@ -175,7 +175,9 @@ def generation_state(db: Session, conv_id: str) -> dict[str, Any]:
 
     Hosted generation is the seller's durable draft task: a queued one leaves the
     listing a draft until a worker starts it, so the task says what is happening
-    and why it failed. On the Mac a run is in this process while it lasts.
+    and why it failed. On the Mac a run is in this process while it lasts; how
+    the last one ended (completed, failed with why, or cancelled) is kept until
+    the next one starts.
     """
     if current() is not None:
         from anteroom.models.background_task import BackgroundTask
@@ -186,11 +188,12 @@ def generation_state(db: Session, conv_id: str) -> dict[str, Any]:
         if task is None:
             return {"state": "idle"}
         return {"state": task.status, "error": task.error, "updated_at": task.updated_at}
-    from anteroom.services.streaming import active_generation
+    from anteroom.services.streaming import active_generation, generation_outcome
 
     conv = ConversationRepo(db).get(conv_id)
-    running = active_generation(conv_id) is not None or (conv is not None and conv.status == "in_progress")
-    return {"state": "running" if running else "idle"}
+    if active_generation(conv_id) is not None or (conv is not None and conv.status == "in_progress"):
+        return {"state": "running"}
+    return generation_outcome(conv_id) or {"state": "idle"}
 
 
 def pending_generations(body: Any) -> list[tuple[dict[str, Any], dict[str, Any]]]:

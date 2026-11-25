@@ -439,6 +439,7 @@ async def run_listing_generation(
                     "Timed out while generating the listing. Retry generate."
                 )
         log.error("listing generation failed for %s: %s", conv_id, message)
+        run.error = message
         try:
             run.publish(sse_data(f"Error: {message}"))
             await in_worker_session(lambda db: _post(db, conv_id, "system", message, provider="system", model=""))

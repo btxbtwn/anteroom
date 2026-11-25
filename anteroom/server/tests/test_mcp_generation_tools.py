@@ -195,6 +195,52 @@ def test_get_listing_says_where_generation_is_on_the_mac(provider):
     assert not error and listing["generation"] == {"state": "running"}
 
 
+def test_get_listing_says_how_the_last_mac_run_ended(provider):
+    import asyncio
+
+    from anteroom.services import streaming
+
+    client = TestClient(app)
+    conv_id = _draft(client)
+
+    async def run_to_end(work, *, stop=False):
+        run = streaming.start_generation(conv_id, work)
+        await asyncio.sleep(0)
+        if stop:
+            streaming.stop_generation(conv_id)
+        await asyncio.gather(run.task, return_exceptions=True)
+
+    async def fails(run):
+        run.error = "Timed out during “Analyzing photos…”. Retry generate."
+
+    async def crashes(run):
+        raise RuntimeError("provider went away")
+
+    async def finishes(run):
+        return None
+
+    async def hangs(run):
+        await asyncio.sleep(60)
+
+    def state():
+        listing, error = _call(client, "get_listing", {"conversation_id": conv_id})
+        assert not error
+        return listing["generation"]
+
+    try:
+        asyncio.run(run_to_end(fails))
+        assert state() == {"state": "failed", "error": "Timed out during “Analyzing photos…”. Retry generate."}
+        asyncio.run(run_to_end(crashes))
+        assert state() == {"state": "failed", "error": "provider went away"}
+        asyncio.run(run_to_end(finishes))
+        assert state() == {"state": "completed"}
+        asyncio.run(run_to_end(hangs, stop=True))
+        assert state() == {"state": "cancelled"}
+    finally:
+        asyncio.run(streaming.reset_generations())
+    assert state() == {"state": "idle"}
+
+
 def test_the_mac_starts_no_more_drafts_once_the_call_ran_out_of_time(started):
     import asyncio
 
