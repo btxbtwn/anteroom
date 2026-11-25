@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1257 — 2026-11-25
+
+- Let a connected AI agent reload a draft's marketplace form, like Reload choices in the editor, so drafts it fixes can be listed or scheduled.
+
 ## 0.1.1256 — 2026-11-25
 
 - When auto-relist drops a price, the new price now also saves as the item's General price. Other marketplaces keep their own prices.

@@ -1,1 +1,0 @@
-- Let a connected AI agent reload a draft's marketplace form, like Reload choices in the editor, so drafts it fixes can be listed or scheduled.
