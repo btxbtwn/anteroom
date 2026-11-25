@@ -521,3 +521,39 @@ def test_snapshot_step_parallel_sessions_do_not_mix_diagnostics():
 
     with ThreadPoolExecutor(max_workers=2) as workers:
         assert list(workers.map(run, (1, 3))) == [1, 3]
+
+
+def test_open_screens_share_one_still_listed_read_per_seller(cloud, signing_keys, monkeypatch):  # noqa: F811
+    from anteroom.services import sale_delist_followup
+    from test_hosted_drafts import BOB
+
+    client, _engine = cloud
+    alice, bob = headers(signing_keys), headers(signing_keys, BOB)
+    version, checks, asked, reads = snapshots._version, [], threading.Event(), []
+
+    def counted(owner):
+        checks.append(True)
+        if len(checks) >= 6:
+            asked.set()
+        return version(owner)
+
+    monkeypatch.setattr(snapshots, '_version', counted)
+
+    def still_listed(db):
+        reads.append(True)
+        # Hold the read until every open screen has asked for it.
+        asked.wait(3)
+        return [{'saleId': f'sale-{len(reads)}'}]
+
+    monkeypatch.setattr(sale_delist_followup, 'still_listed', still_listed)
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        responses = list(executor.map(
+            lambda _: client.get('/api/marketplace-sales/still-listed', headers=alice), range(6)))
+    assert [response.status_code for response in responses] == [200] * 6
+    assert len(reads) == 1, 'Concurrent still-listed requests must share one database read'
+    assert all(response.json() == responses[0].json() for response in responses)
+    assert responses[0].json() == {'items': [{'saleId': 'sale-1'}], 'autodelist': False}
+    # Another seller never receives the first seller's result.
+    other = client.get('/api/marketplace-sales/still-listed', headers=bob)
+    assert other.json()['items'] == [{'saleId': 'sale-2'}]
+    assert len(reads) == 2

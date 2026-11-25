@@ -1,0 +1,1 @@
+- With Anteroom open in several tabs or devices, the "sold but still listed" alert now loads once for all of them instead of each screen holding a database connection, so pages stop failing with "Cloud data is temporarily unavailable".
