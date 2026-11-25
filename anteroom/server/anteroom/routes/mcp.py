@@ -227,7 +227,8 @@ async def mcp_post(request: Request):
                 await mcp_photo_tools.finish_pending_uploads(uploads, expired=expired, request=request)
             forms = mcp_catalog_tools.pending_form_reads(outcome[0])
             if forms:
-                await mcp_catalog_tools.finish_form_reads(forms, deadline=deadline - _MCP_REPLY_MARGIN_SECONDS)
+                await mcp_catalog_tools.finish_form_reads(forms, deadline=deadline - _MCP_REPLY_MARGIN_SECONDS,
+                                                          expired=expired)
             if not result.done():
                 result.set_result(outcome)
         except Exception as exc:
