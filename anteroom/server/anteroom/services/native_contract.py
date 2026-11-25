@@ -744,8 +744,13 @@ def gaps(listing: dict, market: str) -> list[dict]:
     found = []
     rows = {path_of(row): row for row in fields}
     folded = {_fold(path) for path in rows}
+    measurement_path = "depop_specifics.measurements"
+    copied_measurements = market == "depop" and not is_locked(listing, measurement_path)
     for path, value in _leaves(listing.get(f"{market}_specifics") or {}, f"{market}_specifics", set(rows)):
         if path == CANONICAL_PRICE.get(market) and "price" in rows:
+            continue
+        # Item Details supplies these even when the Depop form has no measurements control.
+        if copied_measurements and (path == measurement_path or path.startswith(f"{measurement_path}.")):
             continue
         if path in rows or _fold(path) in folded or (market == "etsy" and _etsy_native_path(path, rows)) or value in (None, "", [], {}):
             continue
