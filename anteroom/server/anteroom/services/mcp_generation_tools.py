@@ -193,6 +193,11 @@ def generation_state(db: Session, conv_id: str) -> dict[str, Any]:
     conv = ConversationRepo(db).get(conv_id)
     if active_generation(conv_id) is not None or (conv is not None and conv.status == "in_progress"):
         return {"state": "running"}
+    from anteroom.services import activity
+
+    if activity.running(conv_id):
+        # After the stream ends, marketplace fields are still being prepared in the background.
+        return {"state": "running"}
     return generation_outcome(conv_id) or {"state": "idle"}
 
 

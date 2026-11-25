@@ -241,6 +241,37 @@ def test_get_listing_says_how_the_last_mac_run_ended(provider):
     assert state() == {"state": "idle"}
 
 
+def test_get_listing_reports_running_while_marketplace_fields_are_prepared(provider):
+    import asyncio
+
+    from anteroom.services import activity, streaming
+
+    client = TestClient(app)
+    conv_id = _draft(client)
+
+    def state():
+        listing, error = _call(client, "get_listing", {"conversation_id": conv_id})
+        assert not error
+        return listing["generation"]
+
+    async def finishes(run):
+        return None
+
+    async def complete():
+        run = streaming.start_generation(conv_id, finishes)
+        await run.task
+
+    try:
+        asyncio.run(complete())
+        work = activity.begin(conv_id, "Preparing marketplace fields…")
+        assert state() == {"state": "running"}
+        activity.end(work)
+        assert state() == {"state": "completed"}
+    finally:
+        asyncio.run(streaming.reset_generations())
+        activity.reset()
+
+
 def test_the_mac_starts_no_more_drafts_once_the_call_ran_out_of_time(started):
     import asyncio
 
