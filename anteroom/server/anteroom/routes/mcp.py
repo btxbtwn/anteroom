@@ -31,6 +31,7 @@ from anteroom.services import (
     mcp_marketplace_tools,
     mcp_oauth,
     mcp_photo_tools,
+    mcp_reading_tools,
     mcp_tokens,
 )
 from anteroom.services.hosted_limits import read_bounded_body
@@ -178,7 +179,9 @@ async def mcp_post(request: Request):
     # Upload links a tool call makes point back at the server the client reached.
     mcp_photo_tools.request_origin.set(mcp_photo_tools.origin_for(request, hosted=is_hosted))
 
-    deadline = monotonic() + _MCP_RPC_TIMEOUT_SECONDS
+    # A size-tag or measurement reading waits on a photo model: those calls get longer.
+    call_timeout = mcp_reading_tools.call_timeout(payload, _MCP_RPC_TIMEOUT_SECONDS)
+    deadline = monotonic() + call_timeout
     stopped = Event()
 
     def expired() -> bool:
@@ -228,6 +231,11 @@ async def mcp_post(request: Request):
             forms = mcp_catalog_tools.pending_form_reads(outcome[0])
             if forms:
                 await mcp_catalog_tools.finish_form_reads(forms, deadline=deadline - _MCP_REPLY_MARGIN_SECONDS)
+            readings = mcp_reading_tools.pending_reads(outcome[0])
+            if readings:
+                # Photos are fetched and read by a photo model only once the session is closed.
+                await mcp_reading_tools.finish_reads(
+                    readings, deadline=deadline - _MCP_REPLY_MARGIN_SECONDS, request=request if is_hosted else None)
             if not result.done():
                 result.set_result(outcome)
         except Exception as exc:
@@ -256,7 +264,7 @@ async def mcp_post(request: Request):
     worker.add_done_callback(_finish_call)
     try:
         body, status_code, extra_headers = await asyncio.wait_for(
-            result, timeout=_MCP_RPC_TIMEOUT_SECONDS,
+            result, timeout=call_timeout,
         )
     except TimeoutError:
         return JSONResponse(
