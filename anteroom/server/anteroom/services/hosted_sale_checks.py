@@ -78,4 +78,9 @@ async def check_cloud_sellers(engine) -> None:
 async def serve_cloud(engine) -> None:
     while True:
         await asyncio.sleep(chrome_sales.POLL_INTERVAL_S)
-        await check_cloud_sellers(engine)
+        try:
+            await check_cloud_sellers(engine)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - a failed pass must not stop the scheduler
+            log.exception('Cloud sale check pass failed. The next scheduled pass will run.')
