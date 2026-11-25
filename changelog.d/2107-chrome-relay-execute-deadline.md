@@ -1,0 +1,1 @@
+- Saving or listing on Depop, Mercari or Poshmark from the web no longer hangs on "Waiting for Chrome to confirm" when the action is started in the background: it now reaches Chrome instead of being turned away before it starts.

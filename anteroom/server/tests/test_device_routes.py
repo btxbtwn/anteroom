@@ -197,6 +197,56 @@ def test_chrome_read_forwards_once_and_a_marketplace_request_is_not_retried(monk
     assert not relay._outbox
 
 
+def test_a_marketplace_action_forwarded_from_the_worker_reaches_chrome_on_the_web_process(monkeypatch):
+    """The worker hands a List or Save draft to the web process with the action's own deadline."""
+    from anteroom.services.native_marketplaces import EXECUTE_TIMEOUT_S
+
+    monkeypatch.setenv('ANTEROOM_PROCESS_TOKEN', 'process-token')
+    owner = str(uuid.uuid4())
+    web_relay = BrowserRelay(owner)
+    web_relay.note_seen({'marketplace.actions'})
+    monkeypatch.setattr('anteroom.routes.internal_devices.chrome_for', lambda seller: web_relay)
+    worker_relay = BrowserRelay(owner)
+    monkeypatch.setattr(browser_bridge, '_manager', lambda: worker_relay)
+    monkeypatch.setattr(device_routes, 'forward_target', _forward_to_peer)
+    monkeypatch.setattr(worker_relay.__class__, 'connected', property(lambda self: True))
+    app = create_app()
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url='http://internal') as client:
+            async def post(url, path, body, timeout):
+                response = await client.post(path, json=body, headers={'Authorization': 'Bearer process-token'})
+                if response.status_code != 200:
+                    raise RoutingUnavailable
+                return response.json()
+
+            monkeypatch.setattr(device_routes, 'post', post)
+            monkeypatch.setattr('anteroom.services.listing_mode.require', lambda mode: None)
+            task = asyncio.create_task(browser_bridge.request(
+                SimpleNamespace(id='job-1'), 'marketplace.execute',
+                {'marketplace': 'depop', 'operation_id': 'job-1'}, timeout=EXECUTE_TIMEOUT_S))
+            for _ in range(200):
+                if web_relay._outbox or task.done():
+                    break
+                await asyncio.sleep(0.01)
+            assert not task.done(), task.exception()
+            command = web_relay._outbox.popleft()
+            assert command['type'] == 'marketplace.execute'
+            web_relay.resolve_wait(command['message_id'], {'ok': True, 'state': 'draft'})
+            assert await task == {'ok': True, 'state': 'draft'}
+
+    asyncio.run(run())
+
+
+def test_the_internal_chrome_routes_accept_every_relayed_deadline():
+    from anteroom.services.hosted_browser_relay import LONGEST_WAIT_S
+    from anteroom.services.native_marketplaces import EXECUTE_TIMEOUT_S
+    from anteroom.services.order_history import READ_TIMEOUT_S as SALES_HISTORY_S
+
+    assert max(EXECUTE_TIMEOUT_S, SALES_HISTORY_S) <= LONGEST_WAIT_S
+
+
 def test_chrome_read_looks_up_the_device_route_off_the_event_loop(monkeypatch):
     # A full pool makes a route lookup wait for a connection. On the request
     # loop that wait froze every request and kept the pool full.
