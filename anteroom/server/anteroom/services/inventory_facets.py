@@ -43,4 +43,4 @@ def listing_facets(db: Session) -> dict[str, dict[str, Any]]:
 
 def listing_facet(db: Session, conv_id: str) -> dict[str, Any]:
     row = ConversationRepo(db).listing_facet_row(conv_id)
-    return _facet(*row) if row else {"sku": None, "price": None, "etsy_eligible": True}
+    return _facet(*row) if row else {"sku": None, "price": None, "etsy_eligible": True, "scheduled_publish_at": None}
