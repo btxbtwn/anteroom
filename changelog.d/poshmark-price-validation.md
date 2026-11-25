@@ -1,1 +1,0 @@
-- Poshmark's Listing Price must be in whole dollars. Auto-Relist leaves the current listing live if the replacement price has cents.
