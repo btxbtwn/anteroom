@@ -527,6 +527,43 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         live = self.db.query(MarketplaceListing).filter_by(conversation_id=conv.id, marketplace="depop").one()
         self.assertEqual((live.state, live.listing_id, live.listed_price), ("published", old_id, 12))
 
+    def test_depop_relist_skips_shipping_if_another_run_fills_the_daily_cap(self):
+        now = _now()
+        conv, _, _ = self._create_draft("Shirt", price=13)
+        self.db.add_all([
+            MarketplaceListing(
+                id=new_id(), conversation_id=conv.id, marketplace="depop", state="published",
+                listing_id="seller-shirt", listing_url="https://www.depop.com/products/seller-shirt/",
+                listed_price=13, listed_at=now - timedelta(days=45),
+            ),
+            MarketplaceRelistRule(id=new_id(), marketplace="depop", enabled=True, daily_cap=1),
+        ])
+        self.db.commit()
+        load = auto_relist._load_enabled_rules_and_candidates
+
+        def load_before_concurrent_relist(db, *args, **kwargs):
+            plan = load(db, *args, **kwargs)
+            self.assertEqual(len(plan), 1)
+            db.add(MarketplaceRelistLog(
+                id=new_id(), conversation_id=conv.id, marketplace="depop",
+                old_listing_id="seller-previous-shirt", new_listing_id="seller-shirt",
+                status="completed", created_at=now,
+            ))
+            db.commit()
+            return plan
+
+        with (
+            patch.object(auto_relist, "_load_enabled_rules_and_candidates", side_effect=load_before_concurrent_relist),
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+            patch("anteroom.services.cloud_marketplace.execute", AsyncMock(return_value={
+                "ok": True, "relist_shipping_checked": True,
+            })) as execute,
+        ):
+            outcomes = asyncio.run(auto_relist.run_auto_relist(now=now, marketplace="depop"))
+
+        self.assertEqual(outcomes, [])
+        execute.assert_not_awaited()
+
     def test_depop_relist_waits_after_a_busy_publish_start(self):
         from anteroom.services import automation_actions, native_marketplaces
 
