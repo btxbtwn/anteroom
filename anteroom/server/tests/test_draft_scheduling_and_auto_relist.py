@@ -1811,6 +1811,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
             id=new_id(), conversation_id=conv.id, marketplace="poshmark", old_listing_id="5f00000000000000000000a1",
             old_price=38.0, new_price=33.0, status="relist_pending",
             reason="stage:deleting | Delisting old listing before relist.", created_at=started,
+            price_revision_id=price_rev, original_revision_id=rev.id,
         )
         self.db.add(attempt)
         self.db.commit()
@@ -1826,6 +1827,41 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.db.expire_all()
         self.assertEqual(self.db.get(MarketplaceRelistLog, attempt.id).status, "failed")
         self._assert_prices_put_back(conv, before)
+
+    def test_a_reserved_relist_records_the_price_revision_it_saved(self):
+        conv, rev, _before = self._stale_poshmark_draft(general=30.0, listed_price=38.0, drop=5)
+        delister = AsyncMock(side_effect=RuntimeError("Chrome went away"))
+        lister = AsyncMock(return_value={"ok": True, "listing_id": "5f00000000000000000000b2"})
+
+        asyncio.run(auto_relist.run_auto_relist(now=_now(), delister=delister, lister=lister))
+
+        self.db.expire_all()
+        row = self.db.query(MarketplaceRelistLog).filter_by(conversation_id=conv.id).one()
+        self.assertEqual(row.original_revision_id, rev.id)
+        self.assertIsNotNone(row.price_revision_id)
+        self.assertNotEqual(row.price_revision_id, rev.id)
+
+    def test_a_stuck_delete_never_puts_back_another_marketplaces_later_relist_price(self):
+        conv, rev, _before = self._stale_poshmark_draft(general=30.0, listed_price=38.0, drop=5)
+        started = _now() - timedelta(minutes=20)
+        poshmark_rev = auto_relist._prepare_price_revision(self.db, conv.id, "poshmark", 33.0, rev.id)
+        attempt = MarketplaceRelistLog(
+            id=new_id(), conversation_id=conv.id, marketplace="poshmark", old_listing_id="5f00000000000000000000a1",
+            old_price=38.0, new_price=33.0, status="relist_pending",
+            reason="stage:deleting | Delisting old listing before relist.", created_at=started,
+            price_revision_id=poshmark_rev, original_revision_id=rev.id,
+        )
+        self.db.add(attempt)
+        self.db.commit()
+        # Meanwhile eBay relists the same item and saves a newer Auto-Relist revision.
+        ebay_rev = auto_relist._prepare_price_revision(self.db, conv.id, "ebay", 27.0, poshmark_rev)
+        self.assertNotEqual(ebay_rev, poshmark_rev)
+
+        auto_relist._reconcile_pending_relists(self.db, _now(), "poshmark")
+
+        self.db.expire_all()
+        self.assertEqual(self.db.get(MarketplaceRelistLog, attempt.id).status, "failed")
+        self.assertEqual(self.db.query(Listing).filter_by(conversation_id=conv.id).one().current_revision_id, ebay_rev)
 
     def _poshmark_form_draft(self, *, general: float, listed_price: float, locked_poshmark: float | None = None):
         from anteroom.services import native_contract

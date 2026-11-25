@@ -786,17 +786,9 @@ def _restore_price_revision(db: Session, conv_id: str, price_revision_id: str, o
 
 def _restore_attempt_price(db: Session, attempt: MarketplaceRelistLog) -> None:
     """Put back the price an unsettled attempt saved, unless the listing changed since."""
-    listing_row = db.query(Listing).filter(Listing.conversation_id == attempt.conversation_id).first()
-    current = db.get(ListingRevision, listing_row.current_revision_id) if listing_row and listing_row.current_revision_id else None
-    if (current is None or current.source != "auto_relist" or not current.parent_revision_id
-            or attempt.new_price is None or not isinstance(current.listing_json, dict)):
+    if not attempt.price_revision_id or not attempt.original_revision_id:
         return
-    saved_at = _as_naive_utc(current.created_at)
-    saved_price = price_for(current.listing_json, attempt.marketplace)
-    if (saved_at is None or saved_at < attempt.created_at or saved_price is None
-            or round(float(saved_price), 2) != round(attempt.new_price, 2)):
-        return
-    _restore_price_revision(db, attempt.conversation_id, current.id, current.parent_revision_id)
+    _restore_price_revision(db, attempt.conversation_id, attempt.price_revision_id, attempt.original_revision_id)
 
 
 async def _restore_price_after_cancel(conv_id: str, price_revision_id: str, original_revision_id: str) -> None:
@@ -1018,6 +1010,8 @@ def _record_log(
     new_listing_url: str | None = None,
     native_job_id: str | None = None,
     attempt_id: str | None = None,
+    price_revision_id: str | None = None,
+    original_revision_id: str | None = None,
 ) -> dict[str, Any]:
     if status == "completed" and new_listing_id:
         swap_tracked_listing_id(
@@ -1038,6 +1032,9 @@ def _record_log(
         db.add(row)
     if native_job_id is not None:
         row.native_job_id = native_job_id
+    if price_revision_id is not None:
+        row.price_revision_id = price_revision_id
+        row.original_revision_id = original_revision_id
     row.new_listing_id = new_listing_id
     row.status = status
     row.reason = reason
@@ -1173,6 +1170,8 @@ def _reserve_relist_attempt(
             status="relist_pending",
             reason=f"{PENDING_STAGE_DELETING} | Delisting old listing before relist.",
             moment=moment,
+            price_revision_id=revision_id,
+            original_revision_id=current_revision_id,
         )
         return {"reserved": True, "attempt_id": attempt_id, "revision_id": revision_id,
                 "original_revision_id": current_revision_id}
