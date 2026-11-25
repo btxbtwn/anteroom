@@ -155,7 +155,7 @@ def _write_password(account: str, value: str) -> bool:
         return False
 
 
-class _Unavailable(Exception):
+class KeychainUnavailable(Exception):
     """Keychain refused or failed the read (e.g. Deny), as opposed to not found."""
 
 
@@ -164,7 +164,7 @@ def _read_item(account: str, *, service: str = KEYRING_SERVICE) -> str | None:
         return _get_password(account, service=service)
     except Exception as exc:
         log.warning("keychain read failed for %s", account, exc_info=True)
-        raise _Unavailable(account) from exc
+        raise KeychainUnavailable(account) from exc
 
 
 def _parse_store(raw: str) -> dict[str, str]:
@@ -209,11 +209,11 @@ def _record_migration_done() -> None:
         log.warning("could not record that the keychain migration ran", exc_info=True)
 
 
-def _secrets() -> dict[str, str]:
+def _secrets(*, refresh: bool = False) -> dict[str, str]:
     """Load the secrets item once, migrating the old service or per-secret items if needed."""
     global _store, _store_readable
     with _lock:
-        if _store is not None and _store_readable:
+        if not refresh and _store is not None and _store_readable:
             return _store
         migrated_service = False
         try:
@@ -223,7 +223,7 @@ def _secrets() -> dict[str, str]:
                 if legacy_raw is not None:
                     raw = legacy_raw
                     migrated_service = True
-        except _Unavailable:
+        except KeychainUnavailable:
             # Never overwrite an item we couldn't read; retry on the next access.
             if _store is None:
                 _store = {}
@@ -269,7 +269,7 @@ def _save_store() -> bool:
             raw = _read_item(SECRETS_ACCOUNT)
             if raw is None:
                 raw = _read_item(SECRETS_ACCOUNT, service=LEGACY_KEYRING_SERVICE)
-        except _Unavailable:
+        except KeychainUnavailable:
             # Never overwrite an item we could not read.
             return False
         on_disk = _parse_store(raw) if raw else {}
@@ -285,13 +285,18 @@ def _save_store() -> bool:
         return True
 
 
-def _get(account: str) -> str | None:
+def _get(account: str, *, require_readable: bool = False) -> str | None:
     from anteroom.services.service_context import current
     context = current()
     if context is not None:
         return context.secrets.get(account)
     with _lock:
-        return _secrets().get(account)
+        # Another process may have filled an empty slot since we cached the store.
+        refresh = require_readable and _store is not None and account not in _store
+        store = _secrets(refresh=refresh)
+        if require_readable and not _store_readable:
+            raise KeychainUnavailable(account)
+        return store.get(account)
 
 
 def _set(account: str, value: str) -> bool:
@@ -394,8 +399,8 @@ def delete_chatgpt_tokens():
     _delete(CHATGPT_ACCOUNT)
 
 
-def _get_json(account: str) -> dict | None:
-    raw = _get(account)
+def _get_json(account: str, *, require_readable: bool = False) -> dict | None:
+    raw = _get(account, require_readable=require_readable)
     try:
         value = json.loads(raw) if raw else None
     except Exception:
@@ -411,8 +416,8 @@ def set_chatgpt_registration(registration: dict):
     _set(CHATGPT_REGISTRATION_ACCOUNT, json.dumps(registration))
 
 
-def get_relay_device() -> dict | None:
-    device = _get_json(RELAY_DEVICE_ACCOUNT)
+def get_relay_device(*, require_readable: bool = False) -> dict | None:
+    device = _get_json(RELAY_DEVICE_ACCOUNT, require_readable=require_readable)
     if device and device.get("deviceId") and device.get("token"):
         return device
     return None

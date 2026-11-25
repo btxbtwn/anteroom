@@ -43,35 +43,32 @@ export class Inbox extends DurableObject {
     this.sql.exec("INSERT OR IGNORE INTO seen (dedupe_key, received_at) SELECT dedupe_key, received_at FROM events");
   }
 
-  seen(dedupeKey) {
-    return this.sql.exec("SELECT 1 FROM seen WHERE dedupe_key = ?", dedupeKey).toArray().length > 0;
+  firstReceivedAt(dedupeKey) {
+    return this.sql.exec("SELECT received_at FROM seen WHERE dedupe_key = ?", dedupeKey).toArray()[0]?.received_at ?? null;
   }
 
   async add(event) {
     const receivedAt = Date.now();
-    const fresh = this.sql
-      .exec(
+    const row = this.ctx.storage.transactionSync(() => {
+      const fresh = this.sql.exec(
         "INSERT INTO seen (dedupe_key, received_at) VALUES (?, ?) ON CONFLICT(dedupe_key) DO NOTHING RETURNING dedupe_key",
         event.dedupeKey,
         receivedAt,
-      )
-      .toArray();
-    if (fresh.length === 0) return { duplicate: true };
-    const cursor = this.sql.exec(
-      `INSERT INTO events (dedupe_key, source, event_type, ids, occurred_at, received_at)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(dedupe_key) DO NOTHING
-       RETURNING *`,
-      event.dedupeKey,
-      event.source,
-      event.eventType,
-      JSON.stringify(event.ids),
-      event.occurredAt,
-      receivedAt,
-    );
-    const rows = cursor.toArray();
-    if (rows.length === 0) return { duplicate: true };
-    const stored = rowToEvent(rows[0]);
+      ).toArray();
+      if (fresh.length === 0) return null;
+      return this.sql.exec(
+        `INSERT INTO events (dedupe_key, source, event_type, ids, occurred_at, received_at)
+         VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
+        event.dedupeKey,
+        event.source,
+        event.eventType,
+        JSON.stringify(event.ids),
+        event.occurredAt,
+        receivedAt,
+      ).one();
+    });
+    if (!row) return { duplicate: true };
+    const stored = rowToEvent(row);
     const message = JSON.stringify({ type: "events", events: [stored] });
     for (const socket of this.ctx.getWebSockets()) {
       try {

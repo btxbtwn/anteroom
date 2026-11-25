@@ -17,13 +17,16 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
+from sqlalchemy.dialects.postgresql import insert as postgres_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
-from anteroom.models.conversation import Conversation, new_id
+from anteroom.models.conversation import Conversation
 from anteroom.models.listing import Listing, ListingRevision
 from anteroom.models.marketplace_listing import LIVE_STATES, MarketplaceListing
 from anteroom.models.marketplace_sale import PAID_STATUSES, MarketplaceSale, SaleSyncEvent
+from anteroom.models.ownership import LOCAL_USER_ID
 from anteroom.services import auto_relist, listing_persistence
 from anteroom.services.marketplace_delist import MARKETPLACES, DelistError, delist, listings, listings_for
 from anteroom.services.marketplace_identity import listing_id as extract_listing_id
@@ -108,6 +111,26 @@ def _current_revision_and_qty(db: Session, conv_id: str) -> tuple[str | None, in
     return rev.id, qty, dict(rev.listing_json)
 
 
+def _event_key(db: Session, sale_id: str, target_marketplace: str, action: str) -> dict[str, str]:
+    return {"user_id": getattr(db, "user_id", LOCAL_USER_ID), "sale_id": sale_id,
+            "target_marketplace": target_marketplace, "action": action}
+
+
+def _check_tracker_write_lease(db: Session) -> None:
+    # Core writes bypass the seller session's before_flush hook.
+    if (lease := db.info.get("background_lease")) is not None:
+        from anteroom.services.background_tasks import check_write_lease
+
+        check_write_lease(db, *lease)
+
+
+def _insert_sync_event(db: Session, key: dict[str, str], **values: Any) -> SaleSyncEvent | None:
+    _check_tracker_write_lease(db)
+    insert = postgres_insert if db.get_bind().dialect.name == "postgresql" else sqlite_insert
+    statement = insert(SaleSyncEvent).values(**key, **values).on_conflict_do_nothing(index_elements=list(key))
+    return db.scalars(statement.returning(SaleSyncEvent)).one_or_none()
+
+
 def record_sync_event(
     db: Session,
     *,
@@ -130,20 +153,15 @@ def record_sync_event(
 ) -> SaleSyncEvent:
     """Insert or update the per-marketplace sync outcome for a detected sale."""
     moment = _now()
-    row = (
-        db.query(SaleSyncEvent)
-        .filter_by(sale_id=sale_id, target_marketplace=target_marketplace, action=action)
-        .first()
-    )
+    key = _event_key(db, sale_id, target_marketplace, action)
+    lookup = db.query(SaleSyncEvent).filter_by(**key).with_for_update()
+    row = lookup.one_or_none()
     if row is None:
-        row = SaleSyncEvent(
-            id=new_id(),
-            sale_id=sale_id,
+        row = _insert_sync_event(
+            db, key,
             conversation_id=conversation_id,
             sku=sku,
             sold_marketplace=sold_marketplace,
-            target_marketplace=target_marketplace,
-            action=action,
             target_listing_id=target_listing_id,
             new_listing_id=new_listing_id,
             previous_quantity=previous_quantity,
@@ -156,28 +174,31 @@ def record_sync_event(
             created_at=moment,
             updated_at=moment,
         )
-        db.add(row)
-    else:
-        if conversation_id is not None:
-            row.conversation_id = conversation_id
-        if sku is not None:
-            row.sku = sku
-        if target_listing_id is not None:
-            row.target_listing_id = target_listing_id
-        if new_listing_id is not None:
-            row.new_listing_id = new_listing_id
-        if previous_quantity is not None:
-            row.previous_quantity = previous_quantity
-        if new_quantity is not None:
-            row.new_quantity = new_quantity
-        if native_job_id is not None:
-            row.native_job_id = native_job_id
-        row.status = status
-        if increment_attempts:
-            row.attempts = int(row.attempts or 0) + 1
-        row.error = error
-        row.next_retry_at = next_retry_at
-        row.updated_at = moment
+        if row is not None:
+            if commit:
+                db.commit()
+            return row
+        row = lookup.one()
+    if conversation_id is not None:
+        row.conversation_id = conversation_id
+    if sku is not None:
+        row.sku = sku
+    if target_listing_id is not None:
+        row.target_listing_id = target_listing_id
+    if new_listing_id is not None:
+        row.new_listing_id = new_listing_id
+    if previous_quantity is not None:
+        row.previous_quantity = previous_quantity
+    if new_quantity is not None:
+        row.new_quantity = new_quantity
+    if native_job_id is not None:
+        row.native_job_id = native_job_id
+    row.status = status
+    if increment_attempts:
+        row.attempts = int(row.attempts or 0) + 1
+    row.error = error
+    row.next_retry_at = next_retry_at
+    row.updated_at = _now()
     if commit:
         db.commit()
     return row
@@ -662,32 +683,49 @@ async def adjust_quantities_for_sale(
         # so an interrupted or in-flight write cannot be duplicated.
         def _prepare_dispatch(m=market, a=action, lid=listing_id, tq=target_qty):
             with factory() as db:
-                existing = (
-                    db.query(SaleSyncEvent)
-                    .filter_by(sale_id=sale_id, target_marketplace=m, action=a)
-                    .first()
-                )
-                if existing is not None:
-                    existing = _reconcile_pending_sync_event(db, existing)
-                    if existing.status in ("succeeded", "pending"):
-                        return {"dispatch": False, "event": _event_out(existing, order_status="paid")}
-                pending_row = record_sync_event(
-                    db,
-                    sale_id=sale_id,
-                    conversation_id=conv_id,
-                    sku=sku,
-                    sold_marketplace=sold_market,
-                    target_marketplace=m,
-                    action=a,
-                    target_listing_id=lid,
-                    previous_quantity=prev_qty,
-                    new_quantity=MERCARI_MAX_QUANTITY if a == "mercari_relist" else tq,
+                key = _event_key(db, sale_id, m, a)
+                lookup = db.query(SaleSyncEvent).filter_by(**key)
+                existing = lookup.one_or_none()
+                moment = _now()
+                pending = dict(
                     status="pending",
                     error="Sync dispatched; awaiting marketplace confirmation.",
                     next_retry_at=None,
-                    increment_attempts=True,
+                    native_job_id=None,
+                    conversation_id=conv_id,
+                    new_quantity=tq,
+                    updated_at=moment,
                 )
-                return {"dispatch": True, "event_id": pending_row.id}
+                if existing is None:
+                    inserted = _insert_sync_event(
+                        db, key, **pending, sold_marketplace=sold_market, sku=sku,
+                        target_listing_id=lid, previous_quantity=prev_qty, created_at=moment, attempts=1,
+                    )
+                    if inserted is not None:
+                        event_id = inserted.id
+                        db.commit()
+                        return {"dispatch": True, "event_id": event_id}
+                    existing = lookup.one()
+                else:
+                    existing = _reconcile_pending_sync_event(db, existing)
+                    if existing.status not in ("succeeded", "pending"):
+                        # Another process may already have claimed this retry.
+                        _check_tracker_write_lease(db)
+                        claimed_id = db.scalar(update(SaleSyncEvent).where(
+                            SaleSyncEvent.id == existing.id,
+                            SaleSyncEvent.status == existing.status,
+                            SaleSyncEvent.attempts == existing.attempts,
+                        ).values(
+                            **pending, attempts=existing.attempts + 1,
+                            sku=sku if sku is not None else existing.sku,
+                            target_listing_id=lid if lid is not None else existing.target_listing_id,
+                            previous_quantity=prev_qty if prev_qty is not None else existing.previous_quantity,
+                        ).returning(SaleSyncEvent.id))
+                        if claimed_id is not None:
+                            db.commit()
+                            return {"dispatch": True, "event_id": claimed_id}
+                        existing = lookup.populate_existing().one()
+                return {"dispatch": False, "event": _event_out(existing, order_status="paid")}
 
         prep = await asyncio.to_thread(_prepare_dispatch)
         if not prep["dispatch"]:
@@ -851,9 +889,10 @@ def record_delist_outcomes(
     """Persist per-marketplace auto-delist outcomes into the 60-day sale tracker."""
     conv = db.get(Conversation, conv_id)
     sku = resolve_sku(db, conv)
-    sales = db.query(MarketplaceSale).filter(MarketplaceSale.id.in_(sale_ids)).all()
+    # Acquire tracker row locks in the same order across concurrent batches.
+    sales = db.query(MarketplaceSale).filter(MarketplaceSale.id.in_(sale_ids)).order_by(MarketplaceSale.id).all()
     for sale in sales:
-        for market, listing_id in live_targets.items():
+        for market, listing_id in sorted(live_targets.items()):
             entry = result.get(market) or {}
             state = entry.get("state")
             if state == "deleted":

@@ -47,7 +47,8 @@ def test_access_token_reads_and_refreshes_the_saved_account_in_a_worker_thread(m
 def test_the_relay_device_is_read_in_a_worker_thread(monkeypatch):
     threads = []
 
-    def device():
+    def device(*, require_readable):
+        assert require_readable
         threads.append(threading.get_ident())
         return {"deviceId": "d", "token": "t"}
 
