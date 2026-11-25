@@ -361,45 +361,42 @@ def test_both_readings_in_one_batch_keep_each_others_fields(model, monkeypatch):
     assert notes["size"] == "M" and notes["measurements"]["top"] == {"pitToPit": "21"} and notes["sku"] == "A4-1"
 
 
-def test_readings_settled_side_by_side_keep_each_others_fields(monkeypatch):
+def test_readings_settled_side_by_side_keep_each_others_fields():
     import threading
-
-    from anteroom.repositories.queries import ConversationRepo
+    from time import monotonic
 
     client = TestClient(app)
     conv_id = _draft(client)
     _set_notes(conv_id, {"sku": "A4-1"})
-    # Without a lock both settlements read the notes before either writes.
+    # Each settlement waits for the other after reading, so both read before either writes,
+    # unless the database makes one wait for the other's lock (then the barrier gives up).
     barrier = threading.Barrier(2, timeout=1.5)
-    waited = threading.local()
-    real_get = ConversationRepo.get
-
-    def get(self, *args, **kwargs):
-        if not getattr(waited, "done", False):
-            waited.done = True
-            try:
-                barrier.wait()
-            except threading.BrokenBarrierError:
-                pass  # The other settlement holds the lock; it reads after this one writes.
-        return real_get(self, *args, **kwargs)
-
-    monkeypatch.setattr(ConversationRepo, "get", get)
     errors: list[BaseException] = []
 
-    def settle(fn, *args):
+    def settle(fold):
+        first = {"read": True}
+
+        def once(db, conv):
+            data = fold(db, conv)
+            if first.pop("read", False):
+                try:
+                    barrier.wait()
+                except threading.BrokenBarrierError:
+                    pass
+            return data
+
         try:
             with SessionLocal() as db:
-                fn(db, conv_id, *args, lambda: False)
-                db.commit()
+                mcp_reading_tools._settle(db, conv_id, once, monotonic() + 30)
         except BaseException as exc:  # noqa: BLE001 - reported by the assertion below
             errors.append(exc)
 
+    size = {"status": "accepted", "size": "M", "sizes": ["M"]}
+    measured = {"photos_read": 1, "measurements": {"pitToPit": {"status": "accepted", "value": 21.0}}}
     threads = [
+        threading.Thread(target=settle, args=(lambda db, conv: mcp_reading_tools._fold_size(db, conv, size, True),)),
         threading.Thread(target=settle, args=(
-            mcp_reading_tools._settle_size, {"status": "accepted", "size": "M", "sizes": ["M"]}, True)),
-        threading.Thread(target=settle, args=(
-            mcp_reading_tools._settle_measurements, "top",
-            {"photos_read": 1, "measurements": {"pitToPit": {"status": "accepted", "value": 21.0}}}, True)),
+            lambda db, conv: mcp_reading_tools._fold_measurements(db, conv, "top", measured, True),)),
     ]
     for thread in threads:
         thread.start()
@@ -408,24 +405,6 @@ def test_readings_settled_side_by_side_keep_each_others_fields(monkeypatch):
     assert errors == []
     notes = _notes(conv_id)
     assert notes["size"] == "M" and notes["measurements"]["top"] == {"pitToPit": "21"} and notes["sku"] == "A4-1"
-
-
-def test_a_settlement_past_the_deadline_saves_nothing(model):
-    client = TestClient(app)
-    conv_id = _draft(client)
-    _set_notes(conv_id, {"sku": "A4-1"})
-    checks = iter([False])  # Still in time when the settlement starts; past the deadline by its commit.
-
-    with SessionLocal() as db, pytest.raises(TimeoutError):
-        mcp_reading_tools._settle_size(
-            db, conv_id, {"status": "accepted", "size": "M", "sizes": ["M"]}, True, lambda: next(checks, True))
-    assert _notes(conv_id) == {"sku": "A4-1"}
-
-    with SessionLocal() as db, pytest.raises(TimeoutError):
-        mcp_reading_tools._settle_measurements(
-            db, conv_id, "top", {"photos_read": 1, "measurements": {"length": {"status": "accepted", "value": 27}}},
-            True, lambda: True)
-    assert _notes(conv_id) == {"sku": "A4-1"}
 
 
 # ---------------------------------------------------------------------------
@@ -461,3 +440,53 @@ def test_hosted_reads_the_sellers_own_photos_and_saves_to_their_item_details(  #
     # An MCP token never reaches Storage: photos are read on the server key, scoped to this seller.
     assert [method for method, _url, _auth in calls].count("GET") == 2
     assert all(auth is None for _method, _url, auth in calls)
+
+
+# ---------------------------------------------------------------------------
+# Saving into Item Details
+# ---------------------------------------------------------------------------
+
+
+def _settle_size_now(conv_id, reading, *, deadline=None, interfere=None):
+    """Run the save step for a size reading, optionally changing the notes once mid-save."""
+    from time import monotonic
+
+    calls = {"n": 0}
+
+    def fold(db, conv):
+        calls["n"] += 1
+        data, notes = mcp_reading_tools._fold_size(db, conv, reading, True)
+        if interfere is not None and calls["n"] == 1:
+            # Another save lands between this one's read and its write.
+            with SessionLocal() as other:
+                other.get(Conversation, conv_id).notes = json.dumps(interfere)
+                other.commit()
+        return data, notes
+
+    with SessionLocal() as db:
+        data = mcp_reading_tools._settle(db, conv_id, fold, deadline if deadline is not None else monotonic() + 60)
+    return data, calls["n"]
+
+
+@pytest.mark.sqlite_only("Postgres locks the row while saving, so no other save can land mid-way")
+def test_a_save_that_raced_another_is_folded_into_the_newer_notes():
+    client = TestClient(app)
+    conv_id = _draft(client, photos=0)
+    reading = {"photos_read": 1, "status": "accepted", "size": "M", "sizes": ["M"]}
+    measured = {"garment": "top", "measurements": {"top": {"pitToPit": "21"}}}
+
+    data, attempts = _settle_size_now(conv_id, reading, interfere=measured)
+    assert attempts == 2 and data["saved"] is True
+    # Neither the measurement saved meanwhile nor this size was lost.
+    assert _notes(conv_id) == {**measured, "size": "M"}
+
+
+def test_nothing_is_saved_once_the_call_has_given_up():
+    from time import monotonic
+
+    client = TestClient(app)
+    conv_id = _draft(client, photos=0)
+    reading = {"photos_read": 1, "status": "accepted", "size": "M", "sizes": ["M"]}
+    with pytest.raises(TimeoutError):
+        _settle_size_now(conv_id, reading, deadline=monotonic() - 1)
+    assert not _notes(conv_id).get("size")

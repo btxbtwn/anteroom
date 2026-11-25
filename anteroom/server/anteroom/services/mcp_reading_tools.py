@@ -25,7 +25,7 @@ from time import monotonic
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import event, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from anteroom.models.conversation import Conversation
@@ -238,7 +238,7 @@ async def finish_reads(reads: list[tuple[dict[str, Any], dict[str, Any]]], *, de
                 # The hosted app's per-seller budget for new model work, as the buttons have.
                 limit_seller_submissions(request)
             async with asyncio.timeout(remaining):
-                data = await _read_and_save(spec, remaining, lambda: monotonic() >= deadline)
+                data = await _read_and_save(spec, remaining, deadline)
             result["content"] = [{"type": "text", "text": json.dumps(data, indent=2, default=str)}]
             result["isError"] = False
         except Exception as exc:  # noqa: BLE001 - each reading reports its own failure
@@ -266,7 +266,7 @@ def _failure(spec: dict[str, Any], exc: Exception) -> str:
     return f"{who} could not read the {what} in these photos. Nothing was saved."
 
 
-async def _read_and_save(spec: dict[str, Any], remaining: float, expired: Callable[[], bool]) -> dict[str, Any]:
+async def _read_and_save(spec: dict[str, Any], remaining: float, deadline: float) -> dict[str, Any]:
     from anteroom.database import in_worker_session
     from anteroom.services import measure_read, size_tag_read
 
@@ -276,40 +276,57 @@ async def _read_and_save(spec: dict[str, Any], remaining: float, expired: Callab
             reading = await size_tag_read.read_size_tag(spec["provider"], paths)
         else:
             reading = await measure_read.read_measurements(spec["provider"], paths, spec["garment"])
-    conv_id = spec["conversation_id"]
+    conv_id, save = spec["conversation_id"], spec["save"]
     if spec["kind"] == "size_tag":
-        return await in_worker_session(_settle_size, conv_id, reading, spec["save"], expired)
-    return await in_worker_session(
-        _settle_measurements, conv_id, spec["garment"], reading, spec["save"], expired)
+        def fold(db: Session, conv: Conversation) -> tuple[dict[str, Any], str | None]:
+            return _fold_size(db, conv, reading, save)
+    else:
+        def fold(db: Session, conv: Conversation) -> tuple[dict[str, Any], str | None]:
+            return _fold_measurements(db, conv, spec["garment"], reading, save)
+    return await in_worker_session(_settle, conv_id, fold, deadline)
 
 
-def _lock_listing(db: Session, conv_id: str, expired: Callable[[], bool]) -> Conversation:
-    """The listing, locked until this session ends, in a session that will not commit late.
+SAVE_ATTEMPTS = 5
 
-    The lock makes the blank-field check and the notes merge one step, so a size
-    and a measurement reading of one listing (``finish_reads`` runs them side by
-    side) or a seller's edit cannot overwrite each other's notes. Cancelling the
-    awaiting coroutine at the deadline does not stop this worker thread, so the
-    commit itself refuses once the call's deadline has passed and the agent was
-    told nothing was saved.
+
+def _settle(
+    db: Session, conv_id: str, fold: Callable[[Session, Conversation], tuple[dict[str, Any], str | None]],
+    deadline: float,
+) -> dict[str, Any]:
+    """Fold a reading into Item Details as they are now, and save it only if they have not changed since.
+
+    The row is locked where the database can (Postgres). On the Mac's SQLite the
+    lock does nothing, so the notes are written only where they still match what
+    was read, and read again otherwise: a size and a measurement reading of one
+    listing, or a seller's edit, never overwrite each other. Nothing is committed
+    once the call's deadline has passed, since the call has already answered
+    that nothing was saved.
     """
-    def refuse_late_commit(*_args: Any) -> None:
-        if expired():
+    for _attempt in range(SAVE_ATTEMPTS):
+        conv = db.get(Conversation, conv_id, populate_existing=True, with_for_update=True)
+        if conv is None:
+            raise ReadingToolError("Listing not found.")
+        before = conv.notes
+        data, notes = fold(db, conv)
+        if notes is None or notes == before:
+            db.rollback()
+            return data
+        same = Conversation.notes.is_(None) if before is None else Conversation.notes == before
+        try:
+            written = db.query(Conversation).filter(Conversation.id == conv_id, same).update(
+                {"notes": notes}, synchronize_session=False)
+        except OperationalError:
+            # SQLite refuses a write from a read that another save has since overtaken: read again.
+            db.rollback()
+            continue
+        if monotonic() >= deadline:
+            db.rollback()
             raise TimeoutError
-
-    event.listen(db, "before_commit", refuse_late_commit)
-    # A commit flushes after before_commit, and a flush can wait on a locked database.
-    event.listen(db, "after_flush", refuse_late_commit)
-    refuse_late_commit()
-    if db.get_bind().dialect.name == "sqlite":
-        # SQLite ignores FOR UPDATE and pysqlite begins no transaction for a SELECT:
-        # take the write lock before the first read so the notes merge is not stale.
-        db.connection().exec_driver_sql("BEGIN IMMEDIATE")
-    db.scalar(select(Conversation.id).where(Conversation.id == conv_id).with_for_update())
-    conv = ConversationRepo(db).get(conv_id)
-    if conv is None:
-        raise ReadingToolError("Listing not found.")
-    return conv
+        if written == 1:
+            db.commit()
+            return data
+        db.rollback()
+    raise ReadingToolError("Item Details kept changing while this was saving, so nothing was saved. Try again.")
 
 
 def _download(keys: list[str], folder: Path, remaining: float) -> list[Path]:
@@ -333,26 +350,26 @@ def _same_size(a: str, b: str) -> bool:
     return key(a) == key(b)
 
 
-def _set_size(db: Session, conv_id: str) -> str:
+def _set_size(db: Session, conv: Conversation) -> str:
     """The size the seller already set: Item Details Size, or a Size they set on the listing."""
-    conv = ConversationRepo(db).get(conv_id)
-    notes = parse_notes(conv.notes if conv else None)
+    notes = parse_notes(conv.notes)
     typed = str(notes.get("size") if notes.get("size") is not None else "").strip()
     if typed:
         return typed
-    listing = _current_listing(db, conv_id)
+    listing = _current_listing(db, conv.id)
     if is_locked(listing, "size") and str(listing.get("size") or "").strip():
         return str(listing.get("size")).strip()
     return ""
 
 
-def _settle_size(
-    db: Session, conv_id: str, reading: dict[str, Any], save: bool, expired: Callable[[], bool],
-) -> dict[str, Any]:
-    """Fold a size-tag reading into Item Details as the button's Fill does (``sizeTagReading.ts``)."""
-    repo = ConversationRepo(db)
-    conv = _lock_listing(db, conv_id, expired)
-    typed = _set_size(db, conv_id)
+def _fold_size(
+    db: Session, conv: Conversation, reading: dict[str, Any], save: bool,
+) -> tuple[dict[str, Any], str | None]:
+    """A size-tag reading folded into Item Details as the button's Fill does (``sizeTagReading.ts``),
+    with the notes to save (None when nothing changes)."""
+    conv_id = conv.id
+    typed = _set_size(db, conv)
+    notes: str | None = None
     status, sizes = reading.get("status"), list(reading.get("sizes") or [])
     size = str(reading.get("size") or "").strip()
     accepted = status == "accepted" and size != ""
@@ -361,7 +378,7 @@ def _settle_size(
         note = ("Size matches the tag." if _same_size(typed, size) else
                 f"The tag reads {size}. Item Details Size is {typed}; it was kept. Check it.")
     elif accepted and save:
-        repo.write_notes(conv_id, merge_note_changes(conv.notes, {"size": size}))
+        notes = merge_note_changes(conv.notes, {"size": size})
         saved = True
         note = "Size saved to Item Details from the tag."
     elif accepted:
@@ -382,17 +399,17 @@ def _settle_size(
         "item_details_size": size if saved else (typed or None),
         "note": note,
         "pushed_to_marketplaces": False,
-    }
+    }, notes
 
 
-def _settle_measurements(
-    db: Session, conv_id: str, garment: str, reading: dict[str, Any], save: bool, expired: Callable[[], bool],
-) -> dict[str, Any]:
-    """Fold a yardstick reading into Item Details as the button's Fill does (``measurementReading.ts``)."""
-    repo = ConversationRepo(db)
-    conv = _lock_listing(db, conv_id, expired)
-    notes = parse_notes(conv.notes)
-    typed = stored_measurements(notes)[garment]
+def _fold_measurements(
+    db: Session, conv: Conversation, garment: str, reading: dict[str, Any], save: bool,
+) -> tuple[dict[str, Any], str | None]:
+    """A yardstick reading folded into Item Details as the button's Fill does (``measurementReading.ts``),
+    with the notes to save (None when nothing changes)."""
+    conv_id = conv.id
+    typed = stored_measurements(parse_notes(conv.notes))[garment]
+    notes: str | None = None
     readings = reading.get("measurements") or {}
     fills: dict[str, str] = {}
     by_hand: list[str] = []
@@ -411,7 +428,7 @@ def _settle_measurements(
             conv.notes, _current_listing(db, conv_id),
         )
         changes["garment"] = garment
-        repo.write_notes(conv_id, merge_note_changes(conv.notes, changes))
+        notes = merge_note_changes(conv.notes, changes)
         saved = {path.rsplit(".", 1)[1]: value for path, value in applied.items() if value}
     if not reading.get("photos_read"):
         note = "No yardstick photo found. Nothing was saved."
@@ -436,4 +453,4 @@ def _settle_measurements(
         "measure_by_hand": by_hand if reading.get("photos_read") else [label for _key, label in _FIELDS[garment]],
         "note": note,
         "pushed_to_marketplaces": False,
-    }
+    }, notes
