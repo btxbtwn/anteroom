@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1270 — 2026-11-25
+
+- An Auto-Relist that stops before the old listing is deleted now records the try as failed and puts back the price it lowered, so the listing is relisted again on a later pass instead of being skipped for good.
+
 ## 0.1.1269 — 2026-11-25
 
 - Check remaining stock for new eBay and Etsy sales on the web and apply your post-sale automation settings.
