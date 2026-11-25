@@ -6,6 +6,18 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1248 — 2026-11-25
+
+- Saving or listing on Depop, Mercari or Poshmark from the web no longer hangs on "Waiting for Chrome to confirm" when the action is started in the background: it now reaches Chrome instead of being turned away before it starts.
+
+## 0.1.1247 — 2026-11-25
+
+- Depop Auto-Relist checks the replacement’s package size before taking down the old listing and waits for a busy publish slot to clear.
+
+## 0.1.1246 — 2026-11-25
+
+- Kids letter sizes no longer stay stuck on Depop Other when Depop uses ages instead (Youth L becomes 14 years).
+
 ## 0.1.1245 — 2026-11-25
 
 - Inventory no longer shows Sellwild as a marketplace logo or filter. Anteroom cannot list or delist there; that history stays in the import only.

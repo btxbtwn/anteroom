@@ -497,11 +497,15 @@ def depop_kids_size(size: Any) -> str:
 
     ``XL (18/20)`` and ``18/20`` are 16 years, ``M`` is 10 years, ``4T`` is
     4 years, ``12M`` is 12-18 months. A number on the tag wins over its letter.
+    ``Youth L`` and bilingual youth tags keep the letter after the youth words.
     """
     text = text_value(size)
     folded = text.casefold()
     if folded in {"os", "one size", "onesize"}:
         return "One size"
+    # Tag copy like "L / G / G YOUTH ENFANT NIÑOS" still carries the letter.
+    folded = re.sub(r"\b(?:youth|enfant|ni[nñ]os?|niñas?)\b", " ", folded)
+    folded = re.sub(r"\s+", " ", folded).strip()
     months = re.fullmatch(r"(\d{1,2})\s*(?:-\s*\d{1,2}\s*)?(?:m|mo|mos|months?)", folded)
     if months:
         start = int(months.group(1))
@@ -513,7 +517,14 @@ def depop_kids_size(size: Any) -> str:
         age = min(numbers)
         return _kids_age_label(age) if age >= 2 else text
     letter = _KIDS_LETTER_AGES.get(re.sub(r"[\s.]+", "", folded))
-    return _kids_age_label(letter) if letter else text
+    if letter:
+        return _kids_age_label(letter)
+    # A youth tag that also names the letter among other words (L / G / G YOUTH).
+    for token in re.findall(r"[a-z0-9]+", folded):
+        age = _KIDS_LETTER_AGES.get(token)
+        if age:
+            return _kids_age_label(age)
+    return text
 
 
 def depop_size_for(size: Any, listing: dict) -> str:
@@ -536,6 +547,65 @@ def depop_size_for(size: Any, listing: dict) -> str:
     if size_type in {"petite", "petites"} and petite:
         text = petite.group(1).upper()
     return size_label(depop_category_id(listing), text)
+
+
+def listed_depop_size(size: Any, listing: dict) -> str | None:
+    """The tag as a size this Depop category lists, or None when Depop has no match.
+
+    Prefers the mapped form (kids ages, petite letters) and never returns Other.
+    """
+    from anteroom.models.sizes import size_choice
+    from anteroom.services.depop_form import size_options
+
+    options = size_options(depop_category_id(listing))
+    if not options:
+        return None
+    mapped = text_value(depop_size_for(size, listing))
+    tag = text_value(size)
+    for candidate in (mapped, tag):
+        if not candidate or candidate.casefold() == "other":
+            continue
+        found = size_choice(candidate, options)
+        if found and found.casefold() != "other":
+            return found
+    return None
+
+
+def replace_depop_other_size(listing: dict) -> bool:
+    """Replace Depop Other with the tag's matching size when Depop offers one.
+
+    Other is never kept over a known tag. Kids letters become ages (Youth L is
+    14 years). Only a size Depop lists is written; unlisted tags leave Other and
+    its lock alone. Clears a stale native size id from the old Other choice.
+    """
+    if not isinstance(listing, dict):
+        return False
+    depop = listing.get("depop_specifics")
+    if not isinstance(depop, dict):
+        return False
+    if text_value(depop.get("size")).casefold() != "other":
+        return False
+    tag = text_value(listing.get("size"))
+    if not tag or tag.casefold() in {"other", "one size", "os"}:
+        return False
+    if not depop_offers_sizes(listing):
+        return False
+    mapped = listed_depop_size(tag, listing)
+    if not mapped:
+        return False
+    updated = {**depop, "size": mapped}
+    updated.pop("nativeSizeId", None)
+    listing["depop_specifics"] = updated
+    from anteroom.services.seller_overrides import _write_locks, fold_key, locked_paths
+
+    locks = locked_paths(listing)
+    drop = {
+        path for path in locks
+        if path.startswith("depop_specifics.") and fold_key(path.rsplit(".", 1)[-1]) == "size"
+    }
+    if drop:
+        _write_locks(listing, locks - drop)
+    return True
 
 
 def depop_offers_sizes(listing: dict) -> bool:

@@ -448,7 +448,9 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         )
         self.db.commit()
 
-        async def delete(market, _command, **_kwargs):
+        async def delete(market, command, **_kwargs):
+            if command["type"] == "marketplace.form":
+                return {"ok": True, "relist_shipping_checked": True}
             if market == "mercari":
                 return {"ok": False, "error_code": "challenge", "error": "Mercari asked for a browser check."}
             return {"ok": True, "state": "deleted"}
@@ -463,8 +465,10 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         ):
             outcomes = asyncio.run(auto_relist.run_auto_relist(now=now))
 
-        self.assertEqual([call.args[0] for call in execute.await_args_list], ["mercari", "depop"])
-        self.assertEqual(execute.await_args_list[1].args[1]["payload"]["action"], "relist")
+        self.assertEqual([(call.args[0], call.args[1]["type"]) for call in execute.await_args_list], [
+            ("mercari", "marketplace.delete"), ("depop", "marketplace.form"), ("depop", "marketplace.delete"),
+        ])
+        self.assertEqual(execute.await_args_list[-1].args[1]["payload"]["action"], "relist")
         self.assertEqual([row["status"] for row in outcomes], ["failed", "completed"])
         self.assertEqual(publish.await_count, 1)
         self.assertEqual(publish.await_args.args[:2], (ids["seller-fleece"][0], "depop"))
@@ -477,6 +481,120 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
             self.assertEqual(auto_relist.price_for(prices.listing_json, "mercari"), 58.0)
             if old_id == "m123456790":
                 self.assertEqual(current.current_revision_id, revision_id)
+
+    def test_depop_relist_refuses_unavailable_shipping_before_delisting(self):
+        now = _now()
+        conv, _, original = self._create_draft("Jeans", price=12, depop_specifics={"parcelSize": "Extra extra small"})
+        original_id = original.id
+        old_id = "seller-jeans"
+        self.db.add_all([
+            MarketplaceListing(
+                id=new_id(), conversation_id=conv.id, marketplace="depop", state="published",
+                listing_id=old_id, listing_url=f"https://www.depop.com/products/{old_id}/",
+                listed_price=12, listed_at=now - timedelta(days=45),
+            ),
+            MarketplaceRelistRule(id=new_id(), marketplace="depop", enabled=True,
+                                  price_adjust_mode="percent", price_adjust_value=10),
+        ])
+        self.db.commit()
+        reason = "Depop needs a package size it offers for this item (it does not offer Extra extra small)."
+        with (
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+            patch("anteroom.services.cloud_marketplace.execute", AsyncMock(return_value={
+                "ok": False, "error_code": "missing_fields", "error": reason,
+            })) as execute,
+            patch("anteroom.services.marketplace_delist.delist", AsyncMock(return_value={
+                "depop": {"state": "deleted"},
+            })) as delete,
+            patch("anteroom.services.native_marketplaces.list_now", AsyncMock(return_value={
+                "state": "published", "listing_id": "seller-new-jeans",
+            })) as publish,
+        ):
+            outcomes = asyncio.run(auto_relist.run_auto_relist(now=now, marketplace="depop"))
+
+        execute.assert_awaited_once()
+        command = execute.await_args.args[1]
+        self.assertEqual(command["type"], "marketplace.form")
+        self.assertTrue(command["payload"]["check_relist_shipping"])
+        self.assertEqual(command["payload"]["listing"]["price"], 10.80)
+        self.assertEqual(command["payload"]["listing"]["depop_specifics"]["parcelSize"], "Extra extra small")
+        delete.assert_not_awaited()
+        publish.assert_not_awaited()
+        self.assertEqual([(row["status"], row["reason"]) for row in outcomes], [("failed", reason)])
+        self.db.expire_all()
+        listing = self.db.query(Listing).filter_by(conversation_id=conv.id).one()
+        self.assertEqual(listing.current_revision_id, original_id)
+        live = self.db.query(MarketplaceListing).filter_by(conversation_id=conv.id, marketplace="depop").one()
+        self.assertEqual((live.state, live.listing_id, live.listed_price), ("published", old_id, 12))
+
+    def test_depop_relist_skips_shipping_if_another_run_fills_the_daily_cap(self):
+        now = _now()
+        conv, _, _ = self._create_draft("Shirt", price=13)
+        self.db.add_all([
+            MarketplaceListing(
+                id=new_id(), conversation_id=conv.id, marketplace="depop", state="published",
+                listing_id="seller-shirt", listing_url="https://www.depop.com/products/seller-shirt/",
+                listed_price=13, listed_at=now - timedelta(days=45),
+            ),
+            MarketplaceRelistRule(id=new_id(), marketplace="depop", enabled=True, daily_cap=1),
+        ])
+        self.db.commit()
+        load = auto_relist._load_enabled_rules_and_candidates
+
+        def load_before_concurrent_relist(db, *args, **kwargs):
+            plan = load(db, *args, **kwargs)
+            self.assertEqual(len(plan), 1)
+            db.add(MarketplaceRelistLog(
+                id=new_id(), conversation_id=conv.id, marketplace="depop",
+                old_listing_id="seller-previous-shirt", new_listing_id="seller-shirt",
+                status="completed", created_at=now,
+            ))
+            db.commit()
+            return plan
+
+        with (
+            patch.object(auto_relist, "_load_enabled_rules_and_candidates", side_effect=load_before_concurrent_relist),
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+            patch("anteroom.services.cloud_marketplace.execute", AsyncMock(return_value={
+                "ok": True, "relist_shipping_checked": True,
+            })) as execute,
+        ):
+            outcomes = asyncio.run(auto_relist.run_auto_relist(now=now, marketplace="depop"))
+
+        self.assertEqual(outcomes, [])
+        execute.assert_not_awaited()
+
+    def test_depop_relist_waits_after_a_busy_publish_start(self):
+        from anteroom.services import automation_actions, native_marketplaces
+
+        now = _now()
+        conv, _, _ = self._create_draft("Shirt", price=13)
+        self.db.add_all([
+            MarketplaceListing(
+                id=new_id(), conversation_id=conv.id, marketplace="depop", state="published",
+                listing_id="seller-shirt", listing_url="https://www.depop.com/products/seller-shirt/",
+                listed_price=13, listed_at=now - timedelta(days=45),
+            ),
+            MarketplaceRelistRule(id=new_id(), marketplace="depop", enabled=True,
+                                  price_adjust_mode="percent", price_adjust_value=10),
+        ])
+        self.db.commit()
+        delete = AsyncMock(return_value={"ok": True})
+        busy = native_marketplaces.NativeMarketplaceError(409, "Another Depop action is running.",
+                                                          reason=native_marketplaces.BUSY)
+        with (
+            patch.object(automation_actions, "_wait_until_free", AsyncMock(return_value=True)) as wait,
+            patch.object(native_marketplaces, "list_now", AsyncMock(side_effect=[
+                busy, {"state": "published", "listing_id": "seller-new-shirt"},
+            ])) as publish,
+        ):
+            outcomes = asyncio.run(auto_relist.run_auto_relist(now=now, marketplace="depop", delister=delete))
+
+        delete.assert_awaited_once()
+        self.assertEqual(publish.await_count, 2)
+        self.assertEqual(wait.await_count, 2)
+        self.assertEqual(outcomes[0]["status"], "completed")
+        self.assertEqual(outcomes[0]["new_listing_id"], "seller-new-shirt")
 
     def test_relist_stops_deleting_after_a_replacement_job_fails(self):
         from types import SimpleNamespace
@@ -511,16 +629,17 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         with (
             patch("anteroom.services.cloud_sessions.has_active_session", return_value=False),
             patch("anteroom.services.extension_connection.current_extension", return_value=SimpleNamespace(connected=True)),
-            patch("anteroom.services.browser_bridge.request", AsyncMock(return_value={
-                "ok": True, "state": "deleted",
-            })) as bridge,
+            patch("anteroom.services.browser_bridge.request", AsyncMock(side_effect=[
+                {"ok": True, "relist_shipping_checked": True},
+                {"ok": True, "state": "deleted"},
+            ])) as bridge,
             patch("anteroom.services.native_marketplaces.list_now", side_effect=publish) as list_now,
         ):
             outcomes = asyncio.run(auto_relist.run_auto_relist(now=now))
 
         self.assertEqual([row["status"] for row in outcomes], ["down_needs_relist"])
         self.assertEqual(outcomes[0]["reason"], "Depop asked to sign in again.")
-        bridge.assert_awaited_once()
+        self.assertEqual([call.args[1] for call in bridge.await_args_list], ["marketplace.form", "marketplace.delete"])
         self.assertEqual(bridge.await_args.args[1:3], ("marketplace.delete", {
             "marketplace": "depop", "listing_id": "seller-fleece", "confirm": True, "action": "relist",
         }))

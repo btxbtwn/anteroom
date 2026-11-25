@@ -833,8 +833,12 @@ def validate_listing(
         tag_size = text_value(payload.get("size"))
         if (text_value(depop.get("size")).casefold() == "other" and tag_size
                 and tag_size.casefold() not in {"other", "one size", "os"} and depop_offers_sizes(payload)):
+            from anteroom.services.depop_fields import listed_depop_size
+
+            mapped = listed_depop_size(tag_size, payload)
+            hint = f"Choose {mapped}." if mapped else "Choose the Depop size that matches it."
             add_issue(result, "depop_specifics.size",
-                      f'Depop size "Other" hides the tag size {tag_size}. Choose the Depop size that matches it.')
+                      f'Depop size "Other" hides the tag size {tag_size}. {hint}')
         grouping = text_value(depop.get("sizeGrouping") or depop.get("size_grouping"))
         size_type = text_value(payload.get("sizeType"))
         if grouping:

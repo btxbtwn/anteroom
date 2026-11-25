@@ -88,6 +88,9 @@ test('a relayed Depop choice refresh reads the catalog and parcels without loadi
   assert.equal(protocol.command(command), command);
   assert.equal(protocol.command({ ...command, payload: { ...command.payload, confirm: true } }), null);
   assert.equal(protocol.command({ ...command, payload: { ...command.payload, marketplace: 'mercari' } }), null);
+  const shipping = { ...command, payload: { ...command.payload, check_relist_shipping: true } };
+  assert.equal(protocol.command(shipping), shipping);
+  assert.equal(protocol.command({ ...shipping, payload: { ...shipping.payload, marketplace: 'poshmark' } }), null);
   c.depopAttributes = async (_deadline, refresh) => {
     assert.equal(refresh, true);
     return {};

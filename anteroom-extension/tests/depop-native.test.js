@@ -136,6 +136,39 @@ test('Depop posts the parcel id the sell page uses for that title', async () => 
   assert.equal(suggested.shipping_methods[0].parcel_size, 'under_1lb');
 });
 
+test('Depop relist checks replacement shipping with the same quote as publish', async () => {
+  const { c } = newDraft();
+  withCatalog(c, { providers: [200, [{ id: 'USPS', parcel_sizes: [
+    { id: 'under_4oz', title: 'Extra-extra small' },
+    { id: 'under_1lb', title: 'Medium', suggested: true },
+  ] }]] });
+  const original = c.fetch;
+  c.fetch = async (url, options = {}) => {
+    assert.equal(options.method, 'GET');
+    if (String(url).includes('/shipping/providers/depop/')) {
+      const params = new URL(url).searchParams;
+      assert.equal(params.get('item_cost'), '10.80');
+      assert.equal(params.get('product_type'), 'tshirts');
+    }
+    return original(url, options);
+  };
+  const check = async parcelSize => {
+    const listing = { ...FULL, price: 10.8, depop_specifics: { parcelSize } };
+    const result = await new Promise(resolve => c.handleNativeMarketplaceForm({ payload: {
+      marketplace: 'depop', listing, check_relist_shipping: true,
+    } }, resolve));
+    return { listing, result };
+  };
+  const equivalent = await check('Extra extra small');
+  assert.equal(equivalent.result.relist_shipping_checked, true);
+  assert.equal(equivalent.result.ok, true);
+  const fields = await c.depopResolvedFields({ listing: equivalent.listing, deadline: Date.now() + 30000 });
+  assert.equal(fields.shipping_methods[0].parcel_size, 'under_4oz');
+  const unavailable = await check('Large');
+  assert.equal(unavailable.result.ok, false);
+  assert.match(unavailable.result.error, /does not offer Large/);
+});
+
 test('Depop worldwide shipping accepts free or paid shipping and verifies clearing', async () => {
   const { c } = newDraft();
   withCatalog(c);
