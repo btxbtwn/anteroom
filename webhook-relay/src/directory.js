@@ -46,6 +46,7 @@ export class Directory extends DurableObject {
         claim_hash TEXT,
         created_at INTEGER NOT NULL
       );
+      CREATE INDEX IF NOT EXISTS sign_ins_by_creation ON sign_ins (created_at);
     `);
     const accountColumns = this.sql.exec("PRAGMA table_info(accounts)").toArray();
     if (!accountColumns.some((col) => col.name === "etsy_user_id")) {
@@ -99,22 +100,23 @@ export class Directory extends DurableObject {
     );
   }
 
-  unlink(marketplace, accountId, deviceId = null) {
+  unlink(marketplace, accountId, deviceId = null, linkedBefore = null) {
     const id = String(accountId);
     this.ctx.storage.transactionSync(() => {
       const rows = deviceId
         ? this.sql
             .exec(
-              "SELECT device_id, etsy_user_id FROM accounts WHERE marketplace = ? AND account_id = ? AND device_id = ?",
+              "SELECT device_id, etsy_user_id, linked_at FROM accounts WHERE marketplace = ? AND account_id = ? AND device_id = ?",
               marketplace,
               id,
               deviceId,
             )
             .toArray()
         : this.sql
-            .exec("SELECT device_id, etsy_user_id FROM accounts WHERE marketplace = ? AND account_id = ?", marketplace, id)
+            .exec("SELECT device_id, etsy_user_id, linked_at FROM accounts WHERE marketplace = ? AND account_id = ?", marketplace, id)
             .toArray();
       if (rows.length === 0) return;
+      if (linkedBefore !== null && rows[0].linked_at >= linkedBefore) return;
 
       const ownerDeviceId = rows[0].device_id;
       const etsyUserId = rows[0].etsy_user_id;

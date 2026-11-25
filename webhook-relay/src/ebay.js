@@ -46,9 +46,8 @@ export const EBAY_FEATURE_SCOPES = {
 };
 
 const KEY_TTL_MS = 60 * 60 * 1000;
-// A key eBay does not know stays unknown for a while; other failures are retried sooner.
+// A key eBay does not know stays unknown for a while.
 const UNKNOWN_KEY_TTL_MS = 10 * 60 * 1000;
-const FAILED_KEY_TTL_MS = 30 * 1000;
 const MAX_CACHED_KEYS = 500;
 // eBay's key IDs are UUIDs (see eBay's event-notification SDK fixtures).
 const KEY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -67,11 +66,12 @@ function basicAuth(env) {
   return `Basic ${btoa(`${env.EBAY_CLIENT_ID}:${env.EBAY_CLIENT_SECRET}`)}`;
 }
 
-async function tokenRequest(env, params) {
+async function tokenRequest(env, params, signal) {
   const response = await fetchWithDeadline("eBay token request", `${hosts(env).api}/identity/v1/oauth2/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", authorization: basicAuth(env) },
     body: new URLSearchParams(params).toString(),
+    signal,
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -83,9 +83,9 @@ async function tokenRequest(env, params) {
   return body;
 }
 
-export async function ebayAppToken(env) {
+export async function ebayAppToken(env, signal) {
   if (appToken && appToken.expiresAt > Date.now() + 60_000) return appToken.value;
-  const body = await tokenRequest(env, { grant_type: "client_credentials", scope: APP_SCOPE });
+  const body = await tokenRequest(env, { grant_type: "client_credentials", scope: APP_SCOPE }, signal);
   appToken = { value: body.access_token, expiresAt: Date.now() + body.expires_in * 1000 };
   return appToken.value;
 }
@@ -150,8 +150,7 @@ function rememberKey(kid, entry) {
   publicKeys.set(kid, entry);
 }
 
-// /ebay is public, so a cache miss is rate-limited per caller (`limitKey`)
-// and a failed lookup is remembered, not retried on every request.
+// /ebay is public, so a cache miss is rate-limited per caller (`limitKey`).
 export async function ebayPublicKey(env, kid, limitKey = "unknown") {
   if (!isEbayKeyId(kid)) throw Object.assign(new Error("eBay key ID is not a UUID"), { status: 412 });
   const cached = publicKeys.get(kid);
@@ -161,27 +160,26 @@ export async function ebayPublicKey(env, kid, limitKey = "unknown") {
   }
   if (env.EBAY_KEY_LIMITER) {
     const { success } = await env.EBAY_KEY_LIMITER.limit({ key: limitKey });
-    if (!success) throw Object.assign(new Error("too many eBay key lookups"), { status: 429 });
+    if (!success) throw Object.assign(new Error("too many eBay key lookups"), { rateLimited: true });
   }
-  try {
-    const token = await ebayAppToken(env);
-    const response = await fetchWithDeadline(
-      "eBay public key request",
-      `${hosts(env).api}/commerce/notification/v1/public_key/${kid}`,
-      { headers: { authorization: `Bearer ${token}` } },
-    );
-    if (!response.ok) {
-      throw Object.assign(new Error(`eBay public key request failed: ${response.status}`), { keyStatus: response.status });
+  const token = await ebayAppToken(env);
+  const response = await fetchWithDeadline(
+    "eBay public key request",
+    `${hosts(env).api}/commerce/notification/v1/public_key/${kid}`,
+    { headers: { authorization: `Bearer ${token}` } },
+  );
+  if (!response.ok) {
+    const error = new Error(`eBay public key request failed: ${response.status}`);
+    if (response.status === 401 && appToken?.value === token) appToken = null;
+    if (response.status === 404) {
+      rememberKey(kid, { error: error.message, expiresAt: Date.now() + UNKNOWN_KEY_TTL_MS });
     }
-    const body = await response.json();
-    if (typeof body?.key !== "string") throw new Error("eBay public key response had no key");
-    rememberKey(kid, { pem: body.key, expiresAt: Date.now() + KEY_TTL_MS });
-    return body.key;
-  } catch (error) {
-    const unknown = error.keyStatus >= 400 && error.keyStatus < 500;
-    rememberKey(kid, { error: error.message, expiresAt: Date.now() + (unknown ? UNKNOWN_KEY_TTL_MS : FAILED_KEY_TTL_MS) });
-    throw new Error(error.message);
+    throw error;
   }
+  const body = await response.json();
+  if (typeof body?.key !== "string") throw new Error("eBay public key response had no key");
+  rememberKey(kid, { pem: body.key, expiresAt: Date.now() + KEY_TTL_MS });
+  return body.key;
 }
 
 export function ebayAuthorizeUrl(env, state, features = []) {
@@ -231,13 +229,14 @@ async function notificationApi(env, token, path, init = {}) {
 }
 
 // One destination per app: this relay's /ebay endpoint.
-export async function ensureEbayDestination(env, endpoint) {
-  const token = await ebayAppToken(env);
-  const { body } = await notificationApi(env, token, "/destination?limit=100");
+export async function ensureEbayDestination(env, endpoint, signal) {
+  const token = await ebayAppToken(env, signal);
+  const { body } = await notificationApi(env, token, "/destination?limit=100", { signal });
   const existing = (body.destinations ?? []).find((d) => d.deliveryConfig?.endpoint === endpoint);
   if (existing) return existing.destinationId;
   const created = await notificationApi(env, token, "/destination", {
     method: "POST",
+    signal,
     body: JSON.stringify({
       name: "Anteroom relay",
       status: "ENABLED",
@@ -249,14 +248,15 @@ export async function ensureEbayDestination(env, endpoint) {
 
 // Sale topics are per seller, so each subscription is made with that
 // seller's own token. Existing ones are left as they are.
-export async function ensureEbaySubscriptions(env, userToken, destinationId) {
-  const { body } = await notificationApi(env, userToken, "/subscription?limit=100");
+export async function ensureEbaySubscriptions(env, userToken, destinationId, signal) {
+  const { body } = await notificationApi(env, userToken, "/subscription?limit=100", { signal });
   const have = new Set((body.subscriptions ?? []).map((s) => s.topicId));
   const created = [];
   for (const topicId of EBAY_SALE_TOPICS) {
     if (have.has(topicId)) continue;
     await notificationApi(env, userToken, "/subscription", {
       method: "POST",
+      signal,
       body: JSON.stringify({
         topicId,
         status: "ENABLED",

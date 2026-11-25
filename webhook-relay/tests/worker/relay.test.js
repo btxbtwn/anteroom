@@ -1,13 +1,23 @@
 import { env, exports } from "cloudflare:workers";
+import { createExecutionContext, runDurableObjectAlarm, runInDurableObject, waitOnExecutionContext } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import worker from "../../src/index.js";
 import { bytesToBase64, pkceChallenge } from "../../src/verify.js";
 
 const ORIGIN = "https://relay.test";
 const ETSY_SECRET = `whsec_${btoa("0123456789abcdef0123456789abcdef")}`;
 
-const relay = (path, init) => exports.default.fetch(new Request(`${ORIGIN}${path}`, init));
+let nextTestIp = 0;
+const relay = (path, init) => {
+  const headers = new Headers(init?.headers);
+  if (!headers.has("cf-connecting-ip")) headers.set("cf-connecting-ip", `192.0.2.${nextTestIp}`);
+  return exports.default.fetch(new Request(`${ORIGIN}${path}`, { ...init, headers }));
+};
 const authed = (token, init = {}) => ({ ...init, headers: { authorization: `Bearer ${token}`, ...(init.headers ?? {}) } });
+const deviceInbox = (deviceId) => env.INBOX.get(env.INBOX.idFromName(`device:${deviceId}`));
+const eventFixture = (dedupeKey) => ({ dedupeKey, source: "etsy", eventType: "order.paid", ids: {}, occurredAt: null });
+const sequences = (events) => events.map((event) => event.seq);
 
 // --- Outbound calls to eBay and Etsy ---------------------------------------
 
@@ -19,6 +29,7 @@ function route(method, pattern, respond) {
 }
 
 beforeEach(() => {
+  nextTestIp += 1;
   routes = [];
   calls = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init = {}) => {
@@ -61,12 +72,11 @@ async function etsySignature(id, timestamp, body) {
   return `v1,${bytesToBase64(mac)}`;
 }
 
-async function postEtsyWebhook(id, payload) {
+async function postEtsyWebhook(id, payload, { timestamp = String(Math.floor(Date.now() / 1000)), tamper = false } = {}) {
   const body = JSON.stringify(payload);
-  const timestamp = String(Math.floor(Date.now() / 1000));
   return relay("/etsy", {
     method: "POST",
-    body,
+    body: tamper ? `${body} ` : body,
     headers: {
       "webhook-id": id,
       "webhook-timestamp": timestamp,
@@ -188,6 +198,98 @@ async function connectEtsy(token, { userId = "777", shopId = "42" } = {}) {
 }
 
 // --- Tests -------------------------------------------------------------------
+
+describe("request limits before Directory work", () => {
+  const ip = "192.0.2.1";
+
+  it.each([
+    ["STUDIO_AUTH_LIMITER", "/studio/events", "GET"],
+    ["OAUTH_CALLBACK_LIMITER", "/oauth/ebay/callback?state=expired", "GET"],
+    ["OAUTH_START_LIMITER", `/studio/oauth/etsy/start?returnTo=${encodeURIComponent(returnTo("etsy"))}`, "POST"],
+  ])("checks %s using the connecting IP", async (binding, path, method) => {
+    const dir = {
+      deviceForToken: vi.fn().mockResolvedValue("test-device"),
+      session: vi.fn().mockResolvedValue(null),
+      startSession: vi.fn().mockResolvedValue(undefined),
+    };
+    const limit = vi.fn().mockResolvedValue({ success: false });
+    const response = await worker.fetch(new Request(`${ORIGIN}${path}`, authed("test-device-token", {
+      method, headers: { "cf-connecting-ip": ip },
+    })), {
+      ...env,
+      [binding]: { limit },
+      DIRECTORY: { idFromName: () => "directory", get: () => dir },
+      INBOX: { idFromName: () => "inbox", get: () => ({ list: () => [] }) },
+    });
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("60");
+    expect(limit).toHaveBeenCalledWith({ key: ip });
+    expect(dir.session).not.toHaveBeenCalled();
+    expect(dir.startSession).not.toHaveBeenCalled();
+    if (binding !== "OAUTH_START_LIMITER") expect(dir.deviceForToken).not.toHaveBeenCalled();
+    expect(env[binding]?.limit).toBeTypeOf("function");
+  });
+});
+
+describe("device inbox", () => {
+  async function socketFor(token, after) {
+    const upgrade = await relay(`/studio/stream?after=${after}`, authed(token, { headers: { upgrade: "websocket" } }));
+    expect(upgrade.status).toBe(101);
+    const socket = upgrade.webSocket;
+    const messages = [];
+    socket.addEventListener("message", ({ data }) => messages.push(JSON.parse(data)));
+    socket.accept();
+    return { socket, messages };
+  }
+
+  const range = (first, last) => Array.from({ length: last - first + 1 }, (_, index) => first + index);
+
+  it("sends the initial page and live events, then drops acknowledged rows and sends the next page", async () => {
+    const device = await register();
+    const box = deviceInbox(device.deviceId);
+    for (const seq of range(1, 202)) await box.add(eventFixture(`stream-${seq}`));
+    const first = await socketFor(device.token, 1);
+    const second = await socketFor(device.token, 202);
+    try {
+      await expect.poll(() => sequences(first.messages[0]?.events ?? [])).toEqual(range(2, 201));
+      await expect.poll(() => second.messages[0]).toEqual({ type: "events", events: [] });
+      await box.add(eventFixture("stream-203"));
+      for (const stream of [first, second]) {
+        await expect.poll(() => stream.messages[1]).toMatchObject({ type: "events", events: [{ seq: 203 }] });
+      }
+      first.socket.send(JSON.stringify({ type: "ack", through: 201 }));
+      await expect.poll(() => first.messages[2]).toEqual({ type: "acked", through: 201, pending: 2 });
+      await expect.poll(() => first.messages[3]).toMatchObject({ type: "events", events: [{ seq: 202 }, { seq: 203 }] });
+      expect(sequences(await events(device.token))).toEqual([202, 203]);
+    } finally {
+      first.socket.close(1000);
+      second.socket.close(1000);
+    }
+  });
+
+  it("pages pull results and expires both unacknowledged events and dedupe records", async () => {
+    const device = await register();
+    const box = deviceInbox(device.deviceId);
+    for (const id of ["acked", "expired", "recent"]) await box.add(eventFixture(id));
+    const page = await relay("/studio/events?after=1&limit=1", authed(device.token));
+    expect(sequences((await page.json()).events)).toEqual([2]);
+    const next = await relay("/studio/events?after=2&limit=1", authed(device.token));
+    expect(sequences((await next.json()).events)).toEqual([3]);
+    await relay("/studio/ack", authed(device.token, { method: "POST", body: '{"through":1}' }));
+    expect(await box.add(eventFixture("acked"))).toEqual({ duplicate: true });
+
+    const expiredAt = Date.now() - 31 * 86400_000;
+    await runInDurableObject(box, (instance) => {
+      instance.sql.exec("UPDATE events SET received_at = ? WHERE dedupe_key = 'expired'", expiredAt);
+      instance.sql.exec("UPDATE seen SET received_at = ? WHERE dedupe_key IN ('acked', 'expired')", expiredAt);
+    });
+    expect(await runDurableObjectAlarm(box)).toBe(true);
+    expect(sequences(await events(device.token))).toEqual([3]);
+    expect(await box.firstReceivedAt("expired")).toBeNull();
+    expect(await box.firstReceivedAt("acked")).toBeNull();
+    expect(await box.firstReceivedAt("recent")).toBeGreaterThan(expiredAt);
+  });
+});
 
 describe("devices", () => {
   it.each([true, false])("honors the registration limiter decision: %s", async (success) => {
@@ -313,6 +415,16 @@ describe("sign-in", () => {
 });
 
 describe("Etsy", () => {
+  it("rejects signed stale webhooks and tampered bodies before delivery", async () => {
+    const device = await register();
+    await connectEtsy(device.token, { userId: "895", shopId: "95" });
+    const paid = { event_type: "order.paid", shop_id: 95, resource_url: "https://api.etsy.com/v3/application/shops/95/receipts/995" };
+    const timestamp = String(Math.floor(Date.now() / 1000) - 301);
+    expect((await postEtsyWebhook("msg_stale", paid, { timestamp })).status).toBe(401);
+    expect((await postEtsyWebhook("msg_tampered", paid, { tamper: true })).status).toBe(401);
+    expect(await events(device.token)).toEqual([]);
+  });
+
   it("signs in with PKCE, hands the tokens over once, and links the shop", async () => {
     const a = await register();
     const start = await connectEtsy(a.token);
@@ -549,6 +661,16 @@ describe("Etsy", () => {
 });
 
 describe("eBay", () => {
+  it("answers the endpoint challenge with the configured token and endpoint", async () => {
+    expect((await relay("/ebay")).status).toBe(400);
+    const challenge = "challenge+value";
+    const response = await relay(`/ebay?challenge_code=${encodeURIComponent(challenge)}`);
+    const input = `${challenge}${"test-verification".padEnd(40, "x")}${ORIGIN}/ebay`;
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ challengeResponse: Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("") });
+  });
+
   it("grants feature groups explicitly and brokers public reads only for authenticated devices", async () => {
     const device = await register();
     const start = await startSignIn(device.token, "ebay", { query: "features=messages,finances" });
@@ -664,6 +786,56 @@ describe("eBay", () => {
     expect((await (await result(a.token, start.state, claim)).json()).warnings).toHaveLength(1);
   });
 
+  it("retries subscription setup after refreshing a linked account even if the original setup failed", async () => {
+    const device = await register();
+    await mockEbayBasics();
+    mockEbaySignIn("seller-subscription-retry");
+    const destinations = /notification\/v1\/destination\?limit=100$/;
+    route("GET", destinations, () => new Response("{}", { status: 503 }));
+    const { state } = await startSignIn(device.token, "ebay");
+    const { claim } = await approve("ebay", state, "abc");
+    const signIn = await result(device.token, state, claim);
+    expect((await signIn.json()).warnings).toHaveLength(1);
+
+    const refresh = async () => {
+      const ctx = createExecutionContext();
+      const request = new Request(`${ORIGIN}/studio/oauth/ebay/refresh`, authed(device.token, {
+        method: "POST", body: JSON.stringify({ refreshToken: "ebay-refresh" }),
+      }));
+      const response = await worker.fetch(request, env, ctx);
+      expect(response.status).toBe(200);
+      expect((await response.json()).tokens.accessToken).toBe("ebay-user-token-2");
+      return ctx;
+    };
+    const deadline = new AbortController();
+    const timeout = AbortSignal.timeout.bind(AbortSignal);
+    vi.spyOn(AbortSignal, "timeout")
+      .mockImplementationOnce(timeout) // Refresh access token.
+      .mockImplementationOnce(timeout) // Validate token owner.
+      .mockReturnValueOnce(deadline.signal); // Total setup deadline.
+    const setupStarted = Promise.withResolvers();
+    route("GET", destinations, () => {
+      const signal = calls.at(-1).signal;
+      return new Promise((_, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        setupStarted.resolve();
+      });
+    });
+    const failed = await refresh();
+    await setupStarted.promise;
+    deadline.abort(new DOMException("Setup deadline reached", "TimeoutError"));
+    await waitOnExecutionContext(failed);
+    expect(calls.filter((call) => destinations.test(call.url))).toHaveLength(2);
+
+    route("GET", destinations, () => ({ destinations: [] }));
+    await waitOnExecutionContext(await refresh());
+    const writes = calls.filter((call) => call.method === "POST" && call.url.endsWith("/subscription"));
+    expect(writes).toHaveLength(1);
+    expect(writes[0].headers.get("authorization")).toBe("Bearer ebay-user-token-2");
+    expect(writes[0].signal).toBeInstanceOf(AbortSignal);
+    expect(JSON.parse(writes[0].body)).toMatchObject({ topicId: "ORDER_CONFIRMATION", destinationId: "dest-1" });
+  });
+
   it("drops notifications for unlinked sellers and unlinks on account deletion", async () => {
     const a = await register();
     await connectEbay(a.token, "seller-d");
@@ -671,13 +843,61 @@ describe("eBay", () => {
       metadata: { topic: "MARKETPLACE_ACCOUNT_DELETION" },
       notification: { notificationId: id, eventDate: now(), publishDate: now(), data: { username: "x", userId, eiasToken: "x" } },
     });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
     expect((await postEbayNotification(deletion("n-del-0", "stranger"))).status).toBe(204);
+    expect(log.mock.calls).toEqual([["[EBAY]", "MARKETPLACE_ACCOUNT_DELETION", "for an unlinked account"]]);
     expect(await events(a.token)).toEqual([]);
     expect((await postEbayNotification(deletion("n-del-1", "seller-d"))).status).toBe(204);
     const [event] = await events(a.token);
     expect(event).toMatchObject({ eventType: "MARKETPLACE_ACCOUNT_DELETION", ids: { userId: ["seller-d"] } });
     const accounts = await (await relay("/studio/accounts", authed(a.token))).json();
     expect(accounts.accounts).toEqual([]);
+  });
+
+  it("keeps the account linked when saving a deletion fails, then queues it on retry", async () => {
+    const device = await register();
+    await connectEbay(device.token, "seller-deletion-retry");
+    const box = deviceInbox(device.deviceId);
+    const deletion = {
+      metadata: { topic: "MARKETPLACE_ACCOUNT_DELETION" },
+      notification: { notificationId: "n-del-retry", eventDate: now(), publishDate: now(), data: { userId: "seller-deletion-retry" } },
+    };
+    const accounts = async () => (await (await relay("/studio/accounts", authed(device.token))).json()).accounts;
+    await runInDurableObject(box, (instance) => {
+      instance.sql.exec("CREATE TRIGGER fail_event BEFORE INSERT ON events BEGIN SELECT RAISE(ABORT, 'inbox unavailable'); END");
+    });
+    await expect(postEbayNotification(deletion)).rejects.toThrow("inbox unavailable");
+    expect(await accounts()).toHaveLength(1);
+    expect(await events(device.token)).toEqual([]);
+
+    await runInDurableObject(box, (instance) => { instance.sql.exec("DROP TRIGGER fail_event"); });
+    expect((await postEbayNotification(deletion)).status).toBe(204);
+    expect(await accounts()).toEqual([]);
+    expect(await events(device.token)).toEqual([expect.objectContaining({ eventType: "MARKETPLACE_ACCOUNT_DELETION" })]);
+  });
+
+  it("finishes an interrupted unlink even if the deletion was already acknowledged", async () => {
+    const device = await register();
+    await connectEbay(device.token, "seller-unlink-retry");
+    const directory = env.DIRECTORY.get(env.DIRECTORY.idFromName("directory"));
+    const deletion = {
+      metadata: { topic: "MARKETPLACE_ACCOUNT_DELETION" },
+      notification: { notificationId: "n-unlink-retry", eventDate: now(), publishDate: now(), data: { userId: "seller-unlink-retry" } },
+    };
+    await runInDurableObject(directory, (instance) => {
+      instance.sql.exec("CREATE TRIGGER fail_unlink BEFORE DELETE ON accounts WHEN OLD.account_id = 'seller-unlink-retry' BEGIN SELECT RAISE(ABORT, 'unlink unavailable'); END");
+    });
+    try {
+      await expect(postEbayNotification(deletion)).rejects.toThrow("unlink unavailable");
+      const [saved] = await events(device.token);
+      expect(saved).toMatchObject({ eventType: "MARKETPLACE_ACCOUNT_DELETION" });
+      await relay("/studio/ack", authed(device.token, { method: "POST", body: JSON.stringify({ through: saved.seq }) }));
+    } finally {
+      await runInDurableObject(directory, (instance) => { instance.sql.exec("DROP TRIGGER fail_unlink"); });
+    }
+    expect((await postEbayNotification(deletion)).status).toBe(204);
+    expect(await directory.deviceForAccount("ebay", "seller-unlink-retry")).toBeNull();
+    expect(await events(device.token)).toEqual([]);
   });
 
   it("rejects notifications that fail the signature check, including malformed base64", async () => {
@@ -753,6 +973,19 @@ describe("eBay public keys", () => {
     expect((await postEbayNotification(order("n-u1"), unknown)).status).toBe(500);
     expect((await postEbayNotification(order("n-u2"), unknown)).status).toBe(500);
     expect(keyFetches()).toHaveLength(1);
+  });
+
+  it.each([401, 429, 503])("retries eBay key lookups following an upstream %s", async (status) => {
+    await mockEbayBasics();
+    const kid = crypto.randomUUID();
+    const pattern = new RegExp(`public_key/${kid}$`);
+    route("GET", pattern, () => new Response("{}", { status }));
+    const notification = order(`n-key-${status}`);
+    expect((await postEbayNotification(notification, kid)).status).toBe(500);
+    const { pem } = await ebaySigner();
+    route("GET", pattern, () => ({ key: pem }));
+    expect((await postEbayNotification(notification, kid)).status).toBe(204);
+    expect(keyFetches()).toHaveLength(2);
   });
 
   it("stops fetching keys when the key limiter says so", async () => {
