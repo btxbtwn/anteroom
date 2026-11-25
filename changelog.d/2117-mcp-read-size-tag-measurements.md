@@ -1,0 +1,1 @@
+- AI assistants connected to Anteroom can now read a listing's size tag and its yardstick measurements from its saved photos, like the Read size tags and Read measurements buttons in Item Details, and save them to Item Details before generating.
