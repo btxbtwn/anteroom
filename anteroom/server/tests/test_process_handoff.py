@@ -108,11 +108,13 @@ def test_losing_the_lease_stops_the_schedulers():
     assert events.count('stop') == 1
 
 
-def drain_with_work(*, finish_after, grace_s=5, renew_as_work_ends=False):
+def drain_with_work(*, finish_after, grace_s=5, renew_as_work_ends=False, max_drain_s=None):
     """Drain ``lead`` while scheduled marketplace work runs; returns the ordered events.
 
-    The work ends ``finish_after`` seconds into the drain (``None``: never), and
-    the scheduler set's stop cancels it, like ``BackgroundLoop.stop``.
+    When ``finish_after`` is given, the work ends ``finish_after`` seconds after
+    the first draining lease renewal (``None``: never), and the scheduler set's
+    stop cancels it, like ``BackgroundLoop.stop``. When ``max_drain_s`` is
+    given, ``on_drain`` to ``release`` must stay under that bound.
 
     The job records its outcome while it is still inside ``marketplace_work``,
     so ``lead`` can renew the lease once more between that record and the work
@@ -121,17 +123,32 @@ def drain_with_work(*, finish_after, grace_s=5, renew_as_work_ends=False):
     """
     events = []
     started = threading.Event()
+    drained = threading.Event()
+    renewed_during_drain = threading.Event()
     finish = threading.Event()
     outcome_recorded = threading.Event()
     renewed_after_outcome = threading.Event()
     waited_for_renewal = []
+    drain_started = []
+    released_at = []
+
+    def on_drain():
+        drain_started.append(time.monotonic())
+        events.append('drain')
+        drained.set()
 
     def hold(_engine, _name='schedulers'):
         late = outcome_recorded.is_set()
         events.append(('hold', process_handoff.draining()))
+        if drained.is_set():
+            renewed_during_drain.set()
         if late:
             renewed_after_outcome.set()
         return True
+
+    def release(_engine):
+        events.append('release')
+        released_at.append(time.monotonic())
 
     def start():
         def job():
@@ -157,18 +174,22 @@ def drain_with_work(*, finish_after, grace_s=5, renew_as_work_ends=False):
 
     async def exercise():
         task = asyncio.create_task(process_handoff.lead(
-            'engine', {'schedulers': start}, lambda: events.append('drain'), grace_s=grace_s,
+            'engine', {'schedulers': start}, on_drain, grace_s=grace_s,
         ))
         assert await asyncio.to_thread(started.wait, 2)
         process_handoff.begin_draining()
         if finish_after is not None:
-            await asyncio.sleep(finish_after)
+            assert await asyncio.to_thread(renewed_during_drain.wait, 2), (
+                f'the drain did not renew the lease while work was running: {events}'
+            )
+            if finish_after:
+                await asyncio.sleep(finish_after)
             finish.set()
-        await asyncio.wait_for(task, 5)
+        await asyncio.wait_for(task, max(5, grace_s + 2))
 
     original = process_handoff.hold, process_handoff.release, process_handoff.release_routes
     process_handoff.hold = hold
-    process_handoff.release = lambda _engine: events.append('release')
+    process_handoff.release = release
     process_handoff.release_routes = lambda _engine: events.append('routes')
     try:
         asyncio.run(exercise())
@@ -177,6 +198,12 @@ def drain_with_work(*, finish_after, grace_s=5, renew_as_work_ends=False):
     if renew_as_work_ends:
         assert 'job cancelled' not in events, events
         assert waited_for_renewal == [True], f'the lease was not renewed while the work was still in flight: {events}'
+    if max_drain_s is not None:
+        assert drain_started and released_at, events
+        elapsed = released_at[-1] - drain_started[0]
+        assert elapsed < max_drain_s, (
+            f'the drain kept waiting after the work had finished ({elapsed:.2f}s >= {max_drain_s}s)'
+        )
     return events
 
 
@@ -197,11 +224,8 @@ def finished_then_stopped_then_released(events):
 
 
 def drained_promptly(**work):
-    """Drain with work that ends 0.2 s in; ``lead`` must hand over then, not wait out the 5 s grace."""
-    started = time.monotonic()
-    events = drain_with_work(finish_after=0.2, **work)
-    assert time.monotonic() - started < 2, 'the drain kept waiting after the work had finished'
-    return events
+    """Drain with work that ends shortly after draining renews; ``lead`` must hand over before the 5 s grace."""
+    return drain_with_work(finish_after=0.2, max_drain_s=4, **work)
 
 
 def test_a_running_relist_finishes_during_the_drain_while_the_lease_is_held():
