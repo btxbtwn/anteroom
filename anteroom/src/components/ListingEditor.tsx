@@ -32,12 +32,12 @@ import { activityPollMs, jobsPollMs } from "../api/polling";
 import { toastManager } from "./ui/toast";
 import { Radio, RadioGroup } from "./ui/radio-group";
 import { Toggle } from "./ui/toggle";
-import { RegenerateListingButton } from "./ClearListingButton";
+import { RegenerateListingButton, useClearListing } from "./ClearListingButton";
 import { MarketplaceMessagesContext, uniqueMarketplaceMessages } from "./marketplaceMessages";
 import { MarketplacesLayout, useReportFixTargets } from "./MarketplacesSection";
 import { confirmDialog } from "../ui/confirmDialog";
 import { useChatBusy } from "./chat/liveChatStore";
-import { ListingActionsMenu } from "./ListingReviewActions";
+import { MenuItem } from "./ui/menu";
 import { FavoriteToggle } from "./favorites";
 import { type ListingReviewTab } from "./ListingReviewTabs";
 import type { BulkListingUploadResult } from "../bulkPhotoUpload";
@@ -208,6 +208,8 @@ export function ListingEditor({
   };
 
   const Layout = vendoo ? VendooLayout : MarketplacesLayout;
+  // Held here, not in the menu item, so the confirm and reset outlive the closed menu.
+  const clearing = useClearListing(convId, onCleared);
   const tabs = React.useMemo(() => editorTabs(marketplaceSettings?.selected, runtime), [marketplaceSettings?.selected, runtime]);
 
   // A marketplace the seller no longer lists to falls back to General.
@@ -296,12 +298,12 @@ export function ListingEditor({
           if (!unsaved && data?.current_revision_id) void prefetchListingForm(queryClient, convId, tab, data.listing, data.current_revision_id);
         }}
         selected={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
-        railActions={runtime.features.has("generation") ? <RegenerateListingButton convId={convId} variant="ghost-muted" onRegenerated={onCleared} /> : undefined}
-        railMenu={<span className="flex items-center gap-0.5">
-          {conversation ? <FavoriteToggle id={convId} title={String(listing.title || conversation.title || "Listing")} favorite={Boolean(conversation.favorite)} /> : null}
-          <ListingActionsMenu convId={convId} onCleared={onCleared} />
-        </span>}
-        railStatus={editState.saving ? <span role="status" className="text-xs text-muted-foreground">{generating ? editorCopy(vendoo).savingAfterAnt : "Saving…"}</span> : undefined}
+        railActions={runtime.features.has("generation") ? <RegenerateListingButton convId={convId} variant="outline" size="sm" onRegenerated={onCleared} /> : undefined}
+        railFavorite={conversation ? <FavoriteToggle id={convId} title={String(listing.title || conversation.title || "Listing")} favorite={Boolean(conversation.favorite)} /> : undefined}
+        railMenuItems={<MenuItem variant="destructive" disabled={clearing.isPending} onClick={() => void clearing.clear()}>
+          {clearing.isPending ? "Clearing…" : "Clear listing"}
+        </MenuItem>}
+        railStatus={editState.saving ? <span role="status" className="text-xs text-muted-foreground">{generating ? "Saving once Ant finishes…" : "Saving…"}</span> : undefined}
         onSelect={(id) => {
           setFieldTarget(null);
           setEditTab(id);

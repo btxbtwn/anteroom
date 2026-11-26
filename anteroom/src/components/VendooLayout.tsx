@@ -4,14 +4,16 @@ import { api } from "../api/client";
 import { pollMs } from "../api/polling";
 import type { MarketplacesLayout } from "./MarketplacesSection";
 import { marketplaceName } from "./marketplaceNames";
+import { EllipsisIcon } from "lucide-react";
 import { Button } from "./ui/button";
+import { Menu, MenuPopup, MenuTrigger } from "./ui/menu";
 
 export function useListingMode() {
   return useQuery({ queryKey: ["settings-ui"], queryFn: api.settings.ui });
 }
 
 export function VendooLayout({ convId, revisionId, disabled, ids, selected, onSelect, railActions,
-  railMenu, railStatus, children }: ComponentProps<typeof MarketplacesLayout>) {
+  railFavorite, railMenuItems, railStatus, children }: ComponentProps<typeof MarketplacesLayout>) {
   const client = useQueryClient();
   const key = ["vendoo-draft", convId];
   const draft = useQuery({ queryKey: key,
@@ -32,7 +34,13 @@ export function VendooLayout({ convId, revisionId, disabled, ids, selected, onSe
       </Button>)}
       <div className="relative mt-auto flex flex-col gap-1 border-t pt-2">
         {railStatus && <div className="pointer-events-none absolute bottom-full end-1 mb-1 flex items-center gap-1.5">{railStatus}</div>}
-        {railMenu && <span className="absolute end-0.5 top-2 z-10">{railMenu}</span>}
+        <span className="absolute end-0.5 top-2 z-10 flex items-center gap-0.5">
+          {railFavorite}
+          {railMenuItems && <Menu>
+            <MenuTrigger render={<Button variant="ghost" size="icon-xs" aria-label="More listing actions" />}><EllipsisIcon /></MenuTrigger>
+            <MenuPopup align="end" width="content">{railMenuItems}</MenuPopup>
+          </Menu>}
+        </span>
         {railActions}
       </div>
     </nav>

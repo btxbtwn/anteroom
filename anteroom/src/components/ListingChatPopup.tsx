@@ -17,6 +17,8 @@ export interface ListingChatStatus {
   messageCount: number;
   /** No messages yet: the chat is where the seller starts generating. */
   empty: boolean;
+  /** The chat offers Generate: photos are in and the listing has no copy yet. */
+  generate: boolean;
 }
 
 /** ⌘J on a Mac, Ctrl+J elsewhere. */

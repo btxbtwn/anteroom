@@ -1,5 +1,7 @@
 /**
- * Per-draft "Ready to list" toggle and future publish scheduler.
+ * Per-draft "Ready to list" toggle and future publish scheduler, opened from
+ * the listing's actions. It is offered only on a draft that is not live (or
+ * one already scheduled, so it can be unscheduled).
  *
  * Editing a scheduled draft automatically unschedules it so stale revisions
  * are never published unexpectedly; this control surfaces that warning clearly.
@@ -15,6 +17,7 @@ import { confirmDialog } from "../ui/confirmDialog";
 import { marketplaceName } from "./marketplaceNames";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
+import { Dialog, DialogDescription, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Spinner } from "./ui/spinner";
 import { Switch } from "./ui/switch";
@@ -28,12 +31,49 @@ function defaultFuture(): string {
   return `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())}T${pad(next.getHours())}:${pad(next.getMinutes())}`;
 }
 
-export function DraftScheduleControl({ convId }: { convId: string }) {
-  const queryClient = useQueryClient();
-  const scheduleQuery = useQuery({
+function useDraftSchedule(convId: string) {
+  return useQuery({
     queryKey: ["draft-schedule", convId],
     queryFn: () => api.draftSchedule.get(convId),
   });
+}
+
+/** "Scheduled · Dec 1, 9:00 AM": short enough for a toolbar button. */
+function shortWhen(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+/**
+ * The listing's scheduling entry point. `draft` is false once the item is live
+ * or sold anywhere; a schedule already set still shows, so it can be cancelled.
+ * `render` draws the trigger, so the same dialog opens from a toolbar button
+ * on a desktop and from the listing's menu on a phone.
+ */
+export function useDraftScheduleEntry(convId: string, draft: boolean) {
+  const [open, setOpen] = useState(false);
+  const state = useDraftSchedule(convId).data;
+  const scheduledAt = state?.scheduled_publish_at ?? null;
+  const available = typeof state?.ready_to_list === "boolean" && (draft || Boolean(scheduledAt));
+  const label = scheduledAt ? `Scheduled · ${shortWhen(scheduledAt)}` : "Schedule…";
+  const dialog = (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogPopup className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Schedule publishing</DialogTitle>
+          <DialogDescription>Publish this draft later, on the marketplaces you pick.</DialogDescription>
+        </DialogHeader>
+        <DialogPanel>
+          <DraftScheduleControl convId={convId} />
+        </DialogPanel>
+      </DialogPopup>
+    </Dialog>
+  );
+  return { available, scheduled: Boolean(scheduledAt), label, open: () => setOpen(true), dialog };
+}
+
+function DraftScheduleControl({ convId }: { convId: string }) {
+  const queryClient = useQueryClient();
+  const scheduleQuery = useDraftSchedule(convId);
   const [whenInput, setWhenInput] = useState(defaultFuture);
   const [markets, setMarkets] = useState<string[]>(["poshmark"]);
   const [error, setError] = useState("");
@@ -87,14 +127,12 @@ export function DraftScheduleControl({ convId }: { convId: string }) {
   if (scheduleQuery.isLoading || !state || typeof state.ready_to_list !== "boolean") return null;
 
   return (
-    <div className="space-y-2.5 rounded-lg border border-border/60 p-3 text-xs">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="font-medium text-foreground">Ready to list &amp; schedule publish</p>
-          <p className="text-muted-foreground">
-            Mark validated drafts ready to schedule future publishing to specific marketplaces.
-          </p>
-        </div>
+    <div className="space-y-3 text-sm">
+      <label className="flex items-center justify-between gap-3">
+        <span className="min-w-0">
+          <span className="block font-medium text-foreground">Ready to list</span>
+          <span className="block text-muted-foreground text-xs">Turn on once you've reviewed the draft.</span>
+        </span>
         <Switch
           size="sm"
           checked={state.ready_to_list}
@@ -102,30 +140,31 @@ export function DraftScheduleControl({ convId }: { convId: string }) {
           aria-label="Mark draft ready to list"
           onCheckedChange={(checked) => setReady.mutate(checked)}
         />
-      </div>
+      </label>
 
       {error ? <p role="alert" className="text-destructive-foreground">{error}</p> : null}
 
       {state.scheduled_publish_at ? (
-        <div className="space-y-2 rounded-md border border-border/60 bg-muted/30 p-2.5">
+        <div className="space-y-2 border-t pt-3">
           <p className="font-medium text-foreground">
             Scheduled for {new Date(state.scheduled_publish_at).toLocaleString()} on{" "}
             {state.scheduled_marketplaces.map(marketplaceName).join(", ")}
           </p>
-          <p className="text-muted-foreground">
-            Saving any edit to this draft will automatically unschedule it so unreviewed changes never go live.
+          <p className="text-muted-foreground text-xs">
+            Editing this draft unschedules it, so unreviewed changes never go live.
           </p>
           {state.scheduled_status === "failed" && state.scheduled_error ? (
             <p className="text-destructive-foreground">Last publish error: {state.scheduled_error}</p>
           ) : null}
-          <Button size="xs" variant="outline" disabled={busy} onClick={() => unschedule.mutate()}>
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => unschedule.mutate()}>
             {unschedule.isPending ? <Spinner size="sm" /> : null}
             Unschedule
           </Button>
         </div>
       ) : state.ready_to_list ? (
-        <div className="space-y-2 pt-1">
-          <div className="flex flex-wrap items-center gap-3">
+        <div className="space-y-3 border-t pt-3">
+          <fieldset className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <legend className="mb-2 font-medium text-muted-foreground text-xs">Marketplaces</legend>
             {MARKETS.map((market) => (
               <label key={market} className="inline-flex cursor-pointer items-center gap-1.5 text-foreground">
                 <Checkbox
@@ -138,7 +177,7 @@ export function DraftScheduleControl({ convId }: { convId: string }) {
                 {marketplaceName(market)}
               </label>
             ))}
-          </div>
+          </fieldset>
           <div className="flex flex-wrap items-center gap-2">
             <Input
               type="datetime-local"
@@ -148,7 +187,7 @@ export function DraftScheduleControl({ convId }: { convId: string }) {
               disabled={busy}
               onChange={(e) => setWhenInput(e.target.value)}
             />
-            <Button size="xs" disabled={busy} onClick={() => void handleSchedule()}>
+            <Button size="sm" disabled={busy} onClick={() => void handleSchedule()}>
               {schedule.isPending ? <Spinner size="sm" /> : <CalendarClockIcon className="size-3.5" />}
               Schedule publish
             </Button>

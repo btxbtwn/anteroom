@@ -111,6 +111,19 @@ export async function openListing(page: Page, phone: boolean, title: string, exp
   await link.click();
 }
 
+/**
+ * Ant's column on a desktop. It starts as the "Ask Ant" launcher on a listing
+ * with no chat; open it from there when it is not already open.
+ */
+export async function openAnt(page: Page) {
+  const chat = page.getByRole("region", { name: "Listing chat" });
+  const launcher = page.locator("main").getByRole("button", { name: /^Ask Ant/ });
+  await expect(chat.or(launcher)).toBeVisible({ timeout: 30_000 });
+  if (await launcher.isVisible()) await launcher.click();
+  await expect(chat).toBeVisible();
+  return chat;
+}
+
 /** The editor's Title box; on a phone it is on the Listing tab. */
 export async function titleBox(page: Page, phone: boolean) {
   if (phone) await page.getByRole("tab", { name: "Listing" }).click();

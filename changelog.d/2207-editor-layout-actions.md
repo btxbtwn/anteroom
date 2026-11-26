@@ -1,0 +1,4 @@
+- The listing form gets more room: Ant waits as an "Ask Ant" button on a listing you haven't chatted in, opens at once, and stays minimized once you minimize it.
+- The listing's actions sit in one row above the form: List everywhere is the main button, and Delist everywhere is in the "…" menu, apart from List.
+- Scheduling a draft opens from **Schedule…** with the listing's actions, and only shows on drafts that aren't live.
+- Each marketplace's "…" menu groups Mark as listed, Mark as sold and Mark as not listed under **Tracking**, and **Mark as sold…** is now the one way to record a sale.
