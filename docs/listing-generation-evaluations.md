@@ -134,7 +134,9 @@ based on when generation saved the draft. The default window is 30 days.
   reviewed attempts, ordered by corrected attempts. Restoring a revision
   clears the attempt's correction counts and keeps any earlier review.
   Marketplace-specific labels outside the fixed fields share a marketplace
-  bucket, whose counts describe net edits within that group.
+  bucket. To distinguish seller corrections within that bucket, the account
+  stores the field's position in an existing draft revision. Reverting an
+  assistant edit leaves corrections to other fields in the count.
 - **Overwrite rate** divides generated attempts in which a saved generation
   stage changed a protected seller field by attempts for which a saved stage
   had a protected seller field to compare.

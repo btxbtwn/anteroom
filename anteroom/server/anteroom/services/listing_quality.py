@@ -148,10 +148,11 @@ def _form_values(listing: dict, previous: dict | None = None) -> dict[str, objec
 
 def _form_corrections(
     historical: dict[str, dict[str, int]], baseline: dict, before: dict, submitted: dict,
-) -> dict[str, dict[str, int]]:
+) -> tuple[dict[str, dict[str, int]], dict[str, str | None]]:
     generated, previous = map(_form_values, (baseline, before))
     reviewed = _form_values(submitted, before)
-    counts = {field: Counter(kinds) for field, kinds in historical.items()}
+    counts = historical.copy()
+    specifics = {}
     for path in sorted(previous.keys() | reviewed.keys()):
         group = _group(path)
         old, new = previous.get(path), reviewed.get(path)
@@ -168,18 +169,60 @@ def _form_corrections(
         expected = generated.get(path)
         change = _change(expected, new)
         if group.endswith(".specifics"):
-            # Marketplace-defined and seller-defined labels share an anonymous
-            # bucket. Counts describe the net changes in this group.
-            bucket = counts.setdefault(group, Counter())
-            if previous_change := _change(expected, old):
-                bucket[previous_change] = max(0, bucket[previous_change] - 1)
-            if change:
-                bucket[change] += 1
+            specifics[path] = change
         elif change:
-            counts[group] = Counter({change: 1})
+            counts[group] = {change: 1}
         else:
             counts.pop(group, None)
-    return {field: dict(+kinds) for field, kinds in counts.items() if +kinds}
+    return counts, specifics
+
+
+def _record_specifics(
+    db: Session, attempt: ListingQualityAttempt, revisions: tuple[ListingRevision, ...],
+    edits: dict[str, str | None], counts: dict[str, dict[str, int]],
+) -> None:
+    # A field's position in an immutable revision identifies it without storing
+    # its name or value. Only outstanding seller corrections need a position.
+    snapshots = {rev.id: rev.listing_json for rev in revisions}
+    missing = attempt.specific_slots.keys() - snapshots.keys()
+    if missing:
+        older = select(ListingRevision.id, ListingRevision.listing_json).where(
+            ListingRevision.conversation_id == attempt.conversation_id, ListingRevision.id.in_(missing),
+        )
+        for revision_id, listing in db.execute(older):
+            snapshots[revision_id] = listing
+
+    positions: dict[str, tuple[str, str]] = {}
+    active: dict[str, str | None] = {}
+    for revision_id, listing in snapshots.items():
+        if not isinstance(listing, dict):
+            continue
+        paths = sorted(
+            f"{bucket}.{key}"
+            for bucket, values in listing.items()
+            if bucket.endswith("_specifics") and isinstance(values, dict)
+            for key in values
+        )
+        recorded = attempt.specific_slots.get(revision_id, {})
+        for index, path in enumerate(paths):
+            position = str(index)
+            positions.setdefault(path, (revision_id, position))
+            if position in recorded:
+                active[path] = recorded[position]
+
+    active.update(edits)
+    slots: dict[str, dict[str, str]] = {}
+    for field in list(counts):
+        if field.endswith(".specifics"):
+            del counts[field]
+    for path, kind in active.items():
+        if kind is not None and path in positions:
+            revision_id, position = positions[path]
+            slots.setdefault(revision_id, {})[position] = kind
+            group = path.partition("_specifics.")[0] + ".specifics"
+            bucket = counts.setdefault(group, {})
+            bucket[kind] = bucket.get(kind, 0) + 1
+    attempt.specific_slots = slots
 
 
 def _protected_paths(listing: dict) -> set[str]:
@@ -221,14 +264,18 @@ def record_revision(
         return
     if restore:
         attempt.corrections = {}
+        attempt.specific_slots = {}
     elif seller_input is not None:
         baseline = previous if previous.id == attempt.generated_revision_id else db.get(
             ListingRevision, attempt.generated_revision_id,
         )
         if baseline is not None:
-            attempt.corrections = _form_corrections(
+            counts, specifics = _form_corrections(
                 attempt.corrections, baseline.listing_json, before, seller_input,
             )
+            if specifics:
+                _record_specifics(db, attempt, (baseline, previous, revision), specifics, counts)
+            attempt.corrections = counts
         if attempt.reviewed_at is None:
             attempt.reviewed_at = utcnow()
     elif source in GENERATED:

@@ -26,5 +26,6 @@ class ListingQualityAttempt(SellerOwned, Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     corrections: Mapped[dict[str, dict[str, int]]] = mapped_column(JSON, default=dict)
+    specific_slots: Mapped[dict[str, dict[str, str]]] = mapped_column(JSON, default=dict)
     overwrite_compared: Mapped[bool] = mapped_column(default=False)
     overwrites: Mapped[dict[str, dict[str, dict[str, int]]]] = mapped_column(JSON, default=dict)

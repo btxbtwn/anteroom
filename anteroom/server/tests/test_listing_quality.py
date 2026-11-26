@@ -31,21 +31,61 @@ def test_marketplace_reconciliation_and_aliases_preserve_only_explicit_correctio
     generated = {"title": "General title", "price": 18,
                  "poshmark_specifics": {"title": "Poshmark title", "poshmarkPrice": 28}}
     submitted = {**generated, "poshmark_specifics": {"title": "General title", "listingPrice": 18}}
-    corrections = _form_corrections({}, generated, generated, submitted)
+    corrections, _ = _form_corrections({}, generated, generated, submitted)
     assert corrections == {"poshmark.title": {"replaced": 1}, "poshmark.price": {"replaced": 1}}
     # Following General removes both independent marketplace fields from storage.
     stored = {"title": "General title", "price": 18}
-    second = _form_corrections(corrections, generated, stored, {**stored, "size": "S"})
+    second, _ = _form_corrections(corrections, generated, stored, {**stored, "size": "S"})
     assert second == {**corrections, "general.size": {"filled": 1}}
-    cleared = _form_corrections(corrections, generated, stored, {
+    cleared, _ = _form_corrections(corrections, generated, stored, {
         **stored, "poshmark_specifics": {"title": ""},
     })
     assert cleared == {"poshmark.title": {"cleared": 1}, "poshmark.price": {"replaced": 1}}
-    restored = _form_corrections(second, generated, {**stored, "size": "S"}, generated)
+    restored, _ = _form_corrections(second, generated, {**stored, "size": "S"}, generated)
     assert restored == {}
     assert _form_corrections({}, generated, generated, {
         **generated, "poshmark_specifics": {"title": "", "listingPrice": "$28.00"},
-    }) == {"poshmark.title": {"cleared": 1}}
+    }) == ({"poshmark.title": {"cleared": 1}}, {})
+
+
+def test_reverting_assistant_specific_keeps_another_seller_correction(cloud, signing_keys, monkeypatch):  # noqa: F811
+    client, engine = cloud
+    alice = headers(signing_keys)
+    monkeypatch.setenv("ANTEROOM_OPERATOR_USER_ID", USER_ID)
+    assert client.put(CONSENT, headers=alice, json={"enabled": True}).is_success
+    draft = client.post("/api/conversations", headers=alice, json={"title": "Boots"}).json()["id"]
+    path = f"/api/conversations/{draft}/listing"
+
+    def listing(toe, shaft, **extra):
+        return {"title": "Boots", "ebay_specifics": {"Toe": toe, "Shaft": shaft, **extra}}
+
+    def generated(source, fields, parent):
+        with SellerDatabaseSession(bind=engine, user_id=USER_ID) as db:
+            return save_revision(db, draft, fields, source=source, expected_revision_id=parent).id
+
+    def form(fields, parent):
+        response = client.put(path, headers=alice, json={"listing": fields, "expected_revision_id": parent})
+        assert response.is_success, response.text
+        return response.json()["revision_id"]
+
+    base = generated("model", listing("square", "short"), "")
+    first = form(listing("round", "short", Lining="wool"), base)
+    refined = generated("model_refinement", listing("round", "tall", Lining="wool", Arch="high"), first)
+    second = form(listing("round", "short", Lining="wool"), refined)
+    report = client.get(REPORT, headers=alice).json()
+    assert report["corrections"] == {"ebay.specifics": {"replaced": 1, "filled": 1}}
+    assert report["field_rankings"] == [
+        {"field": "ebay.specifics", "corrected_attempts": 1, "affected_sellers": 1, "edit_rate": 1}
+    ]
+    with SellerDatabaseSession(bind=engine, user_id=USER_ID) as db:
+        slots = db.get_one(ListingQualityAttempt, base).specific_slots
+        assert slots.keys() <= {base, first, refined, second}
+        assert sorted(kind for fields in slots.values() for kind in fields.values()) == ["filled", "replaced"]
+        assert all(position.isdecimal() for fields in slots.values() for position in fields)
+    third = form(listing("round", "short"), second)
+    assert client.get(REPORT, headers=alice).json()["corrections"] == {"ebay.specifics": {"replaced": 1}}
+    form(listing("square", "short"), third)
+    assert client.get(REPORT, headers=alice).json()["corrected_attempts"] == 0
 
 
 def test_hosted_consent_and_attempt_report(cloud, signing_keys, monkeypatch):  # noqa: F811

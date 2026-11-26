@@ -25,6 +25,7 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, index=True),
             sa.Column("reviewed_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("corrections", sa.JSON(), nullable=False),
+            sa.Column("specific_slots", sa.JSON(), nullable=False),
             sa.Column("overwrite_compared", sa.Boolean(), nullable=False),
             sa.Column("overwrites", sa.JSON(), nullable=False),
             sa.ForeignKeyConstraint(
