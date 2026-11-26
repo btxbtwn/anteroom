@@ -124,6 +124,10 @@ test("xs, icon-xs, and aligned buttons have centered 44 point hit areas on a pho
   await page.goto("/");
   await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Marketplaces", exact: true }).click();
+  // The sandbox has no eBay account, so the calendar sits collapsed under its summary.
+  const calendarSummary = page.locator("summary", { hasText: "Sale calendar" });
+  await expect(calendarSummary).toBeVisible({ timeout: 45_000 });
+  await calendarSummary.click();
   const prevMonth = page.getByRole("button", { name: "Previous month", exact: true });
   await expect(prevMonth).toBeVisible();
   await prevMonth.scrollIntoViewIfNeeded();
