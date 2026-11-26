@@ -124,6 +124,7 @@ def drain_with_work(*, finish_after, grace_s=5, renew_as_work_ends=False):
     finish = threading.Event()
     outcome_recorded = threading.Event()
     renewed_after_outcome = threading.Event()
+    waited_for_renewal = []
 
     def hold(_engine, _name='schedulers'):
         late = outcome_recorded.is_set()
@@ -140,7 +141,8 @@ def drain_with_work(*, finish_after, grace_s=5, renew_as_work_ends=False):
                 events.append('job finished' if not cancelled.is_set() else 'job cancelled')
                 outcome_recorded.set()
                 if renew_as_work_ends and not cancelled.is_set():
-                    assert renewed_after_outcome.wait(2), 'the lease was not renewed while the work was still in flight'
+                    # Checked on the test's own thread below: an assert here would only warn.
+                    waited_for_renewal.append(renewed_after_outcome.wait(2))
 
         cancelled = threading.Event()
         thread = threading.Thread(target=job)
@@ -172,6 +174,8 @@ def drain_with_work(*, finish_after, grace_s=5, renew_as_work_ends=False):
         asyncio.run(exercise())
     finally:
         process_handoff.hold, process_handoff.release, process_handoff.release_routes = original
+    if renew_as_work_ends:
+        assert waited_for_renewal == [True], 'the lease was not renewed while the work was still in flight'
     return events
 
 
