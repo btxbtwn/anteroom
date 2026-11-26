@@ -55,6 +55,7 @@ import { Button, InlineButton } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
 import { Input } from "./ui/input";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "./ui/input-group";
+import { Skeleton } from "./ui/skeleton";
 import { Spinner } from "./ui/spinner";
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
@@ -274,8 +275,20 @@ export function ListingEditor({
 
 
       <div className={cn("listing-form-area", chat && "has-chat")}>
-      {mode.isPending ? <p role="status" className="p-3 text-xs text-muted-foreground">Loading listing workflow…</p> : mode.error && !mode.data ?
-        <p role="alert" className="p-3 text-xs text-destructive-foreground">{mode.error.message}</p> : loadError ?
+      {mode.isPending ? <EditorSkeleton /> : mode.error && !mode.data ?
+        <Alert variant="error" className="m-3 self-start">
+          <CircleAlertIcon />
+          <AlertTitle>The editor didn't load</AlertTitle>
+          <AlertDescription className="gap-2">
+            <p>Your saved details weren't changed. Try again in a moment.</p>
+            <p className="text-xs">{mode.error.message}</p>
+            <div>
+              <Button size="xs" variant="outline" disabled={mode.isFetching} onClick={() => void mode.refetch()}>
+                {mode.isFetching ? "Retrying…" : "Retry"}
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert> : loadError ?
         <Alert variant="error" className="m-3 self-start">
           <CircleAlertIcon />
           <AlertTitle>This listing didn't load</AlertTitle>
@@ -301,7 +314,7 @@ export function ListingEditor({
           {conversation ? <FavoriteToggle id={convId} title={String(listing.title || conversation.title || "Listing")} favorite={Boolean(conversation.favorite)} /> : null}
           <ListingActionsMenu convId={convId} onCleared={onCleared} />
         </span>}
-        railStatus={editState.saving ? <span role="status" className="text-xs text-muted-foreground">{generating ? "Edits kept. Waiting for chat to finish before saving…" : "Saving…"}</span> : undefined}
+        railStatus={editState.saving ? <span role="status" className="text-xs text-muted-foreground">{generating ? "Saving once Ant finishes…" : "Saving…"}</span> : undefined}
         onSelect={(id) => {
           setFieldTarget(null);
           setEditTab(id);
@@ -368,19 +381,40 @@ function fieldName(label: string): string {
   return label.replace(/\s*\*$/, "").replace(/:\s*$/, "").trim() || "This field";
 }
 
+/** Stands in for the marketplace list and form while the editor's settings load. */
+function EditorSkeleton() {
+  return (
+    <div role="status" aria-label="Loading the listing" className="flex min-h-0 flex-1 gap-4 p-3">
+      <div aria-hidden className="flex w-44 shrink-0 flex-col gap-2 max-[900px]:hidden">
+        {[0, 1, 2, 3, 4, 5].map((row) => <Skeleton key={row} className="h-8 w-full" shape="card" />)}
+      </div>
+      <div aria-hidden className="flex min-w-0 flex-1 flex-col gap-4">
+        <div className="flex gap-2">
+          {[0, 1, 2, 3].map((photo) => <Skeleton key={photo} className="size-20 shrink-0" shape="card" />)}
+        </div>
+        {[0, 1, 2, 3, 4].map((field) => (
+          <div key={field} className="flex flex-col gap-1.5">
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-9 w-full" shape="card" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /**
- * A field's secondary tools: where its choices come from and an Ant fill. They stay
+ * A field's secondary tool: an Ant fill. It stays
  * out of sight until the pointer is over the field or focus is in it, so the
  * form reads as fields first. The button stays in the tab order and shows on
  * focus; on touch it shows once the seller taps into the field.
  */
-function FieldTools({ label, source, onAsk }: { label: string; source: string | null; onAsk?: () => void }) {
+function FieldTools({ label, onAsk }: { label: string; onAsk?: () => void }) {
   const action = `Fill ${fieldName(label)} with Ant`;
   return (
     <span className={cn("ms-auto flex shrink-0 items-center gap-1.5 opacity-0 transition-opacity",
       "pointer-events-none group-hover/field:pointer-events-auto group-hover/field:opacity-100",
       "group-focus-within/field:pointer-events-auto group-focus-within/field:opacity-100")}>
-      {source && <span className="text-2xs text-muted-foreground">{source}</span>}
       {onAsk && (
         <Tooltip>
           <TooltipTrigger
@@ -958,6 +992,15 @@ export function StructuredEditor({
   // Only loading, errors and gaps get a line; a form that loaded fine needs none.
   const retryingThisTab = reloadFields.isPending && reloadFields.variables?.market === tab;
   const reloadingThisTab = nativeTab && (retryingThisTab || autoReloadingMarket === tab);
+  // A required pick-list with no choices reloads them on the field itself.
+  const reloadChoices = () => {
+    if (nativeTab) {
+      if (revisionId) reloadFields.mutate({ market: tab, revision: revisionId });
+      return;
+    }
+    void formsQuery.refetch();
+    void dropdownQuery.refetch();
+  };
   const formLoadError = nativeQuery.error instanceof ApiRequestError && nativeQuery.error.status === 0
     ? "Could not reach the server to load this form. Check your connection and try again."
     : nativeQuery.error instanceof Error
@@ -991,7 +1034,7 @@ export function StructuredEditor({
                 : !nativeTab && (formsQuery.isError || dropdownQuery.isError)
                   ? "Some choices could not be refreshed. Check each field's choices before listing."
                   : categoryForm?.known === false
-                    ? "The full category form is unavailable. Reference choices are shown where available."
+                    ? `Some of ${marketplaceName(tab)}'s fields for this category may be missing. Check the listing on ${marketplaceName(tab)} before you publish.`
                     : null;
   // Renders its own hint beside the selected count.
   const multiSelectControl = (f: EditorField) => Boolean(f.multi)
@@ -1238,13 +1281,10 @@ export function StructuredEditor({
               {visible.map((f, index) => {
                 const badge = section.fields.find((row) => row.type === "badge" && (f.key === "price" || f.key === "poshmark_specifics.poshmarkPrice"));
                 const badgeOn = badge ? formFieldText(local[badge.key] ?? badge.defaultValue) === "true" : false;
-                const source = !nativeTab && f.optionsSource && f.optionsSource !== "saved"
-                  ? f.optionsSource === "marketplace" ? "Marketplace choices" : f.optionsSource === "vendoo" ? "Imported category choices" : "Reference choices"
-                  : null;
                 const ask = onAskChat && !f.locked ? () => onAskChat(
                   `Fill or correct only ${marketplaceName(tab)} / ${f.label}${f.section ? ` (${f.section})` : ""} using the photos and seller evidence. Preserve all other fields.`,
                 ) : undefined;
-                const tools = source || ask ? <FieldTools label={f.label} source={source} onAsk={ask} /> : null;
+                const tools = ask ? <FieldTools label={f.label} onAsk={ask} /> : null;
                 const labelRow = f.type !== "cascade" && f.presentation !== "button" && f.presentation !== "checkbox" && Boolean(f.label);
                 return (
                 <React.Fragment key={f.key}>
@@ -1260,7 +1300,7 @@ export function StructuredEditor({
                   : fullWidth(f) && "col-span-full")} tabIndex={-1}
                   onFocus={event => event.currentTarget.classList.add("ring-2", "ring-ring", "rounded-lg")}
                   onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.classList.remove("ring-2", "ring-ring", "rounded-lg"); }}>
-                  {agentFieldLocked(f.key, agentLocks) && <span role="status" className="text-xs text-muted-foreground">Agent editing…</span>}
+                  {agentFieldLocked(f.key, agentLocks) && <span role="status" className="text-xs text-muted-foreground">Ant is editing this field…</span>}
                   {labelRow && (f.hashtagMax != null ? (
                     <div className="mb-1.5 flex items-baseline justify-between gap-2">
                       <span className="flex min-w-0 items-center gap-1.5">
@@ -1286,14 +1326,17 @@ export function StructuredEditor({
                     <div className="mb-1.5 flex items-center gap-2">
                       <FieldLabel htmlFor={`listing-field-${f.key}`} className={cn("mb-0", f.labelHidden && "sr-only")}>{f.label}</FieldLabel>
                       {fieldDefault(f)}
-                      {badge && <button type="button" disabled={disabled || badge.locked} aria-pressed={badgeOn} className="rounded-full border px-2 py-0.5 text-xs font-medium"
-                        onClick={() => commitField(badge.key, !badgeOn)}>{badgeOn ? "Smart Sell ON" : "Smart Sell OFF"}</button>}
+                      {badge && <label className="ms-2 flex min-h-6 items-center gap-2 text-muted-foreground text-xs max-[900px]:min-h-11">
+                        <Switch size="sm" disabled={disabled || badge.locked} checked={badgeOn}
+                          onCheckedChange={(checked) => commitField(badge.key, checked)} />
+                        {badge.label || "Smart Sell"}
+                      </label>}
                       {tools}
                     </div>
                   ))}
                   <div data-listing-control className={cn(f.controlWidth === "half" && "@xl:w-1/2")}>{control(f, tools)}</div>
                   {suggestedCategory(listing, tab, f.key) && <p role="status" className="mt-1 flex flex-wrap items-baseline gap-x-2 text-xs text-warning-foreground">
-                    <span>Suggested: check it. No exact {marketplaceName(tab)} match.</span>
+                    <span>{marketplaceName(tab)} has no exact match. Check this category.</span>
                     {!disabled && !f.locked && <InlineButton type="button" className="text-xs" onClick={() => {
                       const updated = cloneListing(listing);
                       setListingEditorValue(updated, `direct_category_ids.${tab}_suggested`, undefined);
@@ -1306,7 +1349,12 @@ export function StructuredEditor({
                     <p key={message} role="alert" className="mt-1 text-xs text-warning-foreground">{message}</p>)}
                   {f.maxLength != null && (f.multi ? formFieldValues(local[f.key], f.options) : [formFieldText(local[f.key])]).some((value) => value.length > f.maxLength!) &&
                     <p role="alert" className="mt-1 text-xs text-warning-foreground">Each value allows at most {f.maxLength} characters. Shorten the saved value.</p>}
-                  {f.required && f.selectionOnly && !f.options?.length && <p role="alert" className="mt-1 text-xs text-warning-foreground">Choices unavailable. Reopen the listing to load this field.</p>}
+                  {f.required && f.selectionOnly && !f.options?.length && <p role="alert" className="mt-1 flex flex-wrap items-baseline gap-x-2 text-xs text-warning-foreground">
+                    <span>{marketplaceName(tab)}'s choices for this field didn't load.</span>
+                    <InlineButton type="button" className="text-xs" aria-label={`Reload ${fieldName(f.label)} choices`}
+                      disabled={saving || hasDrafts || reloadFields.isPending || autoReloadingMarket !== null || (nativeTab && !revisionId)}
+                      onClick={reloadChoices}>{reloadingThisTab ? "Reloading…" : "Reload"}</InlineButton>
+                  </p>}
                 </fieldset>
                 </React.Fragment>
                 );
