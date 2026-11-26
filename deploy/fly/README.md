@@ -377,8 +377,9 @@ Edits are billed to the Photoroom account behind the managed key.
 
 When managed OpenRouter and/or Photoroom keys are set, each successful call is
 recorded against the seller who made it. OpenRouter costs come from the
-provider's `usage.cost`; Photoroom uses a flat rate card
-(`ANTEROOM_PHOTOROOM_COST_USD`, default `0.10` per successful edit).
+provider's `usage.cost`. Photoroom uses `ANTEROOM_PHOTOROOM_COST_USD` for a Plus
+edit (default $0.10). A plain solid-background cutout uses the Basic endpoint
+and costs one fifth of that rate (default $0.02).
 
 Set `ANTEROOM_OPERATOR_USER_ID` to your Supabase user id, then export:
 
@@ -397,4 +398,22 @@ Or via the CLI against a signed-in operator session:
 
 ```sh
 anteroom api request GET /api/operator/usage --query format=csv
+```
+
+### Subscription tiers & Smart Credits
+
+Hosted accounts default to the **Free** tier (10 distinct items listed/month, 50 Smart Credits/month) unless assigned a paid or internal tier in `seller_plans` or matched by `ANTEROOM_UNLIMITED_EMAILS` (comma-separated emails; defaults to the two approved owner accounts). Local desktop accounts are never limited.
+
+Operators (`ANTEROOM_OPERATOR_USER_ID`) can inspect and assign plans:
+
+```sh
+# List assigned plans and current-month usage
+curl -sS -H "Authorization: Bearer <operator-access-token>" \
+  "https://api.myanteroom.com/api/operator/plans"
+
+# Assign a seller to a tier (free, lister, starter, pro, business, unlimited)
+curl -sS -X PUT -H "Authorization: Bearer <operator-access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"plan_id":"pro","billing_interval":"monthly","note":"Beta subscriber"}' \
+  "https://api.myanteroom.com/api/operator/plans/<seller-user-id>"
 ```

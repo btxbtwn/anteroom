@@ -12,6 +12,7 @@ import type { useChatScroll } from "./useChatScroll";
 export function ChatTranscript({
   scroll,
   className,
+  scrollClassName,
   laneClassName,
   busy = false,
   doneMessage = "Reply finished.",
@@ -19,6 +20,8 @@ export function ChatTranscript({
 }: {
   scroll: ReturnType<typeof useChatScroll>;
   className?: string;
+  /** Extra classes for the scrolling element. */
+  scrollClassName?: string;
   laneClassName?: string;
   /** True while a reply or generation is running. */
   busy?: boolean;
@@ -33,7 +36,7 @@ export function ChatTranscript({
       <DoneAnnouncer busy={busy} doneMessage={doneMessage} />
       <div
         ref={scroll.setScrollEl}
-        className="chat-scroll messages-timeline-scroll h-full min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain [overflow-anchor:none]"
+        className={cn("chat-scroll messages-timeline-scroll h-full min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain [overflow-anchor:none]", scrollClassName)}
         {...scroll.scrollHandlers}
       >
         <div

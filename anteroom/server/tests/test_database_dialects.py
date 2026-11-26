@@ -95,3 +95,92 @@ def test_json_values_come_back_typed_and_comparable():
         ).scalar()
         assert matched == revision.id
         db.rollback()
+
+
+class _Captured(Exception):
+    pass
+
+
+def _driver_arguments(url: str) -> dict:
+    """The keyword arguments a new connection hands psycopg, without connecting."""
+    from sqlalchemy import event
+
+    from anteroom.database import make_engine
+
+    isolated = make_engine(url)
+    captured: dict = {}
+
+    @event.listens_for(isolated, 'do_connect')
+    def capture(_dialect, _record, _cargs, cparams):
+        captured.update(cparams)
+        raise _Captured
+
+    try:
+        with pytest.raises(_Captured):
+            isolated.connect()
+    finally:
+        isolated.dispose()
+    return captured
+
+
+@pytest.mark.parametrize('hosted', ['1', ''])
+def test_postgres_connections_fail_fast_when_the_network_stops_answering(monkeypatch, hosted):
+    # A connection to Supabase that stops delivering packets held request and
+    # automation threads until Postgres ended the idle transaction (30 s), the
+    # connect gave up (~2 min) or the kernel abandoned the socket (~15 min) (#2266).
+    from anteroom.services.hosted_database import IDLE_IN_TRANSACTION_TIMEOUT
+
+    monkeypatch.setenv('ANTEROOM_HOSTED', hosted)
+    for url in ('postgresql+psycopg://u:p@pooler.example:6543/postgres',
+                'postgresql+psycopg://u:p@pooler.example:5432/postgres'):
+        arguments = _driver_arguments(url)
+        assert arguments['connect_timeout'] <= 10
+        assert arguments['keepalives'] == 1
+        assert arguments['keepalives_idle'] + arguments['keepalives_interval'] * arguments['keepalives_count'] <= 30
+        # Unacknowledged data must fail the connection before Postgres ends the
+        # transaction as idle, so the client sees why instead of a dead session.
+        assert arguments['tcp_user_timeout'] < int(IDLE_IN_TRANSACTION_TIMEOUT.removesuffix('s')) * 1000
+
+
+def test_task_signals_listener_carries_the_network_deadlines(monkeypatch):
+    import psycopg
+
+    from anteroom.database import POSTGRES_NETWORK_DEADLINES
+    from anteroom.services.task_signals import TaskSignals
+
+    captured: dict = {}
+
+    def capture(_url, **kwargs):
+        captured.update(kwargs)
+        raise _Captured
+
+    monkeypatch.setattr(psycopg, 'connect', capture)
+    with pytest.raises(_Captured):
+        TaskSignals('postgresql+psycopg://u:p@pooler.example:6543/postgres')._listen()
+    for key, expected in POSTGRES_NETWORK_DEADLINES.items():
+        assert captured[key] == expected
+
+
+def test_postgres_tcp_sockets_carry_the_network_deadlines():
+    import socket
+    import sys
+
+    from anteroom.database import make_engine
+
+    if engine.dialect.name != 'postgresql' or not sys.platform.startswith('linux'):
+        pytest.skip('Reads Linux TCP socket options on a real Postgres connection')
+    isolated = make_engine(engine.url.render_as_string(hide_password=False))
+    try:
+        with isolated.connect() as connection:
+            driver = connection.connection.driver_connection
+            sock = socket.socket(fileno=driver.fileno())
+            try:
+                if sock.family == socket.AF_UNIX:
+                    pytest.skip('The test database is reached over a Unix socket')
+                assert sock.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE) == 1
+                assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE) == 10
+                assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT) == 20_000
+            finally:
+                sock.detach()
+    finally:
+        isolated.dispose()

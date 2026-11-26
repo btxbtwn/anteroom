@@ -65,6 +65,17 @@ SLOW_REPLY = (
     + "\n\n- A list item arrives\n- Then another one\n\nThe end."
 )
 SLOW_WORD_SECONDS = 0.05
+# Sends a reply as a few large chunks with a pause between them, the way a
+# relay or a slow connection delivers one, so browser tests can check that the
+# chat reveals each chunk progressively instead of all at once.
+BURST_MARKER = "[sandbox:burst]"
+BURST_REPLY = (
+    "**Sandbox** sends this reply in a few large chunks. "
+    + "Each chunk carries several sentences that all arrive in the same moment. " * 24
+    + "\n\nThe end."
+)
+BURST_CHUNKS = 6
+BURST_SECONDS = 0.7
 MODEL_SECONDS_ENV = "ANTEROOM_SANDBOX_MODEL_SECONDS"
 
 
@@ -135,6 +146,12 @@ class SandboxProvider:
             for word in SLOW_REPLY.split(" "):
                 await asyncio.sleep(SLOW_WORD_SECONDS)
                 yield word + " "
+            return
+        if BURST_MARKER in _prompt_text([latest_user]):
+            size = len(BURST_REPLY) // BURST_CHUNKS + 1
+            for start in range(0, len(BURST_REPLY), size):
+                await asyncio.sleep(BURST_SECONDS)
+                yield BURST_REPLY[start:start + size]
             return
         if "json" in prompt.lower():
             listing = dict(LISTING)

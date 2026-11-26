@@ -170,7 +170,19 @@ indefinitely. The longest seller read measured is the inventory list, about
 capped at 20 s. Migrations use their own login and are unaffected. When a
 seller sees `canceling statement due to statement timeout` or a connection
 closed for idle-in-transaction, fix the code holding the transaction rather
-than raising these. The seller policies read the signed-in seller through a
+than raising these.
+
+The client side has deadlines too (`POSTGRES_NETWORK_DEADLINES` in
+`database.py`): a 10 s connect timeout, TCP keepalives after 10 s idle (3
+probes 5 s apart) and a 20 s `tcp_user_timeout`. On 2026-11-26 connections
+between Fly and the pooler intermittently stopped delivering packets. Without
+these deadlines a thread waited until Postgres ended the idle transaction
+(30 s), until the connect gave up, or until the kernel abandoned the socket
+after about 15 minutes, which left automations hours overdue (#2266). Before
+blaming the code when a connection closes for idle-in-transaction, check
+`TCPAbortOnTimeout` and `TCPTimeouts` in `/proc/net/netstat` on the Machine.
+
+The seller policies read the signed-in seller through a
 scalar subquery, so Postgres evaluates it once per statement (an InitPlan)
 instead of parsing the claims JSON for every row a scan visits.
 

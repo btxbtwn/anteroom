@@ -108,6 +108,8 @@ struct AssistantLiveTurn: Sendable {
     var asked: Int
     var text = ""
     var status = ""
+    /// The stream has ended; the saved answer is on its way to replace this one.
+    var ended = false
 }
 
 /// A follow-up asked while an answer is still being written.

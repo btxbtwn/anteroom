@@ -84,7 +84,10 @@ async def _relist(conv_id: str, marketplaces: list[str], revision_id: str | None
         if confirmed:
             return {**taken_down, "state": DOWN_STATE, "down": confirmed}
         return taken_down
-    return await _list_remaining(conv_id, marketplaces, revision_id)
+    from anteroom.services import subscriptions
+
+    with subscriptions.exempt_listed_item_count():
+        return await _list_remaining(conv_id, marketplaces, revision_id)
 
 
 def _is_sold(db: Session, conv_id: str) -> bool:
@@ -198,6 +201,7 @@ async def _native_one(conv_id: str, name: str, revision_id: str, kind: str) -> d
     from typing import cast
 
     from anteroom.services.native_marketplaces import ListRequest, Marketplace, NativeMarketplaceError, list_now, update_live
+    from anteroom.services.subscriptions import PlanLimitError
 
     verb = "relist" if kind == "list" else "update"
     start = list_now if kind == "list" else update_live
@@ -210,12 +214,18 @@ async def _native_one(conv_id: str, name: str, revision_id: str, kind: str) -> d
             from anteroom.services.draft_scheduling import scheduled_requester
 
             # A publish an MCP agent scheduled names it on its jobs, as one it started would.
-            requester = {"requested_by": agent} if (agent := scheduled_requester()) else {}
             # This call follows the seller's consumed item-specific approval.
-            result = await start(conv_id, cast(Marketplace, name), ListRequest(revision_id=revision_id, confirm=True),
-                                 **requester)
+            body = ListRequest(revision_id=revision_id, confirm=True)
+            agent = scheduled_requester()
+            result = (
+                await start(conv_id, cast(Marketplace, name), body, requested_by=agent)
+                if agent
+                else await start(conv_id, cast(Marketplace, name), body)
+            )
         except NativeMarketplaceError as exc:
             return {"ok": False, "marketplace": name, "error": str(exc)}
+        except PlanLimitError as exc:
+            return {"ok": False, "marketplace": name, "error": str(exc.detail)}
         if result.get("job_id") and not await _wait_for_job(result["job_id"]):
             return stalled
     job = await _db_work(_job_outcome, result["job_id"]) if result.get("job_id") else None
