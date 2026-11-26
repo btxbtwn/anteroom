@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1276 — 2026-11-26
+
+- Keep small buttons and inline text buttons easy to tap on phones by centering their 44-point touch target without enlarging dense desktop controls.
+
 ## 0.1.1275 — 2026-11-26
 
 - Depop drafts, publishing, edits, relists, and offers use your signed-in Chrome. Depop Cloud still handles sales checks, imports, and standalone delists.
