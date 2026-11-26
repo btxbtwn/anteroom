@@ -2160,6 +2160,26 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.db.expire_all()
         self.assertEqual(self.db.query(MarketplaceListing).filter_by(conversation_id=conv).one().listing_id, "m123456781")
 
+    def test_mercari_already_absent_original_never_authorizes_replacement_publish(self):
+        conv, _ = self._mercari_due("Coat", "m123456781")
+        auto_relist.save_rule(self.db, "mercari", {"enabled": True}, confirm=True)
+        actions = []
+        link = "https://www.mercari.com/sell/draft/ready123/"
+
+        async def respond(job, message, payload, **kwargs):
+            actions.append(payload["action"])
+            if payload["action"] == "prepare_relist":
+                return {"ok": True, "state": "draft", "draft_url": link, "photo_ids": ["uploaded1"]}
+            return {"ok": True, "state": "deleted", "already": True}
+
+        self._connect_mercari_bridge(respond)
+        outcomes = asyncio.run(auto_relist.run_auto_relist(now=_now()))
+        self.assertEqual(actions, ["prepare_relist", "delete_for_relist"])
+        self.assertEqual(outcomes[0]["status"], "down_needs_relist")
+        self.assertIn("already absent", outcomes[0]["reason"])
+        self.db.expire_all()
+        self.assertEqual(self.db.query(MarketplaceListing).filter_by(conversation_id=conv).one().draft_url, link)
+
     def test_mercari_rejected_photos_after_delete_preserves_recovery_draft(self):
         conv, _ = self._mercari_due("Coat", "m123456781")
         self._mercari_due("Boots", "m123456782", age_days=31)

@@ -1275,6 +1275,9 @@ async def run_auto_relist(
                 return {"ok": False, "skipped": True, "error": str(exc)}
             return {"ok": False, "error": str(exc), "error_code": exc.reason}
         entry_res = res.get(marketplace) or {}
+        if marketplace == "mercari" and entry_res.get("state") == "deleted" and entry_res.get("already_gone"):
+            return {"ok": False, "already_gone": True,
+                    "error": "The original Mercari listing was already absent. Check why it was removed before using the saved draft."}
         return {
             "ok": entry_res.get("state") == "deleted",
             "error": entry_res.get("error"),
@@ -1407,6 +1410,8 @@ async def run_auto_relist(
                 log.warning("Auto-relist could not put back the prices of %s after a failed delist", conv_id,
                             exc_info=True)
             delist_status = "skipped_rule_disabled" if delist_res.get("skipped") else "failed"
+            if delist_res.get("already_gone"):
+                delist_status = "down_needs_relist"
             outcomes.append(await in_worker_session(_record_log_payload, {
                 "attempt_id": attempt_id, "conv_id": conv_id,
                 "marketplace": market,

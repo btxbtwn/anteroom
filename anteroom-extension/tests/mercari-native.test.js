@@ -292,6 +292,15 @@ test('Mercari replacement photo drift stops each live mutation at its own read-b
   }
 });
 
+test('an administratively removed Mercari original reports absence without issuing a mutation', async () => {
+  const { c, opsOf } = worker();
+  c.readMercariItem = async () => ({ status: 'admin_cancel' });
+  const result = await c.runNativeMarketplace(publish({ action: 'delete_for_relist', listing_id: 'm123456789',
+    expected_photo_ids: ['i1', 'i2'] }));
+  assert.equal(result.already, true);
+  assert.deepEqual(opsOf(), []);
+});
+
 test('a confirmed Mercari delete is followed by a fresh photo check before publishing', async () => {
   for (const drift of [false, true]) {
     const { c, setDraft, opsOf } = worker({ http: op => {
