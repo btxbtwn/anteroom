@@ -223,8 +223,6 @@ export interface AutoRelistRule {
   relisted_today: number;
   remaining_today: number;
   last_run_at: string | null;
-  /** Why this marketplace's Auto-Relist leaves listings up instead of relisting them. */
-  paused_reason: string | null;
 }
 
 export interface AutoRelistRuleBody {

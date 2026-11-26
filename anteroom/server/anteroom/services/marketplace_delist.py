@@ -51,6 +51,12 @@ class DelistError(RuntimeError):
         self.reason = reason
 
 
+def _require_relist_rule(db: Session, rule_id: str, marketplace: str) -> None:
+    rule = db.get(MarketplaceRelistRule, rule_id, with_for_update=True)
+    if not rule or rule.marketplace != marketplace or not rule.enabled:
+        raise DelistError(409, "The relist rule was turned off. Nothing was delisted.", reason="relist_rule_disabled")
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
@@ -521,6 +527,16 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
             entry = known[name]
             base = {"listing_id": entry["listing_id"], "url": entry["url"], "at": _now(),
                     "attempts": _attempt(entry)}
+            replacement = None
+            if name == "mercari" and relist_rule_id is not None:
+                from anteroom.services.native_marketplaces import NativeMarketplaceError, prepare_mercari_relist
+
+                if not expected_revision_id:
+                    raise DelistError(409, "Mercari Auto-Relist requires a saved replacement revision.")
+                try:
+                    replacement = await prepare_mercari_relist(conv_id, expected_revision_id, job_id)
+                except NativeMarketplaceError as exc:
+                    raise DelistError(exc.status_code, str(exc), reason=exc.reason) from exc
             try:
                 if sale_id is None:
                     ebay_record = await in_worker_session(
@@ -567,9 +583,16 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
                     # Already absent is a reconciliation of the listing, never evidence of a sale.
                     # Who removed it is not known: only that the marketplace no longer has it.
                     already = gone or result.get("already") is True
-                    await in_worker_session(_deleted, conv_id, name, {
+                    receipt = {
                         **base, "already": True, "marketplace_message": scrub(result.get("marketplace_message")),
-                    } if already else base)
+                    } if already else base
+                    if replacement:
+                        await in_worker_session(_deleted_with_replacement, conv_id, receipt, {
+                            "state": "draft", "draft_url": replacement, "revision_id": expected_revision_id,
+                            "job_id": job_id, "action": "save_draft",
+                        })
+                    else:
+                        await in_worker_session(_deleted, conv_id, name, receipt)
                 else:
                     failed = True
                     await in_worker_session(_record, conv_id, name, {
@@ -588,9 +611,10 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
             error=DELIST_INCOMPLETE if failed else None,
             # A follow-up retry alerts the operator itself, on its first try and every few after.
             failure_log_level=logging.INFO if sale_id else logging.ERROR))
-    except BaseException:
+    except BaseException as exc:
+        message = str(exc) if isinstance(exc, DelistError) else "The delist stopped before it finished."
         await asyncio.shield(in_worker_session(lambda db: JobRepo(db).update_status(
-            job_id, "failed", "native_delist", error="The delist stopped before it finished.")))
+            job_id, "failed", "native_delist", error=message)))
         raise
     finally:
         release_api_job(job_id)
@@ -635,6 +659,8 @@ def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
     with listing_mode.guard(db, "direct"):
         known = listings(db, conv_id)
         for name in names:
+            if name == "mercari" and relist_rule_id is not None:
+                _require_relist_rule(db, relist_rule_id, name)
             entry = known.get(name)
             if not entry or not entry["listing_id"]:
                 raise DelistError(409, f"Anteroom has no {name} listing link for this item.")
@@ -707,13 +733,30 @@ def _start_delete(db: Session, conv_id: str, name: str, base: dict, job_id: str,
         from anteroom.services import listing_mode
 
         with listing_mode.guard(db, "direct"):
-            rule = db.get(MarketplaceRelistRule, relist_rule_id, with_for_update=True)
-            if not rule or rule.marketplace != name or not rule.enabled:
-                raise DelistError(409, "The relist rule was turned off. Nothing was delisted.", reason="relist_rule_disabled")
+            _require_relist_rule(db, relist_rule_id, name)
             if expected_revision_id is not None:
                 listing = ListingRepo(db).get_current(conv_id)
                 if not listing or listing.current_revision_id != expected_revision_id:
-                    raise DelistError(409, "The listing changed while checking shipping. Nothing was delisted.",
+                    raise DelistError(409, "The listing changed while preparing the replacement. Nothing was delisted.",
+                                      reason="listing_changed")
+            if name == "mercari":
+                from anteroom.services.draft_scheduling import is_sold_or_has_sale
+                from anteroom.services.native_marketplaces import mercari_replacement_is_current
+
+                conv = _locked_conversation(db, conv_id)
+                live = listings(db, conv_id, conv=conv)
+                target = live.get(name) or {}
+                # A sale arriving during draft preparation makes the item
+                # ineligible under the same policy as the relist scheduler.
+                sale = db.query(MarketplaceSale.id).filter(
+                    MarketplaceSale.conversation_id == conv_id,
+                    MarketplaceSale.order_status.in_((*PAID_STATUSES, "cancellation_pending")),
+                ).first()
+                if (target.get("listing_id") != base["listing_id"] or target.get("state") not in {"live", "failed"}
+                        or sale is not None or any(row.get("sold_here") for row in live.values())
+                        or is_sold_or_has_sale(db, conv)
+                        or not mercari_replacement_is_current(db, conv_id, job_id)):
+                    raise DelistError(409, "The Mercari listing changed while preparing its replacement.",
                                       reason="listing_changed")
             return _record_delete_start(db, conv_id, name, base, job_id)
     return _record_delete_start(db, conv_id, name, base, job_id)
@@ -753,3 +796,14 @@ def _record_delete(db: Session, conv_id: str, name: str, value: dict, *, commit:
 def _deleted(db: Session, conv_id: str, name: str, base: dict) -> None:
     _record_delete(db, conv_id, name, {**base, "state": "deleted", "error": None, "at": _now()})
     _forget_deleted_listing(db, conv_id, name, base.get("listing_id"))
+
+
+def _deleted_with_replacement(db: Session, conv_id: str, receipt: dict, replacement: dict) -> None:
+    """The delete receipt and the exact draft ready for List become visible in one commit."""
+    _record_delete(db, conv_id, "mercari", {**receipt, "state": "deleted", "error": None, "at": _now()}, commit=False)
+    MarketplaceListingRepo(db).save(conv_id, "mercari", {
+        **replacement, "operation_id": replacement["job_id"], "executor": "chrome",
+        "listing_id": None, "listing_url": None, "listed_at": None, "listed_price": None,
+        "error": None, "error_code": None, "error_fields": None, "marketplace_message": None,
+        "retry_after": None, "inventory_observation": None,
+    })

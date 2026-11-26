@@ -74,6 +74,23 @@ function rejectingWorker() {
   return result;
 }
 
+test('preparing an auto-relist requires a matching READY draft and never publishes it', async () => {
+  for (const ready of [false, true]) {
+    const { c, opsOf, setDraft } = worker();
+    setDraft({ ...KEPT, name: listing.title, description: listing.description, price: 2500,
+      photos: [{ id: 'i1' }, { id: 'i2' }], draftItemStatus: ready ? 'DRAFT_ITEM_STATUS_READY' : 'action_required' });
+    const command = { ...message({ action: 'prepare_relist', operation_id: 'abcd1234' }), type: 'marketplace.execute' };
+    const replies = [];
+    await c.handleNativeMarketplaceMessage(command, result => replies.push(result));
+    await c.handleNativeMarketplaceMessage(command, result => replies.push(result));
+    assert.equal(replies.length, 2);
+    assert.equal(replies[0].ok, ready);
+    assert.deepEqual(replies[1], replies[0]);
+    if (ready) assert.equal(replies[0].draft_url, 'https://www.mercari.com/sell/draft/m9AbC123/');
+    assert.deepEqual(opsOf(), ['uploadDraftItemImageMutation', 'uploadDraftItemImageMutation', 'addDraftItemMutation', 'draftItemQuery']);
+  }
+});
+
 test('a new Mercari draft uploads photos, saves once, and is confirmed by reading it back, with no tab', async () => {
   const { c, requests, initializes, journal, opsOf } = worker();
   const result = await c.runMercariNative(message());

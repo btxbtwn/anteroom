@@ -747,7 +747,8 @@ async function runMercariNative(msg, recovery = false) {
   try {
     if (payload.action === 'publish') return await publishMercariDraft(payload, storeReceipt, recovery);
     if (payload.action === 'update') return await updateMercariItem(payload, recovery);
-    if (payload.action !== 'save_draft') return null;
+    const replacement = payload.action === 'prepare_relist';
+    if (payload.action !== 'save_draft' && !replacement) return null;
     let id = mercariDraftId(payload.draft_url);
     if (recovery) {
       if (!id) return marketplaceFailure(new Error('Mercari did not confirm a draft. Check your Mercari drafts before trying again.'), false);
@@ -755,6 +756,7 @@ async function runMercariNative(msg, recovery = false) {
       if (!mercariDraftMatches(draft, await mercariExpected(payload.listing, payload.deadline), payload.expected_photo_count)) {
         return marketplaceFailure(new Error('Mercari\'s listing does not match this revision. List again.'), false, { draft_url: payload.draft_url });
       }
+      if (replacement) requireMercariReady(draft);
       return { ok: true, state: 'draft', draft_url: payload.draft_url };
     }
     const listing = await mercariPreparedListing(payload.listing, payload.deadline);
@@ -781,6 +783,7 @@ async function runMercariNative(msg, recovery = false) {
     const draft = await readMercariDraft(id, payload.deadline);
     const mismatch = mercariDraftMismatch(draft, common, expectedPhotos, 'Mercari did not keep everything this listing sent');
     if (mismatch) throw mismatch;
+    if (replacement) requireMercariReady(draft);
     return { ok: true, state: 'draft', draft_url: payload.draft_url };
   } catch (error) {
     // A draft mutation Mercari clearly refused wrote nothing.
@@ -791,6 +794,14 @@ async function runMercariNative(msg, recovery = false) {
 
 const MERCARI_ACTION_LABELS = { categoryId: 'a category', conditionId: 'a condition', brandId: 'a brand', sizeId: 'a size',
   shipping: 'shipping', shippingClassIds: 'shipping', photos: 'photos', price: 'a price', name: 'a title', description: 'a description' };
+
+function requireMercariReady(draft) {
+  if (draft.status === 'DRAFT_ITEM_STATUS_READY') return;
+  const fields = [...new Set(draft.actions_required)];
+  throw marketplaceMissing('mercari', (fields.length ? fields : ['details']).map(field => ({ field,
+    needs: MERCARI_ACTION_LABELS[field] || String(field).replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase() })),
+  fields.length ? `draftItemActionsRequired: ${fields.join(', ')}` : String(draft.status || ''));
+}
 
 // Publishing lists an existing READY draft with one listDraftItemMutation and
 // the draft ID. Seller-confirmed only, sent at most once, and never retried
@@ -815,12 +826,7 @@ async function publishMercariDraft(payload, storeReceipt, recovery) {
     const draft = await readMercariDraft(id, payload.deadline);
     const mismatch = mercariDraftMismatch(draft, common, null, 'Mercari\'s draft does not match this revision');
     if (mismatch) throw Object.assign(mismatch, { code: 'rejected' });
-    if (draft.status !== 'DRAFT_ITEM_STATUS_READY') {
-      const fields = [...new Set(draft.actions_required)];
-      throw marketplaceMissing('mercari', (fields.length ? fields : ['details']).map(field => ({ field,
-        needs: MERCARI_ACTION_LABELS[field] || String(field).replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase() })),
-      fields.length ? `draftItemActionsRequired: ${fields.join(', ')}` : String(draft.status || ''));
-    }
+    requireMercariReady(draft);
     stage = 'publishing';
     const data = await mercariRequest(mercariOperation('listDraftItemMutation', { input: { draftItemId: id } }), { deadline: payload.deadline });
     stage = 'published';

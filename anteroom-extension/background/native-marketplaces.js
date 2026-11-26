@@ -137,10 +137,15 @@ const NATIVE_UPDATE_LISTING = {
   mercari: ['Mercari', /^m\d{6,}$/],
 };
 
+const NATIVE_ACTIONS = {
+  poshmark: ['list', 'update', 'save_draft'],
+  mercari: ['save_draft', 'prepare_relist', 'publish', 'update'],
+  depop: ['save_draft', 'publish', 'update'],
+};
+
 async function runNativeMarketplace(msg) {
   const p = msg.payload || {};
-  if (!['poshmark', 'mercari', 'depop'].includes(p.marketplace)
-      || !({ poshmark: ['list', 'update', 'save_draft'] }[p.marketplace] || ['save_draft', 'publish', 'update']).includes(p.action)) {
+  if (!Object.hasOwn(NATIVE_ACTIONS, p.marketplace) || !NATIVE_ACTIONS[p.marketplace].includes(p.action)) {
     return nativeRefusal('Unsupported marketplace action.');
   }
   if (p.action === 'list' && p.confirm !== true) return nativeRefusal('Confirm listing on this marketplace.');

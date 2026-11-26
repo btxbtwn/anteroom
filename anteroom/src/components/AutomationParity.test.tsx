@@ -99,7 +99,6 @@ describe("Wave 2 Track C automation and sale-sync UI components", () => {
               relisted_today: 0,
               remaining_today: 25,
               last_run_at: null,
-              paused_reason: null,
             },
             {
               marketplace: "ebay",
@@ -114,7 +113,6 @@ describe("Wave 2 Track C automation and sale-sync UI components", () => {
               relisted_today: 2,
               remaining_today: 48,
               last_run_at: null,
-              paused_reason: null,
             },
           ],
         };

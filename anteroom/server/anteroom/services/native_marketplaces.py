@@ -592,6 +592,8 @@ def _open_job(db: Session, conv_id: str, marketplace: str, body: ListRequest, ki
                 )
                 if previous_versions != current_versions or pricing_changed:
                     steps = ["save_draft", "publish"]
+            if marketplace == "mercari" and relist_rule_id and steps != ["publish"]:
+                raise NativeMarketplaceError(409, "The verified Mercari replacement changed. Review its draft before listing.")
             job = repo.create(conv_id, body.revision_id, snapshot, status="dispatched",
                               current_step=f"native_{marketplace}_{steps[0]}", requested_by=requested_by)
             claim_api_job(db, job.id)
@@ -760,6 +762,73 @@ async def save_draft(conv_id: str, marketplace: Marketplace, revision_id: str, *
     """Save only. No confirmation, publish step, or automatic publish retry."""
     return await _start(conv_id, marketplace, ListRequest(revision_id=revision_id), "save_draft",
                         requested_by=requested_by)
+
+
+async def prepare_mercari_relist(conv_id: str, revision_id: str, job_id: str) -> str:
+    """Use the delist job's photo approval without overwriting the still-live Mercari record."""
+    from anteroom.services import approved_photos
+    from anteroom.services.native_contract import KEY as FORM_CONTRACTS
+
+    snapshot, photos = await in_worker_session(_preflight, conv_id, "mercari", ListRequest(revision_id=revision_id))
+    binding = {"operation_id": job_id, "revision_id": revision_id}
+    payload = await asyncio.to_thread(_execute_payload, "mercari", "prepare_relist", binding, snapshot, photos, "")
+
+    def pin_photos(db: Session) -> None:
+        # Copy before checking out a connection. The same worker either attaches
+        # the copies to their job or releases them, even if the caller cancels.
+        manifest = approved_photos.capture(photos)
+        try:
+            job = JobRepo(db).get(job_id)
+            if job is None or job.approved_revision_id != revision_id:
+                raise NativeMarketplaceError(409, "The approved Mercari revision changed.")
+            pinned = {key: value for key, value in snapshot.items() if key != FORM_CONTRACTS}
+            job.listing_snapshot = {**pinned, "delist": ["mercari"], approved_photos.KEY: manifest}
+            db.commit()
+        except Exception:
+            db.rollback()
+            approved_photos.release({approved_photos.KEY: manifest})
+            raise
+
+    await _joined_worker_session(pin_photos)
+    try:
+        result = await browser_bridge.request(_JobRef(job_id), "marketplace.execute", payload, timeout=EXECUTE_TIMEOUT_S)
+    except browser_bridge.BrowserBridgeError as exc:
+        raise NativeMarketplaceError(409, "Chrome did not confirm the Mercari replacement draft.",
+                                     reason="chrome_unavailable") from exc
+    link = draft_url("mercari", result["draft_url"]) if result.get("draft_url") else None
+    ready = result.get("ok") is True and result.get("state") == "draft"
+    if link:
+        # Keep the receipt even when the rule is turned off or the process
+        # stops between verifying the draft and recording the delete.
+        await _joined_worker_session(lambda db: JobRepo(db).add_event(
+            job_id, "native_result", "native_mercari_prepare_relist", {"draft_url": link, "ready": ready}))
+    if not ready or not link:
+        message = result.get("error") or "Mercari did not confirm the replacement draft."
+        if message == "Unsupported marketplace action.":
+            raise NativeMarketplaceError(409, "Update Anteroom Bridge in Chrome to prepare Mercari relists.",
+                                         reason="chrome_unavailable")
+        raise NativeMarketplaceError(409, str(message), reason=result.get("error_code"))
+    return link
+
+
+def mercari_replacement_is_current(db: Session, conv_id: str, job_id: str) -> bool:
+    """Photos and price rules can change without changing the listing revision."""
+    from anteroom.services import approved_photos
+    from anteroom.services.pricing_rules import SNAPSHOT_RULES
+
+    job = JobRepo(db).get(job_id)
+    if not job or job.cancel_requested or job_cancel_requested(job_id):
+        return False
+    snapshot = job.listing_snapshot or {}
+    approved = snapshot.get(approved_photos.KEY)
+    if not isinstance(approved, list):
+        return False
+    current, _ = _photos(db, conv_id, snapshot, "mercari")
+    current_pricing = {key: value for key, value in snapshot.items() if key != SNAPSHOT_RULES}
+    return (price_for(current_pricing, "mercari") == price_for(snapshot, "mercari")
+            and len(current) == len(approved)
+            and all(photo.id == saved["id"] and (not photo.checksum or photo.checksum == saved["checksum"])
+                    for photo, saved in zip(current, approved, strict=True)))
 
 
 async def check_depop_relist_shipping(conv_id: str, revision_id: str, proposed_price: float | None) -> None:
