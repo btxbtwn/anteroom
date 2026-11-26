@@ -1,1 +1,0 @@
-- Plain background removal now uses Photoroom’s lower-cost API, including when you choose a solid background color.

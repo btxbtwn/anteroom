@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1278 — 2026-11-26
+
+- Plain background removal now uses Photoroom’s lower-cost API, including when you choose a solid background color.
+
 ## 0.1.1277 — 2026-11-26
 
 - See your account’s OpenRouter calls, Photoroom edits, and costs for the last 30 days in Settings → Usage on the web.
