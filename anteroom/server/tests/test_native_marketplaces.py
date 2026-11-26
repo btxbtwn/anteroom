@@ -1872,14 +1872,17 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         self.bridge.assert_called_once()
         self.assertEqual(self.bridge.call_args.args[1], "marketplace.result")
 
-    def test_background_check_skips_a_settled_depop_listing_without_a_link(self):
+    def test_background_check_recovers_a_missing_depop_link_once(self):
         job = JobRepo(self.db).create(self.conv.id, self.rev.id, LISTING, status="completed", current_step="native_depop_list")
         MarketplaceListingRepo(self.db).save(self.conv.id, "depop", {
             "state": "published", "action": "list", "job_id": job.id, "operation_id": job.id, "listing_url": None,
         })
-        self.assertEqual(native._reconcile_targets(self.db, chrome=True, periodic=True), [])
+        self.bridge.return_value = {"finished": True, "result": self.published("depop")}
+        self.assertEqual(asyncio.run(native.reconcile(chrome=True, periodic=True)), 1)
+        self.assertEqual(self.status()["depop"]["listing_url"], LIVE["depop"])
         self.assertEqual(asyncio.run(native.reconcile(chrome=True, periodic=True)), 0)
-        self.bridge.assert_not_called()
+        self.bridge.assert_awaited_once()
+        self.assertEqual(self.bridge.call_args.args[1], "marketplace.result")
 
     def test_the_watchdog_fails_dead_native_jobs_and_leaves_live_ones_alone(self):
         repo = JobRepo(self.db)

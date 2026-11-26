@@ -10,7 +10,9 @@ depends_on = None
 
 def _owners(include_removals: bool) -> None:
     if op.get_bind().dialect.name == "postgresql":
-        due = " OR listing.removal_check_at <= (now() AT TIME ZONE 'UTC')" if include_removals else ""
+        due = """ OR listing.removal_check_at <= (now() AT TIME ZONE 'UTC')
+                   OR (listing.marketplace = 'depop' AND listing.state = 'published'
+                       AND coalesce(listing.listing_url, '') = '' AND listing.job_id IS NOT NULL)""" if include_removals else ""
         op.execute(f"""
             CREATE OR REPLACE FUNCTION anteroom_private.unsettled_job_owners()
             RETURNS TABLE(owner_id text) LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
