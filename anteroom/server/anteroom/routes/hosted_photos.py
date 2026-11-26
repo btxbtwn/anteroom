@@ -72,7 +72,9 @@ def save_photo(db, draft_id, key, data, width, height, marketplace=None):
                   marketplace=marketplace)
     db.add(photo)
     db.commit()
-    # The photo as the photo list shows it, so a client adds it without reading the list again.
+    # The photo as the photo list shows it (stored values, so the same
+    # created_at), so a client adds it without reading the list again.
+    db.refresh(photo)
     return photo_response(photo)
 
 
