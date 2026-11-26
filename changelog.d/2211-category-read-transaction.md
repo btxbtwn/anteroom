@@ -1,0 +1,1 @@
+- Large category pickers release their database connection before preparing the response, leaving it available for other requests.
