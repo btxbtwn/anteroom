@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
 
 from anteroom.models.conversation import Conversation, Photo
+from anteroom.routes import api_contract as contract
+from anteroom.routes.hosted_workspace import photo_response
 from anteroom.services import hosted_photos as photos
 from anteroom.services.hosted_database import get_seller_db, in_seller_session
 from anteroom.services.hosted_limits import hold_upload_slot, read_bounded_body
@@ -70,10 +72,11 @@ def save_photo(db, draft_id, key, data, width, height, marketplace=None):
                   marketplace=marketplace)
     db.add(photo)
     db.commit()
-    return PhotoResponse.model_validate(photo)
+    # The photo as the photo list shows it, so a client adds it without reading the list again.
+    return photo_response(photo)
 
 
-@router.post('', response_model=PhotoResponse, status_code=201)
+@router.post('', response_model=contract.ListingPhoto, status_code=201)
 async def upload_photo(draft_id: str, request: Request, marketplace: Literal['poshmark', 'mercari', 'depop', 'ebay', 'etsy'] | None = None):
     # Check ownership before reading bytes. Hold one per-seller upload slot
     # across body receive and Pillow normalization so concurrent uploads cannot
