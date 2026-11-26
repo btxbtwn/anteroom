@@ -93,7 +93,10 @@ async def _relist(conv_id: str, marketplaces: list[str], revision_id: str | None
         if confirmed:
             return {**taken_down, "state": DOWN_STATE, "down": confirmed}
         return taken_down
-    return await _list_remaining(conv_id, marketplaces, revision_id, confirmed_ebay_ad_rate=confirmed_ebay_ad_rate)
+    from anteroom.services import subscriptions
+
+    with subscriptions.exempt_listed_item_count():
+        return await _list_remaining(conv_id, marketplaces, revision_id, confirmed_ebay_ad_rate=confirmed_ebay_ad_rate)
 
 
 def _check_ebay_relist(db: Session, conv_id: str, revision_id: str | None, rate: str | None) -> None:
@@ -237,6 +240,7 @@ async def _native_one(conv_id: str, name: str, revision_id: str, kind: str, *,
     from typing import cast
 
     from anteroom.services.native_marketplaces import ListRequest, Marketplace, NativeMarketplaceError, list_now, update_live
+    from anteroom.services.subscriptions import PlanLimitError
 
     verb = "relist" if kind == "list" else "update"
     start = list_now if kind == "list" else update_live
@@ -265,6 +269,8 @@ async def _native_one(conv_id: str, name: str, revision_id: str, kind: str, *,
                 result = await start(conv_id, target, body)
         except NativeMarketplaceError as exc:
             return {"ok": False, "marketplace": name, "error": str(exc)}
+        except PlanLimitError as exc:
+            return {"ok": False, "marketplace": name, "error": str(exc.detail)}
         if result.get("job_id") and not await _wait_for_job(result["job_id"]):
             return stalled
     job = await _db_work(_job_outcome, result["job_id"]) if result.get("job_id") else None

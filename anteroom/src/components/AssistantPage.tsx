@@ -36,7 +36,7 @@ import { foldSseEvent } from "./chat/chatStream";
 import { ChatTranscript } from "./chat/ChatTranscript";
 import { FoldedTurnRow, LiveWork } from "./chat/LiveWork";
 import { QueuedMessages } from "./chat/QueuedMessages";
-import { AssistantMessageRow, UserMessageRow } from "./chat/TimelineRows";
+import { AssistantMessageRow, StreamingAssistantRow, UserMessageRow } from "./chat/TimelineRows";
 import { useChatScroll } from "./chat/useChatScroll";
 import { placeTurnFolds, turnHasWork, type FoldedTurn } from "./chat/workLogModel";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
@@ -156,6 +156,8 @@ export interface LiveTurn {
   /** The stream so far: the answer text, the work log and any subagents. */
   parts: SseParts;
   startedAtMs: number;
+  /** The stream has ended; the saved answer is on its way to replace this one. */
+  ended?: boolean;
 }
 
 /** A failed submission preserved out-of-band when restoring directly into the composer would clobber a newer draft. */
@@ -479,11 +481,12 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     let dropped = false;
     let parts = emptySseParts();
     let stopped = false;
+    let ended = false;
     // Once a newer follow owns the page (another conversation, a new chat), a
     // late paint from this one must not put its answer back on screen.
     const show = () => {
       if (controller.current !== abort) return;
-      setLive({ question, questionImages: shownImages, asked, startedAtMs, parts: { ...parts } });
+      setLive({ question, questionImages: shownImages, asked, startedAtMs, parts: { ...parts }, ended });
     };
     if (question !== null || retry) {
       scroll.pinChatToBottom();
@@ -552,6 +555,9 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
       }
     } finally {
       const endedAtMs = Date.now();
+      // Nothing more is coming: the last word no longer waits for the one after it.
+      ended = true;
+      show();
       if (turnHasWork(parts.trace)) {
         foldSeq += 1;
         keepFold(id, {
@@ -974,7 +980,16 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
 
   return (
     <div className="assistant-page flex min-h-0 min-w-0 flex-1 flex-col">
-      <ChatTranscript scroll={scroll} busy={Boolean(live)} doneMessage="Answer finished." laneClassName="max-w-208 px-4 pt-8 sm:px-8">
+      {/* The messages share the message box's left and right edges: the same width and
+          side padding, with room for the scrollbar kept on both sides so the column
+          stays centred over the box once the conversation scrolls. */}
+      <ChatTranscript
+        scroll={scroll}
+        busy={Boolean(live)}
+        doneMessage="Answer finished."
+        scrollClassName="[scrollbar-gutter:stable_both-edges]"
+        laneClassName="max-w-[calc(var(--chat-content-max-width)+2rem)] px-3 pt-8 sm:px-4"
+      >
         <div className="contents" onClick={openLinkedListing}>
           {messages.isLoading && !turns.length ? (
             <div className="flex justify-center py-4"><Spinner size="md" tone="muted" /></div>
@@ -1027,11 +1042,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
                   tailLabel={visible ? "" : liveTail}
                 />
               ) : null}
-              {visible ? (
-                <div className="pb-4">
-                  <AssistantMessageRow text={visible} streaming />
-                </div>
-              ) : null}
+              {visible ? <StreamingAssistantRow received={live.parts.content} complete={live.ended} /> : null}
             </>
           ) : null}
           <QueuedMessages

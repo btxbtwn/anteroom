@@ -452,10 +452,20 @@ def _photos(db: Session, conv_id: str, snapshot: dict, marketplace: str) -> tupl
 
 async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str,
                  relist_rule_id: str | None = None, requested_by: str | None = None, *,
-                 promotion_mode: PromotionMode = "confirm") -> dict:
+                 promotion_mode: PromotionMode = "confirm", count_for_plan: bool = True) -> dict:
     """Check, ask Chrome or eBay, then open the job. Each database step runs on a worker thread
     with its own session, so no pooled connection is held while Chrome or eBay answers."""
-    snapshot, photos, deleted_here = await in_worker_session(_check_start, conv_id, marketplace, body, kind)
+    from anteroom.services import subscriptions
+
+    enforced_plan_listing = (
+        kind == "list"
+        and relist_rule_id is None
+        and count_for_plan
+        and not subscriptions.is_listed_item_exempt()
+    )
+    snapshot, photos, deleted_here = await in_worker_session(
+        _check_start, conv_id, marketplace, body, kind, enforced_plan_listing,
+    )
     if marketplace == "ebay":
         from anteroom.services.ebay_listing_promotion import confirmed_selection, selection
 
@@ -487,7 +497,9 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str,
 
     async def open_and_launch() -> dict:
         record, job_id, steps = await in_worker_session(
-            _open_job, conv_id, marketplace, body, kind, snapshot, photos, deleted_here, relist_rule_id, requested_by)
+            _open_job, conv_id, marketplace, body, kind, snapshot, photos, deleted_here,
+            relist_rule_id, requested_by, enforced_plan_listing,
+        )
         _launch(run_job(job_id, conv_id, marketplace, steps, options))
         record["running"] = True
         return record
@@ -496,7 +508,8 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str,
     return await asyncio.shield(open_and_launch())
 
 
-def _check_start(db: Session, conv_id: str, marketplace: str, body: ListRequest, kind: str) -> tuple[dict, list, bool]:
+def _check_start(db: Session, conv_id: str, marketplace: str, body: ListRequest, kind: str,
+                 check_plan_listing: bool = False) -> tuple[dict, list, bool]:
     from anteroom.services import listing_mode
 
     listing_mode.require("direct", db)
@@ -519,6 +532,13 @@ def _check_start(db: Session, conv_id: str, marketplace: str, body: ListRequest,
         if existing.get("listing_id") and existing.get("state") != "deleted":
             raise NativeMarketplaceError(409, f"This item is already listed on {name}.")
         deleted_here = existing.get("state") == "deleted"
+    if check_plan_listing:
+        from anteroom.services import subscriptions
+
+        try:
+            subscriptions.check_listed_item_allowance(db, conv_id)
+        except subscriptions.PlanLimitError as exc:
+            raise NativeMarketplaceError(402, str(exc.detail), reason=exc.reason) from None
     snapshot, photos = _preflight(db, conv_id, marketplace, body)
     return snapshot, photos, deleted_here
 
@@ -547,7 +567,7 @@ def _after_preview(db: Session, marketplace: str, body: ListRequest, snapshot: d
 
 def _open_job(db: Session, conv_id: str, marketplace: str, body: ListRequest, kind: str, snapshot: dict,
               photos: list, deleted_here: bool, relist_rule_id: str | None = None,
-              requested_by: str | None = None) -> tuple[dict, str, list[str]]:
+              requested_by: str | None = None, record_plan_listing: bool = False) -> tuple[dict, str, list[str]]:
     from anteroom.services import approved_photos, listing_mode
     from anteroom.services.pricing_rules import SNAPSHOT_RULES
 
@@ -619,6 +639,13 @@ def _open_job(db: Session, conv_id: str, marketplace: str, body: ListRequest, ki
                 )
                 if previous_versions != current_versions or pricing_changed:
                     steps = ["save_draft", "publish"]
+            if record_plan_listing:
+                from anteroom.services import subscriptions
+
+                try:
+                    subscriptions.require_and_record_listed_item(db, conv_id, marketplace=marketplace)
+                except subscriptions.PlanLimitError as exc:
+                    raise NativeMarketplaceError(402, str(exc.detail), reason=exc.reason) from None
             job = repo.create(conv_id, body.revision_id, snapshot, status="dispatched",
                               current_step=f"native_{marketplace}_{steps[0]}", requested_by=requested_by)
             claim_api_job(db, job.id)
@@ -769,13 +796,17 @@ async def shared_preflight(conv_id: str, revision_id: str | None = None) -> dict
 
 async def list_now(conv_id: str, marketplace: Marketplace, body: ListRequest, *,
                    relist_rule_id: str | None = None, requested_by: str | None = None,
-                   promotion_mode: Literal["confirm", "leave"] = "confirm") -> dict:
+                   promotion_mode: Literal["confirm", "leave"] = "confirm",
+                   count_for_plan: bool = True) -> dict:
     """Start listing on one marketplace in one seller-confirmed step. Returns at once; poll status.
 
     ``requested_by`` names the agent the seller allowed to ask for it (``services/mcp_marketplace_tools.py``).
     """
     mode = "recreate" if relist_rule_id is not None else promotion_mode
-    return await _start(conv_id, marketplace, body, "list", relist_rule_id, requested_by, promotion_mode=mode)
+    return await _start(
+        conv_id, marketplace, body, "list", relist_rule_id, requested_by,
+        promotion_mode=mode, count_for_plan=count_for_plan,
+    )
 
 
 async def update_live(conv_id: str, marketplace: Marketplace, body: ListRequest, *,

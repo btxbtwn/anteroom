@@ -1,7 +1,7 @@
 """track eBay form promotions
 
 Revision ID: 6d0cac7a2206
-Revises: d5e1b7a3c962
+Revises: f1b4c8d2e930
 Create Date: 2026-11-25 21:38:36.744837
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = '6d0cac7a2206'
-down_revision = 'd5e1b7a3c962'
+down_revision = 'f1b4c8d2e930'
 branch_labels = None
 depends_on = None
 

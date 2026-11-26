@@ -1,8 +1,8 @@
 import { useWorkspaceRuntime } from "../../app/runtime";
 import type { ComponentType } from "react";
-import { BotIcon, CircleHelpIcon, DatabaseIcon, FlaskConicalIcon, Link2Icon, MessageSquareTextIcon, ScrollTextIcon, Settings2Icon, TagIcon, TerminalIcon } from "lucide-react";
+import { BotIcon, ChartNoAxesColumnIcon, CircleHelpIcon, DatabaseIcon, FlaskConicalIcon, Link2Icon, MessageSquareTextIcon, ScrollTextIcon, Settings2Icon, TagIcon, TerminalIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { hostedSettingsSections, SETTINGS_NAV_ITEMS, SETTINGS_SECTION_LABELS, settingsSectionFor, type SettingsSectionId } from "../settingsNav";
+import { SETTINGS_NAV_ITEMS, SETTINGS_SECTION_LABELS, settingsSectionFor, type SettingsSectionId } from "../settingsNav";
 import { SIDEBAR_ROW } from "./sidebarStyles";
 import type { SettingsSearch } from "./useSettingsSearch";
 
@@ -10,6 +10,7 @@ import type { SettingsSearch } from "./useSettingsSearch";
    (c) 2026 T3 Tools Inc.). */
 const SECTION_ICONS: Record<SettingsSectionId, ComponentType<{ className?: string }>> = {
   general: Settings2Icon,
+  usage: ChartNoAxesColumnIcon,
   listings: TagIcon,
   assistant: MessageSquareTextIcon,
   providers: BotIcon,
@@ -36,7 +37,6 @@ export function SettingsSidebarNav({
 }) {
   const { hosted, features } = useWorkspaceRuntime();
   const managedAI = features.has("managed_ai");
-  const visibleSections = hostedSettingsSections(managedAI);
   const activeSection = settingsSectionFor(settingsSection, hosted, managedAI);
   const { activeResultIndex, setActiveResultIndex, settingsResults, isSettingsSearching, handleSettingsResult } = search;
 
@@ -81,7 +81,7 @@ export function SettingsSidebarNav({
         </div>
       ) : (
         <nav aria-label="Settings sections" className="flex flex-col gap-1">
-          {SETTINGS_NAV_ITEMS.filter((item) => !hosted || visibleSections.includes(item.id)).map((item) => {
+          {SETTINGS_NAV_ITEMS.filter(({ id }) => settingsSectionFor(id, hosted, managedAI) === id).map((item) => {
             const Icon = SECTION_ICONS[item.id];
             return (
               <button
