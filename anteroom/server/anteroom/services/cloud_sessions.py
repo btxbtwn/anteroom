@@ -36,6 +36,8 @@ log = logging.getLogger("anteroom.cloud_sessions")
 
 # Not Mercari: its edge answers server requests with a Cloudflare challenge, so it runs only in Chrome (#2029).
 SUPPORTED_CLOUD_MARKETPLACES = frozenset({"poshmark", "depop"})
+# Depop Cloud supports reads and standalone delists. Listing and promotion jobs use Chrome.
+CLOUD_WRITE_MARKETPLACES = frozenset({"poshmark"})
 _COOKIE_NAMES = {"poshmark": "jwt", "depop": "access_token"}
 UPLOAD_TOKEN_TTL_S = 180
 SESSION_EXPIRING_S = 24 * 60 * 60
@@ -466,7 +468,7 @@ def save_uploaded_session(
         row.upload_token_expires_at = None
         row.updated_at = now
     _audit(db, market, "connect", detail=f"cookies={len(cookies)}")
-    if verified:
+    if verified and market in CLOUD_WRITE_MARKETPLACES:
         count = resume_after_cloud_reconnect(db, _seller_id(), market)
         if count:
             _audit(db, market, "automations_resumed", detail=f"count={count}")
@@ -499,7 +501,7 @@ def revoke_session(db: Session, marketplace: str) -> dict[str, Any]:
         ctx.secrets.delete(vault_account(market))
     now = utcnow()
     if row is not None:
-        if row.state == "connected":
+        if row.state == "connected" and market in CLOUD_WRITE_MARKETPLACES:
             pause_for_cloud_disconnect(db, _seller_id(), market)
         row.state = "revoked"
         # Fence a verification that started before disconnect, even on a revoked row.
@@ -522,7 +524,8 @@ def mark_session_expired(db: Session, marketplace: str, error: str, generation: 
     row = _row(db, market, lock=True)
     if row is None or row.state != "connected" or row.connected_at != generation:
         return
-    pause_for_cloud_disconnect(db, _seller_id(), market)
+    if market in CLOUD_WRITE_MARKETPLACES:
+        pause_for_cloud_disconnect(db, _seller_id(), market)
     row.state = "expired"
     row.last_error = (error or f"{market.title()} asked to sign in again.")[:300]
     row.updated_at = utcnow()
@@ -637,6 +640,11 @@ def has_active_session(marketplace: str, db: Session | None = None) -> bool:
     finally:
         if owns:
             session.close()
+
+
+def has_active_write_session(marketplace: str, db: Session | None = None) -> bool:
+    """Whether a new listing or promotion job can run in Cloud."""
+    return marketplace in CLOUD_WRITE_MARKETPLACES and has_active_session(marketplace, db)
 
 
 def public_session(marketplace: str, db: Session | None = None) -> dict[str, Any] | None:

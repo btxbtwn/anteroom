@@ -696,7 +696,7 @@ def marketplace_actions_refusal(marketplace: str | None = None) -> str | None:
         if marketplace:
             from anteroom.services import cloud_sessions
 
-            if cloud_sessions.has_active_session(marketplace):
+            if cloud_sessions.has_active_write_session(marketplace):
                 return None
         from anteroom.services.hosted_browser_relay import relay_for
 

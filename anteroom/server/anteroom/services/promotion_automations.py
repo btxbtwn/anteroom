@@ -190,6 +190,9 @@ def run_out(run: PromotionRun) -> dict:
 
 def out(db: Session, row: PromotionAutomation) -> dict:
     last = db.query(PromotionRun).filter_by(automation_id=row.id).order_by(PromotionRun.started_at.desc()).first()
+    paused_reason = row.paused_reason
+    if row.marketplace == "depop" and paused_reason == CLOUD_DISCONNECTED:
+        paused_reason = "Paused: Connect Chrome and turn this offer rule on to resume."
     return {
         "id": row.id, "marketplace": row.marketplace, "action": row.action, "name": row.name, "enabled": row.enabled,
         "scope": row.scope, "conversation_ids": row.conversation_ids or [], "excluded_ids": row.excluded_ids or [],
@@ -204,7 +207,7 @@ def out(db: Session, row: PromotionAutomation) -> dict:
         "bundle_min_items": row.bundle_min_items,
         "bundle_comment": row.bundle_comment,
         "follow_config": row.follow_config,
-        "paused_reason": row.paused_reason, "next_run_at": _iso(row.next_run_at) if row.enabled else None,
+        "paused_reason": paused_reason, "next_run_at": _iso(row.next_run_at) if row.enabled else None,
         "last_run": run_out(last) if last else None, "available": promotions.available(row.marketplace, row.action),
     }
 
@@ -1103,7 +1106,7 @@ def _due_automations(
         query = query.filter(PromotionAutomation.marketplace.in_(marketplaces))
     rows = query.order_by(PromotionAutomation.next_run_at).all()
     if skip_cloud:
-        rows = [row for row in rows if not cloud_sessions.has_active_session(row.marketplace, db)]
+        rows = [row for row in rows if not cloud_sessions.has_active_write_session(row.marketplace, db)]
     return [(row.id, row.next_run_at, row.marketplace) for row in rows]
 
 
@@ -1161,7 +1164,7 @@ def _offer_automations(
         PromotionAutomation.marketplace.in_(allowed),
     ).all()
     if skip_cloud:
-        rows = [row for row in rows if not cloud_sessions.has_active_session(row.marketplace, db)]
+        rows = [row for row in rows if not cloud_sessions.has_active_write_session(row.marketplace, db)]
     return [(row.id, row.marketplace) for row in rows]
 
 
@@ -1239,7 +1242,7 @@ async def check_new_likes(
             continue
         if marketplace not in feeds:
             try:
-                use_cloud = await run_worker_db_step(cloud_sessions.has_active_session, marketplace)
+                use_cloud = await run_worker_db_step(cloud_sessions.has_active_write_session, marketplace)
                 if not use_cloud:
                     await run_worker_db_step(promotions.require_chrome, marketplace)
                 started = _now()
