@@ -356,7 +356,7 @@ async def ebay_form(snapshot: dict, *, fresh_choices: bool = False) -> dict:
             raise NativeMarketplaceError(502, "eBay’s category fields could not be loaded. Check its connection and refresh choices.") from None
 
     details = snapshot.get("ebay_specifics") or {}
-    # All five independent eBay reads run concurrently and share one lazy client on cache misses.
+    # Read eBay's category fields and account choices concurrently.
     with marketplace_schemas.schema_session(fresh=fresh_choices):
         schema_task = asyncio.create_task(load_schema())
         raw_schema, raw_variations, raw_selling, raw_choices, promotion_rows = await asyncio.gather(
@@ -375,6 +375,8 @@ async def ebay_form(snapshot: dict, *, fresh_choices: bool = False) -> dict:
         raise raw_selling
     if isinstance(raw_choices, BaseException):
         raise raw_choices
+    if isinstance(promotion_rows, BaseException):
+        raise promotion_rows
     schema = raw_schema
     variations = raw_variations
     selling = raw_selling
