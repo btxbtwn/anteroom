@@ -326,6 +326,9 @@ async def sync(marketplace: str, *, session_factory=None) -> dict:
     if not isinstance(raw, dict) or raw.get("skipped") is True:
         return {"ok": False, "skipped": True}
     if raw.get("ok") is not True:
+        code = raw.get("error_code") or raw.get("error")
+        if marketplace == "depop" and use_cloud and code == "challenge":
+            return {"ok": False, "error": "Depop blocked the cloud sales check. Try again later."}
         messages = {
             "signed_out": (
                 "Your cloud session expired. Reconnect it in Settings."
@@ -340,7 +343,6 @@ async def sync(marketplace: str, *, session_factory=None) -> dict:
             "schema_drift": "The marketplace returned sales Anteroom can't read. Saved records were kept.",
             "rejected": "The marketplace refused the sales read. Saved records were kept.",
         }
-        code = raw.get("error_code") or raw.get("error")
         return {"ok": False, "error": messages.get(code, "Couldn't read sales.") if isinstance(code, str) else "Couldn't read sales."}
     try:
         orders = parse_orders(marketplace, raw, seller_region=payload.get("seller_region"))
