@@ -27,28 +27,26 @@ enum StreamingText {
     /// The end of the last block that can no longer change shape: a blank line, a
     /// closed code fence, or the start of the next list item.
     private static func stableBoundary(_ text: String) -> String.Index {
-        var open: (marker: Substring, indent: Int)?
+        var open: (indent: Int, character: Character, length: Int)?
         var boundary = text.startIndex
         var lineStart = text.startIndex
         while true {
             let newline = text[lineStart...].firstIndex(of: "\n")
             let line = trimmingTrailingSpaces(text[lineStart..<(newline ?? text.endIndex)])
-            if open == nil, lineStart > text.startIndex, line.firstMatch(of: #/^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]/#) != nil {
+            if open == nil, lineStart > text.startIndex, startsListItem(line) {
                 boundary = lineStart
             }
             guard let newline else { break }
             let next = text.index(after: newline)
-            if let match = line.firstMatch(of: #/^( *)(`{3,}|~{3,})/#) {
-                let indent = match.1.count
-                let marker = match.2
+            if let fence = fenceStart(line) {
                 if let opened = open {
-                    if marker.first == opened.marker.first, marker.count >= opened.marker.count,
-                       indent <= opened.indent + 3, line.count == indent + marker.count {
+                    if fence.character == opened.character, fence.length >= opened.length,
+                       fence.indent <= opened.indent + 3, line.count == fence.indent + fence.length {
                         open = nil
                         boundary = next
                     }
                 } else {
-                    open = (marker, indent)
+                    open = fence
                 }
             } else if open == nil, lineStart > text.startIndex, line.allSatisfy({ $0 == " " || $0 == "\t" }) {
                 boundary = next
@@ -56,6 +54,45 @@ enum StreamingText {
             lineStart = next
         }
         return boundary
+    }
+
+    /// A code fence at the start of a line: its indent, and its run of three or more
+    /// backticks or tildes. Scanned by hand, as is `startsListItem`: both run for
+    /// every line of the answer each time more of it shows.
+    private static func fenceStart(_ line: Substring) -> (indent: Int, character: Character, length: Int)? {
+        var index = line.startIndex
+        var indent = 0
+        while index < line.endIndex, line[index] == " " {
+            indent += 1
+            index = line.index(after: index)
+        }
+        guard index < line.endIndex, line[index] == "`" || line[index] == "~" else { return nil }
+        let character = line[index]
+        var length = 0
+        while index < line.endIndex, line[index] == character {
+            length += 1
+            index = line.index(after: index)
+        }
+        return length >= 3 ? (indent, character, length) : nil
+    }
+
+    /// `- `, `* `, `+ `, `1. ` or `1) ` after any indent.
+    private static func startsListItem(_ line: Substring) -> Bool {
+        var index = line.startIndex
+        while index < line.endIndex, line[index] == " " || line[index] == "\t" { index = line.index(after: index) }
+        guard index < line.endIndex else { return false }
+        if line[index] == "-" || line[index] == "*" || line[index] == "+" {
+            index = line.index(after: index)
+        } else {
+            var digits = 0
+            while index < line.endIndex, ("0"..."9").contains(line[index]) {
+                digits += 1
+                index = line.index(after: index)
+            }
+            guard (1...9).contains(digits), index < line.endIndex, line[index] == "." || line[index] == ")" else { return false }
+            index = line.index(after: index)
+        }
+        return index < line.endIndex && (line[index] == " " || line[index] == "\t")
     }
 
     private static func trimmingTrailingSpaces(_ text: Substring) -> Substring {

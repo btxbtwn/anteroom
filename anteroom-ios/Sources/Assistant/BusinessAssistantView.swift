@@ -178,7 +178,10 @@ struct BusinessAssistantView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 if !live.text.isEmpty {
                                     // Drawn as the saved answer will be, so it does not change look when saved.
-                                    StreamingAnswer(received: live.text)
+                                    StreamingAnswer(received: live.text, complete: live.ended) {
+                                        // The row grows as it is revealed, after the text arrived.
+                                        if following { proxy.scrollTo(ChatScroll.bottomID, anchor: .bottom) }
+                                    }
                                         .tint(WorkspaceStyle.accent)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                 }
@@ -360,6 +363,10 @@ private struct AnswerView: View {
 /// whole word with open markup closed (DESIGN.md, Streaming replies).
 private struct StreamingAnswer: View {
     let received: String
+    /// The stream has ended, so the last word is whole even with nothing after it.
+    let complete: Bool
+    /// Called each time more of the answer shows, so the transcript can keep up with it.
+    let onReveal: () -> Void
     /// Characters showing. What is there when the answer first appears shows at once,
     /// so one picked back up part way through is not typed out again.
     @State private var shown: Int
@@ -367,14 +374,17 @@ private struct StreamingAnswer: View {
     @State private var total: Int
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    init(received: String) {
+    init(received: String, complete: Bool, onReveal: @escaping () -> Void) {
         self.received = received
+        self.complete = complete
+        self.onReveal = onReveal
         _shown = State(initialValue: received.count)
         _total = State(initialValue: received.count)
     }
 
     var body: some View {
-        MarkdownText(StreamingText.display(String(received.prefix(shown))))
+        MarkdownText(complete && shown >= received.count ? received : StreamingText.display(String(received.prefix(shown))))
+            .onChange(of: shown) { onReveal() }
             .onChange(of: received.count) { _, count in
                 total = count
                 // A shorter text is an answer replayed from its first word.

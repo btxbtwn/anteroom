@@ -28,11 +28,14 @@ describe("copying a table", () => {
   });
 
   it("keeps a value that reads as a formula as text, and leaves figures alone", () => {
-    const risky = table(
-      "<table><tbody><tr><td>=HYPERLINK(\"https://example.com\")</td><td>-12.50</td><td>+5%</td><td>@buyer</td><td>-$4.00</td><td>+cmd</td></tr></tbody></table>",
-    );
-    expect(tableToTsv(risky)).toBe("'=HYPERLINK(\"https://example.com\")\t-12.50\t+5%\t'@buyer\t-$4.00\t'+cmd");
-    expect(tableToHtml(risky)).toContain("<td>'=HYPERLINK(\"https://example.com\")</td><td>-12.50</td>");
+    const row = (...cells: string[]) => table(`<table><tbody><tr>${cells.map((cell) => `<td>${cell}</td>`).join("")}</tr></tbody></table>`);
+    // Figures and a lone dash are what they look like.
+    expect(tableToTsv(row("-12.50", "+5%", "-$4.00", "-1,204", "+.5", "-", "—", "$-3")))
+      .toBe("-12.50\t+5%\t-$4.00\t-1,204\t+.5\t-\t—\t$-3");
+    // Anything else a spreadsheet would run gets an apostrophe, a signed number with more after it included.
+    expect(tableToTsv(row('=HYPERLINK("https://example.com")', "@buyer", "+cmd", "-2+3+cmd|' /C calc'!A0", "+1+HYPERLINK(1)", " =1+1")))
+      .toBe("'=HYPERLINK(\"https://example.com\")\t'@buyer\t'+cmd\t'-2+3+cmd|' /C calc'!A0\t'+1+HYPERLINK(1)\t'=1+1");
+    expect(tableToHtml(row("=1+1", "-12.50"))).toBe("<table><tr><td>'=1+1</td><td>-12.50</td></tr></table>");
   });
 
   it("gives a plain HTML table with its header row, escaped", () => {

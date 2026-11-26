@@ -206,6 +206,13 @@ test("the conversation lines up with the message box, and a phone gets a one-lin
     return { left: Math.round(box!.x), right: Math.round(box!.x + box!.width) };
   };
   expect(await edges('[data-message-role="user"]')).toEqual(await edges('[data-slot="composer-host"]'));
+  // Still lined up once the conversation is long enough to scroll and a scrollbar takes its room.
+  const viewport = page.viewportSize()!;
+  await page.setViewportSize({ width: viewport.width, height: 420 });
+  const scroller = page.locator(".chat-scroll");
+  await expect.poll(() => scroller.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+  expect(await edges('[data-message-role="user"]')).toEqual(await edges('[data-slot="composer-host"]'));
+  await page.setViewportSize(viewport);
 
   if (!phone) return;
   const prose = page.locator('[data-message-role="assistant"] .chat-markdown').last();

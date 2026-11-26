@@ -93,16 +93,20 @@ export function MarkdownCodeBlock({ children }: { children: ReactNode }) {
   );
 }
 
+/** A figure as a seller reads it: -12.50, +5%, -$4.00, 1,204. */
+const FIGURE = /^[+-]?[$€£¥]?(?:\d[\d,]*(?:\.\d+)?|\.\d+)%?$/;
+
 /**
  * A spreadsheet runs a pasted cell that starts with `=`, `@`, `+` or `-` as a
  * formula, and a reply can quote text the seller did not write (a buyer's
  * note, an imported title). Such a cell gets a leading apostrophe, which a
- * spreadsheet reads as "this is text". Figures like -12.50, +5% and -$4.00
- * stay as they are.
+ * spreadsheet reads as "this is text". A cell that is a figure and nothing
+ * else, or only a dash, stays as it is.
  */
 function cellText(cell: Element): string {
   const text = (cell.textContent ?? "").replace(/\s+/g, " ").trim();
-  return /^[=@]/.test(text) || /^[+-](?![\d.,$€£¥])/.test(text) ? `'${text}` : text;
+  if (!/^[=@+-]/.test(text) || FIGURE.test(text) || /^[+-]+$/.test(text)) return text;
+  return `'${text}`;
 }
 
 function tableRows(table: Element): string[][] {

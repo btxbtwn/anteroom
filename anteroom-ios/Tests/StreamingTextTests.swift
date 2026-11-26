@@ -30,6 +30,16 @@ struct StreamingTextTests {
         expect("* first item\n* second item go", "* first item\n* second item")
         expect("- First\n- Second\n- Thi", "- First\n- Second\n-")
 
+        // Numbered items, indented items and wider fences follow the same rules.
+        expect("1. First\n2) Second\n3. Thi", "1. First\n2) Second\n3.")
+        expect("Intro\n  - nested one\n  - nested tw", "Intro\n  - nested one\n  - nested")
+        expect("````md\n```\nstill code\n````\n\nAfter the fence", "````md\n```\nstill code\n````\n\nAfter the")
+        expect("~~~\ncode\n~~~\n\nDone now", "~~~\ncode\n~~~\n\nDone")
+        expect("", "")
+        expect("   \n", "")
+        expect("[", "")
+        expect("Ends with a backslash \\", "Ends with a backslash")
+
         // A link waits for its target.
         expect("See [the listing](https://exa now", "See")
         expect("See [the listing](https://example.com) now ok", "See [the listing](https://example.com) now")

@@ -38,6 +38,23 @@ describe("rehypeStreamWords", () => {
     expect(outline(tree)).toBe("<ul><li>[A ]<strong>[bold ][claim]</strong> [and ]<a>[a ][link]</a></li></ul>");
   });
 
+  it("wraps only the list item being written", () => {
+    const tree = run(root(el("ol", el("li", text("First point")), text("\n"), el("li", text("Second "), el("em", text("one"))))));
+    expect(outline(tree)).toBe("<ol><li>First point</li>\n<li>[Second ]<em>[one]</em></li></ol>");
+  });
+
+  it("wraps only the last paragraph of a list whose items hold paragraphs, so an item already read is not faded again", () => {
+    const tree = run(root(el("ol", el("li", el("p", text("First point"))), el("li", el("p", text("Second point")), el("p", text("More on it"))))));
+    expect(outline(tree)).toBe("<ol><li><p>First point</p></li><li><p>Second point</p><p>[More ][on ][it]</p></li></ol>");
+  });
+
+  it("follows a nested list and a quote down to the line being written", () => {
+    const nested = run(root(el("ul", el("li", text("Outer"), el("ul", el("li", text("Inner item")))))));
+    expect(outline(nested)).toBe("<ul><li>Outer<ul><li>[Inner ][item]</li></ul></li></ul>");
+    const quote = run(root(el("blockquote", el("p", text("Said before")), el("p", text("Said now")))));
+    expect(outline(quote)).toBe("<blockquote><p>Said before</p><p>[Said ][now]</p></blockquote>");
+  });
+
   it("keeps a word's place when more text arrives after it", () => {
     const before = run(root(el("p", text("One two"))));
     const after = run(root(el("p", text("One two three"))));

@@ -167,7 +167,8 @@ whole word, with any bold, italic or code the model has opened closed for it,
 so the seller never sees raw `**` turn into bold. Tables appear once whole.
 Text is revealed at a steady pace that follows how much has arrived, never in
 the chunks the network delivered, and never more than a moment behind; each
-new word fades in. When the reply ends or is stopped, all of it shows at once.
+new word fades in, and text already read never fades again. Once the reply has
+ended its last word no longer waits, and the saved reply always shows whole.
 With reduced motion, text appears as it arrives with no pacing or fade. A
 caret marks where text is arriving; it blinks only when motion is allowed. Stop
 sits where Send was, Esc in the message box does the same, and both keep what
