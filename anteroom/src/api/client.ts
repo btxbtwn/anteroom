@@ -739,8 +739,9 @@ export const api = {
       request<PreferredName>("/assistant/name", { method: "PUT", body: JSON.stringify({ name } satisfies PreferredNameInput) }),
     /** Facts the assistant learned in chat and keeps after a conversation is cleared. */
     memory: () => request<{ memories: AssistantMemory[] }>("/assistant/memory"),
+    /** `keepalive`: a removal committed as the page closes (Undo window) must outlive the tab. */
     forget: (id: string) =>
-      request<{ memories: AssistantMemory[] }>(`/assistant/memory/${encodeURIComponent(id)}`, { method: "DELETE" }),
+      request<{ memories: AssistantMemory[] }>(`/assistant/memory/${encodeURIComponent(id)}`, { method: "DELETE", keepalive: true }),
     /**
      * Ask, and follow the answer. Studio keeps writing it if this connection
      * drops; `resume` picks it back up. Resolves with the assistant's own
@@ -1191,8 +1192,9 @@ export const api = {
     /** The item's photos, or with `marketplace` the photos added on that marketplace's form only. */
     photos: (id: string, marketplace?: string, options?: ReadOptions) =>
       read<ListingPhoto[]>(`/conversations/${seg(id)}/photos${marketplace ? `?marketplace=${encodeURIComponent(marketplace)}` : ""}`, options),
+    /** `keepalive`: a removal committed as the page closes (Undo window) must outlive the tab. */
     deletePhoto: (convId: string, photoId: string) =>
-      request<OkResponse>(`/conversations/${seg(convId)}/photos/${seg(photoId)}`, { method: "DELETE" }),
+      request<OkResponse>(`/conversations/${seg(convId)}/photos/${seg(photoId)}`, { method: "DELETE", keepalive: true }),
     /** Rotate the stored image clockwise by `degrees` (90, -90 or 180). */
     rotatePhoto: (convId: string, photoId: string, degrees: 90 | -90 | 180) =>
       request<ListingPhoto>(`/conversations/${seg(convId)}/photos/${seg(photoId)}/rotate`, {

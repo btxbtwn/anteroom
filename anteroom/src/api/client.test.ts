@@ -20,6 +20,29 @@ it("acknowledges an empty expense deletion response", async () => {
   }
 });
 
+it("sends Undo-window removals with keepalive so they survive the page closing", async () => {
+  const fetch = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ memories: [] })));
+  vi.stubGlobal("fetch", fetch);
+  try {
+    await api.conversations.deletePhoto("coat", "front");
+    await api.assistant.forget("memory-1");
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "/api/conversations/coat/photos/front",
+      expect.objectContaining({ method: "DELETE", keepalive: true }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "/api/assistant/memory/memory-1",
+      expect.objectContaining({ method: "DELETE", keepalive: true }),
+    );
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 it("keeps hosted upload file identities by returned photo ID despite failures and response order", async () => {
   const uninstall = installHostedApiSession({
     seller: "fixture-alice", origin: "https://anteroom.test", accessToken: async () => "fixture-token", unauthorized: () => {},
