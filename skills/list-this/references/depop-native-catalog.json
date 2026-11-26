@@ -1,5 +1,9 @@
 {
   "source": "Depop native form sweeps and public marketplace taxonomy capture",
+  "us_parcel_ids": {
+    "Extra extra small": "under_4oz", "Extra small": "small", "Small": "under_12oz",
+    "Medium": "under_1lb", "Large": "medium", "Extra large": "large"
+  },
   "us_parcel_quotes": {
     "womenswear_jeans": {"options": ["Medium", "Large", "Extra large"], "suggested": "Large"}
   },

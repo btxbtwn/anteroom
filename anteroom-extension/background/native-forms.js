@@ -325,7 +325,7 @@ function depopEditorForm(listing, attributes, parcels = [], shipFrom = '') {
   const [price] = nativeEditorBase(listing, { title: false, minPrice: 1, maxPrice: 9999999999.99 }).filter(row => row.path === 'price');
   const sizes = depopParcelRows(parcels);
   const suggested = sizes.find(row => row.suggested);
-  const parcelValue = specifics.parcelSize || specifics.parcel_size || suggested?.title || '';
+  const parcelValue = depopParcelSize(parcels, listing)?.id || specifics.parcelSize || specifics.parcel_size || '';
   const parcelGroups = suggested ? Object.fromEntries(sizes.map(row => [row.title, row.suggested ? 'Suggested' : 'Change size'])) : {};
   const parcelFields = [
     nativeEditorField('depop.note.carrier', region === 'US' ? 'Depop Shipping (via USPS)' : 'Depop Shipping', '', { input_type: 'note',
@@ -334,7 +334,7 @@ function depopEditorForm(listing, attributes, parcels = [], shipFrom = '') {
     nativeEditorField('depop_specifics.shipFrom', 'Shipping from', shipFrom, { input_type: 'textarea', locked: true,
       ...(shipFrom ? {} : { help: 'Sign in to Depop to show your shipping address.' }) }),
     nativeEditorChoice('depop_specifics.parcelSize', 'Package size', parcelValue,
-      sizes.map(row => row.title),
+      sizes.map(row => ({ label: row.title, value: row.id })),
       { required: true, ...(Object.keys(parcelGroups).length ? { option_groups: parcelGroups } : {}),
         ...(suggested ? { help: "Your selection sets your shipping label and the buyer's shipping cost. We've suggested a size based on your item — you can change it if needed." } : {}) }),
   ];

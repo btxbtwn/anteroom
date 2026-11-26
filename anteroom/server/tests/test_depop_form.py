@@ -24,6 +24,9 @@ class DepopFormTest(unittest.TestCase):
         from anteroom.services import native_contract
 
         seed = {**listing, native_contract.KEY: native_contract.capture(listing, {"depop": depop_form.form(listing)}, ["depop"])}
+        for parcel_id in ("under_1lb", "medium", "large"):
+            locked = {**seed, "depop_specifics": {"parcelSize": parcel_id}, "seller_fields": ["depop_specifics.parcelSize"]}
+            self.assertFalse(any(gap["field"] == "depop_specifics.parcelSize" for gap in native_contract.gaps(locked, "depop")))
         generated = {**listing, "depop_specifics": {"parcelSize": "Extra small"}}
         native_contract.constrain_generated(generated, seed)
         self.assertEqual(generated["depop_specifics"]["parcelSize"], "Large")

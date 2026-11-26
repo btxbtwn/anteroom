@@ -140,6 +140,11 @@ test('a saved package title wins when another parcel uses that word as its id', 
   const { c } = newDraft();
   const rows = [{ id: 'small', title: 'Extra small' }, { id: 'under_12oz', title: 'Small' }];
   assert.equal(c.depopParcelSize(rows, { depop_specifics: { parcelSize: 'Small' } }).id, 'under_12oz');
+  assert.equal(c.depopParcelSize(rows, { depop_specifics: { parcelSize: 'small' } }).title, 'Extra small');
+  const form = c.depopEditorForm({ ...FULL, depop_specifics: { parcelSize: 'under_12oz' } }, {}, rows);
+  const parcel = form.fields.find(row => row.path === 'depop_specifics.parcelSize');
+  assert.equal(parcel.option_values.Small, 'under_12oz');
+  assert.equal(parcel.value, 'under_12oz');
   assert.equal(c.depopParcelSize(rows.slice(0, 1), { depop_specifics: { parcelSize: 'Small' } }), null);
 });
 
@@ -161,7 +166,8 @@ test('jeans carry flat measurements in centimeters and use the estimated USPS pa
   const wanted = c.depopLiveWanted(item, fields);
   const state = c.depopLiveState([{ attributes: { measurements: body.measurements } }]);
   assert.ok(!c.depopLiveMismatch(state, wanted).includes('measurements'));
-  assert.ok(c.depopLiveMismatch({}, wanted).includes('measurements'));
+  assert.ok(!c.depopLiveMismatch({}, wanted).includes('measurements'));
+  assert.ok(c.depopLiveMismatch({ measurements: {} }, wanted).includes('measurements'));
   const check = draft => c.depopDraftMismatch(draft, item, fields).includes('measurements');
   assert.equal(check({ ...body, measurements: { ...body.measurements, waist: 35.559999999999995 } }), false);
   assert.equal(check({ ...body, measurements: undefined }), true);

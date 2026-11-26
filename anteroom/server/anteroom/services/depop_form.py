@@ -148,6 +148,8 @@ def form(listing: dict) -> dict:
     fixed = fixed_options()
     quote = catalog()["us_parcel_quotes"].get(category_id, {}) if region.country == "US" else {}
 
+    parcel_options = quote.get("options", fixed["parcelSize"])
+
     def value(path: str, default: Any = "") -> Any:
         found = get_path(listing, path)
         return default if found is None else found
@@ -235,7 +237,8 @@ def form(listing: dict) -> dict:
                  help="Use the shipping label Depop provides for your order.")] if carrier else []),
         field("depop_specifics.shipFrom", "Shipping from", specifics.get("shipFrom", ""), input_type="textarea",
               locked=True, section="Shipping", help="Your Depop account's shipping address is checked when you publish."),
-        *([choice("depop_specifics.parcelSize", "Package size", quote.get("options", fixed["parcelSize"]),
+        *([choice("depop_specifics.parcelSize", "Package size", parcel_options,
+                  option_values={size: catalog()["us_parcel_ids"][size] for size in parcel_options} if region.country == "US" else {},
                   section="Shipping", required=True, **({
                       "option_groups": {size: "Suggested" if size == quote["suggested"] else "Change size" for size in quote["options"]},
                       "help": f"Depop suggests {quote['suggested']} for this item.",

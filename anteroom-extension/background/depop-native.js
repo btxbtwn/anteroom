@@ -166,11 +166,11 @@ function depopParcelSize(sizes, listing) {
   const rows = depopParcelRows(sizes);
   const wanted = String(listing?.depop_specifics?.parcelSize || listing?.depop_specifics?.parcel_size || '').trim();
   if (!wanted) return rows.find(size => size.suggested) || null;
-  const exact = rows.find(size => size.title.toLowerCase() === wanted.toLowerCase());
+  const exact = rows.find(size => size.title === wanted) || rows.find(size => size.id === wanted);
   if (exact) return exact;
   const key = marketplaceNameKey(wanted);
   const matching = key ? rows.filter(size => marketplaceNameKey(size.title) === key) : [];
-  return matching.length === 1 ? matching[0] : rows.find(size => size.id === wanted) || null;
+  return matching.length === 1 ? matching[0] : null;
 }
 
 // The ship-from line on the sell page: name, street, city, ST ZIP, country.
@@ -1115,7 +1115,7 @@ function depopLiveMismatch(state, wanted) {
   const setWrong = wanted.variant_set && state.variant_set && state.variant_set !== wanted.variant_set;
   const sizeWrong = wanted.sizes.length && state.sizes?.length && state.sizes.join(',') !== wanted.sizes.join(',');
   if (setWrong || sizeWrong) parts.push('size');
-  if (wanted.measurements && depopMeasurementsDiffer(state.measurements, wanted.measurements)) parts.push('measurements');
+  if (wanted.measurements && state.measurements != null && depopMeasurementsDiffer(state.measurements, wanted.measurements)) parts.push('measurements');
   return parts;
 }
 
@@ -1486,7 +1486,7 @@ async function depopApiAction(action, payload) {
         throw marketplaceError(`Depop did not keep this listing's ${wrong.join(', ')}. Check the live listing.`, { code: 'schema_drift', rejected: false,
           marketplace_message: `read back: ${depopLiveDigest(state)} | wanted: ${depopLiveDigest(wanted)} | ${depopSanitizedBody(read)}` });
       }
-      const unconfirmed = ['price', 'product_type'].filter(key => wanted[key] != null && wanted[key] !== '' && (state[key] == null || state[key] === ''));
+      const unconfirmed = ['price', 'product_type', 'measurements'].filter(key => wanted[key] != null && wanted[key] !== '' && (state[key] == null || state[key] === ''));
       return { ok: true, state: 'published', listing_url: `https://www.depop.com/products/${next}/`, previous_slug: slug, price: state.price ?? null,
         ...(unconfirmed.length ? { warning: `Depop's read did not show the ${unconfirmed.map(key => key === 'product_type' ? 'category' : key).join(' or ')}. Check the live listing.` } : {}) };
     }
