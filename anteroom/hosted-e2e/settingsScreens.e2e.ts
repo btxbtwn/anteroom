@@ -64,7 +64,7 @@ function managedUsage(period: string) {
     period: { id: period, start: "2026-10-28T00:00:00+00:00", end: "2026-11-27T00:00:00+00:00" }, months,
     total_usd: 0.5595,
     openrouter: { count: 14, usd: 0.2595, input_tokens: 49_120, output_tokens: 12_280,
-      items: [item("google/gemini-2.5-flash", 11, 0.255, 58_400), item("openai/gpt-5-mini", 3, 0.0045, 3_000)] },
+      items: [item("google/gemini-2.5-flash", 11, 0.2545, 58_400), item("openai/gpt-5-mini", 3, 0.005, 3_000)] },
     photoroom: { ...service, count: 3, usd: 0.3,
       items: [item("Background removed, shadow", 2, 0.2), item("Ghost mannequin", 1, 0.1)] },
     days: days("2026-10-28", { "2026-10-30": [0, 0.1], "2026-11-20": [0.11, 0.1], "2026-11-26": [0.1495, 0.1] }),
@@ -128,8 +128,8 @@ for (const scheme of ["light", "dark"] as const) {
       const ai = rows.filter({ hasText: "OpenRouter" });
       await expect(ai.getByText("14 AI calls · 61.4K tokens")).toBeVisible();
       await expect(ai.getByText("$0.26", { exact: true })).toBeVisible();
-      await expect(ai.getByRole("listitem").filter({ hasText: "google/gemini-2.5-flash" })).toContainText("$0.26");
-      await expect(ai.getByRole("listitem").filter({ hasText: "openai/gpt-5-mini" })).toContainText("$0.0045");
+      await expect(ai.getByRole("listitem").filter({ hasText: "google/gemini-2.5-flash" })).toContainText("$0.25");
+      await expect(ai.getByRole("listitem").filter({ hasText: "openai/gpt-5-mini" })).toContainText("$0.005");
       const edits = rows.filter({ hasText: "Photoroom" });
       await expect(edits.getByText("3 photo edits")).toBeVisible();
       await expect(edits.getByText("$0.30", { exact: true })).toBeVisible();
@@ -145,7 +145,9 @@ for (const scheme of ["light", "dark"] as const) {
       await expect(page.getByRole("option")).toHaveText(["Last 30 days", "November 2026", "October 2026"]);
       await page.getByRole("option", { name: "October 2026" }).click();
       await expect(total).toContainText("Oct 1 – 31, 2026");
-      await expect(total.getByText("$0.10", { exact: true })).toBeVisible();
+      // The table is still showing, so the day's row carries the same figure.
+      await expect(total.locator("strong")).toHaveText("$0.10");
+      await expect(total.getByRole("row", { name: "Oct 30 $0.00 $0.10 $0.10" })).toBeVisible();
       await expect(rows.filter({ hasText: "OpenRouter" }).getByText("0 AI calls")).toBeVisible();
       const download = page.waitForEvent("download");
       await downloadCsv.click();
