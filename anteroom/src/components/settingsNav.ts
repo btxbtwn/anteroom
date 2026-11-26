@@ -1,6 +1,6 @@
 /** T3 Code-style settings categories for Anteroom. */
 
-export type SettingsSectionId = "general" | "listings" | "assistant" | "providers" | "connections" | "agents" | "data" | "logs" | "experimental" | "help";
+export type SettingsSectionId = "general" | "usage" | "listings" | "assistant" | "providers" | "connections" | "agents" | "data" | "logs" | "experimental" | "help";
 
 export type SettingsNavItem = {
   id: SettingsSectionId;
@@ -19,6 +19,7 @@ export type SettingsSearchItem = {
 /** Sidebar order follows T3 Code: General first, then what the seller changes most. */
 export const SETTINGS_NAV_ITEMS: readonly SettingsNavItem[] = [
   { id: "general", label: "General" },
+  { id: "usage", label: "Usage" },
   { id: "listings", label: "Listings" },
   { id: "assistant", label: "Assistant" },
   { id: "providers", label: "Providers" },
@@ -32,6 +33,7 @@ export const SETTINGS_NAV_ITEMS: readonly SettingsNavItem[] = [
 
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsSectionId, string>> = {
   general: "General",
+  usage: "Usage",
   listings: "Listings",
   assistant: "Assistant",
   providers: "Providers",
@@ -46,7 +48,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsSectionId, string>
 export const DEFAULT_SETTINGS_SECTION: SettingsSectionId = "general";
 
 /** Sections the web app has; the others need the Mac. */
-export const HOSTED_SETTINGS_SECTIONS: readonly SettingsSectionId[] = ["general", "listings", "providers", "connections", "agents", "experimental", "help"];
+export const HOSTED_SETTINGS_SECTIONS: readonly SettingsSectionId[] = ["general", "usage", "listings", "providers", "connections", "agents", "experimental", "help"];
 
 /** Sections the hosted web app offers; managed AI handles the model automatically so Providers is hidden. */
 export function hostedSettingsSections(managedAI = false): readonly SettingsSectionId[] {
@@ -55,17 +57,18 @@ export function hostedSettingsSections(managedAI = false): readonly SettingsSect
 
 /** The section to show: on the web, unavailable sections open General (managed AI) or Providers. */
 export function settingsSectionFor(section: SettingsSectionId, hosted: boolean, managedAI = false): SettingsSectionId {
-  if (!hosted) return section;
+  if (!hosted) return section === "usage" ? DEFAULT_SETTINGS_SECTION : section;
   if (hostedSettingsSections(managedAI).includes(section)) return section;
   return managedAI ? DEFAULT_SETTINGS_SECTION : "providers";
 }
 
 /** Settings search entries available in the current runtime. */
 export function settingsSearchItemsFor(hosted: boolean, managedAI = false): readonly SettingsSearchItem[] {
-  if (!hosted) return SETTINGS_SEARCH_ITEMS.filter((item) => item.id !== "agent-mcp-connections");
+  if (!hosted) return SETTINGS_SEARCH_ITEMS.filter((item) => item.id !== "agent-mcp-connections" && item.section !== "usage");
   return SETTINGS_SEARCH_ITEMS.filter(
     (item) =>
       (item.section === "general" && item.id !== "setup-guide") ||
+      item.section === "usage" ||
       item.section === "listings" ||
       item.section === "agents" ||
       item.section === "experimental" ||
@@ -76,6 +79,10 @@ export function settingsSearchItemsFor(hosted: boolean, managedAI = false): read
 }
 
 export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
+  { id: "subscription-plan", title: "Plan & Smart Credits", section: "usage", targetId: "subscription-plan",
+    searchTerms: ["plan", "subscription", "tier", "credits", "smart credits", "upgrade", "free", "lister", "starter", "pro", "business"] },
+  { id: "managed-usage", title: "Metered usage", section: "usage", targetId: "managed-usage",
+    searchTerms: ["cost", "billing", "OpenRouter", "Photoroom"] },
   {
     id: "listing-mode",
     title: "Use Vendoo",

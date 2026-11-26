@@ -98,8 +98,16 @@ async function soldAmongMissing(ids, live, isSold) {
 }
 
 async function depopJson(path) {
-  await ensureMarketplaceRequestContext();
-  return saleJson(`https://webapi.depop.com/presentation/api/v1/${path}`, { credentials: 'omit' });
+  try {
+    const { data } = await marketplaceFetch(`https://webapi.depop.com/presentation/api/v1/${path}`, {
+      marketplace: 'depop', step: 'sales', credentials: 'omit', headers: { Accept: 'application/json' },
+      deadline: Date.now() + 15000, retry: false,
+    });
+    return data;
+  } catch (error) {
+    if (error.status === 404) return null;
+    throw error;
+  }
 }
 
 async function depopSales(slugs) {

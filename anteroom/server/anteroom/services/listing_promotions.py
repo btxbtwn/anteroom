@@ -334,7 +334,7 @@ def require_chrome(marketplace: str | None = None, *, db: Session | None = None)
 
     context = current()
     if context is not None:
-        if marketplace and cloud_sessions.has_active_session(marketplace, db):
+        if marketplace and cloud_sessions.has_active_write_session(marketplace, db):
             return
         if refusal := relay_for(context.seller_id).refusal(MARKETPLACE_PROMOTIONS):
             raise PromotionError(409, refusal, "chrome")
@@ -412,7 +412,7 @@ async def _review_remote(row: ListingPromotion, listing_id: str) -> None:
     }
     diagnostic_inputs = {**payload, "floor_cents": row.floor_cents}
     started = time.monotonic()
-    use_cloud = await run_worker_db_step(cloud_sessions.has_active_session, row.marketplace)
+    use_cloud = await run_worker_db_step(cloud_sessions.has_active_write_session, row.marketplace)
     try:
         if use_cloud:
             facts = await cloud_marketplace.execute(
@@ -718,7 +718,7 @@ async def perform_account_action(
         automation = db.get(PromotionAutomation, automation_id)
         if not automation or not automation.enabled or automation.action != action or automation.marketplace != marketplace:
             raise PromotionError(409, "This automation changed or was turned off. Nothing was sent.", "paused")
-        use_cloud = cloud_sessions.has_active_session(marketplace, db)
+        use_cloud = cloud_sessions.has_active_write_session(marketplace, db)
         require_chrome(marketplace, db=db)
         repo = JobRepo(db)
         extra = dict(extra_payload)
@@ -842,7 +842,7 @@ def _start_send(db: Session, promotion_id: str, shipping_discount_id: str | None
             raise PromotionError(409, "Your floor for this listing changed. Review the offer again.")
         row.floor_cents = max(row.floor_cents, minimum)
         _choose_shipping(row, shipping_discount_id)
-    use_cloud = cloud_sessions.has_active_session(row.marketplace, db)
+    use_cloud = cloud_sessions.has_active_write_session(row.marketplace, db)
     require_chrome(row.marketplace, db=db)
     repo = JobRepo(db)
     listing = ListingRepo(db).get_current(conv.id)

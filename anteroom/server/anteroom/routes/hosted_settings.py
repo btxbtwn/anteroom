@@ -3,14 +3,35 @@
 Desktop sign-in terminals, filesystem utilities and machine settings are not
 mounted here. Their hosted equivalents require a registered worker.
 """
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 from anteroom.repositories.queries import ConversationRepo
+from anteroom.services import api_usage
 from anteroom.services.hosted_database import get_seller_db
 
 from anteroom.routes import ai_keys, settings
 
 router = APIRouter(prefix='/api/settings', tags=['settings'])
+
+
+_usage_period = Query(default='30d', pattern=api_usage.USAGE_PERIOD_PATTERN)
+
+
+@router.get('/managed-usage')
+def managed_usage(period: str = _usage_period, db=Depends(get_seller_db, scope="function")):
+    return api_usage.seller_usage_summary(db, db.user_id, period)
+
+
+@router.get('/managed-usage.csv')
+def managed_usage_csv(period: str = _usage_period, db=Depends(get_seller_db, scope="function")):
+    return PlainTextResponse(
+        api_usage.seller_usage_csv(db, db.user_id, period),
+        media_type='text/csv; charset=utf-8',
+        headers={'Content-Disposition': f'attachment; filename="anteroom-usage-{period}.csv"',
+                 'Cache-Control': 'no-store'},
+    )
+
 
 def require_seller_providers():
     from anteroom.services.hosted_provider import managed_ai_enabled

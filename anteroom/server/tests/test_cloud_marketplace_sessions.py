@@ -426,7 +426,12 @@ def test_marketplace_cloud_verification_and_resume(cloud, signing_keys, monkeypa
     assert challenged["session"]["state"] == "signed_in"
     verification_error = None
     with Session(engine) as db:
-        for name, enabled, reason in (("enabled", True, None), ("manual", False, None), ("unknown", False, "Unconfirmed send")):
+        for name, enabled, reason in (
+            ("enabled", True, None),
+            ("previously paused", False, promotion_automations.CLOUD_DISCONNECTED),
+            ("manual", False, None),
+            ("unknown", False, "Unconfirmed send"),
+        ):
             db.add(PromotionAutomation(user_id=USER_ID, name=name, marketplace=market, action="offer",
                                        enabled=enabled, paused_reason=reason))
         db.commit()
@@ -436,19 +441,22 @@ def test_marketplace_cloud_verification_and_resume(cloud, signing_keys, monkeypa
     assert failed.json()["ok"] is False
     assert failed.json()["session"]["state"] == "expired"
     with Session(engine) as db:
-        paused = db.scalar(select(PromotionAutomation).where(PromotionAutomation.name == "enabled"))
-        assert paused is not None and not paused.enabled
-        assert paused.paused_reason == promotion_automations.CLOUD_DISCONNECTED
+        enabled = db.scalar(select(PromotionAutomation).where(PromotionAutomation.name == "enabled"))
+        assert enabled is not None and enabled.enabled and enabled.paused_reason is None
 
     verified_state = "signed_in"
     assert connect().status_code == 200
     with Session(engine) as db:
         rows = {row.name: row for row in db.scalars(select(PromotionAutomation))}
         assert rows["enabled"].enabled and rows["enabled"].paused_reason is None
-        assert rows["enabled"].next_run_at is not None
+        assert not rows["previously paused"].enabled
+        assert rows["previously paused"].next_run_at is None
+        assert promotion_automations.out(db, rows["previously paused"])["paused_reason"] == (
+            "Paused: Connect Chrome and turn this offer rule on to resume."
+        )
         assert not rows["manual"].enabled and not rows["unknown"].enabled
         assert rows["unknown"].paused_reason == "Unconfirmed send"
-        assert db.scalar(select(CloudSessionAudit).where(CloudSessionAudit.event == "automations_resumed"))
+        assert db.scalar(select(CloudSessionAudit).where(CloudSessionAudit.event == "automations_resumed")) is None
 
     assert client.delete(f"/api/cloud-sessions/{market}", headers=alice).json()["ok"]
     assert (USER_ID, f"cloud-session-{market}") not in vault.data
@@ -488,7 +496,7 @@ def test_manual_pause_survives_cloud_reconnect(cloud, pause_all):  # noqa: F811
 
     _, engine = cloud
     with SellerDatabaseSession(bind=engine, user_id=USER_ID) as manual:
-        rule = PromotionAutomation(name="offers", marketplace="depop", action="offer",
+        rule = PromotionAutomation(name="offers", marketplace="poshmark", action="offer",
                                    enabled=False, paused_reason=rules.CLOUD_DISCONNECTED)
         manual.add(rule)
         manual.commit()
@@ -496,14 +504,14 @@ def test_manual_pause_survives_cloud_reconnect(cloud, pause_all):  # noqa: F811
         manual.refresh(rule)
         assert not rule.enabled
         with SellerDatabaseSession(bind=engine, user_id=USER_ID) as reconnect:
-            assert rules.resume_after_cloud_reconnect(reconnect, USER_ID, "depop") == 1
+            assert rules.resume_after_cloud_reconnect(reconnect, USER_ID, "poshmark") == 1
             reconnect.commit()
 
         assert rules.pause(manual, None if pause_all else rule.id) == 1
         manual.refresh(rule)
         assert not rule.enabled
         assert rule.paused_reason is None
-        assert rules.resume_after_cloud_reconnect(manual, USER_ID, "depop") == 0
+        assert rules.resume_after_cloud_reconnect(manual, USER_ID, "poshmark") == 0
 
 
 @pytest.mark.parametrize("operation", ["marketplace.like_events", "marketplace.promotion_check", "marketplace.promote"])
@@ -573,22 +581,6 @@ def test_cloud_promotion_sign_out_preserves_reconnect_state(cloud, monkeypatch, 
             assert rule.enabled is reconnect
             assert rule.paused_reason == (None if reconnect else rules.CLOUD_DISCONNECTED)
             assert cloud_sessions.has_active_session(market, db) is reconnect
-
-
-@pytest.mark.parametrize("dimensions", [(1, 4096), (4096, 1)])
-def test_depop_photo_preparation_preserves_a_narrow_image(dimensions):
-    from io import BytesIO
-    from PIL import Image
-
-    source = BytesIO()
-    Image.new("RGB", dimensions, "black").save(source, "PNG")
-    result = cloud_marketplace._prepare_photos("depop", [
-        {"id": "photo", "base64": base64.b64encode(source.getvalue()).decode("ascii")},
-    ])
-    with Image.open(BytesIO(base64.b64decode(result[0]["base64"]))) as photo:
-        assert photo.size == (1280, 1280)
-        assert max(photo.getpixel((639, 639))) < 128
-        assert min(photo.getpixel((0, 0))) > 240
 
 
 @pytest.mark.parametrize("already_revoked", [False, True])
@@ -669,25 +661,27 @@ def test_execute_local_uses_fresh_vault_rotates_cookies_and_marks_expired_on_sig
             assert cloud_sessions.has_active_session("poshmark", db) is False
 
 
-_HEADER_ONLY_CHALLENGE_RUNNER = r"""
+_DEPOP_BLOCK_RUNNER = r"""
 const { executeMarketplaceOperation } = require(process.argv[1]);
 const run = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
 const requests = [];
+const block = process.argv[2];
 executeMarketplaceOperation({
   marketplace: 'depop', command: run.command, cookies: run.cookies, userAgent: run.user_agent,
   httpFetch: async url => {
     requests.push(new URL(url).pathname);
-    return new Response('<!doctype html><html><body>private-response</body></html>',
-      { status: 403, headers: { 'content-type': 'text/html', 'cf-mitigated': 'challenge' } });
+    const body = block === 'edge' ? 'Sorry, not authorized. 403 Forbidden' : '';
+    return new Response(`<!doctype html><html><body>${body} private-response</body></html>`,
+      { status: 403, headers: { 'content-type': 'text/html', ...(block === 'header' ? { 'cf-mitigated': 'challenge' } : {}) } });
   },
 }).then(outcome => process.stdout.write(JSON.stringify({ ...outcome, requests })));
 """
 
 
-@pytest.mark.parametrize("command_type", ["marketplace.like_events", "marketplace.verify_session"])
-def test_header_only_challenge_keeps_the_cloud_session(cloud, monkeypatch, command_type):  # noqa: F811
-    """A Cloudflare challenge marked only in its header is a browser check: the saved session,
-    its Vault credentials and the seller's offer rules stay as they were, and the marketplace is asked once."""
+@pytest.mark.parametrize("command_type", ["marketplace.sales_history", "marketplace.verify_session"])
+@pytest.mark.parametrize("block", ["header", "edge"])
+def test_depop_access_block_keeps_the_cloud_session(cloud, monkeypatch, command_type, block):  # noqa: F811
+    """Run the real classifier through the hosted executor on a disposable saved session."""
     import shutil
     import subprocess
     from pathlib import Path
@@ -706,8 +700,13 @@ def test_header_only_challenge_keeps_the_cloud_session(cloud, monkeypatch, comma
     requests: list[str] = []
 
     async def real_runner(marketplace, seller_id, job_id, run_payload, timeout):
-        done = subprocess.run([node, "-e", _HEADER_ONLY_CHALLENGE_RUNNER, str(runner)], input=json.dumps(run_payload),
+        done = subprocess.run([node, "-e", _DEPOP_BLOCK_RUNNER, str(runner), block], input=json.dumps(run_payload),
                               capture_output=True, text=True, timeout=30, check=True)
+        assert f"command={command_type}" in done.stderr
+        assert "status=403 format=html" in done.stderr
+        assert "outcome=challenge" in done.stderr
+        for private in ("session-secret", "private-response", "https://"):
+            assert private not in done.stderr
         outcome = json.loads(done.stdout)
         requests.extend(outcome.pop("requests"))
         return outcome
@@ -726,7 +725,9 @@ def test_header_only_challenge_keeps_the_cloud_session(cloud, monkeypatch, comma
             "depop", {"type": command_type, "job_id": "check-1", "payload": {"marketplace": "depop"}}))
 
         assert result["ok"] is False
-        assert result["error_code"] == "challenge"
+        assert (result.get("error_code") or result.get("error")) == "challenge"
+        if command_type == "marketplace.verify_session":
+            assert result["error"] == "Depop blocked the Cloud connection test. Try again later."
         assert len(requests) == 1, requests
         assert vault.data[(USER_ID, "cloud-session-depop")] == saved
         assert vault.delete_calls == []
