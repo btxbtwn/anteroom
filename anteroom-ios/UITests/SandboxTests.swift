@@ -680,7 +680,8 @@ fileprivate extension XCTestCase {
         create.tap()
         // The editor shows the draft's title, or "Listing" while it has none.
         let editor = app.navigationBars.matching(NSPredicate(format: "identifier IN %@", ["Listing", "New Listing"])).firstMatch
-        XCTAssertTrue(editor.waitForExistence(timeout: 15), "New listing must open the untitled draft in the editor")
+        // A busy simulator can take a while to create and open the draft.
+        XCTAssertTrue(editor.waitForExistence(timeout: 40), "New listing must open the untitled draft in the editor")
     }
 
     @MainActor

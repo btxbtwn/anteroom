@@ -80,7 +80,8 @@ struct MultiShotCamera: View {
                 CameraPreview(control: camera) { image in capture(image) }
                     .ignoresSafeArea()
             } else {
-                Label("The camera isn't available.", systemImage: "camera")
+                Label(CameraSource.simulated ? "Sandbox camera: each shot is a sample photo." : "The camera isn't available.",
+                      systemImage: "camera")
                     .foregroundStyle(.white.opacity(0.7))
             }
             VStack(spacing: 0) {
