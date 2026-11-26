@@ -4,7 +4,7 @@ import { act, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { WorkspaceRuntimeProvider } from "../app/runtime";
+import { WorkspaceRuntimeProvider, type WorkspaceRuntime } from "../app/runtime";
 import { InventoryTablePage } from "./InventoryTablePage";
 import type { Listing } from "./sidebar/listingShelves";
 
@@ -28,12 +28,12 @@ vi.mock("@tanstack/react-virtual", () => ({
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const RUNTIME = {
+const RUNTIME: WorkspaceRuntime = {
   hosted: false,
-  features: new Set<string>(),
+  features: new Set(),
   views: new Set(["listings"]),
-  marketplaceForms: new Set<string>(),
-  actionMarketplaces: new Set<string>(),
+  marketplaceForms: new Set(),
+  actionMarketplaces: new Set(),
 };
 
 function table(
@@ -65,8 +65,8 @@ const driftedListing: Listing = {
   title: "Patagonia Fleece Pullover",
   price: 60,
   price_drift: [
-    { marketplace: "poshmark", price: 60, expected: 68 },
-    { marketplace: "depop", price: 55, expected: 62 },
+    { marketplace: "poshmark", price: 60, expected: 68, source: "live" },
+    { marketplace: "depop", price: 55, expected: 62, source: "live" },
   ],
 };
 
