@@ -93,10 +93,16 @@ struct ListingAssistantView: View {
                 autoGenerate = false
                 // Work that was running when the assistant opened is followed at once.
                 await model.resumeAfterReturn()
+                noteCopy()
             }
             // Pick running work back up after locking the phone or leaving the app.
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { Task { await model.resumeAfterReturn() } }
+                if phase == .active {
+                    Task {
+                        await model.resumeAfterReturn()
+                        noteCopy()
+                    }
+                }
             }
             .sensoryFeedback(.success, trigger: model.runsFinished)
             .sensoryFeedback(.error, trigger: model.runsFailed)
@@ -107,7 +113,7 @@ struct ListingAssistantView: View {
             .task(id: runID) {
                 guard let action else { return }
                 await model.run(action)
-                if model.messages.contains(where: { $0.role == "assistant" && AssistantReply($0.text).isListing }) { hasCopy = true }
+                noteCopy()
             }
             .confirmationDialog("Regenerate this listing?", isPresented: $confirmRegenerate, titleVisibility: .visible) {
                 Button("Regenerate", role: .destructive) { start(.regenerate) }
@@ -279,5 +285,11 @@ struct ListingAssistantView: View {
         following = true
         self.action = action
         runID = UUID()
+    }
+
+    /// Once the transcript holds a generated listing, Generate becomes Regenerate,
+    /// which asks before rewriting it. Work picked up on return counts too.
+    private func noteCopy() {
+        if model.messages.contains(where: { $0.role == "assistant" && AssistantReply($0.text).isListing }) { hasCopy = true }
     }
 }
