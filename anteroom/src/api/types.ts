@@ -323,6 +323,56 @@ export interface ProviderUsageLimits {
   plan?: string;
   unavailable?: { reason: "unsupported" | "probeFailed"; message?: string };
 }
+export interface SubscriptionPlanOption {
+  id: string;
+  name: string;
+  tagline: string;
+  monthly_price_cents: number;
+  annual_price_cents: number;
+  monthly_credits: number | null;
+  monthly_listed_items: number | null;
+  recommended: boolean;
+}
+
+export interface SubscriptionSummary {
+  plan: {
+    id: string;
+    name: string;
+    tagline: string;
+    monthly_price_cents: number;
+    annual_price_cents: number;
+    monthly_credits: number | null;
+    monthly_listed_items: number | null;
+    billing_interval: "monthly" | "annual";
+    unlimited: boolean;
+  };
+  period: string;
+  resets_at: string;
+  credits: {
+    used: number;
+    limit: number | null;
+    remaining: number | null;
+    breakdown: {
+      ai_listing: { count: number; credits: number };
+      photo_cutout: { count: number; credits: number };
+      photo_studio: { count: number; credits: number };
+      photo_refund: { count: number; credits: number };
+    };
+  };
+  listed_items: {
+    used: number;
+    limit: number | null;
+    remaining: number | null;
+  };
+  credit_weights: {
+    ai_listing: number;
+    photo_cutout: number;
+    photo_studio: number;
+    manual_listing: number;
+  };
+  plans: SubscriptionPlanOption[];
+}
+
 /** One model or kind of photo edit inside a metered service. */
 export interface ManagedUsageItem {
   label: string;
@@ -353,7 +403,6 @@ export interface ManagedUsage {
   /** Every day of the period, oldest first, with each service's cost. */
   days: { date: string; openrouter: number; photoroom: number }[];
 }
-
 /** "same" reads photos with the listing provider. */
 export type PhotoProviderChoice = "same" | ListingProviderId;
 

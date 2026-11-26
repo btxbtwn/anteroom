@@ -100,6 +100,15 @@ for (const scheme of ["light", "dark"] as const) {
       await expect(page.getByText("System follows your device’s light or dark setting.")).toBeVisible();
       await shot("settings-general");
       await openSettings(page, "Usage", phone);
+      const plan = page.locator("#subscription-plan");
+      await expect(plan.getByText("Free", { exact: true }).first()).toBeVisible();
+      await expect(plan.getByText(/\/ 50/)).toBeVisible();
+      await expect(plan.getByText(/\/ 10/)).toBeVisible();
+      const tiers = page.locator("#subscription-tiers");
+      await expect(tiers.getByText("$49.99/mo")).toBeVisible();
+      await tiers.getByRole("button", { name: "Annual (2 mo free)", exact: true }).click();
+      await expect(tiers.getByText("$499.90/yr")).toBeVisible();
+      await tiers.getByRole("button", { name: "Monthly", exact: true }).click();
       const usage = page.locator("#managed-usage");
       const downloadCsv = page.getByRole("button", { name: "Download CSV" });
       await expect(usage.getByText("alice@sandbox.test")).toBeVisible();
