@@ -1492,6 +1492,7 @@ export const api = {
       const scheme = window.location.protocol === "https:" ? "wss" : "ws";
       return `${scheme}://${window.location.host}${BASE}/settings/claude/terminal?cols=${cols}&rows=${rows}`;
     },
+    managedUsage: () => request<Record<"openrouter" | "photoroom", { count: number; usd: number }>>("/settings/managed-usage"),
     /** Each provider's subscription usage. `refresh` skips the server's short cache. */
     usageLimits: (refresh = false) =>
       request<{ ok: boolean; providers: ProviderUsageLimits[] }>(
