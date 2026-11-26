@@ -915,7 +915,12 @@ final class SoldAndScheduleSandboxTests: XCTestCase {
         let offer = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Etsy'")).firstMatch
         XCTAssertTrue(offer.waitForExistence(timeout: 30), "Delist of the other marketplaces is offered")
         keep(app, "Delist offered after the sale")
-        app.buttons["Cancel"].firstMatch.tap()
+        let delist = app.buttons["Delist from Etsy"]
+        XCTAssertTrue(delist.exists, "The confirmation names only Etsy")
+        // The popover has no Cancel button on iOS 26: tapping outside dismisses it without delisting.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)).tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: delist)
+        waitForExpectations(timeout: 10)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Sold'")).firstMatch.waitForExistence(timeout: 30))
         keep(app, "Marketplaces after the sale")
     }
