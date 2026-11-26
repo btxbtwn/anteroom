@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1275 — 2026-11-26
+
+- Depop drafts, publishing, edits, relists, and offers use your signed-in Chrome. Depop Cloud still handles sales checks, imports, and standalone delists.
+- Depop Cloud keeps your saved sign-in when Depop returns an access block, so you can distinguish a blocked request from an expired session.
+
 ## 0.1.1274 — 2026-11-25
 
 - Connecting eBay or Etsy on the web no longer fails with "not started here" when Anteroom updates while you are signing in.
