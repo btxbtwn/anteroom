@@ -82,7 +82,11 @@ def enqueue(db, conversation_id, kind, payload):
         BackgroundTask.conversation_id == conversation_id, BackgroundTask.status.in_(ACTIVE)))
     if existing is not None:
         raise HTTPException(409, 'Wait for the current draft task to finish')
-    task = BackgroundTask(conversation_id=conversation_id, kind=kind, payload=payload)
+    task = BackgroundTask(id=new_id(), conversation_id=conversation_id, kind=kind, payload=payload)
+    if kind == 'generate':
+        from anteroom.services import subscriptions
+
+        subscriptions.charge_ai_listing(db, conversation_id, reference_id=task.id)
     db.add(task)
     db.commit()
     return task
