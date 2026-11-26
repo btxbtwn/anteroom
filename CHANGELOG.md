@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1281 — 2026-11-26
+
+- Settings → Usage now lets you pick the last 30 days or a calendar month, charts what you spent each day (with a table of the same numbers), lists which AI models and photo edits the money went on, and downloads every charge as a CSV.
+
 ## 0.1.1280 — 2026-11-26
 
 - Stop Anteroom's own pre-release checks from failing at random on the test that covers finishing a relist or scheduled publish during an update.
