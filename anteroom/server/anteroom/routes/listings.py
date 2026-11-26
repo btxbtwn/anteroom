@@ -335,6 +335,7 @@ class DraftScheduleBody(BaseModel):
     publish_at: str = Field(min_length=1)
     marketplaces: list[str] = Field(min_length=1, max_length=7)
     confirm: bool = False
+    confirmed_ebay_ad_rate: str | None = None
 
 
 @router.get("/api/conversations/{conv_id}/schedule")
@@ -372,6 +373,7 @@ def schedule_draft_publish(conv_id: str, body: DraftScheduleBody, db: Session = 
             publish_at=body.publish_at,
             marketplaces=body.marketplaces,
             confirm=body.confirm,
+            confirmed_ebay_ad_rate=body.confirmed_ebay_ad_rate,
         )
     except draft_scheduling.SchedulePublishError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc

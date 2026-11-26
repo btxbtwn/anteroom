@@ -248,5 +248,5 @@ export function ebayPromotionRate(listing: unknown): string | undefined {
 
 export function ebayPromotionMessage(listing: unknown): string {
   const rate = ebayPromotionRate(listing);
-  return rate ? `eBay will promote this listing at ${rate}% on attributed sales.` : "";
+  return rate ? `Promote this listing on eBay at ${rate}% of attributed sales.` : "";
 }

@@ -42,7 +42,8 @@ from anteroom.services.api_job_lock import (
     claim_api_job, job_cancel_requested, job_is_live, release_api_job, request_job_cancel, start_gate,
 )
 from anteroom.services.chrome_listing import poshmark_fractional_price_error
-from anteroom.services.listing_result import ERROR_CODES, failure, scrub
+from anteroom.services.ebay_listing_promotion import PromotionMode
+from anteroom.services.listing_result import ERROR_CODES, ListingProblem, failure, scrub
 from anteroom.services.seller_overrides import price_for
 log = logging.getLogger("anteroom.native_marketplaces")
 
@@ -451,30 +452,23 @@ def _photos(db: Session, conv_id: str, snapshot: dict, marketplace: str) -> tupl
 
 async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str,
                  relist_rule_id: str | None = None, requested_by: str | None = None, *,
-                 require_ad_rate: bool = False) -> dict:
+                 promotion_mode: PromotionMode = "confirm") -> dict:
     """Check, ask Chrome or eBay, then open the job. Each database step runs on a worker thread
     with its own session, so no pooled connection is held while Chrome or eBay answers."""
     snapshot, photos, deleted_here = await in_worker_session(_check_start, conv_id, marketplace, body, kind)
     if marketplace == "ebay":
-        if require_ad_rate:
-            from anteroom.services.ebay_listing_promotion import choice, validate
-            from anteroom.services.listing_result import ListingProblem
+        from anteroom.services.ebay_listing_promotion import confirmed_selection, selection
 
-            promotion = choice(snapshot)
-            if promotion.get("enabled") is True:
-                try:
-                    _, rate = validate(promotion)
-                except ListingProblem as exc:
-                    raise NativeMarketplaceError(400, str(exc)) from exc
-                from decimal import Decimal, InvalidOperation
-
-                try:
-                    matches_rate = Decimal(body.confirmed_ebay_ad_rate or "") == rate
-                except InvalidOperation:
-                    matches_rate = False
-                if not matches_rate:
-                    raise NativeMarketplaceError(409, f"Confirm the saved {rate}% ad rate in the eBay form. "
-                                                 "Update Anteroom if this device cannot confirm it.")
+        snapshot["_ebay_promotion_mode"] = promotion_mode
+        snapshot.pop("_recreate_ebay_promotion", None)
+        if kind != "save_draft":
+            try:
+                if promotion_mode == "confirm":
+                    confirmed_selection(snapshot, body.confirmed_ebay_ad_rate)
+                elif kind == "list":
+                    selection(snapshot)
+            except ListingProblem as exc:
+                raise NativeMarketplaceError(409, str(exc)) from exc
         await _require_ebay()
     elif marketplace == "etsy":
         await _require_etsy()
@@ -567,6 +561,7 @@ def _open_job(db: Session, conv_id: str, marketplace: str, body: ListRequest, ki
                 rule = db.get(MarketplaceRelistRule, relist_rule_id, with_for_update=True)
                 if not rule or rule.marketplace != marketplace or not rule.enabled:
                     raise NativeMarketplaceError(409, "The relist rule was turned off.", reason="relist_rule_disabled")
+            known: dict = {}
             if kind in {"list", "save_draft"}:
                 from anteroom.models.conversation import Conversation
                 from anteroom.services.draft_scheduling import is_sold_or_has_sale
@@ -577,13 +572,20 @@ def _open_job(db: Session, conv_id: str, marketplace: str, body: ListRequest, ki
                 conv = db.get(Conversation, conv_id, with_for_update=True, populate_existing=True)
                 if conv is None:
                     raise NativeMarketplaceError(404, "Listing not found.")
+                known = live_listings(db, conv_id)
                 if (
                     conv.status == "sold"
-                    or any(entry.get("sold_here") for entry in live_listings(db, conv_id).values())
+                    or any(entry.get("sold_here") for entry in known.values())
                     or is_sold_or_has_sale(db, conv)
                 ):
                     raise NativeMarketplaceError(409, "This item has sold. It cannot be listed again.")
             record = _record(db, conv_id, marketplace)
+            if marketplace == "ebay" and kind == "list" and relist_rule_id is not None and deleted_here:
+                from anteroom.services.ebay_listing_promotion import recreate_from
+
+                old = known.get("ebay") or {}
+                if old.get("state") == "deleted":
+                    snapshot["_recreate_ebay_promotion"] = recreate_from(record, old.get("listing_id"))
             if record.get("state") in UNSETTLED_STATES:
                 raise NativeMarketplaceError(409, f"Check the last {name} action first; Anteroom has not confirmed it.")
             extra: dict = {}
@@ -767,18 +769,19 @@ async def shared_preflight(conv_id: str, revision_id: str | None = None) -> dict
 
 async def list_now(conv_id: str, marketplace: Marketplace, body: ListRequest, *,
                    relist_rule_id: str | None = None, requested_by: str | None = None,
-                   require_ad_rate: bool = False) -> dict:
+                   promotion_mode: Literal["confirm", "leave"] = "confirm") -> dict:
     """Start listing on one marketplace in one seller-confirmed step. Returns at once; poll status.
 
     ``requested_by`` names the agent the seller allowed to ask for it (``services/mcp_marketplace_tools.py``).
     """
-    return await _start(conv_id, marketplace, body, "list", relist_rule_id, requested_by, require_ad_rate=require_ad_rate)
+    mode = "recreate" if relist_rule_id is not None else promotion_mode
+    return await _start(conv_id, marketplace, body, "list", relist_rule_id, requested_by, promotion_mode=mode)
 
 
 async def update_live(conv_id: str, marketplace: Marketplace, body: ListRequest, *,
-                      requested_by: str | None = None, require_ad_rate: bool = False) -> dict:
+                      requested_by: str | None = None, promotion_mode: Literal["confirm", "leave"] = "confirm") -> dict:
     """Write the listing saved in Anteroom onto the one already live. One confirmation, never a second listing."""
-    return await _start(conv_id, marketplace, body, "update", requested_by=requested_by, require_ad_rate=require_ad_rate)
+    return await _start(conv_id, marketplace, body, "update", requested_by=requested_by, promotion_mode=promotion_mode)
 
 
 async def save_draft(conv_id: str, marketplace: Marketplace, revision_id: str, *,
@@ -1022,7 +1025,7 @@ async def _execute_step(job_id: str, conv_id: str, marketplace: str, step: str, 
             from anteroom.services import ebay_listings
 
             result = await ebay_listings.execute(step, snapshot, photos, binding, record, active, confirm=step in {"list", "publish", "update"},
-                                                 conversation_id=conv_id)
+                                                 conversation_id=conv_id, promotion_mode=snapshot.get("_ebay_promotion_mode", "leave"))
         else:
             result = await etsy_listings.execute(step, snapshot, photos, binding, record, active, confirm=step in {"list", "publish", "update"}, **options)
         stored = await _joined_worker_session(_apply_result, conv_id, marketplace, job_id, step, result)
@@ -1040,7 +1043,9 @@ async def _execute_step(job_id: str, conv_id: str, marketplace: str, step: str, 
                 if marketplace == "ebay" and checked.get("state") == "published":
                     from anteroom.services.ebay_listing_promotion import UNCONFIRMED, choice, has_change
 
-                    if has_change(step, choice(snapshot), binding.get("ebay_promotion") or {}):
+                    if snapshot.get("_ebay_promotion_mode") != "leave" and has_change(
+                        step, choice(snapshot), binding.get("ebay_promotion") or {},
+                    ):
                         checked["warning"] = UNCONFIRMED
                 stored = await _joined_worker_session(_apply_result, conv_id, marketplace, job_id, step, checked)
         return stored

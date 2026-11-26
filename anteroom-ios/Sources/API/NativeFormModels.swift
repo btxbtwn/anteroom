@@ -31,6 +31,8 @@ struct NativeField: Decodable, Identifiable, Sendable {
     var inputType: String
     var presentation: String?
     var help: String?
+    var choicesLoading: Bool
+    var suggestedAdRate: String?
     var section: String?
     var half: Bool
     /// A quarter-width field, such as eBay's package weight in pounds beside ounces.
@@ -58,6 +60,8 @@ struct NativeField: Decodable, Identifiable, Sendable {
     enum CodingKeys: String, CodingKey {
         case key, path, label, value, required, multi, options, help, section, locked, placeholder, clears, width, reveal, step, presentation
         case minValue = "min_value"
+        case choicesLoading = "choices_loading"
+        case suggestedAdRate = "suggested_ad_rate"
         case variationAspects = "variation_aspects"
         case choiceList = "choice_list"
         case selectionOnly = "selection_only"
@@ -86,6 +90,8 @@ struct NativeField: Decodable, Identifiable, Sendable {
         inputType = try c.decodeIfPresent(String.self, forKey: .inputType) ?? "text"
         presentation = try c.decodeIfPresent(String.self, forKey: .presentation)
         help = try c.decodeIfPresent(String.self, forKey: .help)
+        choicesLoading = try c.decodeIfPresent(Bool.self, forKey: .choicesLoading) ?? false
+        suggestedAdRate = try c.decodeIfPresent(String.self, forKey: .suggestedAdRate)
         section = try c.decodeIfPresent(String.self, forKey: .section)
         let width = try c.decodeIfPresent(String.self, forKey: .controlWidth) ?? c.decodeIfPresent(String.self, forKey: .width)
         half = width == "half"

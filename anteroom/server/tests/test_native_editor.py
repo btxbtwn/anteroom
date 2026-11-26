@@ -696,6 +696,27 @@ class NativeEditorTest(unittest.TestCase):
 
 
 class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
+    async def test_promotion_choices_do_not_block_a_cold_form(self):
+        import asyncio
+        from anteroom.services import ebay_listing_promotion, saved_choices
+
+        async def stalled(*_args):
+            await asyncio.Event().wait()
+
+        background = []
+        with (
+            patch("anteroom.services.marketplace_accounts.account_id", new=AsyncMock(return_value="test-seller")),
+            saved_choices.preload_entries({"ebay-campaigns": None, "ebay-suggested-rate:123456789012": None}),
+            patch.object(saved_choices, "on_this_loop", side_effect=background.append),
+            patch.object(ebay_listing_promotion, "campaigns", side_effect=stalled),
+            patch.object(ebay_listing_promotion, "suggested_rate", side_effect=stalled),
+        ):
+            rows = await asyncio.wait_for(native_editor._ebay_promotion_fields({
+                "_promotion_listing_id": "123456789012",
+            }), timeout=1)
+        self.assertFalse(rows[0]["value"])
+        self.assertEqual(len(background), 2)
+
     async def test_slab_evidence_reaches_native_condition_rows_and_submission(self):
         from anteroom.services.ebay_listings import _inventory_body, _listing_fields
         from anteroom.services.listing_generate import format_photo_analysis

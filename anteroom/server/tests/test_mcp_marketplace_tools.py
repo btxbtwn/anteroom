@@ -202,6 +202,26 @@ def test_save_drafts_level_allows_only_marketplace_drafts(services):
     assert {kwargs["requested_by"] for _, kwargs in calls} == {"mcp:Claude on iPad"}
 
 
+@pytest.mark.parametrize(("tool", "service"), [("publish_listing", "list_now"), ("send_unsent_edits", "update_live")])
+def test_mcp_promotion_requires_the_exact_rate(tool, service, services):
+    client = TestClient(app)
+    _, bearer = _token(client, "Seller agent", marketplaces="publish")
+    conv_id, _ = _listing()
+    with SessionLocal() as db:
+        revision_id = save_revision(db, conv_id, {"title": "Coat", "ebay_specifics": {
+            "promotion": {"enabled": True, "campaignId": "42", "adRate": 7.5},
+        }}, "user_form").id
+    args = {"conversation_id": conv_id, "marketplaces": ["ebay"], "expected_revision_id": revision_id, "confirm": True}
+    for rate in (None, "7"):
+        refused, is_error = _call(client, tool, {**args, **({"confirmed_ebay_ad_rate": rate} if rate else {})}, bearer)
+        assert is_error and "7.5%" in refused["error"]
+    assert services[service].calls == []
+    result, is_error = _call(client, tool, {**args, "confirmed_ebay_ad_rate": "7.50"}, bearer)
+    assert not is_error, result
+    assert result["marketplaces"]["ebay"]["confirmed_ebay_ad_rate"] == "7.5"
+    assert services[service].calls[0][0][2].confirmed_ebay_ad_rate == "7.5"
+
+
 def test_publish_names_marketplaces_carries_confirm_and_pins_the_revision(services):
     client = TestClient(app)
     conv_id, revision_id = _listing()

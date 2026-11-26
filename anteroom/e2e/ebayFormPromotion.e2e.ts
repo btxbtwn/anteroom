@@ -26,12 +26,14 @@ test("eBay form saves the campaign and rate from an explicit opt-in", async ({ p
     await openForm(page, phone, "eBay");
     const toggle = page.getByRole("switch", { name: "Promoted Listings" });
     await expect(toggle).not.toBeChecked();
-    await toggle.click();
+    await expect(toggle).toBeDisabled();
     const rate = page.getByRole("spinbutton", { name: "Ad rate (%)" });
     await rate.fill("5.5");
     const campaign = page.getByRole("combobox", { name: "Select campaign" });
     await campaign.click();
     await page.getByRole("option", { name: "General campaign" }).click();
+    await expect(toggle).toBeEnabled();
+    await toggle.click();
     await expect.poll(async () => {
       const doc = await (await request.get(url)).json();
       const promotion = doc.listing.ebay_specifics?.promotion;

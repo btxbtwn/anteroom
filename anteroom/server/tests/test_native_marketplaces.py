@@ -1701,6 +1701,20 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         self.assertEqual(checked.await_args.args[0]["ebay_offer_id"], "9")
         self.assertEqual(JobRepo(self.db).get(record["job_id"]).status, "completed")
 
+    def test_listing_form_rejects_an_incomplete_enabled_ebay_promotion(self):
+        listing_url = f"/api/conversations/{self.conv.id}/listing"
+        for promotion, reason in [
+            ({"enabled": True, "adRate": "8"}, "campaign"),
+            ({"enabled": True, "campaignId": "42", "adRate": "101"}, "2% to 100%"),
+        ]:
+            result = self.client.put(listing_url, json={
+                "expected_revision_id": self.rev.id,
+                "listing": {**LISTING, "ebay_specifics": {**LISTING.get("ebay_specifics", {}), "promotion": promotion}},
+            })
+            self.assertEqual(result.status_code, 422, result.text)
+            self.assertIn(reason, result.json()["detail"])
+        self.assertEqual(ConversationRepo(self.db).current_revision_id(self.conv.id), self.rev.id)
+
     def test_an_ebay_ad_failure_keeps_the_publication_completed(self):
         from fastapi import FastAPI
 

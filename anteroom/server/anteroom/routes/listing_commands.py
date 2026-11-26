@@ -124,7 +124,11 @@ async def set_price(conv_id: str, body: SetPriceBody):
             waiting.append(f"{market}: not live")
         else:
             try:
-                await native.update_live(conv_id, cast(native.Marketplace, market), native.ListRequest(revision_id=saved["current_revision_id"], confirm=True))
+                request = native.ListRequest(revision_id=saved["current_revision_id"], confirm=True)
+                if market == "ebay":
+                    await native.update_live(conv_id, "ebay", request, promotion_mode="leave")
+                else:
+                    await native.update_live(conv_id, cast(native.Marketplace, market), request)
                 pushed.append(market)
             except native.NativeMarketplaceError as exc:
                 waiting.append(f"{market}: {exc}")

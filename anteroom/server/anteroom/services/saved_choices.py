@@ -193,12 +193,18 @@ def _refresh_later(name: str, account: str, read: Read, usable: Callable[[Any], 
     background(refresh)
 
 
+def refreshing(name: str, account: str) -> bool:
+    job = (_seller(), name, account)
+    with _lock:
+        return job in _refreshing
+
+
 async def kept(name: str, account: str, read: Read, *, usable: Callable[[Any], bool] = lambda _value: True,
-               background: Background = in_thread) -> Any:
+               background: Background = in_thread, wait_on_miss: bool = True, refresh: bool = False) -> Any:
     """The saved choices at once, refreshed behind the form once they are a few minutes old.
 
-    With no saved copy for this account, read now. ``usable`` keeps a partial or
-    signed-out answer from being saved, so the seller's reload still reads again.
+    With no saved copy for this account, read now or queue a background read
+    when wait_on_miss is false. A forced refresh still returns the saved copy.
     """
     preloaded = _preloaded.get()
     if preloaded is not None and name in preloaded:
@@ -206,7 +212,10 @@ async def kept(name: str, account: str, read: Read, *, usable: Callable[[Any], b
     else:
         entry = await asyncio.to_thread(_entry, name)
     if entry and entry.get("account") == account:
-        if time.time() - float(entry.get("at") or 0) >= REFRESH_AFTER_S:
+        if refresh or time.time() - float(entry.get("at") or 0) >= REFRESH_AFTER_S:
             _refresh_later(name, account, read, usable, background)
         return entry.get("value")
+    if not wait_on_miss:
+        _refresh_later(name, account, read, usable, background)
+        return None
     return await _read_and_save(name, account, read, usable)

@@ -30,6 +30,7 @@ from anteroom.services.ebay_api import dollars, money_cents
 import httpx
 
 from anteroom.services.ebay_client import EBAY_DOWN, EbayClient, EbayFailure, segment
+from anteroom.services.ebay_listing_promotion import PromotionMode
 from anteroom.services.listing_result import ListingProblem, failure, missing
 from anteroom.services.marketplace_accounts import SignInRequired
 from anteroom.services.relay_client import RelayError
@@ -1150,7 +1151,10 @@ def requirements(snapshot: dict, context: Context) -> list[dict]:
     if not isinstance(form, dict):
         form = vendoo_form(snapshot, "ebay")
     found: list[dict] = []
-    for check in (lambda: _listing_fields(snapshot, form), lambda: package_ounces(snapshot, form)):
+    from anteroom.services.ebay_listing_promotion import selection
+
+    for check in (lambda: _listing_fields(snapshot, form), lambda: package_ounces(snapshot, form),
+                  lambda: selection(snapshot)):
         try:
             check()
         except ListingProblem as exc:
@@ -1405,30 +1409,34 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Reco
 
 async def execute(action: str, snapshot: dict, photos: list, binding: dict,
                   record: RecordFn, active: ActiveFn, *, confirm: bool = False,
-                  conversation_id: str = "") -> dict:
+                  conversation_id: str = "", promotion_mode: PromotionMode = "leave") -> dict:
     from anteroom.services import ebay_listing_promotion
 
     promotion = ebay_listing_promotion.choice(snapshot)
     previous = binding.get("ebay_promotion") or {}
-    enabled = promotion.get("enabled")
-    should_apply = confirm is True and ebay_listing_promotion.has_change(action, promotion, previous)
+    should_apply = confirm is True and promotion_mode == "confirm" and ebay_listing_promotion.has_change(action, promotion, previous)
     selected = None
-    if should_apply and enabled is True:
+    if should_apply:
         try:
-            selected = ebay_listing_promotion.validate(promotion)
-            if listing_format(snapshot)["format"] == AUCTION:
-                raise missing("Promoted Listings requires a fixed-price eBay listing.", f"{ebay_listing_promotion.PREFIX}.enabled")
+            selected = ebay_listing_promotion.selection(snapshot)
         except (ListingProblem, ValueError) as exc:
             return _failure(exc, None)
     result = await _execute_listing(action, snapshot, photos, binding, record, active, confirm=confirm,
                                     conversation_id=conversation_id)
     if should_apply and result.get("state") == "published":
         return await _apply_promotion(result, selected, previous, record, active)
+    if confirm and promotion_mode == "recreate" and action == "list" and result.get("state") == "published":
+        applied = snapshot.get("_recreate_ebay_promotion")
+        if applied and str(result["listing_url"]).rsplit("/", 1)[-1] != applied["listing_id"]:
+            selected = applied["campaign_id"], Decimal(applied["applied_rate"])
+            return await _apply_promotion(result, selected, {}, record, active, account_id=applied["account_id"])
+        if promotion.get("enabled") is True or previous:
+            return {**result, "warning": ebay_listing_promotion.NO_APPLIED_PROMOTION}
     return result
 
 
 async def _apply_promotion(result: dict, selected: tuple[str, Decimal] | None, previous: dict,
-                           record: RecordFn, active: ActiveFn) -> dict:
+                           record: RecordFn, active: ActiveFn, *, account_id: str | None = None) -> dict:
     from anteroom.services import ebay_listing_promotion
 
     listing_id = str(result["listing_url"]).rsplit("/", 1)[-1]
@@ -1438,10 +1446,13 @@ async def _apply_promotion(result: dict, selected: tuple[str, Decimal] | None, p
         async with asyncio.timeout(45):
             if not await _is_active(active):
                 raise EbayFailure("The eBay promotion step was cancelled.")
+            client = await EbayClient.connect()
+            if account_id is not None and client.seller[0] != account_id:
+                raise EbayFailure("This promotion belongs to a different eBay account.")
             await ebay_listing_promotion.reconcile(
-                await EbayClient.connect(), listing_id, selected, previous,
+                client, listing_id, selected, previous,
                 lambda values: _record(record, values), lambda: _is_active(active))
-    except Exception:  # noqa: BLE001 - a failed ad or journal write cannot undo confirmed publication
+    except (Exception, asyncio.CancelledError):  # noqa: BLE001 - publication already confirmed
         return {**result, "warning": ebay_listing_promotion.UNCONFIRMED}
     return result
 

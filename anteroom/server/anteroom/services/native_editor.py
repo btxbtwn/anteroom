@@ -65,7 +65,10 @@ def _preload_form_caches(
                 ),
                 db=db,
             )
-        return schemas, {name: saved_choices.read_entry(name, db=db) for name in ("ebay-policies", "ebay-campaigns")}
+        choices = ["ebay-policies", "ebay-campaigns"]
+        if listing_id := snapshot.get("_promotion_listing_id"):
+            choices.append(f"ebay-suggested-rate:{listing_id}")
+        return schemas, {name: saved_choices.read_entry(name, db=db) for name in choices}
 
     if marketplace == "etsy":
         from anteroom.services.direct_categories import direct_category_id
@@ -165,7 +168,7 @@ async def build_form(snapshot: dict, listing_json: dict, marketplace: str, *, re
         # Stale saved choices must be rebuilt from the current catalog below.
         # Rejecting here leaves the editor empty with no way to reload them.
     if marketplace == "ebay":
-        return await ebay_form(snapshot)
+        return await ebay_form(snapshot, refresh_promotion=refresh)
     raise NativeMarketplaceError(404, "This marketplace has no native editor form.")
 
 
@@ -326,7 +329,7 @@ async def _ebay_choices(snapshot: dict, *, fresh: bool = False) -> list[dict]:
             row("returnPolicyId", "return", "Return policy", "Preferences")]
 
 
-async def ebay_form(snapshot: dict, *, fresh_choices: bool = False) -> dict:
+async def ebay_form(snapshot: dict, *, fresh_choices: bool = False, refresh_promotion: bool = False) -> dict:
     from anteroom.services import marketplace_schemas
     from anteroom.services.ebay_fields import ebay_optional_raw
     from anteroom.services.ebay_listings import (CHARITY_PERCENTS, CONDITION_IDS, best_offer_terms, card_condition,
@@ -364,7 +367,7 @@ async def ebay_form(snapshot: dict, *, fresh_choices: bool = False) -> dict:
             _ebay_variations_field(snapshot, category, schema_task, strict=fresh_choices),
             _ebay_format_fields(snapshot, category, details, strict=fresh_choices),
             _ebay_choices(snapshot, fresh=fresh_choices),
-            _ebay_promotion_fields(snapshot, fresh=fresh_choices),
+            _ebay_promotion_fields(snapshot, fresh=fresh_choices or refresh_promotion),
             return_exceptions=True,
         )
     if isinstance(raw_schema, BaseException):
@@ -524,33 +527,48 @@ async def _ebay_promotion_fields(snapshot: dict, *, fresh: bool = False) -> list
     from anteroom.services import ebay_listing_promotion as promotion, saved_choices
     from anteroom.services.marketplace_accounts import account_id
     chosen = promotion.choice(snapshot)
+    try:
+        account = await account_id("ebay")
+    except Exception:  # noqa: BLE001 - promotion choices are optional
+        account = ""
+    listing_id = str(snapshot.get("_promotion_listing_id") or "")
+    suggestion_key = f"ebay-suggested-rate:{listing_id}"
 
-    async def options() -> tuple[list[dict], str]:
+    async def campaigns_read():
         try:
-            account = await account_id("ebay")
-            if not account:
-                return [], "Connect eBay in Settings → Connections to see your campaigns."
-            rows = (await promotion.campaigns() if fresh else await saved_choices.kept(
-                "ebay-campaigns", account, promotion.campaigns))
-        except Exception:  # noqa: BLE001 - optional account access must not block the form
-            return [], "eBay campaigns are unavailable. Check access in Marketplaces → eBay → Marketing."
-        return rows, "" if rows else (
-            "You have no running General campaigns for manually selected listings. "
-            "Create one in Marketplaces → eBay → Marketing."
-        )
+            return await promotion.campaigns()
+        except Exception:  # noqa: BLE001 - optional account choices never break the form
+            return {"unavailable": True}
 
-    async def suggestion() -> str:
+    async def suggestion_read():
         try:
-            return await promotion.suggested_rate(str(snapshot.get("_promotion_listing_id") or ""))
+            return await promotion.suggested_rate(listing_id)
         except Exception:  # noqa: BLE001 - suggestions are optional
             return ""
 
-    (campaigns, note), suggested = await asyncio.gather(options(), suggestion())
+    campaigns, suggested = None, ""
+    if account:
+        campaigns = await saved_choices.kept("ebay-campaigns", account, campaigns_read,
+                                             wait_on_miss=False, refresh=fresh, background=saved_choices.on_this_loop)
+        if listing_id:
+            suggested = await saved_choices.kept(suggestion_key, account, suggestion_read,
+                                                 wait_on_miss=False, refresh=fresh, background=saved_choices.on_this_loop)
+    if not account:
+        note = "Connect eBay in Settings → Connections to see your campaigns."
+    elif campaigns is None:
+        note = "eBay campaign choices are loading. Reload choices if they have not appeared."
+    elif isinstance(campaigns, dict):
+        note = "eBay campaigns are unavailable. Check access in Marketplaces → eBay → Marketing."
+    elif not campaigns:
+        note = "You have no running General campaigns. Create one in Marketplaces → eBay → Marketing."
+    else:
+        note = ""
+    rows = campaigns if isinstance(campaigns, list) else []
     values = {str(row.get("campaignName") or row["campaignId"]): str(row["campaignId"])
-              for row in campaigns if row.get("campaignId")}
-    if len(values) < len(campaigns):
+              for row in rows if row.get("campaignId")}
+    if len(values) < len(rows):
         values = {f"{row.get('campaignName') or 'Campaign'} ({row['campaignId']})": str(row["campaignId"])
-                  for row in campaigns if row.get("campaignId")}
+                  for row in rows if row.get("campaignId")}
     rate_hint = f"Suggested ad rate from eBay: {suggested}%." if suggested else "Enter a rate from 2% to 100%."
     return [
         field(f"{promotion.PREFIX}.enabled", "Promoted Listings", chosen.get("enabled") is True,
@@ -558,10 +576,12 @@ async def _ebay_promotion_fields(snapshot: dict, *, fresh: bool = False) -> list
               help=note or "The ad fee is charged at your rate on attributed sales."),
         field(f"{promotion.PREFIX}.campaignId", "Select campaign", chosen.get("campaignId"),
               section=promotion.SECTION, selection_only=True, options=list(values), option_values=values,
-              options_source="marketplace", help=note, width="half"),
+              options_source="marketplace", help=note, width="half",
+              choices_loading=bool(account and (campaigns is None or saved_choices.refreshing("ebay-campaigns", account)))),
         field(f"{promotion.PREFIX}.adRate", "Ad rate (%)", chosen.get("adRate"),
               section=promotion.SECTION, input_type="number", min_value=2, max_value=100, step=0.1,
-              help=rate_hint, width="half"),
+              help=rate_hint, width="half", suggested_ad_rate=suggested or "",
+              choices_loading=bool(account and listing_id and (suggested is None or saved_choices.refreshing(suggestion_key, account)))),
     ]
 
 

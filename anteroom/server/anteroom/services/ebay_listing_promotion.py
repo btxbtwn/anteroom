@@ -4,18 +4,22 @@ from __future__ import annotations
 import asyncio
 from decimal import Decimal, InvalidOperation
 import re
+from typing import Literal
 
 from anteroom.services.ebay_actions import ad_rate, campaign_ads, create_listing_ad
 from anteroom.services.ebay_client import EbayClient, EbayFailure, segment
-from anteroom.services.listing_result import missing
+from anteroom.services.listing_result import ListingProblem, missing
 from anteroom.services.seller_region import seller_region
 
 CAMPAIGNS = "/sell/marketing/v1/ad_campaign"
 SECTION = "Promote your listing"
 PREFIX = "ebay_specifics.promotion"
+PromotionMode = Literal["confirm", "leave", "recreate"]
 WARNING_CODE = "ebay_promotion_unconfirmed"
 UNCONFIRMED = ("The listing is live. eBay did not confirm the promotion change. "
                "Check the campaign in Marketplaces → eBay → Marketing, then use Update on eBay to retry.")
+NO_APPLIED_PROMOTION = ("The listing is live. Promotion was not applied. "
+                        "Review the eBay form and confirm Update on eBay to apply it.")
 
 
 def choice(snapshot: dict) -> dict:
@@ -38,6 +42,44 @@ def validate(promotion: dict) -> tuple[str, Decimal]:
         return campaign, ad_rate(str(promotion.get("adRate") or ""))
     except (InvalidOperation, EbayFailure):
         raise missing("Enter an ad rate from 2% to 100%, with at most one decimal place.", f"{PREFIX}.adRate") from None
+
+
+def selection(snapshot: dict) -> tuple[str, Decimal] | None:
+    chosen = choice(snapshot)
+    if chosen.get("enabled") is not True:
+        return None
+    from anteroom.services.marketplace_schemas import _ebay_listing_type
+
+    if _ebay_listing_type(snapshot["ebay_specifics"].get("listingFormat")) == "AUCTION":
+        raise missing("Promoted Listings requires a fixed-price eBay listing.", f"{PREFIX}.enabled")
+    return validate(chosen)
+
+
+def confirmed_selection(snapshot: dict, confirmed_rate: str | None) -> tuple[str, Decimal] | None:
+    selected = selection(snapshot)
+    if selected is None:
+        return None
+    try:
+        rate = Decimal(confirmed_rate or "")
+    except InvalidOperation:
+        rate = None
+    if rate is None or not rate.is_finite() or rate != selected[1]:
+        raise missing(f"Confirm the saved {selected[1]}% eBay ad rate before sending this listing. "
+                      "Update Anteroom if this device cannot confirm it.", f"{PREFIX}.adRate")
+    return selected
+
+
+def recreate_from(record: dict, old_listing_id: str | None) -> dict | None:
+    applied = record.get("ebay_promotion")
+    if not isinstance(applied, dict) or not applied.get("account_id") or not applied.get("applied_rate"):
+        return None
+    if not old_listing_id or applied.get("listing_id") != old_listing_id:
+        return None
+    try:
+        validate({"campaignId": applied.get("campaign_id"), "adRate": applied["applied_rate"]})
+    except ListingProblem:
+        return None
+    return applied
 
 
 def _eligible(campaign: dict, marketplace: str) -> bool:
@@ -118,9 +160,13 @@ async def reconcile(client: EbayClient, listing_id: str, selected: tuple[str, De
     ad = await _ad(client, selected[0], listing_id)
     if not await active():
         raise EbayFailure("The eBay promotion step was cancelled.")
-    await remember({"ebay_promotion": {"listing_id": listing_id, "campaign_id": selected[0],
-                                       "account_id": client.seller[0]}})
+    target = {"listing_id": listing_id, "campaign_id": selected[0], "account_id": client.seller[0]}
+    if prior != campaign_id:
+        await remember({"ebay_promotion": target})
+    if not await active():
+        raise EbayFailure("The eBay promotion step was cancelled.")
     if not ad:
         await create_listing_ad(client, path, listing_id, rate)
     elif Decimal(str(ad.get("bidPercentage") or "0")) != rate:
         await client.request("POST", f"{path}/ad/{segment(ad['adId'])}/update_bid", body={"bidPercentage": str(rate)})
+    await remember({"ebay_promotion": {**target, "applied_rate": str(rate)}})

@@ -28,7 +28,7 @@ function defaultFuture(): string {
   return `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())}T${pad(next.getHours())}:${pad(next.getMinutes())}`;
 }
 
-export function DraftScheduleControl({ convId, ebayPromotion }: { convId: string; ebayPromotion?: string }) {
+export function DraftScheduleControl({ convId, ebayAdRate }: { convId: string; ebayAdRate?: string }) {
   const queryClient = useQueryClient();
   const scheduleQuery = useQuery({
     queryKey: ["draft-schedule", convId],
@@ -51,8 +51,8 @@ export function DraftScheduleControl({ convId, ebayPromotion }: { convId: string
   });
 
   const schedule = useMutation({
-    mutationFn: ({ at, targets }: { at: string; targets: string[] }) =>
-      api.draftSchedule.schedule(convId, at, targets),
+    mutationFn: ({ at, targets, adRate }: { at: string; targets: string[]; adRate?: string }) =>
+      api.draftSchedule.schedule(convId, at, targets, adRate),
     onSuccess: () => { setError(""); refresh(); },
     onError: (err: Error) => setError(err.message),
   });
@@ -76,12 +76,13 @@ export function DraftScheduleControl({ convId, ebayPromotion }: { convId: string
       setError("Choose a future publish date and time.");
       return;
     }
+    const adRate = markets.includes("ebay") ? ebayAdRate : undefined;
     const ok = await confirmDialog(
-      `Schedule this draft to publish on ${markets.map(marketplaceName).join(", ")} at ${parsed.toLocaleString()}? If you edit this draft before then, Anteroom will unschedule it automatically.${markets.includes("ebay") && ebayPromotion ? `\n${ebayPromotion}` : ""}`,
+      `Schedule this draft to publish on ${markets.map(marketplaceName).join(", ")} at ${parsed.toLocaleString()}? If you edit this draft before then, Anteroom will unschedule it automatically.${adRate ? `\n\nConfirm eBay ad rate of ${adRate}% on attributed sales.` : ""}`,
       { confirmLabel: "Schedule publish" },
     );
     if (!ok) return;
-    schedule.mutate({ at: parsed.toISOString(), targets: markets });
+    schedule.mutate({ at: parsed.toISOString(), targets: markets, adRate });
   };
 
   if (scheduleQuery.isLoading || !state || typeof state.ready_to_list !== "boolean") return null;

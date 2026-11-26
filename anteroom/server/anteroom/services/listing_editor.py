@@ -111,6 +111,14 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
 
     previous = listing_repo.get_revision(current.current_revision_id) if current and current.current_revision_id else None
     previous_json = previous.listing_json if previous and isinstance(previous.listing_json, dict) else {}
+    if seller_form:
+        from anteroom.services.ebay_listing_promotion import selection
+        from anteroom.services.listing_result import ListingProblem
+
+        try:
+            selection(listing_data)
+        except ListingProblem as exc:
+            raise HTTPException(422, str(exc)) from exc
     if not seller_form:
         from anteroom.services.listing_persistence import preserve_ebay_promotion
 

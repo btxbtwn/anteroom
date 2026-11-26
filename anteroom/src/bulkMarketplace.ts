@@ -18,7 +18,8 @@ export function reviewedTasks(rows: readonly BulkMarketplaceRow[], unchecked: Re
       title: row.title || "Untitled item",
       state: "pending" as const,
       request: { conversation_id: row.conversation_id, action: row.action, marketplaces: row.marketplaces,
-        revision_id: row.revision_id, review_token: row.review_token, confirm: true },
+        revision_id: row.revision_id, review_token: row.review_token, confirm: true,
+        ...(row.ebay_ad_rate ? { confirmed_ebay_ad_rate: row.ebay_ad_rate } : {}) },
     }];
   });
 }

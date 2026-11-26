@@ -85,6 +85,8 @@ interface Props {
 }
 
 interface EditorField {
+  warning?: string;
+  suggestedAdRate?: string;
   key: string;
   label: string;
   type?: string;
@@ -1303,6 +1305,7 @@ export function StructuredEditor({
                   </p>}
                   {!labelRow && !(f.type === "boolean" && f.presentation === "checkbox") && tools && <div className="mt-1 flex">{tools}</div>}
                   {f.help && f.type !== "photos" && !multiSelectControl(f) && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
+                  {f.warning && <p role="status" className="mt-1 text-xs text-warning-foreground">{f.warning}</p>}
                   {uniqueMarketplaceMessages(f.type === "photos" ? [] : fieldWarnings.get(f.key) ?? [], shownMessages).map((message) =>
                     <p key={message} role="alert" className="mt-1 text-xs text-warning-foreground">{message}</p>)}
                   {f.maxLength != null && (f.multi ? formFieldValues(local[f.key], f.options) : [formFieldText(local[f.key])]).some((value) => value.length > f.maxLength!) &&
@@ -1699,6 +1702,7 @@ function schemaFieldsForTab(
     ...(field.option_groups ? { optionGroups: field.option_groups } : {}),
     ...(field.width ? { width: field.width } : {}),
     ...(field.control_width ? { controlWidth: field.control_width } : {}),
+    ...(field.suggested_ad_rate ? { suggestedAdRate: field.suggested_ad_rate } : {}),
     ...(field.cascade ? { cascade: field.cascade as EditorField["cascade"] } : {}),
     ...(field.option_amounts ? { optionAmounts: field.option_amounts } : {}),
     ...(field.group ? { group: field.group, groupHelp: field.group_help } : {}),

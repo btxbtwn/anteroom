@@ -534,14 +534,14 @@ export function MarketplacesLayout({
     const name = marketplaceName(marketplace);
     const promotion = marketplace === "ebay" ? ebayPromotionMessage(savedListing) : "";
     const confirmedEbayAdRate = marketplace === "ebay" ? ebayPromotionRate(savedListing) : undefined;
-    if (await confirmDialog(`Update the live ${name} listing for “${title}” with what's saved in Anteroom?\nThis changes the listing that is already up.${promotion ? `\n${promotion}` : ""}`,
+    if (await confirmDialog(`${promotion ? `${promotion}\n\n` : ""}Update the live ${name} listing for “${title}” with what's saved in Anteroom?\nThis changes the listing that is already up.`,
       { confirmLabel: `Update on ${name}` })) action.mutate({ marketplace, kind: "update", confirmedEbayAdRate });
   }
   async function listNow(marketplace: NativeMarketplace) {
     const name = marketplaceName(marketplace);
     const promotion = marketplace === "ebay" ? ebayPromotionMessage(savedListing) : "";
     const confirmedEbayAdRate = marketplace === "ebay" ? ebayPromotionRate(savedListing) : undefined;
-    if (await confirmDialog(`List “${title}” on ${name}?\nThis creates a live ${name} listing from the listing saved in Anteroom.${promotion ? `\n${promotion}` : ""}`,
+    if (await confirmDialog(`${promotion ? `${promotion}\n\n` : ""}List “${title}” on ${name}?\nThis creates a live ${name} listing from the listing saved in Anteroom.`,
       { confirmLabel: `List on ${name}` })) action.mutate({ marketplace, kind: "list", confirmedEbayAdRate });
   }
   // List everywhere's picker; List starts only on the marketplaces the seller picks there.
@@ -947,7 +947,7 @@ export function MarketplacesLayout({
       )}
       {!soldSomewhere && !selectedMarketplace && Boolean(selected) ? (
         <div className="mb-3">
-          <DraftScheduleControl convId={convId} ebayPromotion={ebayPromotionMessage(savedListing)} />
+          <DraftScheduleControl convId={convId} ebayAdRate={ebayPromotionRate(savedListing)} />
         </div>
       ) : null}
       <FixTargetsContext.Provider value={reportFields}>

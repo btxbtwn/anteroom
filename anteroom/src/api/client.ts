@@ -857,10 +857,10 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ ready_to_list: readyToList }),
       }),
-    schedule: (convId: string, publishAt: string, marketplaces: string[]) =>
+    schedule: (convId: string, publishAt: string, marketplaces: string[], confirmedEbayAdRate?: string) =>
       request<DraftScheduleState>(`/conversations/${encodeURIComponent(convId)}/schedule`, {
         method: "POST",
-        body: JSON.stringify({ publish_at: publishAt, marketplaces, confirm: true }),
+        body: JSON.stringify({ publish_at: publishAt, marketplaces, confirm: true, confirmed_ebay_ad_rate: confirmedEbayAdRate }),
       }),
     unschedule: (convId: string) =>
       request<DraftScheduleState>(`/conversations/${encodeURIComponent(convId)}/schedule`, { method: "DELETE" }),

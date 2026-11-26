@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import asyncio
 import types
 import unittest
 import xml.etree.ElementTree as ET
@@ -141,24 +142,43 @@ class Client:
 
 
 class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
+    async def test_unapproved_update_leaves_saved_promotion_alone(self):
+        client = Client()
+        snapshot = {**LISTING, "ebay_specifics": {**LISTING["ebay_specifics"],
+                    "promotion": {"enabled": True, "campaignId": "42", "adRate": "5.5"}}}
+        self.binding.update(ebay_listing_id="123456789012", ebay_offer_id="offer-1")
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("update", snapshot, [self.photo], self.binding, self.record,
+                                                 self.active, confirm=True)
+        self.assertEqual(result["state"], "published")
+        self.assertFalse(any("/marketing/" in path for _, path, _ in client.calls))
+
+    def test_promotion_is_validated_in_shared_preflight(self):
+        from anteroom.services.direct_preflight import Context
+
+        snapshot = {**LISTING, "ebay_specifics": {**LISTING["ebay_specifics"],
+                    "promotion": {"enabled": True, "campaignId": "42", "adRate": "101"}}}
+        gaps = ebay_listings.requirements(snapshot, Context())
+        self.assertTrue(any(item["blocking"] and item["field"] == "ebay_specifics.promotion.adRate" for item in gaps))
+
     async def test_listing_applies_saved_promotion_and_live_updates_change_or_remove_it(self):
         client = Client()
         snapshot = {**LISTING, "ebay_specifics": {**LISTING["ebay_specifics"],
                     "promotion": {"enabled": True, "campaignId": "42", "adRate": "5.5"}}}
         with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
             result = await ebay_listings.execute("list", snapshot, [self.photo], self.binding, self.record,
-                                                 self.active, confirm=True, conversation_id="abc123")
+                                                 self.active, confirm=True, promotion_mode="confirm", conversation_id="abc123")
             self.assertEqual(result["state"], "published")
             self.assertNotIn("warning", result)
             self.assertEqual(client.ad, {"listingId": "123456789012", "bidPercentage": "5.5", "adId": "ad-1"})
             snapshot["ebay_specifics"]["promotion"]["adRate"] = "6.0"
             updated = await ebay_listings.execute("update", snapshot, [self.photo], self.binding, self.record,
-                                                  self.active, confirm=True)
+                                                  self.active, confirm=True, promotion_mode="confirm")
             self.assertEqual(updated["state"], "published")
             self.assertEqual(client.ad["bidPercentage"], "6.0")
             snapshot["ebay_specifics"]["promotion"]["enabled"] = False
             disabled = await ebay_listings.execute("update", snapshot, [self.photo], self.binding, self.record,
-                                                   self.active, confirm=True)
+                                                   self.active, confirm=True, promotion_mode="confirm")
             self.assertEqual(disabled["state"], "published")
             self.assertFalse(client.ad)
             self.assertIsNone(self.binding["ebay_promotion"])
@@ -170,11 +190,49 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
                     "promotion": {"enabled": True, "campaignId": "42", "adRate": "5.5"}}}
         with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
             result = await ebay_listings.execute("list", snapshot, [self.photo], self.binding, self.record,
-                                                 self.active, confirm=True, conversation_id="abc123")
+                                                 self.active, confirm=True, promotion_mode="confirm", conversation_id="abc123")
         self.assertEqual(result["state"], "published")
         self.assertIn("promotion", result["warning"].lower())
         self.assertEqual(self.binding["ebay_listing_id"], "123456789012")
         self.assertFalse(client.ad)
+
+    async def test_cancel_in_ad_step_keeps_live_listing_and_no_applied_rate(self):
+        from anteroom.services import ebay_listing_promotion
+
+        snapshot = {**LISTING, "ebay_specifics": {**LISTING["ebay_specifics"],
+                    "promotion": {"enabled": True, "campaignId": "42", "adRate": "5.5"}}}
+        client = Client()
+        with (
+            patch.object(ebay_listings.EbayClient, "connect", return_value=client),
+            patch.object(ebay_listing_promotion, "create_listing_ad", new=AsyncMock(side_effect=asyncio.CancelledError)),
+        ):
+            result = await ebay_listings.execute("list", snapshot, [self.photo], self.binding, self.record,
+                                                 self.active, confirm=True, promotion_mode="confirm", conversation_id="abc123")
+        self.assertEqual(result["state"], "published")
+        self.assertIn("warning", result)
+        self.assertNotIn("applied_rate", self.binding["ebay_promotion"])
+
+    async def test_recreate_uses_only_last_applied_rate_and_matching_account(self):
+        from anteroom.services.ebay_listing_promotion import recreate_from
+
+        for seller, expected in (("fake-ebay-account", "5.5"), ("other-account", None), (None, None)):
+            with self.subTest(seller=seller):
+                client = Client()
+                self.binding = {"ebay_promotion": {
+                    "listing_id": "876543210987", "campaign_id": "42", "account_id": seller, "applied_rate": "5.5",
+                }}
+                snapshot = {**LISTING, "ebay_specifics": {**LISTING["ebay_specifics"],
+                            "promotion": {"enabled": True, "campaignId": "99", "adRate": "30"}},
+                            "_recreate_ebay_promotion": recreate_from(self.binding, "876543210987")}
+                self.assertIsNone(recreate_from(self.binding, "987654321098"))
+                with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+                    result = await ebay_listings.execute("list", snapshot, [self.photo], self.binding, self.record,
+                                                         self.active, confirm=True, promotion_mode="recreate", conversation_id="abc123")
+                self.assertEqual(result["state"], "published")
+                self.assertEqual(client.ad.get("bidPercentage"), expected)
+                self.assertEqual("warning" in result, expected is None)
+                if expected:
+                    self.assertEqual(self.binding["ebay_promotion"]["listing_id"], "123456789012")
 
     def test_offer_controls_and_category_metadata_are_not_product_aspects(self):
         listing = {"ebay_specifics": {

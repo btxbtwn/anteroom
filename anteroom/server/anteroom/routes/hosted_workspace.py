@@ -393,6 +393,13 @@ def save_listing(identity: str, body: contract.ListingSave, db=Depends(get_selle
     previous = before.listing_json if before else {}
     preserve_smart_pricing_toggle(previous, payload)
     prepare_user_listing(previous, payload)
+    from anteroom.services.ebay_listing_promotion import selection
+    from anteroom.services.listing_result import ListingProblem
+
+    try:
+        selection(payload)
+    except ListingProblem as exc:
+        raise HTTPException(422, str(exc)) from exc
     match_general_category(db, previous, payload)
     from anteroom.services.unsent_edits import normalized_listing_hash
 

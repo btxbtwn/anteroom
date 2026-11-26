@@ -20,6 +20,7 @@ export interface BulkMarketplacePerform {
   revision_id: string | null;
   review_token: string;
   confirm: true;
+  confirmed_ebay_ad_rate?: string;
 }
 export interface BulkMarketplaceResult {
   conversation_id: string;

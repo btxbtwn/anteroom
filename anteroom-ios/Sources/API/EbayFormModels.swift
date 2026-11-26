@@ -155,7 +155,7 @@ enum EbayFormRules {
         let auction = shown("ebay_specifics.listingFormat") == "AUCTION"
         if key.hasPrefix("ebay_specifics.promotion.") {
             let enabled = shown("ebay_specifics.promotion.enabled") == "true"
-            return key.hasSuffix(".enabled") ? !auction || enabled : !auction && enabled
+            return !auction || (key.hasSuffix(".enabled") && enabled)
         }
         // An auction has a duration and bids instead of an item price; Buy It Now runs until cancelled.
         if auctionPriceKeys.contains(key) || key == "ebay_specifics.listingDuration" { return auction }
@@ -168,6 +168,18 @@ enum EbayFormRules {
         }
         if key == "ebay_specifics.variations" { return !(auction && !varied) }
         return true
+    }
+
+    static func validPromotion(campaign: String, rate: String) -> Bool {
+        guard !campaign.isEmpty, campaign.allSatisfy({ $0.isASCII && $0.isNumber }),
+              let value = Double(rate), (2...100).contains(value) else { return false }
+        return value * 10 == (value * 10).rounded()
+    }
+
+    static func highPromotionRate(_ rate: Double?, suggested: String?) -> Bool {
+        guard let rate, rate <= 100 else { return false }
+        let suggestion = Double(suggested ?? "") ?? 0
+        return rate >= (suggestion > 0 ? max(2 * suggestion, suggestion + 5) : 15)
     }
 
     /// Format, duration and quantity as the current format and variations present them.

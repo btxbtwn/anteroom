@@ -53,7 +53,7 @@ struct SellerConfirmationRequest: Identifiable, Equatable {
 
     private static func addingPromotion(_ message: String, _ marketplaces: [String], _ promotion: String?) -> String {
         guard marketplaces.contains("ebay"), let promotion else { return message }
-        return message + "\n" + "eBay will promote this listing at \(promotion)% on attributed sales."
+        return "Promote this listing on eBay at \(promotion)% of attributed sales.\n\n" + message
     }
 
     static func list(title: String, marketplace: String, priceLabel: String? = nil, ebayPromotion: String? = nil) -> Self {

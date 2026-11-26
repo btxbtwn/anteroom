@@ -11,6 +11,8 @@ export interface NativeFormRow {
   optionValues?: Record<string, string>;
   defaultValue?: unknown;
   help?: string;
+  warning?: string;
+  suggestedAdRate?: string;
   /** True when this row exists only for the selected category. */
   categorySpecific?: boolean;
   /** Discount id → dollars the seller pays. Your Earnings subtracts the selected one. */
@@ -205,7 +207,7 @@ export function nativeFieldVisible(field: NativeFormRow, context: NativeFieldCon
     const auction = ebayFormat(context) === "AUCTION";
     if (field.key.startsWith("ebay_specifics.promotion.")) {
       const enabled = shownChoice(context.fields, context.local, context.listing, "ebay_specifics.promotion.enabled") === "true";
-      return field.key.endsWith(".enabled") ? !auction || enabled : !auction && enabled;
+      return !auction || (field.key.endsWith(".enabled") && enabled);
     }
     const varied = ebayVaried(context.listing);
     // eBay's page: an auction has a duration and bids instead of an item price; Buy It Now runs until cancelled.
@@ -272,6 +274,21 @@ function presentFormat<T extends NativeFormRow>(field: T, varied: boolean, forma
  * which choices they offer, without asking for the form again.
  */
 export function presentNativeField<T extends NativeFormRow>(field: T, context: NativeFieldContext): T {
+  if (context.tab === "ebay" && field.key.startsWith("ebay_specifics.promotion.")) {
+    const shown = (key: string) => shownChoice(context.fields, context.local, context.listing, `ebay_specifics.promotion.${key}`);
+    const rate = Number(shown("adRate"));
+    if (field.key.endsWith(".enabled") && shown("enabled") !== "true") {
+      const valid = /^\d+$/.test(shown("campaignId")) && rate >= 2 && rate <= 100 && Number.isInteger(rate * 10);
+      if (!valid) return { ...field, locked: true, help: field.help
+        ? `${field.help} Choose a campaign and enter an ad rate to turn on promotion.`
+        : "Choose a campaign and enter an ad rate to turn on promotion." };
+    }
+    if (field.key.endsWith(".adRate")) {
+      const suggested = Number(field.suggestedAdRate || 0);
+      const high = suggested > 0 ? rate >= Math.max(suggested * 2, suggested + 5) : rate >= 15;
+      if (high && rate <= 100) return { ...field, warning: `${rate}% is a high ad rate. Check it before confirming promotion.` };
+    }
+  }
   if (context.tab === "ebay" && field.key === "ebay_specifics.listingDuration") {
     return presentDuration(field, ebayFormat(context) === "AUCTION");
   }
