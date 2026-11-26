@@ -463,6 +463,7 @@ class UiInput(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     theme: Literal['dark', 'light', 'system'] | None = None
     listing_mode: Literal["direct", "vendoo"] | None = None
+    jev_field_review: bool | None = None
     listing_names: Literal['title', 'sku'] | None = None
     settled_shelf_expanded: bool | None = None
     stale_listing_days: int | None = Field(None, ge=15, le=120)

@@ -978,6 +978,14 @@ def normalize_theme(value: object) -> ThemeChoice:
     return DEFAULT_THEME
 
 
+def jev_review_enabled() -> bool:
+    from anteroom.services.service_context import current
+
+    context = current()
+    settings = context.settings.read_fresh() if context is not None else None
+    return _ui_prefs(settings).get("jev_field_review") is True
+
+
 def get_ui_prefs() -> dict:
     ui = _ui_prefs()
     settled = ui.get(SETTLED_SHELF_KEY)
@@ -990,6 +998,7 @@ def get_ui_prefs() -> dict:
         # The sidebar names each listing by its title, or by its SKU where it has one.
         LISTING_NAMES_KEY: names if names in LISTING_NAME_CHOICES else "title",
         "listing_mode": "vendoo" if ui.get("listing_mode") == "vendoo" else "direct",
+        "jev_field_review": ui.get("jev_field_review") is True,
         MODEL_FAVORITES_KEY: _clean_model_favorites(ui.get(MODEL_FAVORITES_KEY)),
         STALE_DAYS_KEY: _clean_stale_days(ui.get(STALE_DAYS_KEY)),
         LABEL_COLORS_KEY: _clean_label_colors(ui.get(LABEL_COLORS_KEY)),
@@ -1006,6 +1015,7 @@ def set_ui_prefs(
     stale_listing_days: object | None = None,
     label_colors: object | None = None,
     listing_mode: object | None = None,
+    jev_field_review: bool | None = None,
 ) -> dict:
     if (
         recent_vendoo_labels is None
@@ -1016,6 +1026,7 @@ def set_ui_prefs(
         and stale_listing_days is None
         and label_colors is None
         and listing_mode is None
+        and jev_field_review is None
     ):
         return get_ui_prefs()
     favorites = _clean_model_favorites(model_favorites, strict=True) if model_favorites is not None else None
@@ -1025,6 +1036,8 @@ def set_ui_prefs(
 
     def mutator(payload: dict) -> None:
         ui = dict(_ui_prefs(payload))
+        if jev_field_review is not None:
+            ui["jev_field_review"] = jev_field_review
         if listing_mode is not None:
             if listing_mode not in {"direct", "vendoo"}:
                 raise ValueError("listing_mode must be direct or vendoo")

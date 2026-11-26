@@ -89,6 +89,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     searchTerms: ["listing workflow", "experimental"],
   },
   {
+    id: "jev-field-review",
+    title: "Check draft fields with Jev",
+    section: "experimental",
+    targetId: "jev-field-review",
+    searchTerms: ["verify", "correct", "garment details", "TypeSafe", "OpenRouter"],
+  },
+  {
     id: "hosted-marketplace-browser",
     title: "Hosted marketplace browser",
     section: "experimental",
