@@ -6,7 +6,7 @@ test("auto-relist recovers from a failed load and distinguishes a saved rule fro
   const delay = new Promise<void>((resolve) => { release = resolve; });
   await page.route("**/api/automations/auto-relist", async (route) => {
     await delay;
-    if (fail) await route.fulfill({ status: 503, json: { detail: "Unavailable" } });
+    if (fail) await route.fulfill({ status: 500, json: { detail: "Could not load settings" } });
     else {
       const response = await route.fetch();
       const { rules } = await response.json();
@@ -55,7 +55,7 @@ test("auto-relist recovers from a failed load and distinguishes a saved rule fro
   await confirmation.getByRole("button", { name: "Cancel" }).click();
   await expect(poshmark).not.toBeChecked();
 
-  await section.getByRole("button", { name: "Configure" }).first().click();
+  await section.getByRole("button", { name: "Configure" }).nth(2).click();
   const conditions = section.getByRole("combobox", { name: "Conditions" });
   await conditions.press("ArrowDown");
   const firstCondition = page.getByRole("option").first();
@@ -63,13 +63,21 @@ test("auto-relist recovers from a failed load and distinguishes a saved rule fro
   const condition = (await firstCondition.innerText()).replace(/^○\s*/, "");
   await firstCondition.click();
   await expect(section.getByRole("button", { name: `Remove ${condition}` })).toBeVisible();
+  await page.keyboard.press("Escape");
   const labels = section.getByRole("combobox", { name: "Labels" });
   await labels.fill("Winter");
   await page.getByRole("option", { name: /Winter/ }).click();
   await expect(section.getByRole("button", { name: "Remove Winter" })).toBeVisible();
   await labels.press("Escape");
-  await section.screenshot({ path: info.outputPath("auto-relist-light.png") });
-  await page.emulateMedia({ colorScheme: "dark" });
-  await expect(page.locator("html")).toHaveClass(/\bdark\b/);
-  await section.screenshot({ path: info.outputPath("auto-relist-dark.png") });
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    if (colorScheme === "dark") await expect(page.locator("html")).toHaveClass(/\bdark\b/);
+    const path = info.outputPath(`auto-relist-${colorScheme}.png`);
+    if (phone) {
+      await section.getByText("Paused", { exact: true }).evaluate((badge) => badge.scrollIntoView({ block: "center" }));
+      await page.screenshot({ path });
+    } else {
+      await section.screenshot({ path });
+    }
+  }
 });
