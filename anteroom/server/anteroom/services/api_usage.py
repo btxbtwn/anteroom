@@ -13,10 +13,10 @@ import logging
 import math
 import os
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from anteroom.models.api_usage import ApiUsageEvent
@@ -160,6 +160,25 @@ def list_events(db: Session, *, since: datetime, until: datetime, seller_id: str
         query = query.where(ApiUsageEvent.user_id == seller_id)
     query = query.order_by(ApiUsageEvent.created_at.asc(), ApiUsageEvent.id.asc())
     return list(db.scalars(query).all())
+
+
+def seller_usage_summary(db: Session, seller_id: str):
+    """Aggregate only the signed-in seller's recorded costs for the last 30 days."""
+    end = datetime.now(UTC)
+    summary = {provider: {"count": 0, "usd": 0.0} for provider in ("openrouter", "photoroom")}
+    query = (
+        select(ApiUsageEvent.provider, func.count(), func.sum(ApiUsageEvent.cost_usd))
+        .where(
+            ApiUsageEvent.user_id == seller_id,
+            ApiUsageEvent.created_at >= end - timedelta(days=30),
+            ApiUsageEvent.created_at < end,
+            ApiUsageEvent.provider.in_(list(summary)),
+        )
+        .group_by(ApiUsageEvent.provider)
+    )
+    for provider, count, cost in db.execute(query):
+        summary[provider] = {"count": count, "usd": cost}
+    return summary
 
 
 def operator_report(

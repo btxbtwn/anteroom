@@ -32,7 +32,7 @@ describe("searchSettings", () => {
 
   it("only points at real sections", () => {
     for (const item of SETTINGS_SEARCH_ITEMS) expect(isSettingsSectionId(item.section)).toBe(true);
-    expect(SETTINGS_NAV_ITEMS.map((item) => item.id)).toEqual(["general", "listings", "assistant", "providers", "connections", "agents", "data", "logs", "experimental", "help"]);
+    expect(SETTINGS_NAV_ITEMS.map((item) => item.id)).toEqual(["general", "usage", "listings", "assistant", "providers", "connections", "agents", "data", "logs", "experimental", "help"]);
     expect(searchSettings("mcp").map((item) => item.id)).toEqual(["agent-cli"]);
     expect(searchSettings("claude desktop").map((item) => item.id)).toEqual(["agent-cli"]);
     expect(searchSettings("vendoo")).toContainEqual(expect.objectContaining({section: "experimental", targetId: "listing-mode"}));
@@ -67,6 +67,15 @@ describe("searchSettings", () => {
 });
 
 describe("settings on the web", () => {
+  it("offers account usage to every hosted seller", () => {
+    for (const managed of [true, false]) {
+      expect(hostedSettingsSections(managed)).toContain("usage");
+      expect(searchSettings("usage", settingsSearchItemsFor(true, managed)).map(item => item.section)).toContain("usage");
+    }
+    expect(searchSettings("usage", settingsSearchItemsFor(false))).toEqual([]);
+    expect(settingsSectionFor("usage", false)).toBe("general");
+  });
+
   it("opens every section the web sidebar offers, Connections, Agents and Help included", () => {
     for (const id of HOSTED_SETTINGS_SECTIONS) expect(settingsSectionFor(id, true)).toBe(id);
     expect(HOSTED_SETTINGS_SECTIONS).toContain("connections");
