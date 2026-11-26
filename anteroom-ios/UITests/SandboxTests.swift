@@ -882,3 +882,83 @@ final class CoreFlowSandboxTests: XCTestCase {
         add(attachment)
     }
 }
+
+/// Mark as sold records the sale only and offers Delist for the rest behind
+/// its own confirmation; a draft shows Ready to list and scheduled publishing.
+@MainActor
+final class SoldAndScheduleSandboxTests: XCTestCase {
+    func testMarkAsSoldOffersDelistOnlyAfterConfirming() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        launchSandbox(app)
+        // The sample dress is live on Poshmark and Etsy.
+        openMarketplaces("Free People S Pink Floral Midi Dress", app: app)
+        let markSold = app.buttons["marketplaces-mark-sold"]
+        for _ in 0..<4 where !markSold.isHittable { app.swipeUp() }
+        markSold.tap()
+        XCTAssertTrue(app.navigationBars["Mark as sold"].waitForExistence(timeout: 10))
+        app.buttons["Sold on"].firstMatch.tap()
+        app.buttons["Poshmark"].firstMatch.tap()
+        let price = app.textFields["sale-price"]
+        price.tap()
+        price.typeText("42.50")
+        keep(app, "Mark as sold")
+        app.buttons["Save sale"].tap()
+        // Recording the sale never delists: the rest is offered behind a confirmation naming Etsy.
+        let offer = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Etsy'")).firstMatch
+        XCTAssertTrue(offer.waitForExistence(timeout: 30), "Delist of the other marketplaces is offered")
+        keep(app, "Delist offered after the sale")
+        app.buttons["Cancel"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Sold'")).firstMatch.waitForExistence(timeout: 30))
+        keep(app, "Marketplaces after the sale")
+    }
+
+    func testDraftShowsReadyToListAndSchedule() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        launchSandbox(app)
+        showDrafts(app)
+        let draft = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Draft'")).element(boundBy: 1)
+        XCTAssertTrue(draft.waitForExistence(timeout: 30))
+        let actions = app.buttons["Listing actions"]
+        for _ in 0..<3 where !actions.waitForExistence(timeout: 15) { if draft.isHittable { draft.tap() } }
+        openManage(app)
+        let ready = app.switches["schedule-ready"]
+        for _ in 0..<5 where !ready.isHittable { app.swipeUp() }
+        XCTAssertTrue(ready.exists, "A draft offers Ready to list")
+        keep(app, "Ready to list and schedule publish")
+    }
+
+    private func openMarketplaces(_ title: String, app: XCUIApplication) {
+        let listing = app.staticTexts[title].firstMatch
+        XCTAssertTrue(listing.waitForExistence(timeout: 30))
+        let actions = app.buttons["Listing actions"]
+        for _ in 0..<3 where !actions.waitForExistence(timeout: 15) {
+            if listing.exists && listing.isHittable { listing.tap() }
+        }
+        openManage(app)
+    }
+
+    private func openManage(_ app: XCUIApplication) {
+        let actions = app.buttons["Listing actions"]
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: actions)
+        waitForExpectations(timeout: 30)
+        let manage = app.buttons["Manage marketplaces"]
+        for _ in 0..<3 where !manage.exists {
+            actions.tap()
+            _ = manage.waitForExistence(timeout: 5)
+        }
+        manage.tap()
+        XCTAssertTrue(app.navigationBars["Marketplaces"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["marketplaces-mark-sold"].waitForExistence(timeout: 60), "The marketplaces load")
+    }
+
+    private func keep(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}

@@ -342,6 +342,36 @@ export interface DirectRecord {
   inactive?: boolean;
 }
 
+/**
+ * A draft's Ready to list switch and its scheduled publish (Scheduled Draft Publishing).
+ *
+ * The scheduler publishes only the revision the seller confirmed, only to the
+ * marketplaces named here; saving any edit unschedules it.
+ */
+export interface DraftSchedule {
+  conversation_id?: string | null;
+  title?: string | null;
+  ready_to_list: boolean;
+  /** When the publish is due, in UTC; null when nothing is scheduled. */
+  scheduled_publish_at?: string | null;
+  scheduled_marketplaces?: string[];
+  scheduled_revision_id?: string | null;
+  /** When the seller confirmed the marketplaces and time. */
+  scheduled_confirmed_at?: string | null;
+  scheduled_status?: string | null;
+  /** Why the last scheduled publish failed or was cancelled. */
+  scheduled_error?: string | null;
+}
+
+export interface DraftScheduleInput {
+  /** A future time, ISO 8601 with its offset. */
+  publish_at: string;
+  /** Named marketplaces only; never "all". */
+  marketplaces: string[];
+  /** True only after the seller confirmed these marketplaces and this time. */
+  confirm?: boolean;
+}
+
 /** What a refused request answers: one sentence for the seller. */
 export interface ErrorDetail {
   detail: string;
@@ -675,6 +705,10 @@ export interface PriceDrift {
   price: number;
   /** ``override``: a price typed on that marketplace's form. ``live``: the live listing's known price. */
   source: "override" | "live";
+}
+
+export interface ReadyToListInput {
+  ready_to_list: boolean;
 }
 
 /** A region hidden on the finished frame, such as a name, address or barcode. */

@@ -155,3 +155,35 @@ def test_web_draft_schedule_routes_are_served_and_seller_scoped(cloud, signing_k
     unconfirmed = client.post(path, headers=alice, json={'publish_at': '2099-01-01T00:00:00Z', 'marketplaces': ['ebay']})
     assert unconfirmed.status_code == 400, unconfirmed.text
     assert client.delete(path, headers=alice).status_code == 200
+
+
+def test_hosted_edit_unschedules_a_scheduled_draft(cloud, signing_keys):  # noqa: F811
+    """Scheduled Draft Publishing: saving an edit on the web or iPhone
+    unschedules the draft at once, so nothing still reads scheduled and the
+    unreviewed revision never publishes."""
+    from anteroom.models.listing import Listing
+    from anteroom.routes.api_contract import DraftSchedule
+
+    client, engine = cloud
+    alice = headers(signing_keys)
+    coat = item(client, alice, 'Alice coat', 100)
+    path = '/api/conversations/' + coat + '/schedule'
+    with Session(engine) as db:
+        listing = db.get(Listing, coat)
+        listing.ready_to_list = True
+        listing.scheduled_publish_at = utcnow() + timedelta(days=1)
+        listing.scheduled_marketplaces = ['poshmark']
+        listing.scheduled_revision_id = listing.current_revision_id
+        listing.scheduled_confirmed_at = utcnow()
+        listing.scheduled_status = 'scheduled'
+        revision = listing.current_revision_id
+        db.commit()
+    scheduled = DraftSchedule.model_validate(client.get(path, headers=alice).json())
+    assert scheduled.scheduled_marketplaces == ['poshmark'] and scheduled.scheduled_publish_at
+
+    saved = client.put('/api/conversations/' + coat + '/listing', headers=alice, json={
+        'listing': {'title': 'Alice coat, edited', 'price': 100}, 'expected_revision_id': revision})
+    assert saved.status_code == 200, saved.text
+    after = DraftSchedule.model_validate(client.get(path, headers=alice).json())
+    assert after.scheduled_publish_at is None and after.scheduled_marketplaces == []
+    assert after.ready_to_list is True

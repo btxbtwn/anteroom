@@ -12,6 +12,10 @@ from sqlalchemy.orm import Session
 
 from anteroom.database import get_db
 from anteroom.routes.api_contract import (
+    SCHEDULE_REFUSED,
+    DraftSchedule,
+    DraftScheduleInput,
+    ReadyToListInput,
     CONFLICT,
     NOT_FOUND,
     ListingDocument,
@@ -327,17 +331,8 @@ def apply_markdowns(body: MarkdownApply, db: Session = Depends(get_db)):
     return price_markdown.batch_apply([drop.model_dump() for drop in body.drops], db)
 
 
-class ReadyToListBody(BaseModel):
-    ready_to_list: bool
 
-
-class DraftScheduleBody(BaseModel):
-    publish_at: str = Field(min_length=1)
-    marketplaces: list[str] = Field(min_length=1, max_length=7)
-    confirm: bool = False
-
-
-@router.get("/api/conversations/{conv_id}/schedule")
+@router.get("/api/conversations/{conv_id}/schedule", response_model=DraftSchedule, responses=SCHEDULE_REFUSED)
 def get_draft_schedule(conv_id: str, db: Session = Depends(get_db, scope="function")):
     """Return this draft's ready-to-list toggle and scheduled publish state."""
     from anteroom.services import draft_scheduling
@@ -349,8 +344,8 @@ def get_draft_schedule(conv_id: str, db: Session = Depends(get_db, scope="functi
     return draft_scheduling.schedule_view(listing, conv)
 
 
-@router.put("/api/conversations/{conv_id}/schedule/ready")
-def set_draft_ready_to_list(conv_id: str, body: ReadyToListBody, db: Session = Depends(get_db, scope="function")):
+@router.put("/api/conversations/{conv_id}/schedule/ready", response_model=DraftSchedule, responses=SCHEDULE_REFUSED)
+def set_draft_ready_to_list(conv_id: str, body: ReadyToListInput, db: Session = Depends(get_db, scope="function")):
     """Mark a validated draft ready to list (or turn it off, which clears any pending schedule)."""
     from anteroom.services import draft_scheduling
 
@@ -360,8 +355,8 @@ def set_draft_ready_to_list(conv_id: str, body: ReadyToListBody, db: Session = D
         raise HTTPException(exc.status_code, exc.detail) from exc
 
 
-@router.post("/api/conversations/{conv_id}/schedule")
-def schedule_draft_publish(conv_id: str, body: DraftScheduleBody, db: Session = Depends(get_db, scope="function")):
+@router.post("/api/conversations/{conv_id}/schedule", response_model=DraftSchedule, responses=SCHEDULE_REFUSED)
+def schedule_draft_publish(conv_id: str, body: DraftScheduleInput, db: Session = Depends(get_db, scope="function")):
     """Schedule a validated draft for future publishing to named marketplaces."""
     from anteroom.services import draft_scheduling
 
@@ -377,7 +372,7 @@ def schedule_draft_publish(conv_id: str, body: DraftScheduleBody, db: Session = 
         raise HTTPException(exc.status_code, exc.detail) from exc
 
 
-@router.delete("/api/conversations/{conv_id}/schedule")
+@router.delete("/api/conversations/{conv_id}/schedule", response_model=DraftSchedule, responses=SCHEDULE_REFUSED)
 def unschedule_draft_publish(conv_id: str, db: Session = Depends(get_db, scope="function")):
     """Unschedule a pending draft publish."""
     from anteroom.services import draft_scheduling

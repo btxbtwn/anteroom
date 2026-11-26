@@ -246,8 +246,12 @@ struct ListingEditorView: View {
             ListingHistoryView(api: model.api, listingID: model.listingID)
         }
         .sheet(isPresented: $showingMarketplaces, onDismiss: {
-            // Listing, updating and delisting change the tabs' readiness and the inventory row.
-            Task { await model.loadReadiness() }
+            // Listing, updating, delisting, a sale or a schedule change the tabs'
+            // readiness, the status and schedule shown here, and the inventory row.
+            Task {
+                if !model.hasChanges { await model.load() }
+                await model.loadReadiness()
+            }
             onSaved()
             if let prompt = assistantPrompt {
                 assistantPrompt = nil
@@ -255,7 +259,7 @@ struct ListingEditorView: View {
             }
         }) {
             MarketplaceActionsView(api: model.api, listingID: model.listingID,
-                                   revisionID: model.revisionID, title: model.title) { prompt in
+                                   revisionID: model.revisionID, title: model.title, isDraft: model.isDraft) { prompt in
                 assistantPrompt = prompt
                 showingMarketplaces = false
             }

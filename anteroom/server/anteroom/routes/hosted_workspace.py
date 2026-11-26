@@ -407,6 +407,10 @@ def save_listing(identity: str, body: contract.ListingSave, db=Depends(get_selle
     current.current_revision_id = revision.id
     current.validation_status = None
     current.validation_errors = None
+    # Scheduled Draft Publishing: an edit unschedules the draft in this same
+    # save, so unreviewed changes never publish and nothing still reads scheduled.
+    from anteroom.services.draft_scheduling import unschedule_on_edit
+    unschedule_on_edit(db, identity)
     title = payload.get('title') or conv.title
     db.execute(update(Conversation).where(Conversation.id == identity).values(
         title=title,

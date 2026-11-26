@@ -714,10 +714,11 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     from anteroom.routes.listings import (
         get_draft_schedule, schedule_draft_publish, set_draft_ready_to_list, unschedule_draft_publish,
     )
-    app.add_api_route('/api/conversations/{conv_id}/schedule', get_draft_schedule, methods=['GET'])
-    app.add_api_route('/api/conversations/{conv_id}/schedule/ready', set_draft_ready_to_list, methods=['PUT'])
-    app.add_api_route('/api/conversations/{conv_id}/schedule', schedule_draft_publish, methods=['POST'])
-    app.add_api_route('/api/conversations/{conv_id}/schedule', unschedule_draft_publish, methods=['DELETE'])
+    from anteroom.routes.api_contract import SCHEDULE_REFUSED, DraftSchedule
+    for method, path, handler in (('GET', '', get_draft_schedule), ('PUT', '/ready', set_draft_ready_to_list),
+                                  ('POST', '', schedule_draft_publish), ('DELETE', '', unschedule_draft_publish)):
+        app.add_api_route('/api/conversations/{conv_id}/schedule' + path, handler, methods=[method],
+                          response_model=DraftSchedule, responses=SCHEDULE_REFUSED)
     from anteroom.routes.catalog import categories as catalog_categories, choice_list, dropdown_options, search as catalog_search
     app.add_api_route('/api/catalog/choice-lists/{name}', choice_list, methods=['GET'])
     app.add_api_route('/api/catalog/dropdown-options', dropdown_options, methods=['GET'])

@@ -77,7 +77,7 @@ struct MarketplaceActionBar: View {
                 switch confirmed.action {
                 case .list: await model.list(marketplace, confirmation: confirmed)
                 case .update: await model.update(marketplace, confirmation: confirmed)
-                case .delist: break
+                case .delist, .schedule: break
                 }
                 onChange()
             }

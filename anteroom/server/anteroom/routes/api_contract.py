@@ -62,6 +62,10 @@ CONTRACT_OPERATIONS: tuple[tuple[str, str], ...] = (
     ("post", "/api/conversations/{conv_id}/photos/studio"),
     ("get", "/api/assistant/name"),
     ("put", "/api/assistant/name"),
+    ("get", "/api/conversations/{conv_id}/schedule"),
+    ("put", "/api/conversations/{conv_id}/schedule/ready"),
+    ("post", "/api/conversations/{conv_id}/schedule"),
+    ("delete", "/api/conversations/{conv_id}/schedule"),
     ("get", "/api/home/attention"),
     ("post", "/api/home/attention/dismiss"),
     ("post", "/api/home/attention/resolve"),
@@ -114,6 +118,11 @@ class ErrorDetail(ContractModel):
 # either server answers, so a client handles both.
 Responses = dict[int | str, dict[str, Any]]
 NOT_FOUND: Responses = {404: {"model": ErrorDetail, "description": "The listing does not exist for this seller."}}
+SCHEDULE_REFUSED: Responses = {
+    400: {"model": ErrorDetail, "description": "The schedule was refused, such as a past time, no confirmation or a draft that isn't ready."},
+    404: {"model": ErrorDetail, "description": "The draft does not exist for this seller."},
+    409: {"model": ErrorDetail, "description": "The draft is publishing now."},
+}
 CONFLICT: Responses = {409: {"model": ErrorDetail, "description": "The listing changed elsewhere or is busy."}}
 REFUSED: Responses = {400: {"model": ErrorDetail, "description": "The change was refused, such as an empty title or a busy listing."}}
 
@@ -605,3 +614,38 @@ class AttentionRestoreResult(ContractModel):
     ok: bool
     restored: bool
     item_key: str
+
+
+class DraftSchedule(ContractModel):
+    """A draft's Ready to list switch and its scheduled publish (Scheduled Draft Publishing).
+
+    The scheduler publishes only the revision the seller confirmed, only to the
+    marketplaces named here; saving any edit unschedules it."""
+
+    conversation_id: str | None = None
+    title: str | None = None
+    ready_to_list: bool
+    scheduled_publish_at: str | None = None
+    """When the publish is due, in UTC; null when nothing is scheduled."""
+    scheduled_marketplaces: list[str] = []
+    scheduled_revision_id: str | None = None
+    scheduled_confirmed_at: str | None = None
+    """When the seller confirmed the marketplaces and time."""
+    scheduled_status: str | None = None
+    scheduled_error: str | None = None
+    """Why the last scheduled publish failed or was cancelled."""
+
+
+class ReadyToListInput(ContractModel):
+    model_config = ConfigDict(extra="forbid", use_attribute_docstrings=True)
+    ready_to_list: bool
+
+
+class DraftScheduleInput(ContractModel):
+    model_config = ConfigDict(extra="forbid", use_attribute_docstrings=True)
+    publish_at: str = Field(min_length=1)
+    """A future time, ISO 8601 with its offset."""
+    marketplaces: list[str] = Field(min_length=1, max_length=7)
+    """Named marketplaces only; never "all"."""
+    confirm: bool = False
+    """True only after the seller confirmed these marketplaces and this time."""

@@ -143,15 +143,22 @@ final class MarketplaceActionsModel {
 
 struct MarketplaceActionsView: View {
     let title: String
+    /// A draft also offers Ready to list and scheduled publishing.
+    let isDraft: Bool
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @State private var model: MarketplaceActionsModel
     @State private var confirming: SellerConfirmationRequest?
+    @State private var markingSold = false
+    /// Live listings elsewhere after a recorded sale, offered for Delist once the sheet closes.
+    @State private var delistOffer: [String] = []
     /// Hand a prompt to the listing assistant, which fixes the listing but never lists it.
     let onAskChat: ((String) -> Void)?
 
-    init(api: AnteroomAPI, listingID: String, revisionID: String?, title: String, onAskChat: ((String) -> Void)? = nil) {
+    init(api: AnteroomAPI, listingID: String, revisionID: String?, title: String, isDraft: Bool = false,
+         onAskChat: ((String) -> Void)? = nil) {
         self.title = title
+        self.isDraft = isDraft
         self.onAskChat = onAskChat
         _model = State(initialValue: MarketplaceActionsModel(api: api, listingID: listingID, revisionID: revisionID))
     }
@@ -179,6 +186,18 @@ struct MarketplaceActionsView: View {
                             Text("eBay and Etsy use connected accounts without the extension. Poshmark, Mercari and Depop require desktop Chrome with the Bridge extension connected and an Anteroom tab open. You can create and edit drafts on iPhone without Chrome.")
                         }
                     }
+                    if model.hasLoaded && model.loadError == nil {
+                        Section {
+                            Button("Mark as sold…", systemImage: "tag") { markingSold = true }
+                                .frame(minHeight: 44)
+                                .accessibilityIdentifier("marketplaces-mark-sold")
+                        } footer: {
+                            Text("Records where and when it sold. Nothing changes on any marketplace; you choose whether to delist the rest.")
+                        }
+                        if isDraft {
+                            DraftScheduleSection(api: model.api, listingID: model.listingID, title: title)
+                        }
+                    }
                 }
                 .listRowBackground(WorkspaceStyle.surface)
             }
@@ -198,11 +217,24 @@ struct MarketplaceActionsView: View {
                     case .list: await model.list(confirmed.marketplaces[0], confirmation: confirmed)
                     case .update: await model.update(confirmed.marketplaces[0], confirmation: confirmed)
                     case .delist: await model.delist(confirmed.marketplaces, confirmation: confirmed)
+                    case .schedule: break
                     }
                 }
             }
             .task { await model.load() }
             .reloadingOnReturn(when: model.loadError != nil) { await model.load() }
+            .sheet(isPresented: $markingSold, onDismiss: {
+                // Offered, never done here: the seller confirms the delist in its own dialog.
+                if !delistOffer.isEmpty {
+                    confirming = .delist(title: title, marketplaces: delistOffer)
+                    delistOffer = []
+                }
+            }) {
+                MarkSoldSheet(api: model.api, listingID: model.listingID) { result in
+                    delistOffer = result.delistOffer
+                    Task { await model.load() }
+                }
+            }
             // A List or Delist runs in the background: follow it while one is running.
             .task(id: model.anyRunning) {
                 while model.anyRunning && !Task.isCancelled {

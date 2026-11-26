@@ -1,0 +1,2 @@
+- On iPhone, you can mark an item sold and set, change or cancel a draft's scheduled publish from Manage marketplaces.
+- Editing a scheduled draft on the web or iPhone now unschedules it right away.
