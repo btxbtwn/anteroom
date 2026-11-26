@@ -35,13 +35,13 @@ for (const tablet of [false, true]) {
         await expect(size).toBeFocused({ timeout: 15_000 });
         await expect(size).toBeEnabled();
         const value = attempt ? "Large" : "Medium";
-        if (await size.evaluate(element => element.tagName === "SELECT")) await size.selectOption(value);
+        if (await size.evaluate(element => element.tagName === "SELECT")) await size.selectOption({ label: value });
         else {
           await size.fill(value);
           await page.getByRole("option", { name: value, exact: true }).click();
         }
         await expect.poll(async () => (await (await request.get(`/api/conversations/${id}/listing`)).json())
-          .listing.depop_specifics.parcelSize).toBe(attempt ? "Large" : "Medium");
+          .listing.depop_specifics.parcelSize).toBe(attempt ? "medium" : "under_1lb");
         if (mobile) await openForm(page, mobile, "General");
         else await page.getByRole("navigation", { name: "Marketplaces" }).getByRole("button", { name: "General", exact: true }).click();
         await openForm(page, mobile, "Depop");
