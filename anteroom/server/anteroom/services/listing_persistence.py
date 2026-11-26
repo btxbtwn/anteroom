@@ -35,7 +35,7 @@ def _note_saved_listings(db, _flush_context, _instances):
     if saved:
         db.info.setdefault("saved_listings", set()).update(saved)
     for row in db.new:
-        if isinstance(row, ListingRevision) and row.source != "user_form":
+        if isinstance(row, ListingRevision) and row.source not in {"user_form", "restore"}:
             _keep_seller_promotion(db, row)
 
 

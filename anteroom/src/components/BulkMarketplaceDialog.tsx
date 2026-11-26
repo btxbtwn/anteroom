@@ -142,6 +142,7 @@ export function BulkMarketplaceDialog({
         </label>
         {row.marketplaces.length ? <p className="text-xs">{verb.label}: {names(row.marketplaces)}</p> : null}
         {row.ebay_ad_rate && <p className="text-xs">eBay will promote this listing at {row.ebay_ad_rate}% on attributed sales.</p>}
+        {row.ebay_remove_promotion && <p className="text-xs">This update will remove the promotion on eBay.</p>}
         {row.skipped.map((entry) => <p key={entry.marketplace} className="text-xs text-muted-foreground">{entry.reason}</p>)}
         {row.skip_reason ? <p className="text-xs text-muted-foreground">{row.skip_reason}</p> : null}
       </li>)}</ul>

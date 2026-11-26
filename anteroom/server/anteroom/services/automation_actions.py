@@ -223,6 +223,14 @@ def _job_outcome(db: Session, job_id: str) -> tuple[str | None, str | None] | No
     return (job.status, job.last_error) if job is not None else None
 
 
+def _ebay_promotion_enabled(db: Session, revision_id: str) -> bool:
+    from anteroom.repositories.queries import ListingRepo
+    from anteroom.services.ebay_listing_promotion import choice
+
+    revision = ListingRepo(db).get_revision(revision_id)
+    return revision is not None and choice(revision.listing_json).get("enabled") is True
+
+
 async def _native_one(conv_id: str, name: str, revision_id: str, kind: str, *,
                       confirmed_ebay_ad_rate: str | None = None) -> dict:
     """One List or Update on one marketplace, waited on until the marketplace answers. Never retried."""
@@ -244,11 +252,14 @@ async def _native_one(conv_id: str, name: str, revision_id: str, kind: str, *,
             target = cast(Marketplace, name)
             rate = (confirmed_ebay_ad_rate or scheduled_ebay_ad_rate()) if name == "ebay" else None
             body = ListRequest(revision_id=revision_id, confirm=True, confirmed_ebay_ad_rate=rate)
+            leave_ad = name == "ebay" and rate is None and (
+                kind == "list" or await _db_work(_ebay_promotion_enabled, revision_id)
+            )
             # A publish an MCP agent scheduled names it on its jobs, as one it started would.
             if agent := scheduled_requester():
                 result = await start(conv_id, target, body, requested_by=agent,
-                                     promotion_mode="leave" if name == "ebay" and rate is None else "confirm")
-            elif name == "ebay" and rate is None:
+                                     promotion_mode="leave" if leave_ad else "confirm")
+            elif leave_ad:
                 result = await start(conv_id, target, body, promotion_mode="leave")
             else:
                 result = await start(conv_id, target, body)

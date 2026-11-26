@@ -31,7 +31,13 @@ def choice(snapshot: dict) -> dict:
 def has_change(action: str, promotion: dict, previous: dict) -> bool:
     enabled = promotion.get("enabled")
     return (action in {"list", "update"} and enabled is True
-            or action == "update" and enabled is False and bool(previous))
+            or action == "update" and enabled is not True and bool(previous))
+
+
+def has_disabled_live_ad(snapshot: dict, binding: dict) -> bool:
+    ad = binding.get("ebay_promotion") or {}
+    return (choice(snapshot).get("enabled") is not True and bool(ad.get("listing_id"))
+            and ad["listing_id"] == binding.get("listing_id"))
 
 
 def validate(promotion: dict) -> tuple[str, Decimal]:

@@ -119,7 +119,7 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
             selection(listing_data)
         except ListingProblem as exc:
             raise HTTPException(422, str(exc)) from exc
-    if not seller_form:
+    if not seller_form and source != "restore":
         from anteroom.services.listing_persistence import preserve_ebay_promotion
 
         listing_data = preserve_ebay_promotion(previous_json, listing_data)

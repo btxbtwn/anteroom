@@ -11,6 +11,7 @@ export interface BulkMarketplaceRow {
   skip_reason: string | null;
   review_token: string | null;
   ebay_ad_rate?: string;
+  ebay_remove_promotion?: boolean;
 }
 export interface BulkMarketplacePreview { action: BulkMarketplaceAction; marketplaces: DelistMarketplace[]; rows: BulkMarketplaceRow[] }
 export interface BulkMarketplacePerform {

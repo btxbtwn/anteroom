@@ -126,10 +126,17 @@ def review_row(db: Session, conv_id: str, action: str, marketplaces: list[str]) 
             return row
     known = listings(db, conv_id)
     records = MarketplaceListingRepo(db).for_conversation(conv_id)
+    removes_ad = False
+    if action == "update" and "ebay" in marketplaces:
+        from anteroom.services.ebay_listing_promotion import has_disabled_live_ad
+
+        revision = ListingRepo(db).get_revision(row["revision_id"])
+        removes_ad = bool(revision and has_disabled_live_ad(revision.listing_json, records.get("ebay") or {}))
     for marketplace in dict.fromkeys(marketplaces):
         record = records.get(marketplace) or {}
         reason = _target_reason(action, marketplace, known.get(marketplace) or {}, record)
         if (not reason and action == "update" and record.get("state") == "published"
+                and not (marketplace == "ebay" and removes_ad)
                 and record.get("revision_id") and record.get("revision_id") == row["revision_id"]
                 and _same_price(db, marketplace, record, row["revision_id"])):
             reason = f"Already up to date on {_name(marketplace)}."
@@ -156,7 +163,11 @@ def review_row(db: Session, conv_id: str, action: str, marketplaces: list[str]) 
         else:
             if selected:
                 row["ebay_ad_rate"] = str(selected[1])
+            elif removes_ad:
+                row["ebay_remove_promotion"] = True
     basis, _targets = approval_snapshot(db, conv_id, row["marketplaces"], includes_prices=action in {"list", "relist", "update"})
+    if row.get("ebay_remove_promotion"):
+        basis += ":remove-ebay-promotion"
     row["review_token"] = _token(action, row["marketplaces"], basis)
     return row
 

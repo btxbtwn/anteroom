@@ -218,7 +218,9 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
     setError("");
     try {
       const result = await api.automations.approve(row);
-      if (result.result?.state || result.result?.error) setError(`${row.title || "Listing"}: ${result.result.state || result.result.error}`);
+      const notice = result.result?.state || result.result?.error
+        || (Array.isArray(result.result?.detail) ? result.result.detail.find((item) => item.detail?.warning)?.detail?.warning : undefined);
+      if (notice) setError(`${row.title || "Listing"}: ${notice}`);
     } catch (err) {
       setError((err as Error).message);
     } finally {

@@ -1425,9 +1425,10 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
                                     conversation_id=conversation_id)
     if should_apply and result.get("state") == "published":
         return await _apply_promotion(result, selected, previous, record, active)
-    if confirm and promotion_mode == "recreate" and action == "list" and result.get("state") == "published":
+    if confirm and promotion_mode in {"leave", "recreate"} and action == "list" and result.get("state") == "published":
         applied = snapshot.get("_recreate_ebay_promotion")
-        if applied and str(result["listing_url"]).rsplit("/", 1)[-1] != applied["listing_id"]:
+        if (promotion_mode == "recreate" and promotion.get("enabled") is True and applied
+                and str(result["listing_url"]).rsplit("/", 1)[-1] != applied["listing_id"]):
             selected = applied["campaign_id"], Decimal(applied["applied_rate"])
             return await _apply_promotion(result, selected, {}, record, active, account_id=applied["account_id"])
         if promotion.get("enabled") is True or previous:

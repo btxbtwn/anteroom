@@ -142,6 +142,19 @@ class Client:
 
 
 class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
+    async def test_unapproved_publish_warns_when_promotion_is_skipped(self):
+        from anteroom.services.ebay_listing_promotion import NO_APPLIED_PROMOTION
+
+        snapshot = {**LISTING, "ebay_specifics": {**LISTING["ebay_specifics"],
+                    "promotion": {"enabled": True, "campaignId": "42", "adRate": "5.5"}}}
+        client = Client()
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("list", snapshot, [self.photo], self.binding, self.record,
+                                                 self.active, confirm=True, conversation_id="abc123")
+        self.assertEqual(result["state"], "published")
+        self.assertEqual(result.get("warning"), NO_APPLIED_PROMOTION)
+        self.assertFalse(client.ad)
+
     async def test_unapproved_update_leaves_saved_promotion_alone(self):
         client = Client()
         snapshot = {**LISTING, "ebay_specifics": {**LISTING["ebay_specifics"],
@@ -215,14 +228,15 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
     async def test_recreate_uses_only_last_applied_rate_and_matching_account(self):
         from anteroom.services.ebay_listing_promotion import recreate_from
 
-        for seller, expected in (("fake-ebay-account", "5.5"), ("other-account", None), (None, None)):
-            with self.subTest(seller=seller):
+        for enabled, seller, expected in ((True, "fake-ebay-account", "5.5"), (True, "other-account", None),
+                                          (True, None, None), (False, "fake-ebay-account", None)):
+            with self.subTest(enabled=enabled, seller=seller):
                 client = Client()
                 self.binding = {"ebay_promotion": {
                     "listing_id": "876543210987", "campaign_id": "42", "account_id": seller, "applied_rate": "5.5",
                 }}
                 snapshot = {**LISTING, "ebay_specifics": {**LISTING["ebay_specifics"],
-                            "promotion": {"enabled": True, "campaignId": "99", "adRate": "30"}},
+                            "promotion": {"enabled": enabled, "campaignId": "99", "adRate": "30"}},
                             "_recreate_ebay_promotion": recreate_from(self.binding, "876543210987")}
                 self.assertIsNone(recreate_from(self.binding, "987654321098"))
                 with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
