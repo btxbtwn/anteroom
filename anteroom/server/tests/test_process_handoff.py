@@ -175,7 +175,8 @@ def drain_with_work(*, finish_after, grace_s=5, renew_as_work_ends=False):
     finally:
         process_handoff.hold, process_handoff.release, process_handoff.release_routes = original
     if renew_as_work_ends:
-        assert waited_for_renewal == [True], 'the lease was not renewed while the work was still in flight'
+        assert 'job cancelled' not in events, events
+        assert waited_for_renewal == [True], f'the lease was not renewed while the work was still in flight: {events}'
     return events
 
 
@@ -195,12 +196,20 @@ def finished_then_stopped_then_released(events):
     return after[:-2]
 
 
+def drained_promptly(**work):
+    """Drain with work that ends 0.2 s in; ``lead`` must hand over then, not wait out the 5 s grace."""
+    started = time.monotonic()
+    events = drain_with_work(finish_after=0.2, **work)
+    assert time.monotonic() - started < 2, 'the drain kept waiting after the work had finished'
+    return events
+
+
 def test_a_running_relist_finishes_during_the_drain_while_the_lease_is_held():
-    finished_then_stopped_then_released(drain_with_work(finish_after=0.2))
+    finished_then_stopped_then_released(drained_promptly())
 
 
 def test_a_lease_renewal_as_the_relist_ends_still_stops_before_releasing():
-    late_renewals = finished_then_stopped_then_released(drain_with_work(finish_after=0.2, renew_as_work_ends=True))
+    late_renewals = finished_then_stopped_then_released(drained_promptly(renew_as_work_ends=True))
     assert late_renewals, 'this run is meant to renew the lease after the job recorded its outcome'
 
 
