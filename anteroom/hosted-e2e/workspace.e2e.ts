@@ -26,9 +26,7 @@ test("a signed-in seller opens a hosted draft and other sellers cannot see its p
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  // Signed in, the assistant is home.
-  await expect(page.getByRole("heading", { level: 1, name: /^Good (morning|afternoon|evening)$/ })).toBeVisible();
-  await expect(page.getByRole("list", { name: "Example questions" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Needs attention/ })).toBeVisible();
   if (info.project.name === "phone") {
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
@@ -346,7 +344,7 @@ test("the Mac window hands its account session to the native AI worker and clear
   await expect.poll(current).toMatchObject({ hasToken: true, owner: expect.stringMatching(/^[0-9a-f-]{36}$/) });
   // The worker receives auth before workspace startup finishes. Wait for the
   // interactive home screen so startup cannot replace an already-open menu.
-  await expect(page.getByRole("list", { name: "Example questions" })).toBeVisible();
+  await expect(page.getByRole("tablist", { name: "Needs attention views" })).toBeVisible();
   await page.getByRole("button", { name: "Account", exact: true }).click();
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page.getByLabel("Email address")).toBeVisible();
