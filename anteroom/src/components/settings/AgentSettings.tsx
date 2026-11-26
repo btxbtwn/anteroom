@@ -18,6 +18,7 @@ import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
+import { confirmDialog } from "../../ui/confirmDialog";
 import { SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
 
 const EXPIRY_OPTIONS = [
@@ -188,7 +189,7 @@ function ConnectedApps() {
     <SettingsRow
       id="agent-mcp-connections"
       title="Connected apps"
-      description={`In Claude, ChatGPT or Gemini, add a custom connector with the endpoint above. The app asks you to sign in to Anteroom and choose what it can do. It can act on marketplaces only if you set Marketplaces for it here.`}
+      description="Add Anteroom in Claude, ChatGPT or Gemini using the server address below, then sign in and pick what the app can do."
       status={connections.isPending ? "Loading connected apps…" : rows.length === 0 ? "No apps connected." : undefined}
     >
       {failure ? <SettingsNote tone="error">{failure.message}</SettingsNote> : null}
@@ -210,8 +211,20 @@ function ConnectedApps() {
                   </div>
                 </div>
                 {active ? (
-                  <Button type="button" variant="outline" size="xs" disabled={busy}
-                    onClick={() => disconnect.mutate(app.client_id)} aria-label={`Disconnect ${name}`}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    disabled={busy}
+                    onClick={async () => {
+                      const confirmed = await confirmDialog(
+                        `Disconnect ${name}?\nIt will lose access to Anteroom until you connect it again from ${name}.`,
+                        { variant: "destructive", confirmLabel: "Disconnect" },
+                      );
+                      if (confirmed) disconnect.mutate(app.client_id);
+                    }}
+                    aria-label={`Disconnect ${name}`}
+                  >
                     <Trash2Icon />
                     Disconnect
                   </Button>
@@ -295,29 +308,11 @@ export function AgentSettings() {
 
   return (
     <>
-      <SettingsSection id="agent-remote-mcp" title="Remote MCP server">
-        <SettingsRow
-          id="agent-mcp-url"
-          title="Streamable HTTP endpoint"
-          description="Agents can read inventory, analytics, offers, sourcing ROI, and Needs Attention, stage local drafts or edits, and dismiss alerts, as far as each token or app allows. They act on marketplaces only where you set Marketplaces: Save drafts lets them save private marketplace drafts; Publish, update and delist also lets them list, send saved edits to live listings and delist, on the marketplaces they name. Their jobs show which agent started them."
-        >
-          {data?.mcp_url ? (
-            <div className="flex items-start gap-2">
-              <div className="min-w-0 flex-1">
-                <CommandBlock text={data.mcp_url} />
-              </div>
-              <CopyButton text={data.mcp_url} label="Copy MCP endpoint URL" />
-            </div>
-          ) : isPending ? (
-            <SettingsNote>Loading MCP endpoint…</SettingsNote>
-          ) : null}
-          {error ? <SettingsNote tone="error">{error.message}</SettingsNote> : null}
-        </SettingsRow>
-
+      <SettingsSection id="agent-remote-mcp" title="Let an AI app work in Anteroom">
         <SettingsRow
           id="agent-mcp-tokens"
           title="Access tokens"
-          description="Personal tokens authenticate MCP clients to your account only. Choose what each token can read or change; changes apply to its next request. Marketplaces is off for every new token. Tokens cannot access other API routes."
+          description="Choose what each AI app can read or change. Changes apply to its next request, and every job records which agent started it."
           status={
             tokensQuery.isPending
               ? "Loading tokens…"
@@ -326,6 +321,15 @@ export function AgentSettings() {
                 : `${activeTokenCount} active ${activeTokenCount === 1 ? "token" : "tokens"}.`
           }
         >
+          <div className="space-y-1 text-xs text-muted-foreground">
+            <p>
+              <strong className="font-medium text-foreground">Marketplaces</strong> starts at{" "}
+              <strong className="font-medium text-foreground">No access</strong>.{" "}
+              <strong className="font-medium text-foreground">Save drafts</strong> saves private marketplace drafts.{" "}
+              <strong className="font-medium text-foreground">Publish, update and delist</strong> also lists, sends saved edits to live listings and delists on the marketplaces the app names.
+            </p>
+          </div>
+
           <form onSubmit={handleCreateToken} className="flex flex-wrap items-center gap-2">
             <Input
               type="text"
@@ -419,7 +423,13 @@ export function AgentSettings() {
                       variant="outline"
                       size="xs"
                       disabled={revokeToken.isPending}
-                      onClick={() => revokeToken.mutate(tok.id)}
+                      onClick={async () => {
+                        const confirmed = await confirmDialog(
+                          `Revoke “${tok.name}”?\nAny app using this token will lose access right away, and you’ll need a new token to reconnect it.`,
+                          { variant: "destructive", confirmLabel: "Revoke token" },
+                        );
+                        if (confirmed) revokeToken.mutate(tok.id);
+                      }}
                       aria-label={`Revoke ${tok.name}`}
                     >
                       <Trash2Icon />
@@ -445,10 +455,28 @@ export function AgentSettings() {
         </SettingsRow>
 
         {isHosted ? <ConnectedApps /> : null}
+
+        <SettingsRow
+          id="agent-mcp-url"
+          title="Server address"
+          description="Paste this address into an AI app when it asks for your Anteroom server URL."
+        >
+          {data?.mcp_url ? (
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <CommandBlock text={data.mcp_url} />
+              </div>
+              <CopyButton text={data.mcp_url} label="Copy server address" />
+            </div>
+          ) : isPending ? (
+            <SettingsNote>Loading server address…</SettingsNote>
+          ) : null}
+          {error ? <SettingsNote tone="error">{error.message}</SettingsNote> : null}
+        </SettingsRow>
       </SettingsSection>
 
       {remoteClients.length > 0 ? (
-        <SettingsSection id="agent-remote-clients" title="HTTP client setup">
+        <SettingsSection id="agent-remote-clients" title="App setup">
           {remoteClients.map((client) => (
             <AgentClientRow key={client.id} id={`agent-remote-${client.id}`} client={client} />
           ))}

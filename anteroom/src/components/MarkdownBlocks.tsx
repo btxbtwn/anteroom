@@ -20,6 +20,7 @@ import {
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
+import { toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 function useCopied(): [boolean, (text: string) => void] {
@@ -29,12 +30,17 @@ function useCopied(): [boolean, (text: string) => void] {
     if (timer.current) clearTimeout(timer.current);
   }, []);
   const copy = useCallback((text: string) => {
-    if (typeof navigator === "undefined" || !navigator.clipboard) return;
+    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+      toastManager.add({ type: "error", title: "Couldn't copy" });
+      return;
+    }
     void navigator.clipboard.writeText(text).then(() => {
       if (timer.current) clearTimeout(timer.current);
       setCopied(true);
       timer.current = setTimeout(() => setCopied(false), 1200);
-    }).catch(() => undefined);
+    }).catch(() => {
+      toastManager.add({ type: "error", title: "Couldn't copy" });
+    });
   }, []);
   return [copied, copy];
 }

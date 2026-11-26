@@ -511,7 +511,20 @@ function ThreadToastVisibleAutoDismiss({
   return null;
 }
 
+let mountedToastProviders = 0;
+
+export function isToastProviderMounted(): boolean {
+  return mountedToastProviders > 0;
+}
+
 function ToastProvider({ children, position = "top-right", ...props }: ToastProviderProps) {
+  useEffect(() => {
+    mountedToastProviders += 1;
+    return () => {
+      mountedToastProviders = Math.max(0, mountedToastProviders - 1);
+    };
+  }, []);
+
   return (
     <Toast.Provider toastManager={toastManager} {...props}>
       {children}

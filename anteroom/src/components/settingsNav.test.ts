@@ -48,11 +48,9 @@ describe("searchSettings", () => {
     expect(searchSettings("saved templates")).toContainEqual(expect.objectContaining({id:"listing-templates",section:"listings",targetId:"listing-templates"}));
   });
 
-  it("finds the hosted browser experiment by its name and extension-free workflow", () => {
+  it("does not index the removed hosted marketplace browser placeholder", () => {
     for (const query of ["hosted marketplace browser", "without an extension"]) {
-      expect(searchSettings(query)).toContainEqual(expect.objectContaining({
-        section: "experimental", targetId: "hosted-marketplace-browser",
-      }));
+      expect(searchSettings(query)).toEqual([]);
     }
   });
 

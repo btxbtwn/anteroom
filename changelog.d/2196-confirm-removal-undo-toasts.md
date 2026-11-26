@@ -1,0 +1,4 @@
+- Confirm before removing AI keys, signing out of AI providers, revoking agent tokens, disconnecting agent apps, or deleting business expenses.
+- Add an Undo toast when removing listing photos, deleting shipping presets, or forgetting assistant memories.
+- Show a clear notice when copying text to the clipboard fails.
+- Clarify Settings → Agents to lead with what connected AI apps can do, remove the unavailable Hosted marketplace browser placeholder in Settings → Experimental, and capitalize "eBay" properly in Settings → Listings.

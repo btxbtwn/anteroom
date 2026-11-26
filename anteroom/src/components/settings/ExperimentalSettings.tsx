@@ -33,20 +33,6 @@ export function ExperimentalSettings() {
       >
         {prefs.error || save.error ? <SettingsNote tone="error">{prefs.error?.message || save.error?.message}</SettingsNote> : null}
       </SettingsRow>
-      <SettingsRow
-        id="hosted-marketplace-browser"
-        title="Hosted marketplace browser"
-        description="Create marketplace drafts from any device without installing an extension."
-        status={<span id="hosted-marketplace-browser-status">Coming soon</span>}
-        control={
-          <Switch
-            aria-label="Hosted marketplace browser"
-            aria-describedby="hosted-marketplace-browser-status"
-            checked={false}
-            disabled
-          />
-        }
-      />
     </SettingsSection>
   );
 }

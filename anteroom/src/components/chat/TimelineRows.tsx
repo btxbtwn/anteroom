@@ -17,6 +17,7 @@ import { CHAT_PROSE_CLASS, ChatMarkdown } from "../ChatMarkdown";
 import { WorkingDuration } from "../WorkingDuration";
 import { Button } from "../ui/button";
 import { Dialog, DialogPopup } from "../ui/dialog";
+import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 /** One image the seller attached to a message. */
@@ -93,12 +94,17 @@ export const MessageCopyButton = memo(function MessageCopyButton({
     if (timer.current) clearTimeout(timer.current);
   }, []);
   const copy = () => {
-    if (typeof navigator === "undefined" || !navigator.clipboard) return;
+    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+      toastManager.add({ type: "error", title: "Couldn't copy" });
+      return;
+    }
     void navigator.clipboard.writeText(text).then(() => {
       if (timer.current) clearTimeout(timer.current);
       setCopied(true);
       timer.current = setTimeout(() => setCopied(false), COPIED_RESET_MS);
-    }).catch(() => undefined);
+    }).catch(() => {
+      toastManager.add({ type: "error", title: "Couldn't copy" });
+    });
   };
   return (
     <Tooltip>

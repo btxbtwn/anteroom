@@ -9,6 +9,7 @@ import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
+import { confirmDialog } from "../ui/confirmDialog";
 import { EmptyRow, FormError, FormField, PageHeader, PageSkeleton, Panel } from "./WorkspacePage";
 
 const CATEGORIES: Record<ExpenseInput["category"], string> = {
@@ -244,8 +245,16 @@ function ExpenseForm({ expense, today, close }: { expense?: Expense; today: stri
         }}>Calculate mileage</Button>}
         <Button type="button" variant="outline" disabled={busy} onClick={close}>Cancel</Button>
         {expense && <Button type="button" variant="ghost" disabled={busy}
-          onClick={() => { if (window.confirm(expense.import_source === "plaid"
-            ? "Exclude this transaction from your expenses? Plaid will not import it again." : "Delete this expense?")) remove.mutate(expense); }}>{expense.import_source === "plaid" ? "Exclude transaction" : "Delete expense"}</Button>}
+          onClick={async () => {
+            const plaid = expense.import_source === "plaid";
+            const confirmed = await confirmDialog(
+              plaid
+                ? "Exclude this transaction from your expenses?\nPlaid will not import it again."
+                : "Delete this expense?\nIt will be removed from your expenses and profit & loss reports.",
+              { variant: "destructive", confirmLabel: plaid ? "Exclude transaction" : "Delete expense" },
+            );
+            if (confirmed) remove.mutate(expense);
+          }}>{expense.import_source === "plaid" ? "Exclude transaction" : "Delete expense"}</Button>}
       </div>
     </form>
   </Panel>;

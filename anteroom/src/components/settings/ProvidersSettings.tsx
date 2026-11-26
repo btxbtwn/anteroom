@@ -21,6 +21,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { ScrollArea } from "../ui/scroll-area";
 import { Spinner } from "../ui/spinner";
+import { confirmDialog } from "../../ui/confirmDialog";
 import {
   SettingsCode,
   SettingsGroup,
@@ -319,7 +320,18 @@ function BraveSearchSection({ chatgptSignedIn }: { chatgptSignedIn: boolean }) {
           configured ? (
             <>
               <TestButton testing={connection.testing} onClick={connection.test} />
-              <Button size="xs" variant="ghost-destructive" onClick={() => deleteKeyMutation.mutate()}>
+              <Button
+                size="xs"
+                variant="ghost-destructive"
+                disabled={deleteKeyMutation.isPending}
+                onClick={async () => {
+                  const confirmed = await confirmDialog(
+                    "Remove your Brave Search API key?\nYou’ll need to paste a new key to use Brave Search for fallback sold comps.",
+                    { variant: "destructive", confirmLabel: "Remove key" },
+                  );
+                  if (confirmed) deleteKeyMutation.mutate();
+                }}
+              >
                 <Trash2Icon />
                 Remove
               </Button>
@@ -386,8 +398,21 @@ function PhotoroomSection({ hosted }: { hosted: boolean }) {
         status={status}
         control={
           !managed && configured ? (
-            <Button size="xs" variant="ghost-destructive" disabled={setKeyMutation.isPending || deleteKeyMutation.isPending}
-              onClick={() => { setKeyMutation.reset(); deleteKeyMutation.mutate(); }}>
+            <Button
+              size="xs"
+              variant="ghost-destructive"
+              disabled={setKeyMutation.isPending || deleteKeyMutation.isPending}
+              onClick={async () => {
+                const confirmed = await confirmDialog(
+                  "Remove your Photoroom API key?\nAI Studio will be turned off until you save a new key.",
+                  { variant: "destructive", confirmLabel: "Remove key" },
+                );
+                if (confirmed) {
+                  setKeyMutation.reset();
+                  deleteKeyMutation.mutate();
+                }
+              }}
+            >
               <Trash2Icon />
               Remove
             </Button>
@@ -637,7 +662,18 @@ function KeyProviderEditor({
             configured ? (
               <>
                 <TestButton testing={test.testing} onClick={test.test} />
-                <Button size="xs" variant="ghost-destructive" onClick={() => deleteKey.mutate()}>
+                <Button
+                  size="xs"
+                  variant="ghost-destructive"
+                  disabled={deleteKey.isPending}
+                  onClick={async () => {
+                    const confirmed = await confirmDialog(
+                      `Remove your ${label} API key?\nYou’ll need to enter a new key to use ${label} again.`,
+                      { variant: "destructive", confirmLabel: "Remove key" },
+                    );
+                    if (confirmed) deleteKey.mutate();
+                  }}
+                >
                   <Trash2Icon />
                   Remove
                 </Button>
@@ -927,7 +963,13 @@ export function ProvidersSettings() {
                   <Button
                     size="xs"
                     variant="ghost"
-                    onClick={() => chatgptLogoutMutation.mutate()}
+                    onClick={async () => {
+                      const confirmed = await confirmDialog(
+                        "Sign out of ChatGPT?\nAnteroom won’t be able to use your ChatGPT plan until you sign in again.",
+                        { variant: "destructive", confirmLabel: "Sign out" },
+                      );
+                      if (confirmed) chatgptLogoutMutation.mutate();
+                    }}
                     disabled={chatgptLogoutMutation.isPending}
                   >
                     Sign out
@@ -1111,7 +1153,18 @@ export function ProvidersSettings() {
               mimoConfigured ? (
                 <>
                   <TestButton testing={mimoTest.testing} onClick={mimoTest.test} />
-                  <Button size="xs" variant="ghost-destructive" onClick={() => deleteKeyMutation.mutate()}>
+                  <Button
+                    size="xs"
+                    variant="ghost-destructive"
+                    disabled={deleteKeyMutation.isPending}
+                    onClick={async () => {
+                      const confirmed = await confirmDialog(
+                        "Remove your Xiaomi MiMo API key?\nYou’ll need to paste a new key to use MiMo again.",
+                        { variant: "destructive", confirmLabel: "Remove key" },
+                      );
+                      if (confirmed) deleteKeyMutation.mutate();
+                    }}
+                  >
                     <Trash2Icon />
                     Remove
                   </Button>
@@ -1168,7 +1221,18 @@ export function ProvidersSettings() {
               cursorConfigured ? (
                 <>
                   <TestButton testing={cursorTest.testing} onClick={cursorTest.test} />
-                  <Button size="xs" variant="ghost-destructive" onClick={() => deleteCursorMutation.mutate()}>
+                  <Button
+                    size="xs"
+                    variant="ghost-destructive"
+                    disabled={deleteCursorMutation.isPending}
+                    onClick={async () => {
+                      const confirmed = await confirmDialog(
+                        "Remove your Cursor API key?\nYou’ll need to paste a new key to use Cursor again.",
+                        { variant: "destructive", confirmLabel: "Remove key" },
+                      );
+                      if (confirmed) deleteCursorMutation.mutate();
+                    }}
+                  >
                     <Trash2Icon />
                     Remove
                   </Button>
