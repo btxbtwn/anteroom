@@ -156,7 +156,7 @@ def drain_with_work(*, finish_after, grace_s=5, renew_as_work_ends=False, max_dr
         def job():
             with process_handoff.marketplace_work():
                 started.set()
-                finish.wait(max(5, grace_s + 2))
+                finish.wait(max(5, grace_s + 2) + 5)
                 events.append('job finished' if not cancelled.is_set() else 'job cancelled')
                 outcome_recorded.set()
                 if renew_as_work_ends and not cancelled.is_set():
@@ -181,6 +181,7 @@ def drain_with_work(*, finish_after, grace_s=5, renew_as_work_ends=False, max_dr
         assert await asyncio.to_thread(started.wait, 2)
         process_handoff.begin_draining()
         if finish_after is not None:
+            assert await asyncio.to_thread(drained.wait, 5), f'the drain did not start: {events}'
             assert await asyncio.to_thread(renewed_during_drain.wait, drain_watchdog_s), (
                 f'the drain did not renew the lease while work was running: {events}'
             )
