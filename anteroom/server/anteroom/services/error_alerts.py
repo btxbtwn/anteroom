@@ -306,6 +306,17 @@ class AlertHandler(logging.Handler):
             return False  # Never report the reporter.
         if record.name == "uvicorn.error" and str(record.msg).startswith(_UVICORN_DUPLICATE):
             return False
+        if record.name == "anteroom.marketplaces" and record.exc_info:
+            from anteroom.services.hosted_browser_relay import CHROME_DISCONNECTED, ChromeReadError
+
+            exc = record.exc_info[1]
+            context = getattr(record, "marketplace_context", {})
+            # A failed lookup on another Machine can re-raise the local refusal.
+            # Keep those routing failures visible, even with the same message.
+            if (isinstance(exc, ChromeReadError) and exc.__context__ is None
+                    and str(exc) == CHROME_DISCONNECTED
+                    and isinstance(context, dict) and context.get("operation") == "marketplace.sessions"):
+                return False
         return super().filter(record)
 
     def emit(self, record: logging.LogRecord) -> None:

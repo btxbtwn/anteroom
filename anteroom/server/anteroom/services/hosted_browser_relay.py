@@ -122,7 +122,7 @@ class BrowserRelay(ReplyWaits):
         # A tab that declared nothing has not connected a Bridge yet. Name a
         # version only when a Bridge declared reads but not the one needed.
         if time.monotonic() - self._seen_at >= SEEN_FOR_S or not self._capabilities:
-            return "Open Anteroom in Chrome on your computer and connect Chrome first."
+            return CHROME_DISCONNECTED
         if capability not in self._capabilities:
             version, purpose = NEEDS[capability]
             return f"Update Anteroom Bridge in Chrome to {version} or later to {purpose} from the web."
@@ -252,7 +252,7 @@ class BrowserRelay(ReplyWaits):
         if not await self.deliver_local({"type": command, "job_id": None, "message_id": request_id,
                                          "payload": {**payload, "request_id": request_id}}):
             self.cancel_wait(request_id)
-            raise ChromeReadError("Open Anteroom in Chrome on your computer and connect Chrome first.")
+            raise ChromeReadError(CHROME_DISCONNECTED)
         try:
             reply = await asyncio.wait_for(waiter, timeout)
         except TimeoutError:
@@ -270,7 +270,7 @@ class BrowserRelay(ReplyWaits):
         waiter = self.register_wait(request_id, message.get("job_id"))
         try:
             if not await self.deliver_local(message):
-                raise ChromeReadError("Open Anteroom in Chrome on your computer and connect Chrome first.")
+                raise ChromeReadError(CHROME_DISCONNECTED)
             result = await asyncio.wait_for(waiter, timeout)
         except TimeoutError:
             raise ChromeReadError("Chrome did not answer in time. Try again.") from None
@@ -313,6 +313,9 @@ class BrowserRelay(ReplyWaits):
                 raise ChromeReadError(body.get('error') or 'Chrome did not answer in time. Try again.') from None
             reply = body.get('reply')
             return reply if isinstance(reply, dict) else {"ok": False}
+
+
+CHROME_DISCONNECTED = "Open Anteroom in Chrome on your computer and connect Chrome first."
 
 
 class ChromeReadError(RuntimeError):
