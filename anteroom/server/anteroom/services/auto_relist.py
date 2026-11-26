@@ -712,7 +712,11 @@ def _preview_candidates(db: Session, rule: MarketplaceRelistRule, remaining: int
             else:
                 original_data = item["listing_fields"]
                 data = original_data
-                if new_price is not None:
+                current_val = price_for(original_data, market)
+                price_changes = new_price is not None and (
+                    current_val is None or round(float(current_val), 2) != round(new_price, 2)
+                )
+                if price_changes and new_price is not None:
                     data = _snapshot_with_relist_price(data, market, new_price)
                 prepared = direct_preflight.prepare(db, item["conversation"], data, market)
                 gaps = direct_preflight.gaps(prepared, market, direct_preflight.Context(db=db))
@@ -732,9 +736,9 @@ def _mercari_smart_pricing_disabled_note(before: dict, after: dict, *, future: b
         return None
     price_dollars = mercari_whole_dollars(price_for(after, "mercari"))
     min_dollars = mercari_whole_dollars(after_smart.get("minimumPrice"))
-    if price_dollars == 1:
+    if price_dollars is not None and price_dollars < 2:
         if future:
-            return "Relisting at $1 will turn off Mercari Smart Pricing because Mercari requires $2 or more."
+            return f"Relisting at ${price_dollars} will turn off Mercari Smart Pricing because Mercari requires $2 or more."
         return "Turned off Mercari Smart Pricing because Mercari requires $2 or more."
     if price_dollars is not None and min_dollars is not None:
         if future:
@@ -750,12 +754,24 @@ def _disable_mercari_smart_pricing_at_floor(updated: dict) -> None:
 
     The saved ``minimumPrice`` stays untouched so we never lower the seller's floor
     behind their back; disabling Smart Pricing keeps the relist draft valid on Mercari.
+    Any captured ``_native_forms.mercari`` contract is updated in lockstep so toggling
+    Smart Pricing off does not trigger a stale-form reload gap in preview or readiness.
     """
     if not mercari_smart_pricing_meets_price(updated):
         return
     specifics = updated.get("mercari_specifics")
-    if isinstance(specifics, dict) and isinstance(specifics.get("smartPricing"), dict):
-        specifics["smartPricing"]["enabled"] = False
+    if not (isinstance(specifics, dict) and isinstance(specifics.get("smartPricing"), dict)):
+        return
+    specifics["smartPricing"]["enabled"] = False
+    native_forms = updated.get("_native_forms")
+    mercari_contract = native_forms.get("mercari") if isinstance(native_forms, dict) else None
+    if isinstance(mercari_contract, dict):
+        contract_inputs = mercari_contract.get("inputs")
+        if isinstance(contract_inputs, dict) and "mercari_specifics.smartPricing.enabled" in contract_inputs:
+            contract_inputs["mercari_specifics.smartPricing.enabled"] = False
+        for row in mercari_contract.get("fields") or []:
+            if isinstance(row, dict) and (row.get("path") or row.get("key")) == "mercari_specifics.smartPricing.minimumPrice":
+                row["required"] = False
 
 
 def _snapshot_with_relist_price(data: dict, marketplace: str, price: float) -> dict:

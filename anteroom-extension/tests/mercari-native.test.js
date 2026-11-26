@@ -712,6 +712,7 @@ test('a safe Mercari read retries a temporary GraphQL error; writes never do', a
   for (const [operationName, opts] of [
     ['addDraftItemMutation', { deadline: Date.now() + 30000 }],
     ['createOfferToLikers', { deadline: Date.now() + 30000, resend: false }],
+    ['editListing', { deadline: Date.now() + 30000, retry: true }],
     ['uploadDraftItemImageMutation', { multipart: new FormData(), deadline: Date.now() + 30000, operationName: 'uploadDraftItemImageMutation', retry: true }],
   ]) {
     let calls = 0;

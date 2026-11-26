@@ -1,7 +1,7 @@
 """Mercari Smart Pricing minimum must stay below the listing price (#2244)."""
 from __future__ import annotations
 
-from anteroom.services import auto_relist, direct_preflight, listing_readiness, mercari_form
+from anteroom.services import auto_relist, direct_preflight, listing_readiness, mercari_form, native_contract
 from anteroom.services.chrome_listing import mercari_requirements
 from anteroom.services.direct_preflight import Context
 
@@ -60,6 +60,8 @@ def test_missing_or_zero_minimum_or_one_dollar_price_blocks_list():
         _snapshot(11, {"enabled": True, "minimumPrice": ""}),
         _snapshot(11, {"enabled": True, "minimumPrice": 0}),
         _snapshot(1, {"enabled": True, "minimumPrice": 1}),
+        _snapshot(0.4, {"enabled": True, "minimumPrice": 1}),
+        _snapshot(0, {"enabled": True, "minimumPrice": 10}),
     ):
         gaps = _smart_gaps(snapshot)
         assert len(gaps) == 1, snapshot
@@ -124,6 +126,32 @@ def test_auto_relist_disables_mercari_smart_pricing_when_price_reaches_floor():
     assert above_floor["mercari_specifics"]["smartPricing"] == {"enabled": True, "minimumPrice": 11}
     assert auto_relist._mercari_smart_pricing_disabled_note(listing, above_floor) is None
     assert _smart_gaps(above_floor) == []
+
+
+def test_auto_relist_keeps_captured_mercari_native_form_valid_when_disabling_smart_pricing():
+    listing = _snapshot(13, {"enabled": True, "minimumPrice": 11})
+    listing["condition"] = "Pre-Owned - Good"
+    listing["_native_forms"] = native_contract.capture(
+        listing, {"mercari": mercari_form.form(listing)}, ("mercari",),
+    )
+    assert listing["_native_forms"]["mercari"]["inputs"]["mercari_specifics.smartPricing.enabled"] is True
+
+    at_floor = auto_relist._general_with_relist_price(listing, "mercari", 11.0, live_elsewhere=set())
+    assert at_floor["mercari_specifics"]["smartPricing"] == {"enabled": False, "minimumPrice": 11}
+    assert not any(
+        "Reload its fields before listing" in g["message"]
+        for g in native_contract.gaps(at_floor, "mercari")
+    )
+    assert not any(
+        "Reload its fields before listing" in g["message"]
+        for g in direct_preflight.gaps(at_floor, "mercari")
+    )
+    rendered = native_contract.editor_form(at_floor, "mercari")
+    assert rendered is not None
+    rendered_fields = {row["path"]: row for row in rendered["fields"]}
+    assert rendered_fields["mercari_specifics.smartPricing.enabled"]["value"] is False
+    assert rendered_fields["mercari_specifics.smartPricing.minimumPrice"]["value"] == 11
+    assert rendered_fields["mercari_specifics.smartPricing.minimumPrice"]["required"] is False
 
 
 def test_auto_relist_on_another_marketplace_disables_unlisted_mercari_smart_pricing_at_floor():

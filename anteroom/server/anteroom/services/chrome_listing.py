@@ -223,7 +223,7 @@ def mercari_whole_dollars(value: object) -> int | None:
     return _whole_dollars(amount) if amount is not None else None
 
 
-def _mercari_smart_pricing_amounts(snapshot: dict, specifics: dict) -> tuple[int, int | None] | None:
+def _mercari_smart_pricing_amounts(snapshot: dict, specifics: dict) -> tuple[int | None, int | None] | None:
     """Whole-dollar ``(price, minimum)`` when Mercari Smart Pricing is on, else None.
 
     Mercari receives both values rounded to whole dollars (``Math.round``).
@@ -234,8 +234,7 @@ def _mercari_smart_pricing_amounts(snapshot: dict, specifics: dict) -> tuple[int
     from anteroom.services.seller_overrides import price_for
 
     raw_price = price_for(snapshot, "mercari")
-    rounded_price = mercari_whole_dollars(raw_price)
-    price_dollars = rounded_price if rounded_price is not None and rounded_price > 0 else 0
+    price_dollars = mercari_whole_dollars(raw_price)
     min_dollars = mercari_whole_dollars(smart.get("minimumPrice"))
     return price_dollars, min_dollars
 
@@ -246,9 +245,9 @@ def mercari_smart_pricing_meets_price(snapshot: dict) -> bool:
     if amounts is None:
         return False
     price_dollars, min_dollars = amounts
-    if price_dollars <= 0:
+    if price_dollars is None:
         return False
-    return price_dollars == 1 or (min_dollars is not None and min_dollars >= price_dollars)
+    return price_dollars < 2 or (min_dollars is not None and min_dollars >= price_dollars)
 
 
 def _mercari_smart_pricing_gap(snapshot: dict, specifics: dict) -> dict | None:
@@ -257,7 +256,7 @@ def _mercari_smart_pricing_gap(snapshot: dict, specifics: dict) -> dict | None:
     if amounts is None:
         return None
     price_dollars, min_dollars = amounts
-    if price_dollars == 1:
+    if price_dollars is not None and price_dollars < 2:
         return gap(
             "mercari_specifics.smartPricing.minimumPrice",
             "Mercari Smart Pricing needs a listing price of $2 or more. Raise the price or turn Smart Pricing off.",
@@ -267,7 +266,7 @@ def _mercari_smart_pricing_gap(snapshot: dict, specifics: dict) -> dict | None:
             "mercari_specifics.smartPricing.minimumPrice",
             "Mercari Smart Pricing needs a minimum price of $1 or more, or turn Smart Pricing off.",
         )
-    if price_dollars >= 2 and min_dollars >= price_dollars:
+    if price_dollars is not None and min_dollars >= price_dollars:
         highest = price_dollars - 1
         return gap(
             "mercari_specifics.smartPricing.minimumPrice",

@@ -566,6 +566,8 @@ function mercariHeaders(session) {
 }
 
 const MERCARI_TEMPORARY_READ_ERROR = 'Oops, an error has occurred. Please try again.';
+// Persisted read-only operations whose names do not end in "Query".
+const MERCARI_READ_OPERATIONS = new Set(['offerToLikerable', 'offerToLikerInit']);
 
 // Mercari's GraphQL errors, classified. Its messages pass through as its own words.
 function mercariFailure(operationName, errors, write, { readOnly = false } = {}) {
@@ -608,8 +610,12 @@ function mercariFailure(operationName, errors, write, { readOnly = false } = {})
 // exactly once.
 async function mercariRequest(body, { multipart = null, deadline, operationName = body?.operationName, retry = false, resend = true }) {
   const write = !operationName.endsWith('Query') && !/^\s*query\b/.test(body?.query || '');
-  const mutation = Boolean(multipart) || String(operationName || '').endsWith('Mutation') || /^\s*mutation\b/.test(body?.query || '');
-  const readOnly = retry && !mutation;
+  const isRead = !multipart && (
+    String(operationName || '').endsWith('Query')
+    || /^\s*query\b/.test(body?.query || '')
+    || MERCARI_READ_OPERATIONS.has(operationName)
+  );
+  const readOnly = retry && isRead;
   for (let attempt = 0; ; attempt += 1) {
     const headers = mercariHeaders(await mercariCurrentSession(deadline));
     if (!multipart) headers['content-type'] = 'application/json';
