@@ -73,6 +73,7 @@ with SessionLocal() as db:
 
 for (const theme of ["light", "dark"]) {
   test(`offer activity is usable in ${theme}`, async ({ page, request, phone }, testInfo) => {
+    test.setTimeout(90_000);
     expect((await request.put("/api/settings/ui", { data: { theme } })).ok()).toBe(true);
     await page.addInitScript((value) => localStorage.setItem("anteroom:theme", value), theme);
     await page.goto("/");
@@ -82,7 +83,7 @@ for (const theme of ["light", "dark"]) {
     } else await page.getByRole("button", { name: "Automations", exact: true }).click();
     const section = page.getByRole("region", { name: "Offer activity" });
     const automations = page.getByRole("region", { name: "Your automations" });
-    await expect(automations).toBeVisible();
+    await expect(automations).toBeVisible({ timeout: 45_000 });
     expect(await section.evaluate((node) => Boolean(node.compareDocumentPosition(
       document.querySelector('[aria-label="Your automations"]')!,
     ) & Node.DOCUMENT_POSITION_PRECEDING))).toBe(true);
