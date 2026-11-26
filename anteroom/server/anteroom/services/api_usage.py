@@ -114,8 +114,8 @@ def record_openrouter(
     ))
 
 
-def record_photoroom(*, edit_label: str, conversation_id: str | None = None) -> None:
-    """Persist one managed Photoroom image credit at the configured rate card."""
+def record_photoroom(*, edit_label: str, basic: bool, conversation_id: str | None = None) -> None:
+    """Record one managed call. A Basic removal uses one fifth of a Plus image credit."""
     from anteroom.services.photoroom import managed_photoroom_enabled
 
     if not managed_photoroom_enabled():
@@ -128,7 +128,7 @@ def record_photoroom(*, edit_label: str, conversation_id: str | None = None) -> 
         provider="photoroom",
         kind="edit",
         model_or_edit=(edit_label or "")[:256],
-        cost_usd=photoroom_cost_usd(),
+        cost_usd=photoroom_cost_usd() / (5 if basic else 1),
         cost_source="rate_card",
         units=1,
         conversation_id=conversation_id,
@@ -162,23 +162,102 @@ def list_events(db: Session, *, since: datetime, until: datetime, seller_id: str
     return list(db.scalars(query).all())
 
 
-def seller_usage_summary(db: Session, seller_id: str):
-    """Aggregate only the signed-in seller's recorded costs for the last 30 days."""
-    end = datetime.now(UTC)
-    summary = {provider: {"count": 0, "usd": 0.0} for provider in ("openrouter", "photoroom")}
-    query = (
-        select(ApiUsageEvent.provider, func.count(), func.sum(ApiUsageEvent.cost_usd))
-        .where(
-            ApiUsageEvent.user_id == seller_id,
-            ApiUsageEvent.created_at >= end - timedelta(days=30),
-            ApiUsageEvent.created_at < end,
-            ApiUsageEvent.provider.in_(list(summary)),
-        )
-        .group_by(ApiUsageEvent.provider)
+USAGE_PERIOD_PATTERN = r"^(30d|20\d{2}-(0[1-9]|1[0-2]))$"
+USAGE_MONTHS_LISTED = 12
+_SERVICES = ("openrouter", "photoroom")
+
+
+def usage_period(period: str, now: datetime) -> tuple[datetime, datetime]:
+    """UTC bounds, end exclusive, of ``30d`` (today and the 29 days before it) or a ``YYYY-MM`` month."""
+    if period == "30d":
+        today = now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        return today - timedelta(days=29), today + timedelta(days=1)
+    year, month = (int(part) for part in period.split("-"))
+    start = datetime(year, month, 1, tzinfo=UTC)
+    return start, datetime(year + month // 12, month % 12 + 1, 1, tzinfo=UTC)
+
+
+def _months_with_usage(first: datetime | None, now: datetime) -> list[str]:
+    """Months a seller can pick, newest first: this month back to their first charge."""
+    months = []
+    year, month = now.year, now.month
+    oldest = min((first.year, first.month), (year, month)) if first else (year, month)
+    while (year, month) >= oldest and len(months) < USAGE_MONTHS_LISTED:
+        months.append(f"{year:04d}-{month:02d}")
+        year, month = (year, month - 1) if month > 1 else (year - 1, 12)
+    return months
+
+
+def seller_usage_summary(db: Session, seller_id: str, period: str = "30d") -> dict[str, Any]:
+    """The signed-in seller's own recorded costs for one period: totals, what they went on, and each UTC day."""
+    now = datetime.now(UTC)
+    start, end = usage_period(period, now)
+    mine = (
+        ApiUsageEvent.user_id == seller_id,
+        ApiUsageEvent.provider.in_(_SERVICES),
     )
-    for provider, count, cost in db.execute(query):
-        summary[provider] = {"count": count, "usd": cost}
-    return summary
+    in_period = (*mine, ApiUsageEvent.created_at >= start, ApiUsageEvent.created_at < end)
+    cost = func.sum(ApiUsageEvent.cost_usd)
+
+    services: dict[str, dict[str, Any]] = {
+        provider: {"count": 0, "usd": 0.0, "input_tokens": 0, "output_tokens": 0, "items": []}
+        for provider in _SERVICES
+    }
+    by_item = (
+        select(ApiUsageEvent.provider, ApiUsageEvent.model_or_edit, func.count(), cost,
+               func.sum(ApiUsageEvent.input_tokens), func.sum(ApiUsageEvent.output_tokens))
+        .where(*in_period)
+        .group_by(ApiUsageEvent.provider, ApiUsageEvent.model_or_edit)
+    )
+    for provider, label, count, usd, tokens_in, tokens_out in db.execute(by_item):
+        service = services[provider]
+        service["count"] += count
+        service["usd"] += float(usd)
+        service["input_tokens"] += tokens_in or 0
+        service["output_tokens"] += tokens_out or 0
+        service["items"].append({
+            "label": label, "count": count, "usd": round(float(usd), 6),
+            "input_tokens": tokens_in or 0, "output_tokens": tokens_out or 0,
+        })
+    for service in services.values():
+        service["usd"] = round(service["usd"], 6)
+        service["items"].sort(key=lambda item: (-item["usd"], item["label"]))
+
+    day = func.date(ApiUsageEvent.created_at)
+    spent = {
+        (str(on), provider): float(usd)
+        for on, provider, usd in db.execute(
+            select(day, ApiUsageEvent.provider, cost).where(*in_period).group_by(day, ApiUsageEvent.provider))
+    }
+    days = []
+    for offset in range((end - start).days):
+        on = (start + timedelta(days=offset)).date().isoformat()
+        days.append({"date": on, **{provider: round(spent.get((on, provider), 0.0), 6) for provider in _SERVICES}})
+
+    first = db.scalar(select(func.min(ApiUsageEvent.created_at)).where(*mine))
+    return {
+        "period": {"id": period, "start": start.isoformat(), "end": end.isoformat()},
+        "months": _months_with_usage(first, now),
+        "total_usd": round(sum(service["usd"] for service in services.values()), 6),
+        **services,
+        "days": days,
+    }
+
+
+def seller_usage_csv(db: Session, seller_id: str, period: str = "30d") -> str:
+    """Every charge the signed-in seller ran up in one period, oldest first."""
+    from anteroom.services import ledger_exports
+
+    start, end = usage_period(period, datetime.now(UTC))
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(["time_utc", "service", "item", "input_tokens", "output_tokens", "cost_usd"])
+    for event in list_events(db, since=start, until=end, seller_id=seller_id):
+        writer.writerow([
+            f"{event.created_at:%Y-%m-%d %H:%M:%S}", event.provider, ledger_exports.text(event.model_or_edit),
+            event.input_tokens, event.output_tokens, event.cost_usd,
+        ])
+    return out.getvalue()
 
 
 def operator_report(
