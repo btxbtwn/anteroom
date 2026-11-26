@@ -26,12 +26,30 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function render(activeView: WorkspaceView = "listings", onOpenHome = noop) {
+function render(
+  activeView: WorkspaceView = "listings",
+  options: {
+    hosted?: boolean;
+    onOpenHome?: () => void;
+    onOpenInventory?: () => void;
+    updateStatus?: { available: boolean; summary?: string };
+  } = {},
+) {
+  const { hosted = true, onOpenHome = noop, onOpenInventory = noop, updateStatus } = options;
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, staleTime: Infinity, refetchOnMount: false, refetchOnWindowFocus: false },
+    },
+  });
+  if (!hosted) {
+    queryClient.setQueryData(["updates"], updateStatus ?? { available: false });
+    queryClient.setQueryData(["update-progress"], { status: "idle", download_percent: null, sha: null, error: null });
+  }
   act(() => {
     root.render(
-      <QueryClientProvider client={new QueryClient()}>
-        <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(), views: new Set(["home", "assistant", "analytics", "marketplaces", "automations", "settings"]), marketplaceForms: new Set(), actionMarketplaces: new Set() }}>
-          <NavRail activeView={activeView} onOpenHome={onOpenHome} onOpenAnalytics={noop}
+      <QueryClientProvider client={queryClient}>
+        <WorkspaceRuntimeProvider value={{ hosted, features: new Set(), views: new Set(["home", "assistant", "listings", "analytics", "marketplaces", "automations", "settings"]), marketplaceForms: new Set(), actionMarketplaces: new Set() }}>
+          <NavRail activeView={activeView} onOpenHome={onOpenHome} onOpenInventory={onOpenInventory} onOpenAnalytics={noop}
             onOpenMarketplaces={noop} onOpenAutomations={noop} onOpenAssistant={noop} onOpenSettings={noop} />
         </WorkspaceRuntimeProvider>
       </QueryClientProvider>,
@@ -47,22 +65,45 @@ const pointer = (type: "pointerover" | "pointerout", target: Element, relatedTar
 const press = (key: string, target: EventTarget = document.body) =>
   act(() => { target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true })); });
 
-it("names every page in a labelled navigation and marks the open one", () => {
+it("names every page in the same order as phones and marks the open one", () => {
   render("marketplaces");
   const nav = container.querySelector('nav[aria-label="Pages"]')!;
-  for (const label of ["Today", "Assistant", "Analytics", "Marketplaces", "Automations", "Settings"]) {
+  const labels = Array.from(nav.querySelectorAll("button")).map((button) => button.getAttribute("aria-label"));
+  expect(labels).toEqual(["Today", "Assistant", "Inventory", "Analytics", "Marketplaces", "Automations", "Settings"]);
+  for (const label of labels) {
     expect(nav.querySelector(`button[aria-label="${label}"]`)?.textContent).toContain(label);
   }
   expect(nav.querySelector('[aria-current="page"]')?.getAttribute("aria-label")).toBe("Marketplaces");
+  render("inventory");
+  expect(nav.querySelector('[aria-current="page"]')?.getAttribute("aria-label")).toBe("Inventory");
+  render("listings");
+  expect(nav.querySelector('[aria-current="page"]')?.getAttribute("aria-label")).toBe("Inventory");
   render("settings");
   expect(nav.querySelector('[aria-current="page"]')?.getAttribute("aria-label")).toBe("Settings");
 });
 
-it("opens a page from the rail", () => {
+it("opens a page or inventory from the rail", () => {
   const onOpenHome = vi.fn();
-  render("listings", onOpenHome);
+  const onOpenInventory = vi.fn();
+  render("home", { onOpenHome, onOpenInventory });
   act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Today"]')!.click());
   expect(onOpenHome).toHaveBeenCalledOnce();
+  act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Inventory"]')!.click());
+  expect(onOpenInventory).toHaveBeenCalledOnce();
+});
+
+it("gives the update control a visible label when the rail opens", () => {
+  render("home", { hosted: false });
+  const idleButton = panel().querySelector<HTMLButtonElement>('button[aria-label="Check for updates"]');
+  expect(idleButton).toBeTruthy();
+  expect(idleButton!.textContent?.trim()).toBe("Check for updates");
+
+  act(() => root.unmount());
+  root = createRoot(container);
+  render("home", { hosted: false, updateStatus: { available: true, summary: "New build ready" } });
+  const availableButton = panel().querySelector<HTMLButtonElement>('button[aria-label="Download update"]');
+  expect(availableButton).toBeTruthy();
+  expect(availableButton!.textContent?.trim()).toBe("Download update");
 });
 
 it("widens after a mouse rests on it and narrows a moment after it leaves", () => {

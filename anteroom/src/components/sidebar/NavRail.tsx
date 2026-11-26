@@ -7,11 +7,13 @@ import {
   MessageCircleIcon,
   PinIcon,
   PinOffIcon,
+  Rows3Icon,
   SettingsIcon,
   StoreIcon,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { UpdateButton } from "../UpdateButton";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { WorkspaceView } from "../workspaceCrumbs";
 import { usePanelCollapsed } from "../PanelResizeHandle";
 import { pageLoaders } from "../../app/pageLoaders";
@@ -53,35 +55,46 @@ function focusVisible(element: Element) {
 function RailButton({
   label,
   page,
+  view = page,
   icon: Icon,
   active,
+  expanded,
   onClick,
 }: {
   label: string;
   page?: keyof typeof pageLoaders;
+  view?: string;
   icon: ComponentType<{ className?: string }>;
   active?: boolean;
+  expanded: boolean;
   onClick: () => void;
 }) {
   const runtime = useWorkspaceRuntime();
-  const disabled = Boolean(page && !runtime.views.has(page));
+  const disabled = Boolean(view && !runtime.views.has(view));
   const intent = useNavigationIntent(() => {
     if (page) void pageLoaders[page]().catch(() => {});
   });
   return (
-    <button
-      type="button"
-      className={RAIL_ROW}
-      aria-label={label}
-      aria-current={active ? "page" : undefined}
-      data-active={active}
-      onClick={onClick}
-      disabled={disabled}
-      {...intent}
-    >
-      <Icon />
-      <span className={RAIL_LABEL}>{label}</span>
-    </button>
+    <Tooltip disabled={expanded}>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            className={RAIL_ROW}
+            aria-label={label}
+            aria-current={active ? "page" : undefined}
+            data-active={active}
+            onClick={onClick}
+            disabled={disabled}
+            {...intent}
+          />
+        }
+      >
+        <Icon />
+        <span className={RAIL_LABEL}>{label}</span>
+      </TooltipTrigger>
+      <TooltipPopup side="right">{label}</TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -101,6 +114,7 @@ const RAIL_LABEL =
 export function NavRail({
   activeView,
   onOpenHome,
+  onOpenInventory,
   onOpenAnalytics,
   onOpenMarketplaces,
   onOpenAutomations,
@@ -109,6 +123,7 @@ export function NavRail({
 }: {
   activeView: WorkspaceView;
   onOpenHome: () => void;
+  onOpenInventory: () => void;
   onOpenAnalytics: () => void;
   onOpenMarketplaces: () => void;
   onOpenAutomations: () => void;
@@ -180,31 +195,53 @@ export function NavRail({
         }}
       >
         <nav aria-label="Pages" className="flex min-h-0 flex-1 flex-col gap-0.5">
-          <RailButton page="home" label="Today" icon={HomeIcon} active={activeView === "home"} onClick={onOpenHome} />
-          <RailButton page="assistant" label="Assistant" icon={MessageCircleIcon} active={activeView === "assistant"} onClick={onOpenAssistant} />
-          <RailButton page="analytics" label="Analytics" icon={ChartColumnIcon} active={activeView === "analytics"} onClick={onOpenAnalytics} />
-          <RailButton page="marketplaces" label="Marketplaces" icon={StoreIcon} active={activeView === "marketplaces"} onClick={onOpenMarketplaces} />
-          <RailButton page="automations" label="Automations" icon={CalendarClockIcon} active={activeView === "automations"} onClick={onOpenAutomations} />
+          <RailButton page="home" label="Today" icon={HomeIcon} active={activeView === "home"} expanded={expanded} onClick={onOpenHome} />
+          <RailButton page="assistant" label="Assistant" icon={MessageCircleIcon} active={activeView === "assistant"} expanded={expanded} onClick={onOpenAssistant} />
+          <RailButton
+            page="inventory"
+            view="listings"
+            label="Inventory"
+            icon={Rows3Icon}
+            active={activeView === "inventory" || activeView === "listings"}
+            expanded={expanded}
+            onClick={onOpenInventory}
+          />
+          <RailButton page="analytics" label="Analytics" icon={ChartColumnIcon} active={activeView === "analytics"} expanded={expanded} onClick={onOpenAnalytics} />
+          <RailButton page="marketplaces" label="Marketplaces" icon={StoreIcon} active={activeView === "marketplaces"} expanded={expanded} onClick={onOpenMarketplaces} />
+          <RailButton page="automations" label="Automations" icon={CalendarClockIcon} active={activeView === "automations"} expanded={expanded} onClick={onOpenAutomations} />
           <div className="flex-1" />
-          <RailButton page="settings" label="Settings" icon={SettingsIcon} active={activeView === "settings"} onClick={onOpenSettings} />
+          <RailButton page="settings" label="Settings" icon={SettingsIcon} active={activeView === "settings"} expanded={expanded} onClick={onOpenSettings} />
         </nav>
-        {runtime.hosted ? null : <div className="nav-rail-update"><UpdateButton /></div>}
-        <button
-          type="button"
-          className={cn(RAIL_ROW, "mt-0.5")}
-          aria-label={pinned ? "Let navigation narrow" : "Keep navigation open"}
-          aria-pressed={pinned}
-          aria-keyshortcuts="["
-          onClick={() => {
-            clearTimer();
-            setPeeking(false);
-            setPinned(!pinned);
-          }}
-        >
-          {pinned ? <PinOffIcon /> : <PinIcon />}
-          <span className={RAIL_LABEL}>{pinned ? "Unpin" : "Keep open"}</span>
-          <kbd className={cn(RAIL_LABEL, "ml-auto rounded border border-sidebar-border px-1 font-sans text-xs text-sidebar-muted-foreground")}>[</kbd>
-        </button>
+        {runtime.hosted ? null : (
+          <UpdateButton
+            className={cn(RAIL_ROW, "mt-0.5")}
+            labelClassName={RAIL_LABEL}
+            expanded={expanded}
+          />
+        )}
+        <Tooltip disabled={expanded}>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                className={cn(RAIL_ROW, "mt-0.5")}
+                aria-label={pinned ? "Let navigation narrow" : "Keep navigation open"}
+                aria-pressed={pinned}
+                aria-keyshortcuts="["
+                onClick={() => {
+                  clearTimer();
+                  setPeeking(false);
+                  setPinned(!pinned);
+                }}
+              />
+            }
+          >
+            {pinned ? <PinOffIcon /> : <PinIcon />}
+            <span className={RAIL_LABEL}>{pinned ? "Unpin" : "Keep open"}</span>
+            <kbd className={cn(RAIL_LABEL, "ml-auto rounded border border-sidebar-border px-1 font-sans text-xs text-sidebar-muted-foreground")}>[</kbd>
+          </TooltipTrigger>
+          <TooltipPopup side="right">{pinned ? "Unpin" : "Keep open"} ([)</TooltipPopup>
+        </Tooltip>
       </div>
     </div>
   );

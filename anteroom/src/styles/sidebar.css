@@ -185,8 +185,8 @@ html.desktop-app .editor-header {
 .sidebar-update-progress-icon {
   position: relative;
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 24px;
+  height: 24px;
   place-items: center;
 }
 
@@ -205,8 +205,8 @@ html.desktop-app .editor-header {
 }
 
 .sidebar-update-progress-ring {
-  width: 32px;
-  height: 32px;
+  width: 24px;
+  height: 24px;
   transform: rotate(-90deg);
   pointer-events: none;
   overflow: visible;

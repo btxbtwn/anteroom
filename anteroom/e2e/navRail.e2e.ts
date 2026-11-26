@@ -42,4 +42,27 @@ test.describe("navigation rail", () => {
     await page.mouse.move(900, 450);
     await expect(label).toHaveCSS("opacity", "0");
   });
+
+  test("lists Inventory in the same order as phones and names the update button when open", async ({ page }) => {
+    await page.goto("/");
+    const pages = page.getByRole("navigation", { name: "Pages" });
+    const names = await pages.getByRole("button").evaluateAll((buttons) =>
+      buttons.map((button) => button.getAttribute("aria-label")),
+    );
+    expect(names).toEqual(["Today", "Assistant", "Inventory", "Analytics", "Marketplaces", "Automations", "Settings"]);
+
+    await page.getByRole("button", { name: "Keep navigation open" }).click();
+    const updateButton = page.locator(".nav-rail-panel").getByRole("button", { name: /check for updates|download update|restart to update|checking/i });
+    await expect(updateButton).toBeVisible();
+    const updateLabel = updateButton.locator("span").last();
+    await expect(updateLabel).toHaveCSS("opacity", "1");
+    await expect(updateLabel).toHaveText(/.+/);
+
+    const inventory = pages.getByRole("button", { name: "Inventory", exact: true });
+    await inventory.click();
+    await expect(inventory).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("heading", { name: "Inventory" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Let navigation narrow" }).click();
+  });
 });
