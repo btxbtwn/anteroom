@@ -93,12 +93,22 @@ export function MarkdownCodeBlock({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * A spreadsheet runs a pasted cell that starts with `=`, `@`, `+` or `-` as a
+ * formula, and a reply can quote text the seller did not write (a buyer's
+ * note, an imported title). Such a cell gets a leading apostrophe, which a
+ * spreadsheet reads as "this is text". Figures like -12.50, +5% and -$4.00
+ * stay as they are.
+ */
+function cellText(cell: Element): string {
+  const text = (cell.textContent ?? "").replace(/\s+/g, " ").trim();
+  return /^[=@]/.test(text) || /^[+-](?![\d.,$€£¥])/.test(text) ? `'${text}` : text;
+}
+
 function tableRows(table: Element): string[][] {
   const rows = [...table.querySelectorAll(":scope > thead > tr, :scope > tbody > tr, :scope > tr")];
   return rows
-    .map((row) => [...row.children]
-      .filter((cell) => cell.tagName === "TH" || cell.tagName === "TD")
-      .map((cell) => (cell.textContent ?? "").replace(/\s+/g, " ").trim()))
+    .map((row) => [...row.children].filter((cell) => cell.tagName === "TH" || cell.tagName === "TD").map(cellText))
     .filter((cells) => cells.length > 0);
 }
 

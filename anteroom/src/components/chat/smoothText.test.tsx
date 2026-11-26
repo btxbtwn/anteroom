@@ -99,6 +99,32 @@ describe("useSmoothText", () => {
     expect(lengths).toEqual([...lengths].sort((a, b) => a - b));
   });
 
+  it("keeps revealing when text arrives faster than it steps", () => {
+    render("Start.");
+    let text = "Start.";
+    // A new piece every 10ms for a second: quicker than one reveal step.
+    for (let piece = 0; piece < 100; piece++) {
+      text += " word";
+      render(text);
+      act(() => { vi.advanceTimersByTime(10); });
+    }
+    const shown = (host.textContent ?? "").length;
+    expect(shown).toBeGreaterThan(text.length * 0.6);
+  });
+
+  it("does not jump ahead after a pause between chunks", () => {
+    render("Start.");
+    render(`Start.${" word".repeat(40)}`);
+    advance(3000);
+    expect(host.textContent).toBe(`Start.${" word".repeat(40)}`);
+    // Nothing arrives for a while; the next chunk is still revealed gradually.
+    act(() => { vi.advanceTimersByTime(5000); });
+    const next = `Start.${" word".repeat(240)}`;
+    render(next);
+    act(() => { vi.advanceTimersByTime(45); });
+    expect((host.textContent ?? "").length).toBeLessThan(next.length * 0.6);
+  });
+
   it("shows text as it arrives when the seller asked for reduced motion", () => {
     reduced = true;
     render("Start.");

@@ -6,7 +6,7 @@
  * behind. The Vercel AI SDK's smoothStream does the same on the server, a
  * word every 10ms; doing it here covers every provider and relay.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /** How long the reveal takes to close most of the gap to what has arrived. */
 const CATCH_UP_MS = 180;
@@ -35,22 +35,27 @@ function reducedMotion(): boolean {
 export function useSmoothText(text: string): string {
   const [shown, setShown] = useState(text.length);
   const total = text.length;
+  // When the reveal last moved. Kept across renders, so text that arrives
+  // more often than the reveal steps never pushes the next step back.
+  const lastStepAt = useRef<number | null>(null);
   // A shorter text is a new answer, or one being replayed from its first word.
-  if (shown > total) setShown(total);
+  // With reduced motion nothing is paced: what arrived is what shows.
+  if (shown > total || (shown < total && reducedMotion())) setShown(total);
 
   useEffect(() => {
-    if (shown >= total) return;
-    if (reducedMotion()) {
-      setShown(total);
+    if (shown >= total) {
+      // Caught up: a pause before the next chunk is not time spent revealing it.
+      lastStepAt.current = null;
       return;
     }
-    const startedAt = performance.now();
+    lastStepAt.current ??= performance.now();
     let frame = requestAnimationFrame(function step(now: number) {
-      const elapsed = now - startedAt;
+      const elapsed = now - (lastStepAt.current ?? now);
       if (elapsed < STEP_MS) {
         frame = requestAnimationFrame(step);
         return;
       }
+      lastStepAt.current = now;
       // A tab left in the background comes back with a long gap, and so with everything.
       setShown((current) => revealStep(current, total, elapsed));
     });

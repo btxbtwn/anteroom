@@ -363,23 +363,29 @@ private struct StreamingAnswer: View {
     /// Characters showing. What is there when the answer first appears shows at once,
     /// so one picked back up part way through is not typed out again.
     @State private var shown: Int
+    /// Characters received, kept in state so the reveal reads the newest count as it runs.
+    @State private var total: Int
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(received: String) {
         self.received = received
         _shown = State(initialValue: received.count)
+        _total = State(initialValue: received.count)
     }
 
     var body: some View {
-        let total = received.count
-        MarkdownText(StreamingText.display(String(received.prefix(min(shown, total)))))
-            .task(id: total) {
+        MarkdownText(StreamingText.display(String(received.prefix(shown))))
+            .onChange(of: received.count) { _, count in
+                total = count
                 // A shorter text is an answer replayed from its first word.
-                if shown > total || reduceMotion { shown = total }
+                if shown > count || reduceMotion { shown = count }
+            }
+            // One run while text is waiting. It is not restarted by each new piece, so
+            // text that arrives faster than the reveal steps never holds it back.
+            .task(id: shown < total) {
                 var last = ContinuousClock.now
-                while shown < total {
+                while shown < total, !Task.isCancelled {
                     try? await Task.sleep(for: .milliseconds(Int(RevealPace.stepMs)))
-                    if Task.isCancelled { return }
                     let now = ContinuousClock.now
                     let elapsed = now - last
                     last = now

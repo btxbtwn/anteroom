@@ -27,6 +27,14 @@ describe("copying a table", () => {
     expect(tableToTsv(wrapped)).toBe("Levi's 501 jeans\t41");
   });
 
+  it("keeps a value that reads as a formula as text, and leaves figures alone", () => {
+    const risky = table(
+      "<table><tbody><tr><td>=HYPERLINK(\"https://example.com\")</td><td>-12.50</td><td>+5%</td><td>@buyer</td><td>-$4.00</td><td>+cmd</td></tr></tbody></table>",
+    );
+    expect(tableToTsv(risky)).toBe("'=HYPERLINK(\"https://example.com\")\t-12.50\t+5%\t'@buyer\t-$4.00\t'+cmd");
+    expect(tableToHtml(risky)).toContain("<td>'=HYPERLINK(\"https://example.com\")</td><td>-12.50</td>");
+  });
+
   it("gives a plain HTML table with its header row, escaped", () => {
     expect(tableToHtml(SALES)).toBe(
       "<table><tr><th>Marketplace</th><th>Orders</th><th>Revenue</th></tr>"
