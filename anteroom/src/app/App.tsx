@@ -108,19 +108,18 @@ export function App() {
     dispatchOpenListing({ type: "open", id });
   }, []);
   const clearListingWorkspace = (id: string) => dispatchOpenListing({ type: "clear", id });
-  const listingFromUrl = Boolean(initialOpenListing(new URLSearchParams(window.location.search).get("listing")));
   const [suggestionsVisited, setSuggestionsVisited] = useState(false);
   const [returnToSuggestions, setReturnToSuggestions] = useState(false);
-  // The assistant is home, on the Mac and signed in alike; a listing link opens that listing.
-  const home = listingFromUrl || !runtime.views.has("assistant") ? "listings" : "assistant";
+  const shellView = selectedConvId || !runtime.views.has("assistant") ? "listings" : "assistant";
+  const launchView = !selectedConvId && runtime.views.has("home") ? "home" : shellView;
   const [activeView, setActiveView] = useState<WorkspaceView>(() =>
     runtime.hosted && runtime.views.has("analytics") && new URLSearchParams(window.location.search).has("oauth_state_id")
-      ? "analytics" : home,
+      ? "analytics" : launchView,
   );
   const [marketplace, setMarketplace] = useState<Marketplace>("ebay");
-  /** Where Analytics, Settings and the rest return: the assistant is home, inventory is the other place. */
-  const shell = useRef<"listings" | "assistant">(home);
-  const viewBeforeSettings = useRef<WorkspaceView>(home);
+  /** Where Analytics, Settings and the rest return: the most recent inventory or Assistant view. */
+  const shell = useRef<"listings" | "assistant">(shellView);
+  const viewBeforeSettings = useRef<WorkspaceView>(launchView);
   const [pickedThreadId, setPickedThreadId] = useState<string | null>(null);
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>(DEFAULT_SETTINGS_SECTION);
   const [settingsTargetId, setSettingsTargetId] = useState<string | null>(null);
@@ -179,7 +178,7 @@ export function App() {
     queryFn: ({ signal }) => api.assistant.threads({ signal }),
     enabled: runtime.features.has("assistant"),
   });
-  // A blank chat is the home screen. A thread opens only when the seller picks one or sends the first message.
+  // Assistant starts with a blank chat. A thread opens only when the seller picks one or sends the first message.
   const assistantThreadId = pickedThreadId && (
     assistantThreads.data?.some((thread) => thread.id === pickedThreadId) ?? !assistantThreads.isFetched
   )

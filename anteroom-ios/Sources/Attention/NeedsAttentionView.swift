@@ -61,7 +61,7 @@ struct NeedsAttentionView: View {
 
     private var footer: String {
         switch tab {
-        case .active: "Resolve hides an alert until something changes, like another sale or a new error. Snooze hides it for 7 days."
+        case .active: "Review alerts that may need action."
         case .snoozed: "Back after 7 days if they still apply."
         case .resolved: "Back when something changes. Pairs marked not duplicates stay resolved."
         }

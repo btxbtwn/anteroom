@@ -1,0 +1,1 @@
+- Anteroom opens on Today so you can see what needs attention before the daily numbers. Failed alert actions and goal deletions show an error, and deleting a goal asks you to confirm.
