@@ -1091,16 +1091,31 @@ code {
   to { opacity: 0; }
 }
 
-/* Paragraphs and code blocks arrive in chunks while a response streams. Fade
-   each new block in so the chunk does not pop. @starting-style only applies
-   when an element is first inserted, and the rule is gated on data-streaming,
-   so opening a finished thread never replays the fade. Opacity only, one
-   shot, no layout change. */
+/* Each word of the block being written fades in as it is added, so a reply
+   flows instead of popping (see streamWords.ts). A word's span is mounted once
+   and keeps its place, so the fade plays once. Opacity only: inline text
+   cannot shift the layout. */
 @media (prefers-reduced-motion: no-preference) {
-  .chat-markdown[data-streaming] > *,
+  .chat-markdown[data-streaming] .chat-stream-word {
+    animation: chat-word-in 240ms ease-out both;
+  }
+}
+
+@keyframes chat-word-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Tables and code blocks arrive whole or a line at a time; fade each new one
+   in so it does not pop. Text blocks are left to their words. @starting-style
+   only applies when an element is first inserted, and the rule is gated on
+   data-streaming, so opening a finished thread never replays the fade.
+   Opacity only, one shot, no layout change. */
+@media (prefers-reduced-motion: no-preference) {
+  .chat-markdown[data-streaming] > :not(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote),
   .chat-markdown[data-streaming] .chat-markdown-shiki,
   .chat-markdown[data-streaming] .chat-markdown-mermaid {
-    transition: opacity 600ms ease-out;
+    transition: opacity 400ms ease-out;
 
     @starting-style {
       opacity: 0;

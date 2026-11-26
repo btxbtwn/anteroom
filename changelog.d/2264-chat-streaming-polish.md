@@ -1,0 +1,5 @@
+- Chat replies now flow in at a steady pace with each new word fading in, instead of jumping forward a chunk at a time. With reduced motion on, text simply appears as it arrives.
+- On the iPhone, a reply being written no longer shows raw `**` or half-written links, and tables are drawn as tables instead of rows of `|` characters.
+- On a phone, the message box rests at one line and grows as you type, and replies are set in larger 16px text.
+- The Assistant's messages line up with its message box.
+- Copying a table from a reply now pastes into a spreadsheet as cells.
