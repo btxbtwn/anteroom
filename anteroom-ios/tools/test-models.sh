@@ -83,6 +83,10 @@ echo "Test assistant Markdown blocks"
 xcrun swiftc Sources/Assistant/MarkdownBlocks.swift Tests/MarkdownBlocksTests.swift -o "$RUNNER_TEMP/markdown-tests"
 "$RUNNER_TEMP/markdown-tests"
 
+echo "Test what a streaming answer shows, and how fast"
+xcrun swiftc Sources/Assistant/StreamingText.swift Tests/StreamingTextTests.swift -o "$RUNNER_TEMP/streaming-text-tests"
+"$RUNNER_TEMP/streaming-text-tests"
+
 echo "Test sign-in messages"
 xcrun swiftc Sources/Session/SignInMessages.swift Tests/SignInMessagesTests.swift -o "$RUNNER_TEMP/sign-in-tests"
 "$RUNNER_TEMP/sign-in-tests"

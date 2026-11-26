@@ -6,11 +6,18 @@ mounted here. Their hosted equivalents require a registered worker.
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from anteroom.repositories.queries import ConversationRepo
+from anteroom.services import api_usage
 from anteroom.services.hosted_database import get_seller_db
 
 from anteroom.routes import ai_keys, settings
 
 router = APIRouter(prefix='/api/settings', tags=['settings'])
+
+
+@router.get('/managed-usage')
+def managed_usage(db=Depends(get_seller_db, scope="function")):
+    return api_usage.seller_usage_summary(db, db.user_id)
+
 
 def require_seller_providers():
     from anteroom.services.hosted_provider import managed_ai_enabled

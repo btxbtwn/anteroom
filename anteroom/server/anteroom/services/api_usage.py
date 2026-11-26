@@ -13,10 +13,10 @@ import logging
 import math
 import os
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from anteroom.models.api_usage import ApiUsageEvent
@@ -114,8 +114,8 @@ def record_openrouter(
     ))
 
 
-def record_photoroom(*, edit_label: str, conversation_id: str | None = None) -> None:
-    """Persist one managed Photoroom image credit at the configured rate card."""
+def record_photoroom(*, edit_label: str, basic: bool, conversation_id: str | None = None) -> None:
+    """Record one managed call. A Basic removal uses one fifth of a Plus image credit."""
     from anteroom.services.photoroom import managed_photoroom_enabled
 
     if not managed_photoroom_enabled():
@@ -128,7 +128,7 @@ def record_photoroom(*, edit_label: str, conversation_id: str | None = None) -> 
         provider="photoroom",
         kind="edit",
         model_or_edit=(edit_label or "")[:256],
-        cost_usd=photoroom_cost_usd(),
+        cost_usd=photoroom_cost_usd() / (5 if basic else 1),
         cost_source="rate_card",
         units=1,
         conversation_id=conversation_id,
@@ -160,6 +160,25 @@ def list_events(db: Session, *, since: datetime, until: datetime, seller_id: str
         query = query.where(ApiUsageEvent.user_id == seller_id)
     query = query.order_by(ApiUsageEvent.created_at.asc(), ApiUsageEvent.id.asc())
     return list(db.scalars(query).all())
+
+
+def seller_usage_summary(db: Session, seller_id: str):
+    """Aggregate only the signed-in seller's recorded costs for the last 30 days."""
+    end = datetime.now(UTC)
+    summary = {provider: {"count": 0, "usd": 0.0} for provider in ("openrouter", "photoroom")}
+    query = (
+        select(ApiUsageEvent.provider, func.count(), func.sum(ApiUsageEvent.cost_usd))
+        .where(
+            ApiUsageEvent.user_id == seller_id,
+            ApiUsageEvent.created_at >= end - timedelta(days=30),
+            ApiUsageEvent.created_at < end,
+            ApiUsageEvent.provider.in_(list(summary)),
+        )
+        .group_by(ApiUsageEvent.provider)
+    )
+    for provider, count, cost in db.execute(query):
+        summary[provider] = {"count": count, "usd": cost}
+    return summary
 
 
 def operator_report(
