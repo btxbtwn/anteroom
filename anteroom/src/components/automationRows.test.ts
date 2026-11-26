@@ -32,7 +32,7 @@ describe("automation rows", () => {
       "Price drop, relist or regenerate",
       "eBay offers",
       "Poshmark sharing",
-      "Offers to likers & waterfall offers",
+      "Offers to likers",
       "Poshmark private bundle offers",
       "Poshmark automatic follows",
     ]);

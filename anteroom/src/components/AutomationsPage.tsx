@@ -243,7 +243,7 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
     <WorkspacePage>
       <PageHeader
         title="Automations"
-        description="Price drops, relists, waterfall offers, sharing, and follows — nothing lists or delists until you approve each item unless you opt in to scheduled publishing or auto-relist."
+        description="Schedule price drops, relists, offers, sharing and follows."
         actions={(
           <Button size="sm" onClick={() => openPanel({ kind: "pick" })}>
             <PlusIcon />
@@ -251,8 +251,6 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
           </Button>
         )}
       />
-
-      <OfferAnalytics />
 
       {error ? <PageError message={error} /> : null}
 
@@ -268,7 +266,7 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
                   <span className="truncate text-foreground">{row.title || row.conversation_id}</span>
                   <span className="truncate text-xs text-muted-foreground">
                     {[row.action === "publish" ? "List" : row.action === "delist" ? "Delist" : "Relist",
-                      row.marketplaces.map(marketplaceName).join(", "), row.state].filter(Boolean).join(" · ")}
+                      row.marketplaces.map(marketplaceName).join(", "), "Awaiting approval"].filter(Boolean).join(" · ")}
                   </span>
                 </span>
                 {Object.entries(row.targets || {}).map(([name, target]) => target.url ? (
@@ -280,11 +278,15 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
                 <Button
                   size="sm"
                   disabled={!canApprove}
-                  title={canApprove ? undefined : "Marketplace actions are not available on the web yet."}
+                  variant="outline"
+                  aria-describedby={canApprove ? undefined : `approval-reason-${row.id}`}
                   onClick={() => void approve(row)}
                 >
                   Review and approve
                 </Button>
+                {!canApprove ? (
+                  <p id={`approval-reason-${row.id}`} className="basis-full text-xs text-muted-foreground">Open Anteroom on your Mac to approve this action.</p>
+                ) : null}
               </li>
             ))}
           </RowList>
@@ -292,13 +294,13 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
       ) : null}
 
       {down.length ? (
-        <PageSection title="Down, needs relist">
+        <PageSection title="Taken down, not relisted yet">
           <RowList>
             {down.map((gap: RelistGap) => (
               <ListRow
                 key={gap.id}
                 title={gap.title || gap.conversation_id}
-                meta={[marketplaceName(gap.marketplace), gap.state, gap.error].filter(Boolean).join(" · ")}
+                meta={[marketplaceName(gap.marketplace), gap.error].filter(Boolean).join(" · ")}
                 valueHint="Open item"
                 onClick={() => onOpenListing(gap.conversation_id)}
               />
@@ -409,6 +411,8 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
       <ScheduledDraftsSection onOpenListing={onOpenListing} />
 
       <AutoRelistSection />
+
+      <OfferAnalytics />
 
       <Sheet open={panelOpen} onOpenChange={setPanelOpen}>
         <SheetPopup side="right" className="max-w-xl">

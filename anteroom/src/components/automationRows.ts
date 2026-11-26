@@ -17,7 +17,7 @@ export const AUTOMATION_KINDS: readonly { kind: AutomationKind; label: string; d
   { kind: "scheduled", label: "Price drop, relist or regenerate", description: "Changes save on schedule; listing, relisting and delisting need approval." },
   { kind: "ebay_offers", label: "eBay offers", description: "Offers and waterfall sequences to buyers watching your eBay listings." },
   { kind: "share", label: "Poshmark sharing", description: "Self, Posh Party (9a/12p/4p/7p PT), or community shares with 24-hour intensity and up to 8,000/day." },
-  { kind: "offer", label: "Offers to likers & waterfall offers", description: "Single or multi-step waterfall offers to likers on Poshmark, Mercari or Depop." },
+  { kind: "offer", label: "Offers to likers", description: "Send one offer or a series of offers to likers on Poshmark, Mercari or Depop." },
   { kind: "bundle_offer", label: "Poshmark private bundle offers", description: "Single- or multi-item private bundle offers after buyer like activity pauses, with optional first comment." },
   { kind: "follow", label: "Poshmark automatic follows", description: "Reciprocal 24h follows, active-seller follows, unfollows (<= 1,000/day), and optional Live Show unsubscribe." },
 ];

@@ -4,6 +4,7 @@ import { ListIcon } from "lucide-react";
 import { api } from "../api/client";
 import type { OfferAnalyticsResponse } from "../api/contract.gen";
 import { marketplaceName } from "./marketplaceNames";
+import { dateOnly } from "./saleCalendarDates";
 import { OfferLog } from "./OfferLog";
 import { offerProblems, offerReach, offersSent } from "./offerActivityFormat";
 import { FormField, PageError, PageNote, PageSection, Panel } from "./WorkspacePage";
@@ -47,6 +48,9 @@ export function OfferAnalytics() {
   const [logOpen, setLogOpen] = useState(false);
   const [custom, setCustom] = useState(offerDates("today"));
   const dates = period === "custom" ? custom : offerDates(period);
+  const format = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
+  const start = dates.start ? format.format(dateOnly(dates.start)) : "";
+  const end = dates.end ? format.format(dateOnly(dates.end)) : "";
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const query = useQuery({ queryKey: ["offer-analytics", dates.start, dates.end, timezone],
     queryFn: () => api.analytics.offers({ ...dates, timezone }),
@@ -67,12 +71,11 @@ export function OfferAnalytics() {
         <FormField label="Through"><Input type="date" value={custom.end} onChange={(e) => setCustom({ ...custom, end: e.target.value })} /></FormField>
       </> : null}
     </div>
-    <PageNote>{dates.start} – {dates.end} · {timezone} · Weeks start Monday.</PageNote>
+    {start && end ? <PageNote>{start === end ? start : `${start} – ${end}`}</PageNote> : null}
     {dates.start > dates.end ? <PageError message="Choose a start on or before the end." /> : null}
     {query.error ? <PageError message={`Could not read offer activity: ${(query.error as Error).message}`} /> : null}
     {query.isLoading ? <Skeleton className="h-48" /> : query.data ? <OfferEvidence data={query.data} /> : null}
-    <PageNote>Each offer is one listing's offer to its likers or watchers, so one buyer can count more than once. Listings that were checked and skipped aren't counted, and neither are offers sent on eBay before Anteroom recorded send dates.</PageNote>
-    <PageNote>Sales from offers aren't counted: marketplaces don't say which offer led to a sale.</PageNote>
+    <PageNote>Counts include sent offers with a recorded send date, one per listing each time. A buyer can receive more than one. Marketplaces don’t report which offers led to sales.</PageNote>
     <OfferLog open={logOpen} onOpenChange={setLogOpen} />
   </PageSection>;
 }

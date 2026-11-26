@@ -21,6 +21,7 @@ import {
   describeWaterfall, formFromAutomation, withListing,
   type PromotionAutomationForm,
 } from "./promotionAutomationsFormat";
+import { FormField } from "./WorkspacePage";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
 import { Input } from "./ui/input";
@@ -31,7 +32,6 @@ import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
 
 const KEY = promotionAutomationsQuery.queryKey;
-const FIELD = "h-8 rounded-md border border-border bg-background px-2 text-sm";
 const INTENSITIES: HourlyIntensity[] = ["none", "low", "medium", "high"];
 
 function when(value: string | null | undefined): string {
@@ -72,7 +72,7 @@ export async function confirmPromotionOn(row: PromotionAutomation): Promise<bool
     what = `Anteroom will send private Poshmark bundle offers (${wf || `${row.discount_percent}% off`}) after a ${row.bundle_pause_minutes ?? 5}-minute pause in buyer like activity; ${describePromotionMinimum(row)}.`;
   } else {
     const wf = describeWaterfall(row.waterfall_steps);
-    what = `Anteroom will send ${wf ? `waterfall offers (${wf})` : `${row.discount_percent}% off offers`} to new likers on its own; ${describeOfferChecks(row.marketplace)}; ${describePromotionMinimum(row)}.`;
+    what = `Anteroom will send ${wf ? `a series of offers (${wf})` : `${row.discount_percent}% off offers`} to new likers on its own; ${describeOfferChecks(row.marketplace)}; ${describePromotionMinimum(row)}.`;
   }
   return confirmDialog(`Turn on “${row.name}”? ${what} It stops and turns itself off at the first limit or unconfirmed result. Nothing runs until the next round.`, { confirmLabel: "Turn on" });
 }
@@ -130,7 +130,7 @@ function WaterfallStepsEditor({
     <div className="space-y-2 rounded-lg border border-border/60 p-3">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <p className="text-xs font-medium text-foreground">Waterfall offer sequence (optional)</p>
+          <p className="text-xs font-medium text-foreground">Offer sequence (optional)</p>
           <p className="text-xs text-muted-foreground">
             Step up discounts over time if a buyer has not accepted. Always respects floor prices and cooldowns.
           </p>
@@ -145,26 +145,24 @@ function WaterfallStepsEditor({
       {steps.map((step, idx) => (
         <div key={idx} className="flex flex-wrap items-end gap-2 border-t border-border/50 pt-2 text-xs">
           <span className="pb-1.5 font-medium text-muted-foreground">Step {idx + 1}</span>
-          <label className="flex flex-col gap-1">
-            Discount (%)
-            <input
-              className={`${FIELD} w-16`}
+          <FormField label="Discount (%)">
+            <Input
+              className="w-16"
               inputMode="numeric"
-              aria-label={`Waterfall step ${idx + 1} discount`}
+              aria-label={`Offer step ${idx + 1} discount`}
               value={step.discount}
               onChange={(e) => updateStep(idx, { discount: e.target.value })}
             />
-          </label>
-          <label className="flex flex-col gap-1">
-            Delay (minutes)
-            <input
-              className={`${FIELD} w-24`}
+          </FormField>
+          <FormField label="Delay (minutes)">
+            <Input
+              className="w-24"
               inputMode="numeric"
-              aria-label={`Waterfall step ${idx + 1} delay minutes`}
+              aria-label={`Offer step ${idx + 1} delay minutes`}
               value={step.delayMinutes}
               onChange={(e) => updateStep(idx, { delayMinutes: e.target.value })}
             />
-          </label>
+          </FormField>
           {form.marketplace === "poshmark" ? (
             <label className="flex flex-col gap-1">
               Shipping
@@ -242,9 +240,9 @@ export function PromotionEditor({ initial, onSaved, onCancel }: {
             </RadioGroup>
           </fieldset>
           <p className="text-xs text-muted-foreground">Choose listings and exclusions under Listings after saving.</p>
-          <label className="flex items-center gap-2">Only listings live at least
-            <input className={`${FIELD} w-16`} inputMode="numeric" value={form.minDays} onChange={(event) => set({ minDays: event.target.value })} /> days
-          </label>
+          <FormField label="Minimum days listed">
+            <Input className="w-16" inputMode="numeric" value={form.minDays} onChange={(event) => set({ minDays: event.target.value })} />
+          </FormField>
         </>
       ) : null}
 
@@ -304,9 +302,9 @@ export function PromotionEditor({ initial, onSaved, onCancel }: {
               <Choice label="Speed" value={form.speed} onChange={(speed) => { if (speed) set({ speed }); }}
                 options={Object.entries(SPEED_LABELS).map(([value, label]) => ({ value: value as PromotionAutomationForm["speed"], label }))} />
             </label>
-            <label className="flex flex-col gap-1">Daily cap
-              <input className={`${FIELD} w-24`} inputMode="numeric" value={form.dailyCap} onChange={(event) => set({ dailyCap: event.target.value })} />
-            </label>
+            <FormField label="Daily cap">
+              <Input className="w-24" inputMode="numeric" value={form.dailyCap} onChange={(event) => set({ dailyCap: event.target.value })} />
+            </FormField>
           </div>
           <p className="text-xs text-muted-foreground">
             The cap counts every share in the last 24 hours across self, party, and community shares (at most {maxCap.toLocaleString()}).
@@ -333,16 +331,14 @@ export function PromotionEditor({ initial, onSaved, onCancel }: {
             />
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 text-xs">
-            <label className="flex flex-col gap-1">
-              Active sellers cap (≤ 1,000/day)
-              <input className={FIELD} inputMode="numeric" value={form.followActiveSellersCap}
+            <FormField label="Active sellers cap (≤ 1,000/day)">
+              <Input inputMode="numeric" value={form.followActiveSellersCap}
                 onChange={(e) => set({ followActiveSellersCap: e.target.value })} />
-            </label>
-            <label className="flex flex-col gap-1">
-              Unfollow cap (≤ 1,000/day)
-              <input className={FIELD} inputMode="numeric" value={form.unfollowCap}
+            </FormField>
+            <FormField label="Unfollow cap (≤ 1,000/day)">
+              <Input inputMode="numeric" value={form.unfollowCap}
                 onChange={(e) => set({ unfollowCap: e.target.value })} />
-            </label>
+            </FormField>
           </div>
           <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2 text-xs">
             <div>
@@ -360,12 +356,12 @@ export function PromotionEditor({ initial, onSaved, onCancel }: {
       ) : (
         <>
           <div className="flex flex-wrap gap-3">
-            <label className="flex items-center gap-2">Discount
-              <input className={`${FIELD} w-16`} inputMode="numeric" value={form.discount} onChange={(event) => set({ discount: event.target.value })} />% off
-            </label>
-            <label className="flex items-center gap-2">At least
-              <input className={`${FIELD} w-16`} inputMode="numeric" value={form.minLikes} onChange={(event) => set({ minLikes: event.target.value })} /> likes
-            </label>
+            <FormField label="Discount (%)">
+              <Input className="w-16" inputMode="numeric" value={form.discount} onChange={(event) => set({ discount: event.target.value })} />
+            </FormField>
+            <FormField label="Minimum likes">
+              <Input className="w-16" inputMode="numeric" value={form.minLikes} onChange={(event) => set({ minLikes: event.target.value })} />
+            </FormField>
             <label className="flex items-center gap-2">Minimum ($, optional)
               <Input className="w-28" type="number" min="0.01" step="0.01" placeholder="No minimum" value={form.minimumPrice}
                 onChange={(event) => set({ minimumPrice: event.target.value })} />
@@ -375,14 +371,14 @@ export function PromotionEditor({ initial, onSaved, onCancel }: {
             <div className="space-y-3 rounded-lg border border-border/60 p-3 text-xs">
               <p className="font-medium text-foreground">Private bundle settings</p>
               <div className="flex flex-wrap gap-3">
-                <label className="flex items-center gap-2">Pause after last like
-                  <input className={`${FIELD} w-16`} inputMode="numeric" value={form.bundlePauseMinutes}
-                    onChange={(e) => set({ bundlePauseMinutes: e.target.value })} /> min
-                </label>
-                <label className="flex items-center gap-2">Minimum items
-                  <input className={`${FIELD} w-16`} inputMode="numeric" value={form.bundleMinItems}
-                    onChange={(e) => set({ bundleMinItems: e.target.value })} /> (1 = single &amp; multi)
-                </label>
+                <FormField label="Pause after last like (minutes)">
+                  <Input className="w-16" inputMode="numeric" value={form.bundlePauseMinutes}
+                    onChange={(e) => set({ bundlePauseMinutes: e.target.value })} />
+                </FormField>
+                <FormField label="Minimum items (1 includes single-item bundles)">
+                  <Input className="w-16" inputMode="numeric" value={form.bundleMinItems}
+                    onChange={(e) => set({ bundleMinItems: e.target.value })} />
+                </FormField>
               </div>
               <label className="flex flex-col gap-1">Optional first bundle comment
                 <Textarea
@@ -458,11 +454,11 @@ export function PromotionDetails({ automation }: { automation: PromotionAutomati
                   <span className="truncate">{item.title || item.listing_id}</span>
                   <span className="text-muted-foreground">{item.listed_days != null ? `${item.listed_days} d` : ""}{item.too_new ? " · too new" : ""}</span>
                 </label>
-                {isOfferLike ? <span className="flex items-center gap-1">Minimum $
-                  <input className={`${FIELD} w-20`} inputMode="decimal" aria-label={`Floor for ${item.title || "listing"}`} placeholder={automation.minimum_price || "None"}
+                {isOfferLike ? <FormField label="Minimum ($)">
+                  <Input className="w-20" inputMode="decimal" aria-label={`Floor for ${item.title || "listing"}`} placeholder={automation.minimum_price || "None"}
                     value={floors[item.conversation_id] ?? item.floor ?? ""}
                     onChange={(event) => setFloors({ ...floors, [item.conversation_id]: event.target.value.replace(/[^0-9.]/g, "").slice(0, 10) })} />
-                </span> : null}
+                </FormField> : null}
               </li>
             ))}
             {coverage.data && !coverage.data.items.length ? <li className="text-xs text-muted-foreground">No live {marketplaceName(automation.marketplace)} listings with links in Anteroom.</li> : null}
