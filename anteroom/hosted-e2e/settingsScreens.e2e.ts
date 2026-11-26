@@ -65,6 +65,30 @@ for (const scheme of ["light", "dark"] as const) {
       await openSettings(page, "General", phone);
       await expect(page.getByText("System follows your device’s light or dark setting.")).toBeVisible();
       await shot("settings-general");
+      await openSettings(page, "Usage", phone);
+      const usage = page.locator("#managed-usage");
+      await expect(usage.getByText("alice@sandbox.test")).toBeVisible();
+      await expect(usage.getByText("$0.00", { exact: true })).toHaveCount(3);
+      await expect(usage.getByText("0 AI calls")).toBeVisible();
+      await expect(usage.getByText("0 photo edits")).toBeVisible();
+      await shot("settings-usage-empty");
+      // The offline sandbox never spends provider credits. Exercise a refresh
+      // with distinct costs, including the fractional cents OpenRouter reports.
+      const usagePath = "**/api/settings/managed-usage";
+      await page.route(usagePath, route => route.fulfill({ json: {
+        openrouter: { count: 12, usd: 0.0245 }, photoroom: { count: 3, usd: 0.30 },
+      } }));
+      await usage.getByRole("button", { name: "Refresh" }).click();
+      const rows = usage.locator("[data-slot=settings-row]");
+      await expect(rows.filter({ hasText: "Total metered usage" })).toContainText("$0.3245");
+      const ai = rows.filter({ hasText: "OpenRouter" });
+      await expect(ai.getByText("12 AI calls")).toBeVisible();
+      await expect(ai.getByText("$0.0245")).toBeVisible();
+      const edits = rows.filter({ hasText: "Photoroom" });
+      await expect(edits.getByText("3 photo edits")).toBeVisible();
+      await expect(edits.getByText("$0.30")).toBeVisible();
+      await shot("settings-usage");
+      await page.unroute(usagePath);
       await openSettings(page, "Experimental", phone);
       const vendoo = page.getByRole("switch", { name: "Use Vendoo", exact: true });
       await vendoo.scrollIntoViewIfNeeded();
