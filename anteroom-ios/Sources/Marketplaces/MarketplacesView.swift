@@ -75,7 +75,7 @@ struct EbayWorkspaceView: View {
                 content
             } else if loaded {
                 Section("Connect your eBay account") {
-                    Text("Choose the tools you need and authorize them through eBay. You review account changes before confirming them.")
+                    Text("Connect to see your eBay orders, earnings and buyer messages, and manage listings. You review changes before sending them to eBay.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             } else {

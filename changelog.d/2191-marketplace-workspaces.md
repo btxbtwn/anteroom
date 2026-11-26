@@ -1,0 +1,1 @@
+- See what connecting eBay unlocks, with quieter calendar and template actions and clearer marketplace loading states.

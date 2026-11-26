@@ -29,7 +29,7 @@ export function ChannelWorkspace({ marketplace, onOpenListing }: { marketplace: 
       <div>
         {/* The tab above names the marketplace; the heading is for screen readers. */}
         <h2 className="sr-only">{name}</h2>
-        <p>Sales recorded in Studio.</p></div>
+        <p>Sales recorded in Anteroom.</p></div>
       <div className="ebay-connection">
         <a className="inline-flex items-center gap-1 text-sm underline" href={CHANNEL_URLS[marketplace]} target="_blank" rel="noreferrer">Open {name}<ExternalLinkIcon className="size-3.5" aria-hidden="true" /></a>
       </div>
@@ -61,7 +61,7 @@ export function ChannelDashboard({ marketplace }: { marketplace: ChannelMarketpl
   const show = (value: string) => loaded ? value : "—";
   return <>
     <div className="ebay-dashboard-toolbar">
-      <div className="ebay-tab-intro"><h2>Sales overview</h2><p>Your {name} sales recorded in Studio.</p></div>
+      <div className="ebay-tab-intro"><h2>Sales overview</h2><p>Your {name} sales recorded in Anteroom.</p></div>
       <div className="ebay-date-range">
         <label>From<Input nativeInput type="date" aria-label={`${name} sales from`} value={start} max={end} onChange={(event) => setStart(event.target.value)} /></label>
         <label>To<Input nativeInput type="date" aria-label={`${name} sales to`} value={end} min={start} max={today} onChange={(event) => setEnd(event.target.value)} /></label>

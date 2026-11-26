@@ -5,7 +5,7 @@ import type { EbayRow } from "../../api/ebay";
 import { PageError, PageSection } from "../WorkspacePage";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
-import { ListingPicker, RemoteList } from "./shared";
+import { EbayRowsLoading, ListingPicker, RemoteList } from "./shared";
 import { ActionForm } from "./ActionForm";
 import { WorkspaceTabs } from "./WorkspaceTabs";
 import { useFormDraft } from "./FormDrafts";
@@ -102,7 +102,7 @@ function AudiencePicker({ selected, onChange }: { selected: string[]; onChange: 
   return <fieldset className="ebay-selection"><legend>Email audiences</legend>
     <p className="ebay-selection-meta">{selected.length} selected. Choose who should receive this email.</p>
     {audiences.error ? <PageError message={audiences.error.message} /> : null}
-    {audiences.isPending ? <p className="text-sm">Loading audiences…</p> : null}
+    {audiences.isPending ? <EbayRowsLoading label="Loading audiences" compact /> : null}
     <div className="ebay-selection-list">{audiences.data?.rows.map((row) => <label key={row.id}>
       <Checkbox className="mt-0.5" checked={selected.includes(row.id)} onCheckedChange={(next) => onChange(next === true ? [...selected, row.id] : selected.filter((id) => id !== row.id))} />{row.title}
     </label>)}</div>

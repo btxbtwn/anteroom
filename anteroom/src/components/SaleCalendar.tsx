@@ -65,7 +65,7 @@ function patternDiscount(pattern: SalePattern | undefined, items: SaleCalendarIt
   return suggestDiscount(items.filter(item => item.marketplaces.includes(pattern.marketplace)), pattern.fee_percent, pattern.shipping_cost ?? 0, 0);
 }
 
-export function SaleCalendar({ marketplace: market, onOpenListing }: { marketplace: SaleMarketplace; onOpenListing: (id: string) => void }) {
+export function SaleCalendar({ marketplace: market, onOpenListing, secondary = false }: { marketplace: SaleMarketplace; onOpenListing: (id: string) => void; secondary?: boolean }) {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const [today, setToday] = useState(() => calendarDate(new Date()));
   useEffect(() => {
@@ -114,7 +114,7 @@ export function SaleCalendar({ marketplace: market, onOpenListing }: { marketpla
       actions={<>
         <Button variant="ghost-muted" size="xs" disabled={query.isFetching} onClick={() => void query.refetch()}>Refresh calendar</Button>
         <Button variant="outline" size="xs" disabled={!query.data} onClick={() => setForm({ start: today, end: today, marketplace: market, record: true })}>Record a sale I ran</Button>
-        <Button size="xs" disabled={!query.data} onClick={() => newPlan()}>Plan a sale</Button>
+        <Button variant={secondary ? "outline" : "default"} size="xs" disabled={!query.data} onClick={() => newPlan()}>Plan a sale</Button>
       </>}
     >
       {query.isLoading ? (
@@ -206,7 +206,7 @@ export function SaleCalendar({ marketplace: market, onOpenListing }: { marketpla
             </div> : null}
             <div className="flex flex-wrap items-center gap-1.5 pt-1">
               {event.status === "planned" ? <>
-                <Button size="xs" disabled={busy} onClick={() => statusMutation.mutate({ id: event.id, status: "ran" })}>I ran this sale</Button>
+                <Button variant="outline" size="xs" disabled={busy} onClick={() => statusMutation.mutate({ id: event.id, status: "ran" })}>I ran this sale</Button>
                 <Button variant="outline" size="xs" disabled={busy} onClick={() => setForm({ start: event.start_date, end: event.end_date, marketplace: event.marketplace, event })}>Edit plan</Button>
               </> : event.fee_percent == null ? <Button variant="outline" size="xs" disabled={busy} onClick={() => setForm({ start: event.start_date, end: event.end_date, marketplace: event.marketplace, event, record: true })}>Edit record</Button> : <Button variant="outline" size="xs" disabled={busy} onClick={() => statusMutation.mutate({ id: event.id, status: "planned" })}>Return to planned</Button>}
               {event.status === "planned" ? <Button variant="ghost-muted" size="xs" disabled={busy} onClick={() => statusMutation.mutate({ id: event.id, status: "cancelled" })}>Cancel plan</Button> : null}

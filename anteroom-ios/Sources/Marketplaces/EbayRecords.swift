@@ -85,6 +85,25 @@ struct EbayRemoteList: View {
     @State private var loading = false
     @State private var error: String?
 
+    private var sectionLabel: String {
+        switch section {
+        case "inventory": "listings"
+        case "offers": "listing offers"
+        case "research": "research results"
+        case "finances": "earnings"
+        case "traffic": "listing performance"
+        case "order": "order details"
+        case "disputes": "payment disputes"
+        case "dispute": "dispute details"
+        case "promotion-reports": "promotion results"
+        case "campaigns": "ad campaigns"
+        case "ad-reports": "advertising reports"
+        case "ad-report": "report details"
+        case "emails": "store emails"
+        default: section.replacingOccurrences(of: "-", with: " ")
+        }
+    }
+
     var body: some View {
         Group {
             HStack {
@@ -94,7 +113,7 @@ struct EbayRemoteList: View {
                 Button("Refresh", systemImage: "arrow.clockwise") { Task { await load() } }
                     .font(.footnote)
                     .disabled(loading)
-                    .accessibilityLabel("Refresh \(section)")
+                    .accessibilityLabel("Refresh \(sectionLabel)")
             }
             if let error {
                 Label(error, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.red)
@@ -129,7 +148,15 @@ struct EbayRemoteList: View {
                     .font(.footnote)
                 }
             } else if loading {
-                HStack(spacing: 8) { ProgressView(); Text("Loading your eBay data…").font(.footnote).foregroundStyle(.secondary) }
+                ForEach(0..<3) { _ in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Record title").font(.subheadline)
+                        Text("Record details").font(.caption)
+                    }
+                    .redacted(reason: .placeholder)
+                    .accessibilityHidden(true)
+                }
+                Color.clear.frame(height: 0).accessibilityLabel("Loading \(sectionLabel)")
             }
         }
         .task(id: "\(section)|\(params.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "&"))|\(offset)") {
