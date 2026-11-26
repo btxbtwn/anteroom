@@ -157,9 +157,7 @@ class MarketplaceListingRepo:
 
     def unsettled(self) -> list[MarketplaceListing]:
         """Records whose last action is still running or unconfirmed, on every item."""
-        missing_depop_link = ((MarketplaceListing.marketplace == "depop") & (MarketplaceListing.state == "published")
-                              & (MarketplaceListing.listing_url.is_(None) | (MarketplaceListing.listing_url == "")))
-        return (self.db.query(MarketplaceListing).filter(MarketplaceListing.state.in_(UNSETTLED_STATES) | missing_depop_link)
+        return (self.db.query(MarketplaceListing).filter(MarketplaceListing.state.in_(UNSETTLED_STATES))
                 .order_by(MarketplaceListing.updated_at.asc()).all())
 
     def job_ids(self, conv_id: str) -> set[str]:
