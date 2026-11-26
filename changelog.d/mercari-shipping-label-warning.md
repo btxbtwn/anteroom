@@ -1,0 +1,1 @@
+- Mercari no longer asks you to fix a saved shipping label while it waits for package-specific rates.

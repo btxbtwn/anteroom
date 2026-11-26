@@ -178,11 +178,7 @@ def _empty_form_rows(snapshot: dict, marketplace: str) -> list[dict]:
             # This form is built without Mercari's labels for the package, so a
             # saved carrier cannot be matched to one here. List tries it, and
             # the module check refuses a listing with no label at all.
-            answer = mercari_shipping_label.label_answer(snapshot)
-            if answer.source == "default":
-                found.append(gap(path, mercari_shipping_label.unverified_default_message(answer.value),
-                                 blocking=False, label=str(row.get("label") or "").strip() or None))
-            if answer.source != "none":
+            if mercari_shipping_label.label_answer(snapshot).source != "none":
                 continue
         if _empty(row) and not _general_answer(snapshot, path):
             label = str(row.get("label") or "").strip() or None
