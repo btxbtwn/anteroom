@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1280 — 2026-11-26
+
+- Stop Anteroom's own pre-release checks from failing at random on the test that covers finishing a relist or scheduled publish during an update.
+
 ## 0.1.1279 — 2026-11-26
 
 - Chat replies now flow in at a steady pace with each new word fading in, instead of jumping forward a chunk at a time. With reduced motion on, text simply appears as it arrives.
