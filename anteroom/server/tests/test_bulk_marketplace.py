@@ -161,9 +161,8 @@ def test_bulk_review_only_uses_the_sellers_persisted_promotion(db, client, sourc
     row, = _preview(client, [conv.id], "list", ["ebay"])
     assert "ebay_ad_rate" not in row
 
-    approved = listing_persistence.save_revision(db, conv.id, attempted, "user_form")
-    edited = listing_persistence.save_revision(db, conv.id, {"title": "New title", "price": 40}, source,
-                                              parent_revision_id=approved.id)
+    listing_persistence.save_revision(db, conv.id, attempted, "user_form")
+    edited = listing_persistence.save_revision(db, conv.id, {"title": "New title", "price": 40}, source)
     assert edited.listing_json["ebay_specifics"]["promotion"] == attempted["ebay_specifics"]["promotion"]
     row, = _preview(client, [conv.id], "list", ["ebay"])
     assert row["ebay_ad_rate"] == "7.5"

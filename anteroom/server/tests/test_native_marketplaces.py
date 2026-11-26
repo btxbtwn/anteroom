@@ -1702,9 +1702,16 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         self.assertEqual(JobRepo(self.db).get(record["job_id"]).status, "completed")
 
     def test_an_ebay_ad_failure_keeps_the_publication_completed(self):
+        from fastapi import FastAPI
+
+        from anteroom.routes.hosted_direct_listing import router as hosted_direct
         from anteroom.services import ebay_listings
         from anteroom.services.ebay_listing_promotion import UNCONFIRMED, WARNING_CODE
 
+        promotion = {"enabled": True, "campaignId": "42", "adRate": 5.5}
+        self.rev = listing_persistence.save_revision(self.db, self.conv.id, {
+            **LISTING, "ebay_specifics": {**LISTING.get("ebay_specifics", {}), "promotion": promotion},
+        }, "user_form")
         execute = AsyncMock(return_value={
             "ok": True, "state": "published", "listing_url": "https://www.ebay.com/itm/123456789012",
             "warning": UNCONFIRMED,
@@ -1713,7 +1720,25 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
             patch("anteroom.services.ebay_client.EbayClient.connect", AsyncMock()),
             patch.object(ebay_listings, "execute", execute),
         ):
-            record = self.list("ebay")
+            hosted = FastAPI()
+            hosted.include_router(hosted_direct)
+            hosted_client = TestClient(hosted)
+            for client in (self.client, hosted_client):
+                refused = client.post(f"{self.base}/ebay/list", json={"revision_id": self.rev.id, "confirm": True})
+                self.assertEqual(refused.status_code, 409)
+                self.assertIn("5.5%", refused.json()["detail"])
+            execute.assert_not_called()
+            approved = hosted_client.post(f"{self.base}/ebay/list", json={
+                "revision_id": self.rev.id, "confirm": True, "confirmed_ebay_ad_rate": "5.5",
+            })
+            self.assertEqual(approved.status_code, 200, approved.text)
+            self.run_jobs()
+            record = self.status()["ebay"]
+            for client in (self.client, hosted_client):
+                refused = client.post(f"{self.base}/ebay/update", json={"revision_id": self.rev.id, "confirm": True})
+                self.assertEqual(refused.status_code, 409)
+                self.assertIn("5.5%", refused.json()["detail"])
+        self.assertEqual(execute.await_args.args[1]["ebay_specifics"]["promotion"], promotion)
         self.assertEqual((record["state"], record["error_code"], record["error"]), ("published", WARNING_CODE, UNCONFIRMED))
         self.assertEqual(JobRepo(self.db).get(record["job_id"]).status, "completed")
 

@@ -209,13 +209,14 @@ async def _native_one(conv_id: str, name: str, revision_id: str, kind: str) -> d
         try:
             from anteroom.services.draft_scheduling import scheduled_requester
 
-            # A publish an MCP agent scheduled names it on its jobs, as one it started would.
             # This call follows the seller's consumed item-specific approval.
+            target = cast(Marketplace, name)
             body = ListRequest(revision_id=revision_id, confirm=True)
+            # A publish an MCP agent scheduled names it on its jobs, as one it started would.
             if agent := scheduled_requester():
-                result = await start(conv_id, cast(Marketplace, name), body, requested_by=agent)
+                result = await start(conv_id, target, body, requested_by=agent)
             else:
-                result = await start(conv_id, cast(Marketplace, name), body)
+                result = await start(conv_id, target, body)
         except NativeMarketplaceError as exc:
             return {"ok": False, "marketplace": name, "error": str(exc)}
         if result.get("job_id") and not await _wait_for_job(result["job_id"]):
