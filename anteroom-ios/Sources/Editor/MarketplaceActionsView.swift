@@ -152,6 +152,8 @@ struct MarketplaceActionsView: View {
     @State private var markingSold = false
     /// Live listings elsewhere after a recorded sale, offered for Delist once the sheet closes.
     @State private var delistOffer: [String] = []
+    /// Changes after a recorded sale so the schedule section reads the schedule the sale may have cleared.
+    @State private var scheduleReload = 0
     /// Hand a prompt to the listing assistant, which fixes the listing but never lists it.
     let onAskChat: ((String) -> Void)?
 
@@ -196,6 +198,7 @@ struct MarketplaceActionsView: View {
                         }
                         if isDraft {
                             DraftScheduleSection(api: model.api, listingID: model.listingID, title: title)
+                                .id(scheduleReload)
                         }
                     }
                 }
@@ -232,6 +235,7 @@ struct MarketplaceActionsView: View {
             }) {
                 MarkSoldSheet(api: model.api, listingID: model.listingID) { result in
                     delistOffer = result.delistOffer
+                    scheduleReload += 1
                     Task { await model.load() }
                 }
             }

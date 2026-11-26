@@ -1,7 +1,7 @@
 import { listingScreenRead } from "./listingScreen";
 import { reportError } from "./errorReports";
 import type { VendooDraft } from "./vendooDraft";
-import type { AttentionItem, AttentionResolveInput, AttentionResolveResult, AttentionRestoreInput, AttentionRestoreResult, AttentionSnoozeInput, AttentionSnoozeResult, ConnectionStatus, CsvInput, CsvResult, CurrencyReport, Expense, ExpenseInput, ExpenseUpdate, MarketplaceCloudResult, MarketplaceCloudSessions, MileageAmount, MileageInput, OfferLogResponse, PlaidExchange, PlaidLinkToken, PlaidStatus, PreferredName, PreferredNameInput } from "./contract.gen";
+import type { AttentionItem, AttentionResolveInput, AttentionResolveResult, AttentionRestoreInput, AttentionRestoreResult, AttentionSnoozeInput, AttentionSnoozeResult, ConnectionStatus, CsvInput, CsvResult, CurrencyReport, Expense, ExpenseInput, ExpenseUpdate, MarketplaceCloudResult, MarketplaceCloudSessions, MileageAmount, MileageInput, OfferLogResponse, PlaidExchange, PlaidLinkToken, PlaidStatus, PreferredName, PreferredNameInput, DraftScheduleInput, ReadyToListInput } from "./contract.gen";
 import { ApiRequestError, currentHostedSession, retryAfterMs, studioFetch, studioUpload, hasHostedApiSession } from "./transport";
 import { trackPhotoUpload } from "../photoUploads";
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
@@ -854,12 +854,12 @@ export const api = {
     setReady: (convId: string, readyToList: boolean) =>
       request<DraftScheduleState>(`/conversations/${encodeURIComponent(convId)}/schedule/ready`, {
         method: "PUT",
-        body: JSON.stringify({ ready_to_list: readyToList }),
+        body: JSON.stringify({ ready_to_list: readyToList } satisfies ReadyToListInput),
       }),
     schedule: (convId: string, publishAt: string, marketplaces: string[]) =>
       request<DraftScheduleState>(`/conversations/${encodeURIComponent(convId)}/schedule`, {
         method: "POST",
-        body: JSON.stringify({ publish_at: publishAt, marketplaces, confirm: true }),
+        body: JSON.stringify({ publish_at: publishAt, marketplaces, confirm: true } satisfies DraftScheduleInput),
       }),
     unschedule: (convId: string) =>
       request<DraftScheduleState>(`/conversations/${encodeURIComponent(convId)}/schedule`, { method: "DELETE" }),

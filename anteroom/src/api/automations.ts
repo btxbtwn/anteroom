@@ -1,3 +1,5 @@
+import type { DraftSchedule } from "./contract.gen";
+
 /** A scheduled task the seller confirmed, or a draft that has not been confirmed. */
 
 export type AutomationStatus = "draft" | "active" | "paused" | "completed";
@@ -165,16 +167,9 @@ export interface RelistGap {
   error: string | null;
 }
 
-export interface DraftScheduleState {
+/** The shared contract's draft schedule, always read for one draft. */
+export interface DraftScheduleState extends Required<DraftSchedule> {
   conversation_id: string;
-  title: string | null;
-  ready_to_list: boolean;
-  scheduled_publish_at: string | null;
-  scheduled_marketplaces: string[];
-  scheduled_revision_id: string | null;
-  scheduled_confirmed_at: string | null;
-  scheduled_status: string | null;
-  scheduled_error: string | null;
 }
 
 export interface ScheduledPublishLog {
