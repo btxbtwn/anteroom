@@ -236,19 +236,25 @@ final class CameraControl {
     /// True from the shutter until the camera hands the photo over; a second
     /// `takePicture()` meanwhile would be ignored.
     private(set) var capturing = false
+    /// The fallback for the shot in flight; only that shot's timer may clear `capturing`.
+    private var fallback: Task<Void, Never>?
 
     func shoot() {
         guard let picker, !capturing else { return }
         capturing = true
         picker.takePicture()
         // The camera can drop a shot (for example when interrupted); never leave the shutter stuck.
-        Task { [weak self] in
+        fallback?.cancel()
+        fallback = Task { [weak self] in
             try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
             self?.capturing = false
         }
     }
 
     fileprivate func captured() {
+        fallback?.cancel()
+        fallback = nil
         capturing = false
     }
 }
