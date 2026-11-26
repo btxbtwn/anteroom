@@ -42,7 +42,6 @@ def _cloud_like_check_interval_s() -> float:
 
 
 def _prepare_seller(db, owner: str, recovered: set[str]) -> None:
-    promotion_automations.report_overdue(db)
     if owner not in recovered:
         fail_stalled_jobs(db)
         promotion_automations.recover(db)
@@ -66,7 +65,8 @@ async def check_ready_sellers(recovered: set[str]) -> None:
 
     def check_disconnected(owner):
         with use(for_seller(owner)), SessionLocal() as db:
-            promotion_automations.report_overdue(db)
+            history = promotion_automations.tick_history("chrome")
+            promotion_automations.report_overdue(db, history=history, reason="chrome_disconnected", skip_cloud=True)
 
     async def check(owner):
         try:
@@ -77,7 +77,7 @@ async def check_ready_sellers(recovered: set[str]) -> None:
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - a seller's failed round must not stop others
-            log.exception('Promotion check failed for one seller; unknown sends are never retried')
+            promotion_automations.log_pass_failure(owner, "chrome")
     with limit_worker_db_steps(asyncio.Semaphore(MAX_CONCURRENT_DB_STEPS)):
         await asyncio.gather(*(check(owner) for owner in ready | recovered))
 
@@ -131,7 +131,7 @@ async def check_cloud_seller(
     except asyncio.CancelledError:
         raise
     except Exception:  # noqa: BLE001 - a seller's failed round must not stop others
-        log.exception('Cloud promotion check failed for one seller; unknown sends are never retried')
+        promotion_automations.log_pass_failure(owner, "cloud")
 
 
 async def check_cloud_sellers(

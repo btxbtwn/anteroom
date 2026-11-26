@@ -1193,16 +1193,49 @@ class PromotionAutomationsTest(unittest.TestCase):
         row.next_run_at = _now() - timedelta(hours=1)
         self.db.commit()
         with self.assertLogs("anteroom.promotion_automations", level="ERROR") as errors:
-            promotion_automations.report_overdue(self.db)
+            promotion_automations.report_overdue(self.db, history=promotion_automations.PromotionTickHistory(), reason="chrome_disconnected")
 
-        self.assertIn(row.id, " ".join(errors.output))
+        self.assertNotIn(row.id, " ".join(errors.output))
         self.assertIn("overdue", " ".join(errors.output))
         self.assertTrue(row.enabled)
         self.assertEqual(self.promoted(), [])
         row.enabled = False
         self.db.commit()
         with self.assertNoLogs("anteroom.promotion_automations", level="ERROR"):
-            promotion_automations.report_overdue(self.db)
+            promotion_automations.report_overdue(self.db, history=promotion_automations.PromotionTickHistory(), reason="chrome_disconnected")
+
+    def test_overdue_blocker_reports_transitions_without_private_ids(self):
+        saved = self.create(OFFER)
+        self.enable(saved["id"])
+        row = self.db.get(PromotionAutomation, saved["id"])
+        row.next_run_at = _now() - timedelta(hours=1)
+        self.db.commit()
+        previous_tick = _now() - timedelta(minutes=1)
+        history = promotion_automations.PromotionTickHistory(last_success=previous_tick)
+        for reason in ("chrome_disconnected", "active_job"):
+            with self.assertLogs("anteroom.promotion_automations", level="ERROR") as errors:
+                promotion_automations.report_overdue(self.db, reason=reason, history=history)
+            line = " ".join(errors.output)
+            self.assertIn(reason, line)
+            self.assertIn(previous_tick.isoformat(), line)
+            self.assertNotIn(row.id, line)
+            with self.assertNoLogs("anteroom.promotion_automations", level="ERROR"):
+                promotion_automations.report_overdue(self.db, reason=reason, history=history)
+        self.assertEqual(self.promoted(), [])
+
+    def test_busy_tick_reports_overdue_without_sending_or_repeating(self):
+        saved = self.create(OFFER)
+        self.enable(saved["id"])
+        row = self.db.get(PromotionAutomation, saved["id"])
+        row.next_run_at = _now() - timedelta(hours=1)
+        self.db.commit()
+        with patch.object(promotion_automations, "_has_active_job", return_value=True):
+            with self.assertLogs("anteroom.promotion_automations", level="ERROR") as errors:
+                self.assertEqual(self.tick(), 0)
+            self.assertIn("blocker=active_job", " ".join(errors.output))
+            with self.assertNoLogs("anteroom.promotion_automations", level="ERROR"):
+                self.assertEqual(self.tick(), 0)
+        self.assertEqual(self.promoted(), [])
 
     def test_failed_job_reports_once_even_when_error_was_handled(self):
         job = JobRepo(self.db).create(self.items[0][0].id, "", {})

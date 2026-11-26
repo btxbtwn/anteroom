@@ -149,7 +149,9 @@ def test_disconnected_seller_is_monitored_without_running_a_round(monkeypatch):
     monkeypatch.setattr(scheduler.promotion_automations, 'report_overdue', report)
     monkeypatch.setattr(scheduler, 'check_seller', run)
     asyncio.run(scheduler.check_ready_sellers({USER_ID}))
-    report.assert_called_once_with(db)
+    report.assert_called_once()
+    assert report.call_args.args == (db,)
+    assert report.call_args.kwargs["reason"] == "chrome_disconnected"
     run.assert_not_awaited()
 
 
