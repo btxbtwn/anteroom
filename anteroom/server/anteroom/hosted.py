@@ -339,9 +339,15 @@ class SellerSessionMiddleware:
             )
         else:
             scope.setdefault("state", {})["seller"] = identity
+            from dataclasses import replace
+
             from anteroom.services.hosted_context import for_seller
-            from anteroom.services.service_context import use
-            with use(for_seller(identity.user_id, context_token, email=identity.email)):
+            from anteroom.services.service_context import ServiceContext, use
+            context = for_seller(identity.user_id, context_token)
+            email = getattr(identity, "email", None)
+            if isinstance(context, ServiceContext) and email and not context.seller_email:
+                context = replace(context, seller_email=email)
+            with use(context):
                 await self.app(scope, receive, send)
             return
         await response(scope, receive, send)

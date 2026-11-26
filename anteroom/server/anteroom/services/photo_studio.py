@@ -135,7 +135,7 @@ async def _one(
         if charged > 0:
             try:
                 await asyncio.shield(
-                    run_db(subscriptions.refund_photo_credit, conv_id, photo_id, charged, period=charged_period)
+                    run_db(subscriptions.refund_photo_credit, conv_id, photo_id, charged, charged_period)
                 )
             except Exception:  # noqa: BLE001 - refund failure must not mask the primary error
                 log.warning("Could not refund AI Studio credits for photo %s", photo_id)

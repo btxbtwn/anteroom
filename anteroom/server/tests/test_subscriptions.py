@@ -447,7 +447,7 @@ def test_account_import_rejects_subscription_and_credit_tables(db):
 
     for forbidden_table in ("seller_plans", "plan_usage_events"):
         with pytest.raises(HTTPException) as exc_info:
-            account_import.import_rows(db, SELLER_A, forbidden_table, [])
+            account_import.import_rows(db, forbidden_table, [])
         assert exc_info.value.status_code == 422
 
 

@@ -391,8 +391,8 @@ def refund_photo_credit(
     conversation_id: str,
     photo_id: str,
     credits: int,
-    *,
     period: str | None = None,
+    *,
     now: datetime | None = None,
 ) -> None:
     """Refund reserved photo credits into the period originally charged when Photoroom fails."""
