@@ -66,7 +66,7 @@ struct AutomationsView: View {
                                         .filter { !$0.isEmpty }.joined(separator: " · "))
                                         .font(.caption).foregroundStyle(.secondary)
                                     if !canApprove {
-                                        Text("Open Anteroom on your Mac to approve this action.")
+                                        Text("Approving marketplace actions isn't available in your account yet. This item stays waiting.")
                                             .font(.caption).foregroundStyle(.secondary)
                                     }
                                 }

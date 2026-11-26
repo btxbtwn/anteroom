@@ -131,7 +131,9 @@ describe("AutomationsPage", () => {
     expect(html).toContain("Review and approve");
     const web = hosted(["inventory"]);
     expect(web).toContain('aria-describedby="approval-reason-p1"');
-    expect(web).toContain("Open Anteroom on your Mac to approve this action.");
+    // renderToStaticMarkup escapes the apostrophe.
+    expect(web).toContain("Approving marketplace actions isn&#x27;t available in your account yet. This item stays waiting.");
+    expect(web).not.toContain("Open Anteroom on your Mac");
   });
 
   it("on the web, shows eBay offers only while the offer timer runs", () => {

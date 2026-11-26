@@ -285,7 +285,7 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
                   Review and approve
                 </Button>
                 {!canApprove ? (
-                  <p id={`approval-reason-${row.id}`} className="basis-full text-xs text-muted-foreground">Open Anteroom on your Mac to approve this action.</p>
+                  <p id={`approval-reason-${row.id}`} className="basis-full text-xs text-muted-foreground">Approving marketplace actions isn't available in your account yet. This item stays waiting.</p>
                 ) : null}
               </li>
             ))}
