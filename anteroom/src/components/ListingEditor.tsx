@@ -55,7 +55,6 @@ import { Button, InlineButton } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
 import { Input } from "./ui/input";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "./ui/input-group";
-import { Skeleton } from "./ui/skeleton";
 import { Spinner } from "./ui/spinner";
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
@@ -275,20 +274,8 @@ export function ListingEditor({
 
 
       <div className={cn("listing-form-area", chat && "has-chat")}>
-      {mode.isPending ? <EditorSkeleton /> : mode.error && !mode.data ?
-        <Alert variant="error" className="m-3 self-start">
-          <CircleAlertIcon />
-          <AlertTitle>The editor didn't load</AlertTitle>
-          <AlertDescription className="gap-2">
-            <p>Your saved details weren't changed. Try again in a moment.</p>
-            <p className="text-xs">{mode.error.message}</p>
-            <div>
-              <Button size="xs" variant="outline" disabled={mode.isFetching} onClick={() => void mode.refetch()}>
-                {mode.isFetching ? "Retrying…" : "Retry"}
-              </Button>
-            </div>
-          </AlertDescription>
-        </Alert> : loadError ?
+      {mode.isPending ? <p role="status" className="p-3 text-xs text-muted-foreground">Loading listing workflow…</p> : mode.error && !mode.data ?
+        <p role="alert" className="p-3 text-xs text-destructive-foreground">{mode.error.message}</p> : loadError ?
         <Alert variant="error" className="m-3 self-start">
           <CircleAlertIcon />
           <AlertTitle>This listing didn't load</AlertTitle>
@@ -400,28 +387,6 @@ export function editorCopy(vendoo: boolean) {
     categoryFormMissing: (name: string) => `Some of ${name}'s fields for this category may be missing. Check the listing on ${name} before you publish.`,
     choicesMissing: (name: string) => `${name}'s choices for this field didn't load.`,
   };
-}
-
-/** Stands in for the marketplace list and form while the editor's settings load. */
-function EditorSkeleton() {
-  return (
-    <div role="status" aria-label="Loading the listing" className="flex min-h-0 flex-1 gap-4 p-3">
-      <div aria-hidden className="flex w-44 shrink-0 flex-col gap-2 max-[900px]:hidden">
-        {[0, 1, 2, 3, 4, 5].map((row) => <Skeleton key={row} className="h-8 w-full" shape="card" />)}
-      </div>
-      <div aria-hidden className="flex min-w-0 flex-1 flex-col gap-4">
-        <div className="flex gap-2">
-          {[0, 1, 2, 3].map((photo) => <Skeleton key={photo} className="size-20 shrink-0" shape="card" />)}
-        </div>
-        {[0, 1, 2, 3, 4].map((field) => (
-          <div key={field} className="flex flex-col gap-1.5">
-            <Skeleton className="h-3 w-24" />
-            <Skeleton className="h-9 w-full" shape="card" />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 /**
