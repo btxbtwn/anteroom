@@ -4,7 +4,6 @@ import hashlib
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from typing import Literal
-from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
 
 from anteroom.models.conversation import Conversation, Photo
@@ -16,14 +15,6 @@ from anteroom.services.hosted_limits import hold_upload_slot, read_bounded_body
 
 router = APIRouter(prefix='/api/drafts/{draft_id}/photos')
 log = logging.getLogger(__name__)
-
-
-class PhotoResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: str
-    width: int | None
-    height: int | None
-    size_bytes: int
 
 
 def require_draft(db, draft_id, *, lock=False):
@@ -48,11 +39,11 @@ def get_photo(db, draft_id, photo_id):
     return photo
 
 
-@router.get('', response_model=list[PhotoResponse])
+@router.get('', response_model=list[contract.ListingPhoto])
 def list_photos(draft_id: str, db=Depends(get_seller_db, scope="function")):
     require_draft(db, draft_id)
-    return db.scalars(select(Photo).where(Photo.conversation_id == draft_id)
-                      .order_by(Photo.display_order, Photo.id)).all()
+    return [photo_response(row) for row in db.scalars(select(Photo).where(Photo.conversation_id == draft_id)
+                                                      .order_by(Photo.display_order, Photo.id)).all()]
 
 
 def save_photo(db, draft_id, key, data, width, height, marketplace=None):
