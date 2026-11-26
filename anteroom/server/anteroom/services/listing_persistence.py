@@ -43,8 +43,11 @@ def _keep_seller_promotion(db: Session, revision: ListingRevision) -> None:
     """An agent, template or copied item cannot opt into an eBay advertising fee."""
     if not isinstance(revision.listing_json, dict):
         return
-    parent = db.get(ListingRevision, revision.parent_revision_id) if revision.parent_revision_id else None
-    previous = parent.listing_json if parent and parent.conversation_id == revision.conversation_id else {}
+    previous = (db.query(ListingRevision.listing_json)
+                .join(Listing, Listing.current_revision_id == ListingRevision.id)
+                .filter(Listing.conversation_id == revision.conversation_id,
+                        ListingRevision.conversation_id == revision.conversation_id)
+                .scalar()) or {}
     revision.listing_json = preserve_ebay_promotion(previous, revision.listing_json)
 
 
