@@ -7,6 +7,7 @@ test("Today refreshes after a saved goal deletion without a dashboard snapshot",
   const firstSection = page.getByRole("heading", { level: 2 }).first();
   await expect(firstSection).toHaveText(/Needs attention/);
   await expect(page.locator("h1").filter({ hasText: "Today" })).toHaveClass(/sr-only/);
+  await expect(page.getByRole("tablist", { name: "Needs attention views" })).toHaveCSS("display", "inline-flex");
   await page.getByRole("button", { name: "Add goal" }).click();
   await page.getByLabel("Goal target").fill("150");
   await page.getByLabel("Goal label").fill("Repair test goal");

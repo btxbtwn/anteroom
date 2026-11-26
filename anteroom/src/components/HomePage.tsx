@@ -35,6 +35,7 @@ import { cn } from "../lib/utils";
 import { confirmDialog } from "../ui/confirmDialog";
 import { Stat, StatGrid } from "./AnalyticsStat";
 import { WorkspaceTabs } from "./ebay/WorkspaceTabs";
+import "./ebay/ebay.css";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
