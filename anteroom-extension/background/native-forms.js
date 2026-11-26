@@ -494,7 +494,10 @@ function mercariEditorForm(listing, master) {
     nativeEditorChoice('mercari_specifics.shippingPayerId', 'Offer buyers free shipping?', payer,
       [{ label: 'Yes (Recommended)', value: 2 }, { label: 'No', value: 1 }], { width: 'half' }),
   ].map(product('Shipping')));
-  const dollars = Number(listing.price || 0);
+  const rawPrice = specifics.price !== undefined && specifics.price !== null && specifics.price !== ''
+    ? specifics.price
+    : listing.price;
+  const dollars = Number(rawPrice || 0);
   // Mercari turns Smart pricing on once a price is entered, and fills the floor with 85% of it. The minimum must sit
   // at least $1 under the price, so under $2 it stays off and the floor stays between $1 and the price minus $1.
   const whole = dollars > 0 ? Math.round(dollars) : 0;

@@ -215,6 +215,14 @@ def mercari_requirements(snapshot: dict, context: Context) -> list[dict]:
     return found
 
 
+def mercari_whole_dollars(value: object) -> int | None:
+    """Round a Mercari dollar amount to whole dollars the way Mercari's form does (``Math.round``)."""
+    if value is None:
+        return None
+    amount = _money(value)
+    return _whole_dollars(amount) if amount is not None else None
+
+
 def _mercari_smart_pricing_amounts(snapshot: dict, specifics: dict) -> tuple[int, int | None] | None:
     """Whole-dollar ``(price, minimum)`` when Mercari Smart Pricing is on, else None.
 
@@ -226,10 +234,9 @@ def _mercari_smart_pricing_amounts(snapshot: dict, specifics: dict) -> tuple[int
     from anteroom.services.seller_overrides import price_for
 
     raw_price = price_for(snapshot, "mercari")
-    price_amount = _money(raw_price) if raw_price is not None else None
-    price_dollars = _whole_dollars(price_amount) if price_amount is not None and price_amount > 0 else 0
-    min_amount = _money(smart.get("minimumPrice"))
-    min_dollars = _whole_dollars(min_amount) if min_amount is not None else None
+    rounded_price = mercari_whole_dollars(raw_price)
+    price_dollars = rounded_price if rounded_price is not None and rounded_price > 0 else 0
+    min_dollars = mercari_whole_dollars(smart.get("minimumPrice"))
     return price_dollars, min_dollars
 
 

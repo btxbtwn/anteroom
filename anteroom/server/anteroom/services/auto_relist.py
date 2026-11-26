@@ -34,6 +34,7 @@ from anteroom.services import listing_mode, listing_persistence
 from anteroom.services.automation_age import load_listed_index, resolve_listed_at
 from anteroom.services.chrome_listing import (
     mercari_smart_pricing_meets_price,
+    mercari_whole_dollars,
     poshmark_fractional_price_error,
 )
 from anteroom.services.marketplace_delist import listings_for
@@ -709,14 +710,39 @@ def _preview_candidates(db: Session, rule: MarketplaceRelistRule, remaining: int
             if item["revision_id"] is None:
                 gaps = [direct_preflight.gap("listing", "Save the listing's fields before relisting.")]
             else:
-                data = item["listing_fields"]
+                original_data = item["listing_fields"]
+                data = original_data
                 if new_price is not None:
                     data = _snapshot_with_relist_price(data, market, new_price)
                 prepared = direct_preflight.prepare(db, item["conversation"], data, market)
                 gaps = direct_preflight.gaps(prepared, market, direct_preflight.Context(db=db))
+                if market == "mercari" and (note := _mercari_smart_pricing_disabled_note(original_data, data, future=True)):
+                    gaps.append(direct_preflight.gap("mercari_specifics.smartPricing.enabled", note, blocking=False))
             detail.update(local_fields_ready=not direct_preflight.blocking(gaps), listing_gaps=gaps)
         details.append(detail)
     return details, counts
+
+
+def _mercari_smart_pricing_disabled_note(before: dict, after: dict, *, future: bool = False) -> str | None:
+    """Seller-facing explanation when a relist price drop turned Mercari Smart Pricing off."""
+    before_smart = (before.get("mercari_specifics") or {}).get("smartPricing") if isinstance(before, dict) else None
+    after_smart = (after.get("mercari_specifics") or {}).get("smartPricing") if isinstance(after, dict) else None
+    if not (isinstance(before_smart, dict) and before_smart.get("enabled") is True
+            and isinstance(after_smart, dict) and after_smart.get("enabled") is False):
+        return None
+    price_dollars = mercari_whole_dollars(price_for(after, "mercari"))
+    min_dollars = mercari_whole_dollars(after_smart.get("minimumPrice"))
+    if price_dollars == 1:
+        if future:
+            return "Relisting at $1 will turn off Mercari Smart Pricing because Mercari requires $2 or more."
+        return "Turned off Mercari Smart Pricing because Mercari requires $2 or more."
+    if price_dollars is not None and min_dollars is not None:
+        if future:
+            return (f"Relisting at ${price_dollars} reaches your ${min_dollars} Smart Pricing minimum, so Mercari "
+                    f"Smart Pricing will be turned off (your ${min_dollars} minimum stays saved).")
+        return (f"Turned off Mercari Smart Pricing because the new price (${price_dollars}) reached its "
+                f"${min_dollars} minimum (your ${min_dollars} minimum stays saved).")
+    return "Mercari Smart Pricing will be turned off." if future else "Turned off Mercari Smart Pricing."
 
 
 def _disable_mercari_smart_pricing_at_floor(updated: dict) -> None:
@@ -1213,8 +1239,14 @@ def _reserve_relist_attempt(
             price_revision_id=revision_id,
             original_revision_id=current_revision_id,
         )
+        completion_note = None
+        if revision_id != current_revision_id and current_revision_id is not None:
+            orig_rev = db.get(ListingRevision, current_revision_id)
+            prep_rev = db.get(ListingRevision, revision_id)
+            if orig_rev is not None and prep_rev is not None and isinstance(orig_rev.listing_json, dict) and isinstance(prep_rev.listing_json, dict):
+                completion_note = _mercari_smart_pricing_disabled_note(orig_rev.listing_json, prep_rev.listing_json)
         return {"reserved": True, "attempt_id": attempt_id, "revision_id": revision_id,
-                "original_revision_id": current_revision_id}
+                "original_revision_id": current_revision_id, "completion_note": completion_note}
 
 
 def _record_pause(db: Session, entry: dict[str, Any], reason: str, moment: datetime) -> dict[str, Any]:
@@ -1529,7 +1561,7 @@ async def run_auto_relist(
             "old_price": entry["price"],
             "new_price": entry["new_price"],
             "status": "completed",
-            "reason": None,
+            "reason": reservation.get("completion_note"),
             "moment": moment if now is not None else _now(),
             "new_listing_url": list_res.get("listing_url"),
         }))

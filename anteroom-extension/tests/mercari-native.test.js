@@ -708,24 +708,43 @@ test('a safe Mercari read retries a temporary GraphQL error; writes never do', a
   );
   assert.equal(exhaustedCalls, 3);
 
-  // A write is sent once and never retried on the same temporary message.
-  let writeCalls = 0;
-  const write = worker({
-    respond: op => {
-      if (op !== 'addDraftItemMutation') return undefined;
-      writeCalls += 1;
-      return transient;
-    },
+  // Writes and upload mutations are sent once and never retried on the same temporary message.
+  for (const [operationName, opts] of [
+    ['addDraftItemMutation', { deadline: Date.now() + 30000 }],
+    ['createOfferToLikers', { deadline: Date.now() + 30000, resend: false }],
+    ['uploadDraftItemImageMutation', { multipart: new FormData(), deadline: Date.now() + 30000, operationName: 'uploadDraftItemImageMutation', retry: true }],
+  ]) {
+    let calls = 0;
+    const w = worker({
+      respond: op => {
+        if (op !== operationName) return undefined;
+        calls += 1;
+        return transient;
+      },
+    });
+    w.c.marketplaceSleep = async () => {};
+    if (opts.multipart) {
+      opts.multipart.append('operations', JSON.stringify({ operationName }));
+    }
+    await assert.rejects(
+      w.c.mercariRequest(
+        opts.multipart ? null : { operationName, variables: { input: {} } },
+        opts,
+      ),
+      err => err.code === 'rejected'
+        && err.marketplace_message === 'Oops, an error has occurred. Please try again.',
+    );
+    assert.equal(calls, 1, `${operationName} must not retry temporary read errors`);
+  }
+
+  // Disabled Smart Pricing after a floor-crossing relist sends isAutoPriceDrop: false and omits minimumPrice.
+  const c = loadWorker();
+  const disabledCommon = c.mercariCommon({
+    ...listing,
+    price: 11,
+    mercari_specifics: { price: 11, smartPricing: { enabled: false, minimumPrice: 11 } },
   });
-  write.c.marketplaceSleep = async () => {};
-  await assert.rejects(
-    write.c.mercariRequest(
-      { operationName: 'addDraftItemMutation', variables: { input: {} } },
-      { deadline: Date.now() + 30000 },
-    ),
-    err => err.code === 'rejected'
-      && err.marketplace_message === 'Oops, an error has occurred. Please try again.',
-  );
-  assert.equal(writeCalls, 1);
+  assert.equal(disabledCommon.isAutoPriceDrop, false);
+  assert.equal('minPriceForAutoPriceDrop' in disabledCommon, false);
 });
 

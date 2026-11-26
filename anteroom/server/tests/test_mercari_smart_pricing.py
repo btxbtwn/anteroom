@@ -89,9 +89,40 @@ def test_auto_relist_disables_mercari_smart_pricing_when_price_reaches_floor():
     at_floor = auto_relist._snapshot_with_relist_price(listing, "mercari", 11.0)
     assert at_floor["mercari_specifics"]["smartPricing"] == {"enabled": False, "minimumPrice": 11}
     assert _smart_gaps(at_floor) == []
+    assert not any(
+        item["field"].startswith("mercari_specifics.smartPricing")
+        for item in listing_readiness.missing(direct_preflight.gaps(at_floor, "mercari"))
+    )
+
+    # Seller-facing Mercari form shows Smart Pricing off while preserving the seller's $11 minimum.
+    fields = {row["path"]: row for row in mercari_form.form(at_floor)["fields"]}
+    assert fields["mercari_specifics.smartPricing.enabled"]["value"] is False
+    assert fields["mercari_specifics.smartPricing.minimumPrice"]["value"] == 11
+    assert fields["mercari_specifics.smartPricing.minimumPrice"]["required"] is False
+
+    # Re-enabling Smart Pricing at $11 immediately blocks List and shows Minimum price in review.
+    reenabled = {
+        **at_floor,
+        "mercari_specifics": {**at_floor["mercari_specifics"], "smartPricing": {"enabled": True, "minimumPrice": 11}},
+    }
+    assert any(
+        item["field"] == "mercari_specifics.smartPricing.minimumPrice" and item["label"] == "Minimum price"
+        for item in listing_readiness.missing(direct_preflight.gaps(reenabled, "mercari"))
+    )
+
+    # Preview and completed Auto-Relist log notes explain why Smart Pricing was turned off and that the floor stays saved.
+    preview_note = auto_relist._mercari_smart_pricing_disabled_note(listing, at_floor, future=True)
+    completed_note = auto_relist._mercari_smart_pricing_disabled_note(listing, at_floor, future=False)
+    assert preview_note is not None and "$11" in preview_note and "stays saved" in preview_note
+    assert completed_note is not None and "$11" in completed_note and "stays saved" in completed_note
+
+    at_one = auto_relist._snapshot_with_relist_price(_snapshot(3, {"enabled": True, "minimumPrice": 2}), "mercari", 1.0)
+    one_note = auto_relist._mercari_smart_pricing_disabled_note(_snapshot(3, {"enabled": True, "minimumPrice": 2}), at_one)
+    assert one_note is not None and "$2" in one_note
 
     above_floor = auto_relist._snapshot_with_relist_price(listing, "mercari", 12.0)
     assert above_floor["mercari_specifics"]["smartPricing"] == {"enabled": True, "minimumPrice": 11}
+    assert auto_relist._mercari_smart_pricing_disabled_note(listing, above_floor) is None
     assert _smart_gaps(above_floor) == []
 
 
@@ -99,7 +130,11 @@ def test_auto_relist_on_another_marketplace_disables_unlisted_mercari_smart_pric
     listing = _snapshot(13, {"enabled": True, "minimumPrice": 11})
     unlisted = auto_relist._general_with_relist_price(listing, "ebay", 11.0, live_elsewhere=set())
     assert unlisted["mercari_specifics"]["smartPricing"] == {"enabled": False, "minimumPrice": 11}
+    note = auto_relist._mercari_smart_pricing_disabled_note(listing, unlisted)
+    assert note is not None and "$11" in note
 
     # When Mercari is live elsewhere, its price is held at $13 so Smart Pricing stays untouched.
     live_mercari = auto_relist._general_with_relist_price(listing, "ebay", 11.0, live_elsewhere={"mercari"})
     assert live_mercari["mercari_specifics"]["smartPricing"] == {"enabled": True, "minimumPrice": 11}
+    assert auto_relist._mercari_smart_pricing_disabled_note(listing, live_mercari) is None
+

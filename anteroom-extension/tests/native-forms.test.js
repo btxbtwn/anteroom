@@ -333,6 +333,22 @@ test('Mercari Smart pricing suggests a minimum at least $1 under the price', () 
   assert.deepEqual(smart(2), [true, 1, 'Recommended: $1.']);
   assert.deepEqual(smart(3), [true, 2, 'Recommended: $2.']);
   assert.deepEqual(smart(20), [true, 17, 'Recommended: $17.']);
+
+  // Mercari-specific price overrides General price, and a disabled floor stays off with its saved minimum intact.
+  const overridden = Object.fromEntries(clean(call(c, 'mercariEditorForm', {
+    direct_category_ids: { mercari: 1 }, title: 'A tee', price: 13,
+    mercari_specifics: { price: 1 },
+  }, MERCARI)).fields.map(row => [row.path, row]));
+  assert.equal(overridden['mercari_specifics.smartPricing.enabled'].value, false);
+  assert.equal(overridden['mercari_specifics.smartPricing.minimumPrice'].value, '');
+
+  const disabledAtFloor = Object.fromEntries(clean(call(c, 'mercariEditorForm', {
+    direct_category_ids: { mercari: 1 }, title: 'A tee', price: 11,
+    mercari_specifics: { price: 11, smartPricing: { enabled: false, minimumPrice: 11 } },
+  }, MERCARI)).fields.map(row => [row.path, row]));
+  assert.equal(disabledAtFloor['mercari_specifics.smartPricing.enabled'].value, false);
+  assert.equal(disabledAtFloor['mercari_specifics.smartPricing.minimumPrice'].value, 11);
+  assert.equal(disabledAtFloor['mercari_specifics.smartPricing.minimumPrice'].required, false);
 });
 
 // Mercari's sell page, read 2026-10-27: its sections, field names and order, and the size group headings.

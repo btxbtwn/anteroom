@@ -565,13 +565,10 @@ function mercariHeaders(session) {
   };
 }
 
-const MERCARI_TEMPORARY_ERRORS = new Set([
-  'Unable to contact API',
-  'Oops, an error has occurred. Please try again.',
-]);
+const MERCARI_TEMPORARY_READ_ERROR = 'Oops, an error has occurred. Please try again.';
 
 // Mercari's GraphQL errors, classified. Its messages pass through as its own words.
-function mercariFailure(operationName, errors, write) {
+function mercariFailure(operationName, errors, write, { readOnly = false } = {}) {
   const list = Array.isArray(errors) ? errors : [];
   const text = JSON.stringify(list).slice(0, 4000);
   const own = list.map(entry => {
@@ -594,7 +591,7 @@ function mercariFailure(operationName, errors, write) {
     // Mercari's edge could not reach its service; a write may still have landed.
     return marketplaceError('Mercari could not reach its own service.', { code: write ? 'uncertain' : 'network', rejected: !write, marketplace_message: own });
   }
-  if (!write && list.some(entry => entry?.message === 'Oops, an error has occurred. Please try again.')) {
+  if (readOnly && list.some(entry => entry?.message === MERCARI_TEMPORARY_READ_ERROR)) {
     return marketplaceError('Mercari returned a temporary error. Try again.', { code: 'network', rejected: true, marketplace_message: own });
   }
   const label = { addDraftItemMutation: 'the draft', editDraftItemMutation: 'the draft update', listDraftItemMutation: 'the listing',
@@ -606,10 +603,13 @@ function mercariFailure(operationName, errors, write) {
 // One GraphQL request. A rejected session ("Unauthorized", HTTP 401/403) is
 // read again from /v1/initialize after a short wait and the request sent again,
 // at most twice: Mercari refused it before doing anything. A safe request is
-// also sent again when Mercari returns a temporary backend error. ``resend: false``
-// sends exactly once.
+// also sent again when Mercari could not reach its own API, and read-only
+// requests retry Mercari's temporary GraphQL error. ``resend: false`` sends
+// exactly once.
 async function mercariRequest(body, { multipart = null, deadline, operationName = body?.operationName, retry = false, resend = true }) {
   const write = !operationName.endsWith('Query') && !/^\s*query\b/.test(body?.query || '');
+  const mutation = Boolean(multipart) || String(operationName || '').endsWith('Mutation') || /^\s*mutation\b/.test(body?.query || '');
+  const readOnly = retry && !mutation;
   for (let attempt = 0; ; attempt += 1) {
     const headers = mercariHeaders(await mercariCurrentSession(deadline));
     if (!multipart) headers['content-type'] = 'application/json';
@@ -618,13 +618,14 @@ async function mercariRequest(body, { multipart = null, deadline, operationName 
       const { data } = await marketplaceFetch(MERCARI_API, { marketplace: 'mercari', step: operationName, method: 'POST', headers,
         body: multipart || JSON.stringify(body), deadline, timeoutMs: multipart ? 45000 : 25000, retry });
       if (!data.errors?.length && data.data) return data.data;
-      failure = mercariFailure(operationName, data.errors, write && !retry);
+      failure = mercariFailure(operationName, data.errors, write && !retry, { readOnly });
     } catch (error) {
       failure = error;
     }
     const sessionRefused = failure.code === 'signed_out';
-    const temporary = retry && failure.code === 'network' && MERCARI_TEMPORARY_ERRORS.has(failure.marketplace_message);
-    if (!resend || attempt >= 2 || !(sessionRefused || temporary) || Date.now() + MERCARI_SESSION_RETRY_MS + 1000 >= deadline) throw failure;
+    const unreachable = retry && failure.code === 'network' && failure.marketplace_message === 'Unable to contact API';
+    const temporaryRead = readOnly && failure.code === 'network' && failure.marketplace_message === MERCARI_TEMPORARY_READ_ERROR;
+    if (!resend || attempt >= 2 || !(sessionRefused || unreachable || temporaryRead) || Date.now() + MERCARI_SESSION_RETRY_MS + 1000 >= deadline) throw failure;
     marketplaceLog('mercari', operationName, { retry: attempt + 1, error_code: failure.code });
     await marketplaceSleep(MERCARI_SESSION_RETRY_MS);
     await mercariCurrentSession(deadline, true);
