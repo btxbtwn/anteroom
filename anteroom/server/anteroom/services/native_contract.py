@@ -715,6 +715,11 @@ def constrain_generated(
                 continue
             elif path not in rows or value_error({**applicable_row(rows[path], listing, list(rows.values())), "required": False}, value):
                 _remove(listing, path)
+        if market == "depop" and not block.get("parcelSize") and not is_locked(seed, "depop_specifics.parcelSize"):
+            groups = (rows.get("depop_specifics.parcelSize") or {}).get("option_groups") or {}
+            suggested = next((size for size, group in groups.items() if group == "Suggested"), None)
+            if suggested:
+                set_path(listing, "depop_specifics.parcelSize", suggested)
     for path in locked_paths(seed):
         if path.split(".", 1)[0] in {f"{market}_specifics" for market in contracts}:
             value = get_path(seed, path)

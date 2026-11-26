@@ -1,13 +1,8 @@
-"""Map Anteroom's stored garment measurements into Depop's measurements block.
-
-Depop's live "add measurements" field ids are not in this repo or its fixtures.
-The ids and labels below are the ones the extension sends and the form filler
-matches by label. Confirm them against a live Depop listing before relying on
-the draft body.
-"""
+"""Copy Item Details measurements into Depop and apply marketplace edits."""
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from anteroom.services.general_measurements import active_garment, stored_measurements
@@ -42,6 +37,25 @@ def depop_measurements_from_notes(notes: dict | None, listing: dict | None = Non
             "unit": "in",
         })
     return {"unit": "in", "values": rows}
+
+
+def measurement_inputs(specifics: dict) -> dict:
+    stored = specifics.get("measurements")
+    block = stored if isinstance(stored, dict) else {}
+    aliases = {"pit_to_pit": "pit-to-pit", "sleeve": "sleeve-length", "leg_opening": "leg-opening", "hip": "hips"}
+    result = {}
+    rows = block.get("values")
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or not row.get("id") or row.get("value") is None:
+            continue
+        value = str(row["value"]).strip()
+        if not re.search(r'(?:cm|inches|inch|in\.?|["″])$', value, re.I):
+            value = f"{value} {row.get('unit') or block.get('unit') or 'in'}"
+        result[aliases.get(row["id"], row["id"])] = value
+    overrides = specifics.get("measurementInputs")
+    if isinstance(overrides, dict):
+        result.update(overrides)
+    return result
 
 
 def sync_depop_measurements(

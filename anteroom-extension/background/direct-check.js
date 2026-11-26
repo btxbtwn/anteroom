@@ -75,7 +75,7 @@ function chromeDirectPreview(listing, sources = {}) {
   }
   if (Array.isArray(sources.parcels)) {
     const label = directIdString(item.depop_specifics?.parcelSize || item.depop_specifics?.parcel_size);
-    const offered = sources.parcels.some(entry => marketplaceNameKey(entry?.title) === marketplaceNameKey(label));
+    const offered = depopParcelSize(sources.parcels, item);
     if (label && !offered) {
       gaps.depop.push({
         field: 'depop_specifics.parcelSize', message: `Depop does not offer "${label}" as a parcel size.`, blocking: true,
@@ -93,13 +93,9 @@ async function handleMarketplaceDirectCheck(msg) {
   try { sources.attributes = await depopAttributes(deadline); } catch { /* Same for Depop's category list. */ }
   let parcelsChecked = false;
   const label = directIdString(listing.depop_specifics?.parcelSize || listing.depop_specifics?.parcel_size);
-  if (label) {
+  if (label && sources.attributes && depopRegion(listing) !== 'CA') {
     try {
-      const price = encodeURIComponent(String(listing.price ?? ''));
-      const providers = await marketplaceCatalog(`depop:parcels:${price}`, () => depopAccountRead(
-        `/api/v1/shipping-providers/?ids=USPS&itemCurrency=USD&itemCost=${price}`, 'parcel sizes', deadline));
-      const rows = Array.isArray(providers) ? providers : providers?.objects || [];
-      sources.parcels = rows.flatMap(provider => provider?.parcelSizes || provider?.parcel_sizes || []);
+      sources.parcels = await depopParcelQuote(listing, depopCategory(listing, sources.attributes), deadline);
       parcelsChecked = true;
     } catch { /* The known parcel titles still apply when Depop's list cannot be read. */ }
   }

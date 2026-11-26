@@ -7,6 +7,7 @@ from functools import lru_cache
 from typing import Any
 
 from anteroom.config import skills_dir
+from anteroom.services.depop_measurements import measurement_inputs
 from anteroom.services.seller_overrides import get_path, marketplace_text, price_for
 
 DEPOP_CONDITIONS = frozenset({"brand_new", "used_like_new", "used_excellent", "used_good", "used_fair"})
@@ -145,6 +146,7 @@ def form(listing: dict) -> dict:
     category_id = str((listing.get("direct_category_ids") or {}).get("depop") or "")
     category = _by_id().get(category_id)
     fixed = fixed_options()
+    quote = catalog()["us_parcel_quotes"].get(category_id, {}) if region.country == "US" else {}
 
     def value(path: str, default: Any = "") -> Any:
         found = get_path(listing, path)
@@ -209,6 +211,10 @@ def form(listing: dict) -> dict:
             row["value"] = size_label(category_id, text("size"))
             rows.append(row)
         elif key == "quantity":
+            inputs = measurement_inputs(specifics)
+            for measurement in catalog()["product_measurements"].get(category_id.partition("_")[2], []):
+                rows.append(field(f"depop_specifics.measurementInputs.{measurement}", catalog()["measurement_labels"][measurement],
+                                  inputs.get(measurement), section="Info", placeholder="Inches or cm, e.g. 14 in"))
             rows.append(field("quantity", label, listing.get("quantity", 1), input_type="number", min_value=1,
                               step=1, section="Info", width="quarter"))
         elif key == "SKU":
@@ -229,7 +235,11 @@ def form(listing: dict) -> dict:
                  help="Use the shipping label Depop provides for your order.")] if carrier else []),
         field("depop_specifics.shipFrom", "Shipping from", specifics.get("shipFrom", ""), input_type="textarea",
               locked=True, section="Shipping", help="Your Depop account's shipping address is checked when you publish."),
-        *([choice("depop_specifics.parcelSize", "Package size", fixed["parcelSize"], section="Shipping", required=True)]
+        *([choice("depop_specifics.parcelSize", "Package size", quote.get("options", fixed["parcelSize"]),
+                  section="Shipping", required=True, **({
+                      "option_groups": {size: "Suggested" if size == quote["suggested"] else "Change size" for size in quote["options"]},
+                      "help": f"Depop suggests {quote['suggested']} for this item.",
+                  } if quote else {}))]
            if carrier else [field("depop_specifics.domesticShippingPrice", "Domestic shipping", value("depop_specifics.domesticShippingPrice"),
                                    input_type="number", required=True, min_value=0, step=0.01, prefix=currency, section="Shipping")]),
         field("depop_specifics.worldwideShipping.enabled", "Offer worldwide shipping",

@@ -421,12 +421,12 @@ def ensure_depop_category_optionals(listing: dict) -> bool:
     # tier the model picked on its own.
     parcel = text_value(depop.get("parcelSize") or depop.get("parcel_size"))
     from_weight = _infer_depop_parcel_size(listing)
-    if from_weight:
+    if from_weight and not is_locked(listing, "depop_specifics.parcelSize"):
         if parcel != from_weight or "parcel_size" in depop:
             depop["parcelSize"] = from_weight
             depop.pop("parcel_size", None)
             changed = True
-    elif not parcel:
+    elif not parcel and not is_locked(listing, "depop_specifics.parcelSize"):
         set_key("parcelSize", "Medium")
         depop.pop("parcel_size", None)
 

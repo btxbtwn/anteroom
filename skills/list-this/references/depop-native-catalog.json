@@ -1,5 +1,214 @@
 {
   "source": "Depop native form sweeps and public marketplace taxonomy capture",
+  "us_parcel_quotes": {
+    "womenswear_jeans": {"options": ["Medium", "Large", "Extra large"], "suggested": "Large"}
+  },
+  "measurement_labels": {
+    "pit-to-pit": "Pit to pit",
+    "length": "Length",
+    "sleeve-length": "Sleeve length",
+    "waist": "Waist",
+    "inseam": "Inseam",
+    "outseam": "Outseam",
+    "rise": "Rise",
+    "leg-opening": "Leg opening",
+    "bust": "Bust",
+    "hips": "Hips",
+    "shoulder-width": "Shoulder width"
+  },
+  "product_measurements": {
+    "tshirts": [
+      "pit-to-pit",
+      "length"
+    ],
+    "jerseys": [
+      "pit-to-pit",
+      "length"
+    ],
+    "hoodies": [
+      "pit-to-pit",
+      "length",
+      "sleeve-length"
+    ],
+    "sweatshirts": [
+      "pit-to-pit",
+      "length",
+      "sleeve-length"
+    ],
+    "jumpers": [
+      "pit-to-pit",
+      "length",
+      "sleeve-length"
+    ],
+    "cardigans": [
+      "pit-to-pit",
+      "length",
+      "sleeve-length"
+    ],
+    "shirts": [
+      "pit-to-pit",
+      "length",
+      "sleeve-length"
+    ],
+    "vests-tanks-camis": [
+      "pit-to-pit",
+      "length"
+    ],
+    "jeans": [
+      "waist",
+      "inseam",
+      "outseam"
+    ],
+    "joggers-tracksuits": [
+      "waist",
+      "inseam",
+      "outseam"
+    ],
+    "trousers": [
+      "waist",
+      "inseam",
+      "outseam"
+    ],
+    "shorts": [
+      "waist",
+      "inseam",
+      "outseam"
+    ],
+    "skirts": [
+      "waist",
+      "hips",
+      "length"
+    ],
+    "casual-dresses": [
+      "bust",
+      "waist",
+      "hips",
+      "length"
+    ],
+    "formal-dresses": [
+      "bust",
+      "waist",
+      "hips",
+      "length"
+    ],
+    "going-out-dresses": [
+      "bust",
+      "waist",
+      "hips",
+      "length"
+    ],
+    "prom-dresses": [
+      "bust",
+      "waist",
+      "hips",
+      "length"
+    ],
+    "summer-dresses": [
+      "bust",
+      "waist",
+      "hips",
+      "length"
+    ],
+    "shift-dresses": [
+      "bust",
+      "waist",
+      "hips",
+      "length"
+    ],
+    "shirt-dresses": [
+      "bust",
+      "waist",
+      "hips",
+      "length"
+    ],
+    "wrap-dresses": [
+      "bust",
+      "waist",
+      "hips",
+      "length"
+    ],
+    "babydoll-dresses": [
+      "bust",
+      "waist",
+      "hips",
+      "length"
+    ],
+    "bodycon-dresses": [
+      "bust",
+      "waist",
+      "hips",
+      "length"
+    ],
+    "work-dresses": [
+      "bust",
+      "waist",
+      "hips",
+      "length"
+    ],
+    "wedding-dresses": [
+      "bust",
+      "waist",
+      "hips",
+      "length"
+    ],
+    "other-dresses": [
+      "bust",
+      "waist",
+      "hips",
+      "length"
+    ],
+    "dresses": [
+      "bust",
+      "waist",
+      "hips",
+      "length"
+    ],
+    "coats": [
+      "pit-to-pit",
+      "length",
+      "sleeve-length"
+    ],
+    "jackets": [
+      "pit-to-pit",
+      "length",
+      "sleeve-length"
+    ],
+    "gilets": [
+      "pit-to-pit",
+      "length"
+    ],
+    "jumpsuit": [
+      "pit-to-pit",
+      "waist",
+      "inseam",
+      "outseam",
+      "sleeve-length"
+    ],
+    "playsuit-romper": [
+      "bust",
+      "waist",
+      "hips",
+      "length"
+    ],
+    "tailored-jackets": [
+      "pit-to-pit",
+      "waist",
+      "length",
+      "shoulder-width",
+      "sleeve-length"
+    ],
+    "tailored-trousers": [
+      "waist",
+      "inseam",
+      "outseam",
+      "rise",
+      "leg-opening"
+    ],
+    "waistcoats-vests": [
+      "pit-to-pit",
+      "length"
+    ]
+  },
   "categories": [
     {
       "id": "menswear_tshirts",

@@ -1,0 +1,3 @@
+- The Depop jeans form shows the available US package sizes and the suggested size.
+- Enter flat measurements on Depop drafts in inches or centimeters, or use the measurements from Item Details.
+- Save a Depop listing link copied from the app.

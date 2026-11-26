@@ -170,6 +170,19 @@ class MarketplaceDelistTest(unittest.TestCase):
         self.assertEqual(self.client.get(self.base).json()["mercari"]["state"], "live")
         self.ebay.assert_not_called()
 
+    def test_depop_app_share_page_links_to_the_canonical_product(self):
+        share = "https://depop.app.link/example"
+        def answer(request):
+            self.assertEqual(str(request.url), share)
+            return httpx.Response(200, text='<meta property="og:url" content="https://www.depop.com/products/shop-jeans/?utm_source=share">')
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(answer))
+        with patch("anteroom.services.depop_share_link.httpx.AsyncClient", return_value=client):
+            result = self.client.post(f"{self.base}/depop/mark", json={"state": "listed", "url": share})
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(result.json()["depop"]["url"], "https://www.depop.com/products/shop-jeans/")
+        self.assertEqual(result.json()["depop"]["listing_id"], "shop-jeans")
+
     def test_marking_listed_with_the_link_anteroom_deleted_needs_confirmation(self):
         self.client.post(f"{self.base}/mercari/mark", json={"state": "listed", "url": URLS["mercari"]})
         self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["mercari"], "confirm": True}).json()["mercari"]["state"], "deleted")

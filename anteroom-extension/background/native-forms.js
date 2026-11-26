@@ -303,6 +303,12 @@ function depopEditorForm(listing, attributes, parcels = [], shipFrom = '') {
     sizeLabel ? depopName(sizeLabel) : specifics.size ?? '',
     (set.sizes || []).map(row => depopName(row)),
     { required: true, category_specific: true, clears: ['depop_specifics.nativeSizeId'] }));
+  const measurementInputs = depopMeasurementInputs(specifics);
+  for (const id of category?.measurementIds || []) {
+    const label = depopName(attributes.measurements?.find(row => row.id === id)) || id;
+    fields.push(nativeEditorField(`depop_specifics.measurementInputs.${id}`, label, measurementInputs[id],
+      { placeholder: 'Inches or cm, e.g. 14 in' }));
+  }
   fields.push(
     nativeEditorField('quantity', 'Quantity', listing.quantity ?? 1, { input_type: 'number', min_value: 1, step: 1 }),
     nativeEditorField('depop.note.sku', 'Learn more about SKUs', '', { input_type: 'note' }),
@@ -328,7 +334,7 @@ function depopEditorForm(listing, attributes, parcels = [], shipFrom = '') {
     nativeEditorField('depop_specifics.shipFrom', 'Shipping from', shipFrom, { input_type: 'textarea', locked: true,
       ...(shipFrom ? {} : { help: 'Sign in to Depop to show your shipping address.' }) }),
     nativeEditorChoice('depop_specifics.parcelSize', 'Package size', parcelValue,
-      sizes.map(row => ({ label: row.title, value: row.id || row.title })),
+      sizes.map(row => row.title),
       { required: true, ...(Object.keys(parcelGroups).length ? { option_groups: parcelGroups } : {}),
         ...(suggested ? { help: "Your selection sets your shipping label and the buyer's shipping cost. We've suggested a size based on your item — you can change it if needed." } : {}) }),
   ];
@@ -570,15 +576,8 @@ async function handleNativeMarketplaceForm(msg, respond = result => sendBrowserR
       // Choice refreshes need rates, never the seller's street address.
       const addressRead = refresh || region === 'CA' ? Promise.resolve('') : depopAccountRead(`/api/v1/addresses/${addressFilter}`, 'ship-from addresses', deadline, 5000)
         .then(data => depopShipFromLine(depopAddress(listing, data))).catch(() => '');
-      const parcelsRead = region === 'CA' ? Promise.resolve([]) : attributesRead.then(async attributes => {
-        const params = depopShippingParams(depopCategory(listing, attributes), region);
-        const price = Number(depopPrice(listing));
-        if (Number.isFinite(price) && price > 0) {
-          params.set('item_cost', price.toFixed(2));
-          params.set('item_currency', DEPOP_CURRENCIES[region]);
-        }
-        return depopParcelRows(await depopAccountRead(`/presentation/api/v1/shipping/providers/depop/?${params}`, 'parcel sizes', deadline, 5000));
-      }).catch(() => null);
+      const parcelsRead = region === 'CA' ? Promise.resolve([]) : attributesRead.then(attributes =>
+        depopParcelQuote(listing, depopCategory(listing, attributes), deadline, 5000)).catch(() => null);
       const [attributes, parcels, shipFrom] = await Promise.all([attributesRead, parcelsRead, addressRead]);
       const form = depopEditorForm(listing, attributes, parcels || [], shipFrom);
       if (refresh && region !== 'CA') {

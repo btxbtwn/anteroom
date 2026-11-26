@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from anteroom.database import get_db, in_worker_session
-from anteroom.services import chrome_sales, marketplace_delist, sales_ledger
+from anteroom.services import chrome_sales, depop_share_link, marketplace_delist, sales_ledger
 
 router = APIRouter(prefix="/api/conversations/{conv_id}/marketplace-listings", tags=["marketplace-listings"])
 
@@ -33,8 +33,18 @@ def listings(conv_id: str, db: Session = Depends(get_db, scope="function")):
         raise HTTPException(exc.status_code, str(exc)) from exc
 
 
+async def _resolve_mark_link(marketplace: str, body: MarkRequest) -> MarkRequest:
+    if marketplace == "depop" and body.state == "listed":
+        try:
+            body.url = await depop_share_link.resolve(body.url)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+    return body
+
+
 @router.post("/{marketplace}/mark")
-def mark(conv_id: str, marketplace: str, body: MarkRequest, db: Session = Depends(get_db, scope="function")):
+def mark(conv_id: str, marketplace: str, body: MarkRequest = Depends(_resolve_mark_link),
+         db: Session = Depends(get_db, scope="function")):
     try:
         return marketplace_delist.mark(db, conv_id, marketplace, body.state, body.url, body.relink_deleted)
     except marketplace_delist.DelistError as exc:
