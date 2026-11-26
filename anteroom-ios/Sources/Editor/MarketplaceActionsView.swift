@@ -145,22 +145,25 @@ struct MarketplaceActionsView: View {
     let title: String
     /// A draft also offers Ready to list and scheduled publishing.
     let isDraft: Bool
+    /// Unsaved editor edits; only the saved draft can be scheduled.
+    let hasUnsavedChanges: Bool
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @State private var model: MarketplaceActionsModel
     @State private var confirming: SellerConfirmationRequest?
     @State private var markingSold = false
+    /// Counts recorded sales; a sale can unschedule the draft, so the schedule reads again.
+    @State private var salesRecorded = 0
     /// Live listings elsewhere after a recorded sale, offered for Delist once the sheet closes.
     @State private var delistOffer: [String] = []
-    /// Changes after a recorded sale so the schedule section reads the schedule the sale may have cleared.
-    @State private var scheduleReload = 0
     /// Hand a prompt to the listing assistant, which fixes the listing but never lists it.
     let onAskChat: ((String) -> Void)?
 
     init(api: AnteroomAPI, listingID: String, revisionID: String?, title: String, isDraft: Bool = false,
-         onAskChat: ((String) -> Void)? = nil) {
+         hasUnsavedChanges: Bool = false, onAskChat: ((String) -> Void)? = nil) {
         self.title = title
         self.isDraft = isDraft
+        self.hasUnsavedChanges = hasUnsavedChanges
         self.onAskChat = onAskChat
         _model = State(initialValue: MarketplaceActionsModel(api: api, listingID: listingID, revisionID: revisionID))
     }
@@ -197,8 +200,8 @@ struct MarketplaceActionsView: View {
                             Text("Records where and when it sold. Nothing changes on any marketplace; you choose whether to delist the rest.")
                         }
                         if isDraft {
-                            DraftScheduleSection(api: model.api, listingID: model.listingID, title: title)
-                                .id(scheduleReload)
+                            DraftScheduleSection(api: model.api, listingID: model.listingID, title: title,
+                                                 hasUnsavedChanges: hasUnsavedChanges, reload: salesRecorded)
                         }
                     }
                 }
@@ -235,7 +238,7 @@ struct MarketplaceActionsView: View {
             }) {
                 MarkSoldSheet(api: model.api, listingID: model.listingID) { result in
                     delistOffer = result.delistOffer
-                    scheduleReload += 1
+                    salesRecorded += 1
                     Task { await model.load() }
                 }
             }

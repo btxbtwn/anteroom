@@ -259,7 +259,8 @@ struct ListingEditorView: View {
             }
         }) {
             MarketplaceActionsView(api: model.api, listingID: model.listingID,
-                                   revisionID: model.revisionID, title: model.title, isDraft: model.isDraft) { prompt in
+                                   revisionID: model.revisionID, title: model.title, isDraft: model.isDraft,
+                                   hasUnsavedChanges: model.hasChanges) { prompt in
                 assistantPrompt = prompt
                 showingMarketplaces = false
             }

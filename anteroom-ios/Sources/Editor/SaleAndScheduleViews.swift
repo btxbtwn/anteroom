@@ -98,6 +98,8 @@ struct DraftScheduleSection: View {
     let title: String
     /// Unsaved edits would not be what publishes, so scheduling waits for Save.
     var hasUnsavedChanges = false
+    /// Changes when something else may have changed the schedule (a recorded sale unschedules a sold draft).
+    var reload = 0
     var onChange: () -> Void = {}
     @State private var schedule: DraftSchedule?
     @State private var loadError: String?
@@ -163,7 +165,7 @@ struct DraftScheduleSection: View {
                  ? "Save your changes first; only the saved draft can be scheduled."
                  : "Mark a validated draft ready, then schedule it to publish later on the marketplaces you choose.")
         }
-        .task { await load() }
+        .task(id: reload) { await load() }
         .sellerConfirmation($confirming) { confirmed in
             guard confirmed.action == .schedule else { return }
             let at = publishAt
