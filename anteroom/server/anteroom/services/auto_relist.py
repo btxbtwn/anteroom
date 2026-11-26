@@ -1,8 +1,8 @@
 """Per-marketplace unattended Auto-Relist and eBay Auto-Recreate (OFF by default).
 
 Approved by the seller on 2026-11-22 (see AGENTS.md Invariant):
-- Per-marketplace rules for Poshmark, eBay, Mercari, and Depop are OFF by default.
-- Minimum 30-day cycle on Poshmark/Mercari/Depop; eBay recreate mode targets ~30 minutes
+- Per-marketplace rules for Poshmark, eBay, and Depop are OFF by default.
+- Minimum 30-day cycle on Poshmark/Depop; eBay recreate mode targets ~30 minutes
   before the monthly 30-day GTC renewal.
 - Enforces a seller daily cap (max 100/day/marketplace), optional price adjustment
   (% or $ step with floor), and filters (likers/watchers, condition, price range,
@@ -46,7 +46,7 @@ from anteroom.services.vendoo_import import merge_notes, parse_notes
 
 log = logging.getLogger("anteroom.auto_relist")
 
-RELIST_MARKETPLACES = ("poshmark", "ebay", "mercari", "depop")
+RELIST_MARKETPLACES = ("poshmark", "ebay", "depop")
 MIN_AGE_DAYS_STANDARD = 30
 MAX_DAILY_CAP = 100
 DEFAULT_DAILY_CAP = 25
@@ -64,20 +64,6 @@ DELIST_BLOCKERS = ("signed_out", "challenge", "chrome_unavailable", "rate_limite
 RULE_DISABLED_AFTER_DELETE = "The relist rule was turned off after deletion. Review the listing before recreating it."
 # How long a relist cancelled mid-delete waits to put its price back.
 RESTORE_PRICE_DEADLINE_S = 30.0
-# Marketplaces whose replacement is first saved as a native draft, which the marketplace
-# can refuse. Relisting deletes the old listing first, so a refused draft left the item
-# down (production 2026-11-25: Mercari refused native_mercari_save_draft after the delete).
-# A replacement draft cannot be saved and verified before that delete: the item's one
-# marketplace_listings row holds the live listing, and a draft is refused while it is live.
-# Until it can, Auto-Relist leaves these listings up rather than delete one first.
-REPLACEMENT_UNVERIFIED = {
-    "mercari": ("Mercari Auto-Relist is paused: Mercari can refuse the replacement after the old listing is "
-                "deleted, so Anteroom leaves Mercari listings up with their price unchanged."),
-}
-# A paused marketplace logs why at most once a day. The row neither counts toward the
-# daily cap nor starts the retry wait, since nothing was tried.
-PAUSED_STATUS = "skipped_paused"
-PAUSED_LOG_INTERVAL = timedelta(hours=24)
 
 
 class AutoRelistError(ValueError):
@@ -146,7 +132,6 @@ def _default_rule_view(marketplace: str, relisted_today: int = 0) -> dict[str, A
         "relisted_today": relisted_today,
         "remaining_today": max(DEFAULT_DAILY_CAP - relisted_today, 0),
         "last_run_at": None,
-        "paused_reason": REPLACEMENT_UNVERIFIED.get(marketplace),
     }
 
 
@@ -167,7 +152,6 @@ def rule_view(db: Session, row: MarketplaceRelistRule, moment: datetime | None =
         "relisted_today": done,
         "remaining_today": max(int(row.daily_cap) - done, 0),
         "last_run_at": _iso(row.last_run_at),
-        "paused_reason": REPLACEMENT_UNVERIFIED.get(row.marketplace),
     }
 
 
@@ -248,7 +232,7 @@ def _clean_filters(raw: Any) -> dict[str, Any]:
 def save_rule(db: Session, marketplace: str, body: dict[str, Any], *, confirm: bool = False) -> dict[str, Any]:
     market = str(marketplace or "").strip().lower()
     if market not in RELIST_MARKETPLACES:
-        raise AutoRelistError("Auto-relist supports Poshmark, eBay, Mercari, and Depop.")
+        raise AutoRelistError("Auto-relist supports Poshmark, eBay, and Depop.")
     enabled = bool(body.get("enabled", False))
     if enabled and confirm is not True:
         raise AutoRelistError("Confirm enabling unattended auto-relist for this marketplace.")
@@ -317,10 +301,6 @@ def save_rule(db: Session, marketplace: str, body: dict[str, Any], *, confirm: b
     return rule_view(db, row)
 
 
-# Poshmark and Mercari take whole-dollar prices only.
-WHOLE_DOLLAR_RELIST = frozenset({"poshmark", "mercari"})
-
-
 def compute_relist_price(current_price: float | None, rule: MarketplaceRelistRule) -> float | None:
     """Compute adjusted price respecting the seller's floor without ever raising the price."""
     if current_price is None or current_price <= 0 or not rule.price_adjust_mode or not rule.price_adjust_value:
@@ -334,7 +314,7 @@ def compute_relist_price(current_price: float | None, rule: MarketplaceRelistRul
     else:
         next_price = current_price - float(rule.price_adjust_value)
     next_price = round(min(max(next_price, floor), current_price), 2)
-    if rule.marketplace in WHOLE_DOLLAR_RELIST:
+    if rule.marketplace == "poshmark":
         # Round the drop down so it is still a drop, but never under the floor.
         whole = math.floor(next_price)
         if whole < floor:
@@ -969,12 +949,15 @@ def _load_enabled_rules_and_candidates(
     respect_backoff: bool = True,
     dry_run: bool = False,
 ) -> list[dict[str, Any]]:
-    query = db.query(MarketplaceRelistRule).filter(MarketplaceRelistRule.enabled.is_(True))
+    query = db.query(MarketplaceRelistRule).filter(
+        MarketplaceRelistRule.enabled.is_(True),
+        MarketplaceRelistRule.marketplace.in_(RELIST_MARKETPLACES),
+    )
     market: str | None = None
     if marketplace:
         market = str(marketplace).strip().lower()
         if market not in RELIST_MARKETPLACES:
-            raise AutoRelistError("Auto-relist supports Poshmark, eBay, Mercari, and Depop.")
+            raise AutoRelistError("Auto-relist supports Poshmark, eBay, and Depop.")
         query = query.filter(MarketplaceRelistRule.marketplace == market)
     if scheduled:
         throttle_cutoff = moment - AUTO_RELIST_TICK_INTERVAL
@@ -1154,8 +1137,6 @@ def _reserve_relist_attempt(
             return {"reserved": False, "outcome": None}
 
         price_error = poshmark_fractional_price_error(new_price) if marketplace == "poshmark" else None
-        if (paused := REPLACEMENT_UNVERIFIED.get(marketplace)) is not None:
-            return {"reserved": False, "outcome": _record_pause(db, entry, paused, moment)}
 
         preflight_error = readiness_error or price_error
         revision_id = None if preflight_error else _prepare_price_revision(
@@ -1194,32 +1175,6 @@ def _reserve_relist_attempt(
         )
         return {"reserved": True, "attempt_id": attempt_id, "revision_id": revision_id,
                 "original_revision_id": current_revision_id}
-
-
-def _record_pause(db: Session, entry: dict[str, Any], reason: str, moment: datetime) -> dict[str, Any]:
-    """Log that a paused marketplace left this listing up, at most once a day.
-
-    Nothing is deleted, priced or sent. A pass within the interval reports the
-    reason without writing another row.
-    """
-    marketplace = entry["marketplace"]
-    outcome = {
-        "conversation_id": entry["conversation_id"], "marketplace": marketplace,
-        "old_listing_id": entry["listing_id"], "new_listing_id": None, "status": PAUSED_STATUS, "reason": reason,
-    }
-    logged = (
-        db.query(MarketplaceRelistLog.id)
-        .filter(MarketplaceRelistLog.marketplace == marketplace, MarketplaceRelistLog.status == PAUSED_STATUS,
-                MarketplaceRelistLog.created_at > moment - PAUSED_LOG_INTERVAL)
-        .first()
-    )
-    if logged is not None:
-        return outcome
-    return _record_log(
-        db, conv_id=entry["conversation_id"], marketplace=marketplace, old_listing_id=entry["listing_id"],
-        new_listing_id=None, old_price=entry["price"], new_price=entry["price"], status=PAUSED_STATUS,
-        reason=reason, moment=moment,
-    )
 
 
 def _update_attempt_stage(
@@ -1279,7 +1234,7 @@ async def run_auto_relist(
                 "old_price": entry["price"],
                 "new_price": entry["new_price"],
                 "status": "dry_run",
-                "reason": REPLACEMENT_UNVERIFIED.get(entry["marketplace"]),
+                "reason": None,
             }
             for entry in plan
         ]
@@ -1287,8 +1242,6 @@ async def run_auto_relist(
     async def _run_delist(
         conv_id: str, marketplace: str, expected_listing_id: str, rule_id: str, revision_id: str
     ) -> dict[str, Any]:
-        if marketplace in REPLACEMENT_UNVERIFIED:
-            return {"ok": False, "error": REPLACEMENT_UNVERIFIED[marketplace]}
         if not await in_worker_session(_rule_enabled, rule_id):
             return {
                 "ok": False,
@@ -1418,9 +1371,6 @@ async def run_auto_relist(
         if not reservation["reserved"]:
             if reservation.get("outcome") is not None:
                 outcomes.append(reservation["outcome"])
-                if market in REPLACEMENT_UNVERIFIED:
-                    # One refusal per pass says why; the rest of this marketplace waits.
-                    blocked_markets.add(market)
             continue
 
         attempt_id = reservation["attempt_id"]

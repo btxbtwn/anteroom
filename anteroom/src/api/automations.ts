@@ -197,7 +197,7 @@ export interface BulkScheduleResult {
   failed: { conversation_id: string; error: string }[];
 }
 
-export type AutoRelistMarketplace = "poshmark" | "ebay" | "mercari" | "depop";
+export type AutoRelistMarketplace = "poshmark" | "ebay" | "depop";
 
 export interface AutoRelistFilters {
   min_likes?: number;
@@ -223,8 +223,6 @@ export interface AutoRelistRule {
   relisted_today: number;
   remaining_today: number;
   last_run_at: string | null;
-  /** Why this marketplace's Auto-Relist leaves listings up instead of relisting them. */
-  paused_reason: string | null;
 }
 
 export interface AutoRelistRuleBody {
@@ -243,7 +241,7 @@ export interface AutoRelistLog {
   id: string;
   conversation_id: string;
   title: string | null;
-  marketplace: AutoRelistMarketplace;
+  marketplace: AutoRelistMarketplace | "mercari";
   old_listing_id: string | null;
   new_listing_id: string | null;
   old_price: number | null;

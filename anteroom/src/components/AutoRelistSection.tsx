@@ -1,18 +1,13 @@
-/**
- * Per-marketplace unattended Auto-Relist and eBay Auto-Recreate settings.
- *
- * Every marketplace rule defaults to OFF and requires explicit seller confirmation
- * to turn on. Respects the 30-day minimum on Poshmark/Mercari/Depop, eBay GTC
- * recreate window (~30m before renewal), daily cap (<= 100), optional price drop
- * with floor, filters, and atomic listing ID swapping.
- */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDownIcon, RefreshCwIcon } from "lucide-react";
 
 import { api } from "../api/client";
 import { autoRelistRulesQuery } from "../api/pageQueries";
 import type { AutoRelistMarketplace, AutoRelistRule, AutoRelistRuleBody } from "../api/automations";
+import { optionsForField } from "../dropdownOptions";
+import { SearchableMultiSelect } from "./ListingFormControls";
+import { Skeleton } from "./ui/skeleton";
 import { confirmDialog } from "../ui/confirmDialog";
 import { marketplaceName } from "./marketplaceNames";
 import { Button } from "./ui/button";
@@ -21,10 +16,20 @@ import { Input } from "./ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Spinner } from "./ui/spinner";
 import { Switch } from "./ui/switch";
-import { PageError, PageSection, Panel } from "./WorkspacePage";
+import { FormField, PageError, PageSection, Panel } from "./WorkspacePage";
 
 const KEY = autoRelistRulesQuery.queryKey;
 const LOGS_KEY = ["auto-relist-logs"] as const;
+
+const STATUS_LABELS = new Map([
+  ["completed", "Relisted"],
+  ["failed", "Relist failed"],
+  ["down_needs_relist", "Old listing removed. Needs relisting."],
+  ["relist_pending", "Relist in progress"],
+  ["skipped_rule_disabled", "Skipped because Auto-Relist was off"],
+  ["skipped_paused", "Skipped because Auto-Relist was paused"],
+  ["dry_run", "Preview"],
+]);
 
 interface RuleFormState {
   minAgeDays: string;
@@ -37,9 +42,9 @@ interface RuleFormState {
   maxLikes: string;
   minPrice: string;
   maxPrice: string;
-  conditions: string;
+  conditions: string[];
   keywords: string;
-  labels: string;
+  labels: string[];
 }
 
 function formFromRule(rule: AutoRelistRule): RuleFormState {
@@ -54,9 +59,9 @@ function formFromRule(rule: AutoRelistRule): RuleFormState {
     maxLikes: rule.filters.max_likes != null ? String(rule.filters.max_likes) : "",
     minPrice: rule.filters.min_price != null ? String(rule.filters.min_price) : "",
     maxPrice: rule.filters.max_price != null ? String(rule.filters.max_price) : "",
-    conditions: (rule.filters.conditions ?? []).join(", "),
+    conditions: rule.filters.conditions ?? [],
     keywords: (rule.filters.keywords ?? []).join(", "),
-    labels: (rule.filters.labels ?? []).join(", "),
+    labels: rule.filters.labels ?? [],
   };
 }
 
@@ -76,12 +81,10 @@ function bodyFromRuleForm(
   if (form.maxLikes.trim()) filters.max_likes = Number(form.maxLikes);
   if (form.minPrice.trim()) filters.min_price = Number(form.minPrice);
   if (form.maxPrice.trim()) filters.max_price = Number(form.maxPrice);
-  const conditions = splitCsv(form.conditions);
-  if (conditions) filters.conditions = conditions;
+  if (form.conditions.length) filters.conditions = form.conditions;
   const keywords = splitCsv(form.keywords);
   if (keywords) filters.keywords = keywords;
-  const labels = splitCsv(form.labels);
-  if (labels) filters.labels = labels;
+  if (form.labels.length) filters.labels = form.labels;
 
   return {
     enabled,
@@ -98,12 +101,12 @@ function bodyFromRuleForm(
 
 function ruleSummary(rule: AutoRelistRule): string {
   const cadence = rule.marketplace === "ebay"
-    ? `Recreates ~${rule.ebay_recreate_before_gtc_minutes ?? 30} min before 30-day GTC renewal`
-    : `Minimum ${rule.min_age_days}-day age cycle`;
+    ? `Recreates about ${rule.ebay_recreate_before_gtc_minutes ?? 30} min before eBay renews the listing`
+    : `Listings at least ${rule.min_age_days} days old`;
   const price = rule.price_adjust_mode && rule.price_adjust_value
     ? ` · Drop ${rule.price_adjust_mode === "percent" ? `${rule.price_adjust_value}%` : `$${rule.price_adjust_value}`}${rule.price_floor != null ? ` (floor $${rule.price_floor})` : ""}`
     : "";
-  return `${cadence} · Cap ${rule.relisted_today}/${rule.daily_cap} today${price}`;
+  return `${cadence} · ${rule.relisted_today} of ${rule.daily_cap} relisted today${price}`;
 }
 
 export function AutoRelistSection() {
@@ -114,6 +117,19 @@ export function AutoRelistSection() {
     queryFn: () => api.automations.autoRelistLogs(undefined, 30),
   });
   const [editing, setEditing] = useState<AutoRelistMarketplace | null>(null);
+  const { data: dropdowns } = useQuery({
+    queryKey: ["catalog-dropdown-options"], queryFn: api.catalog.dropdownOptions,
+    staleTime: Infinity, enabled: editing !== null,
+  });
+  const { data: conversations } = useQuery({
+    queryKey: ["conversations"], queryFn: ({ signal }) => api.conversations.list({ signal }),
+    enabled: editing !== null,
+  });
+  const conditionOptions = optionsForField(dropdowns?.forms, "general", "condition") ?? [];
+  const labelOptions = useMemo(
+    () => [...new Set(conversations?.flatMap((item) => item.vendoo_labels ?? []))].sort(),
+    [conversations],
+  );
   const [form, setForm] = useState<RuleFormState | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -161,10 +177,10 @@ export function AutoRelistSection() {
     setError("");
     if (nextEnabled) {
       const modeText = rule.marketplace === "ebay"
-        ? `recreate eligible eBay listings ~${rule.ebay_recreate_before_gtc_minutes ?? 30} minutes before their 30-day GTC renewal`
-        : `delist and relist stale ${marketplaceName(rule.marketplace)} listings at least ${rule.min_age_days} days old`;
+        ? `recreate eligible eBay listings about ${rule.ebay_recreate_before_gtc_minutes ?? 30} minutes before eBay renews them`
+        : `replace eligible ${marketplaceName(rule.marketplace)} listings at least ${rule.min_age_days} days old`;
       const ok = await confirmDialog(
-        `Enable unattended auto-relist on ${marketplaceName(rule.marketplace)}? Anteroom will ${modeText}, up to ${rule.daily_cap}/day, and atomically update tracked listing IDs so post-sale auto-delisting stays pinned. Any open buyer offer on a relisted listing ends with the old listing.`,
+        `Turn on Auto-Relist for ${marketplaceName(rule.marketplace)}? Anteroom will ${modeText}, up to ${rule.daily_cap} listings per day. Relisting ends any open offers on the old listing.`,
         { confirmLabel: "Enable auto-relist" },
       );
       if (!ok) return;
@@ -193,8 +209,9 @@ export function AutoRelistSection() {
 
   return (
     <PageSection
+      aria-label="Auto-relist and eBay auto-recreate"
       title="Auto-relist and eBay auto-recreate"
-      description="Opt-in per-marketplace relisting (off by default). Atomically swaps tracked listing IDs so sale auto-delisting never loses track."
+      description="Auto-Relist starts off. Turn it on for each marketplace where you want Anteroom to replace older listings automatically. Relisting ends any open offers on the old listing."
       actions={anyEnabled ? (
         <Button size="xs" variant="outline" disabled={busy} onClick={() => runNow.mutate()}>
           {runNow.isPending ? <Spinner size="sm" /> : <RefreshCwIcon className="size-3.5" />}
@@ -205,7 +222,28 @@ export function AutoRelistSection() {
       {error ? <PageError message={error} /> : null}
       {notice ? <p role="status" className="text-xs text-muted-foreground">{notice}</p> : null}
 
+      {rulesQuery.isError ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <PageError message="Could not load Auto-Relist settings." />
+          <Button size="xs" variant="outline" disabled={rulesQuery.isFetching} onClick={() => void rulesQuery.refetch()}>
+            Retry
+          </Button>
+        </div>
+      ) : null}
       <Panel>
+        {rulesQuery.isPending ? (
+          <div role="status" aria-label="Loading Auto-Relist settings" aria-busy="true" className="divide-y divide-border">
+            {[0, 1, 2].map((row) => (
+              <div key={row} className="flex items-center justify-between gap-3 px-4 py-3">
+                <div className="min-w-0 space-y-2">
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="h-3 w-40 max-w-full" />
+                </div>
+                <Skeleton className="h-5 w-20 shrink-0" />
+              </div>
+            ))}
+          </div>
+        ) : null}
         {rules.map((rule) => {
           const isEditing = editing === rule.marketplace && form !== null;
           return (
@@ -217,7 +255,6 @@ export function AutoRelistSection() {
                     {rule.marketplace === "ebay" ? " · Auto-recreate" : " · Auto-relist"}
                   </p>
                   <p className="text-xs text-muted-foreground">{ruleSummary(rule)}</p>
-                  {rule.paused_reason ? <p className="text-xs text-warning-foreground">{rule.paused_reason}</p> : null}
                 </div>
                 <div className="flex items-center gap-3">
                   <Button size="xs" variant="ghost" disabled={busy} onClick={() => openEditor(rule)}>
@@ -237,8 +274,7 @@ export function AutoRelistSection() {
                 <div className="mt-3 space-y-3 rounded-lg border border-border/60 p-3 text-xs">
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                     {rule.marketplace === "ebay" ? (
-                      <label className="flex flex-col gap-1">
-                        Minutes before 30-day GTC renewal
+                      <FormField label="Minutes before eBay renews the listing">
                         <Input
                           type="number"
                           min={5}
@@ -246,10 +282,9 @@ export function AutoRelistSection() {
                           value={form.ebayGtcMinutes}
                           onChange={(e) => setForm({ ...form, ebayGtcMinutes: e.target.value })}
                         />
-                      </label>
+                      </FormField>
                     ) : (
-                      <label className="flex flex-col gap-1">
-                        Minimum age (days, min 30)
+                      <FormField label="Minimum age (days, min 30)">
                         <Input
                           type="number"
                           min={30}
@@ -257,10 +292,9 @@ export function AutoRelistSection() {
                           value={form.minAgeDays}
                           onChange={(e) => setForm({ ...form, minAgeDays: e.target.value })}
                         />
-                      </label>
+                      </FormField>
                     )}
-                    <label className="flex flex-col gap-1">
-                      Daily cap (1–100)
+                    <FormField label="Listings per day (1–100)">
                       <Input
                         type="number"
                         min={1}
@@ -268,9 +302,8 @@ export function AutoRelistSection() {
                         value={form.dailyCap}
                         onChange={(e) => setForm({ ...form, dailyCap: e.target.value })}
                       />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      Price adjustment
+                    </FormField>
+                    <FormField label="Price adjustment">
                       <Select
                         value={form.priceMode}
                         onValueChange={(next) => setForm({ ...form, priceMode: (next || "none") as RuleFormState["priceMode"] })}
@@ -286,13 +319,12 @@ export function AutoRelistSection() {
                           <SelectItem value="amount">Drop by $</SelectItem>
                         </SelectPopup>
                       </Select>
-                    </label>
+                    </FormField>
                   </div>
 
                   {form.priceMode !== "none" ? (
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <label className="flex flex-col gap-1">
-                        {form.priceMode === "percent" ? "Drop percent (%)" : "Drop amount ($)"}
+                      <FormField label={form.priceMode === "percent" ? "Drop percent (%)" : "Drop amount ($)"}>
                         <Input
                           type="number"
                           min="0.01"
@@ -300,9 +332,8 @@ export function AutoRelistSection() {
                           value={form.priceValue}
                           onChange={(e) => setForm({ ...form, priceValue: e.target.value })}
                         />
-                      </label>
-                      <label className="flex flex-col gap-1">
-                        Price floor ($, optional)
+                      </FormField>
+                      <FormField label="Price floor ($, optional)">
                         <Input
                           type="number"
                           min="0"
@@ -311,52 +342,56 @@ export function AutoRelistSection() {
                           value={form.priceFloor}
                           onChange={(e) => setForm({ ...form, priceFloor: e.target.value })}
                         />
-                      </label>
+                      </FormField>
                     </div>
                   ) : null}
 
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <label className="flex flex-col gap-1">
-                      Min likes / watchers
+                    <FormField label="Min likes / watchers">
                       <Input type="number" min={0} placeholder="Any" value={form.minLikes}
                         onChange={(e) => setForm({ ...form, minLikes: e.target.value })} />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      Max likes / watchers
+                    </FormField>
+                    <FormField label="Max likes / watchers">
                       <Input type="number" min={0} placeholder="Any" value={form.maxLikes}
                         onChange={(e) => setForm({ ...form, maxLikes: e.target.value })} />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      Min price ($)
+                    </FormField>
+                    <FormField label="Min price ($)">
                       <Input type="number" min={0} step="0.01" placeholder="Any" value={form.minPrice}
                         onChange={(e) => setForm({ ...form, minPrice: e.target.value })} />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      Max price ($)
+                    </FormField>
+                    <FormField label="Max price ($)">
                       <Input type="number" min={0} step="0.01" placeholder="Any" value={form.maxPrice}
                         onChange={(e) => setForm({ ...form, maxPrice: e.target.value })} />
-                    </label>
+                    </FormField>
                   </div>
 
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    <label className="flex flex-col gap-1">
-                      Conditions (comma-separated)
-                      <Input placeholder="New with tags, Good" value={form.conditions}
-                        onChange={(e) => setForm({ ...form, conditions: e.target.value })} />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      Keywords (comma-separated)
+                    <FormField label="Conditions" htmlFor={`relist-${rule.marketplace}-conditions`}>
+                      <SearchableMultiSelect
+                        id={`relist-${rule.marketplace}-conditions`}
+                        fieldKey="conditions"
+                        value={form.conditions}
+                        options={[...new Set([...conditionOptions, ...form.conditions])]}
+                        onChange={(conditions) => setForm({ ...form, conditions })}
+                        disabled={busy}
+                      />
+                    </FormField>
+                    <FormField label="Keywords (comma-separated)">
                       <Input placeholder="vintage, denim" value={form.keywords}
                         onChange={(e) => setForm({ ...form, keywords: e.target.value })} />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      Labels (comma-separated)
-                      <Input placeholder="winter, clearance" value={form.labels}
-                        onChange={(e) => setForm({ ...form, labels: e.target.value })} />
-                    </label>
+                    </FormField>
+                    <FormField label="Labels" htmlFor={`relist-${rule.marketplace}-labels`}>
+                      <SearchableMultiSelect
+                        id={`relist-${rule.marketplace}-labels`}
+                        fieldKey="labels"
+                        value={form.labels}
+                        options={[...new Set([...labelOptions, ...form.labels])]}
+                        onChange={(labels) => setForm({ ...form, labels })}
+                        disabled={busy}
+                        selectionOnly={false}
+                      />
+                    </FormField>
                   </div>
-
-                  <p>Relisting ends any open buyer offer on the old listing.</p>
 
                   <div className="flex gap-2">
                     <Button size="xs" disabled={busy} onClick={() => void saveEdited(rule)}>
@@ -389,8 +424,7 @@ export function AutoRelistSection() {
                       {entry.title || entry.conversation_id} · {marketplaceName(entry.marketplace)}
                     </p>
                     <p className={entry.status === "failed" || entry.status === "down_needs_relist" ? "text-destructive-foreground" : "text-muted-foreground"}>
-                      {entry.status}
-                      {entry.old_listing_id && entry.new_listing_id ? ` · ${entry.old_listing_id} → ${entry.new_listing_id}` : ""}
+                      {STATUS_LABELS.get(entry.status) ?? "Unknown status"}
                       {entry.old_price != null && entry.new_price != null && entry.old_price !== entry.new_price
                         ? ` · $${entry.old_price} → $${entry.new_price}`
                         : ""}

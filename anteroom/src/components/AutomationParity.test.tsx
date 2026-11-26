@@ -80,7 +80,7 @@ describe("Wave 2 Track C automation and sale-sync UI components", () => {
     expect(html).toContain("Scheduled publish history (1)");
   });
 
-  it("renders AutoRelistSection with per-marketplace controls OFF by default and eBay GTC mode", () => {
+  it("renders AutoRelistSection with per-marketplace controls OFF by default and eBay renewal timing", () => {
     useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) => {
       if (queryKey[0] === "auto-relist-rules") {
         return {
@@ -99,7 +99,6 @@ describe("Wave 2 Track C automation and sale-sync UI components", () => {
               relisted_today: 0,
               remaining_today: 25,
               last_run_at: null,
-              paused_reason: null,
             },
             {
               marketplace: "ebay",
@@ -114,7 +113,6 @@ describe("Wave 2 Track C automation and sale-sync UI components", () => {
               relisted_today: 2,
               remaining_today: 48,
               last_run_at: null,
-              paused_reason: null,
             },
           ],
         };
@@ -124,10 +122,10 @@ describe("Wave 2 Track C automation and sale-sync UI components", () => {
 
     const html = renderToStaticMarkup(<AutoRelistSection />);
     expect(html).toContain("Auto-relist and eBay auto-recreate");
-    expect(html).toContain("Minimum 30-day age cycle");
-    expect(html).toContain("Recreates ~30 min before 30-day GTC renewal");
+    expect(html).toContain("Listings at least 30 days old");
+    expect(html).toContain("Recreates about 30 min before eBay renews the listing");
     expect(html).toContain("Drop 10% (floor $20)");
-    expect(html).toContain("Cap 2/50 today");
+    expect(html).toContain("2 of 50 relisted today");
   });
 
   it("renders SaleDetectionTracker with 60-day summary, SKU, error details, and one-click Retry", () => {
