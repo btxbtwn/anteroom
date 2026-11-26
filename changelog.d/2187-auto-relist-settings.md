@@ -1,2 +1,2 @@
 - Auto-Relist now shows when settings are loading and lets you retry if they fail to load. Choose conditions and labels from searchable lists, and read clearer activity updates.
-- Removed the Mercari Auto-Relist switch. Auto-Relist is available for Poshmark, eBay, and Depop and starts off for each marketplace.
+- Mercari Auto-Relist shows why it’s paused and whether it’s set to resume when available.

@@ -173,7 +173,7 @@ TOOLS: list[dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "marketplace": {"type": "string", "enum": ["poshmark", "ebay", "depop"]},
+                "marketplace": {"type": "string", "enum": ["poshmark", "ebay", "mercari", "depop"]},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25,
                           "description": "Maximum candidate details to include per marketplace."},
             },

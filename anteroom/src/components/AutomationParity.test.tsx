@@ -99,6 +99,7 @@ describe("Wave 2 Track C automation and sale-sync UI components", () => {
               relisted_today: 0,
               remaining_today: 25,
               last_run_at: null,
+              paused_reason: null,
             },
             {
               marketplace: "ebay",
@@ -113,6 +114,7 @@ describe("Wave 2 Track C automation and sale-sync UI components", () => {
               relisted_today: 2,
               remaining_today: 48,
               last_run_at: null,
+              paused_reason: null,
             },
           ],
         };
@@ -126,6 +128,21 @@ describe("Wave 2 Track C automation and sale-sync UI components", () => {
     expect(html).toContain("Recreates about 30 min before eBay renews the listing");
     expect(html).toContain("Drop 10% (floor $20)");
     expect(html).toContain("2 of 50 relisted today");
+  });
+
+  it("labels a paused rule's saved preference separately from active relisting", () => {
+    useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) => ({
+      data: queryKey[0] === "auto-relist-rules" ? [{
+        marketplace: "mercari", enabled: true, filters: {}, min_age_days: 30,
+        daily_cap: 25, relisted_today: 0, paused_reason: "Mercari can refuse the replacement listing.",
+      }] : [],
+    }));
+
+    const html = renderToStaticMarkup(<AutoRelistSection />);
+    expect(html).toContain(">Paused<");
+    expect(html).toContain("Mercari can refuse the replacement listing.");
+    expect(html).toContain("Resume Mercari Auto-Relist when available");
+    expect(html).not.toContain("Enable auto-relist for Mercari");
   });
 
   it("renders SaleDetectionTracker with 60-day summary, SKU, error details, and one-click Retry", () => {

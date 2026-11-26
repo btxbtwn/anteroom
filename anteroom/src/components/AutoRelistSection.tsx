@@ -10,6 +10,7 @@ import { SearchableMultiSelect } from "./ListingFormControls";
 import { Skeleton } from "./ui/skeleton";
 import { confirmDialog } from "../ui/confirmDialog";
 import { marketplaceName } from "./marketplaceNames";
+import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsible";
 import { Input } from "./ui/input";
@@ -144,9 +145,10 @@ export function AutoRelistSection() {
       api.automations.saveAutoRelistRule(marketplace, body),
     onSuccess: (saved) => {
       setError("");
-      setNotice(
-        `${marketplaceName(saved.marketplace)} auto-relist ${saved.enabled ? "enabled" : "saved (off)"}.`,
-      );
+      const name = marketplaceName(saved.marketplace);
+      setNotice(saved.enabled && saved.paused_reason
+        ? `${name} Auto-Relist is set to resume when available.`
+        : `${name} Auto-Relist ${saved.enabled ? "enabled" : "saved (off)"}.`);
       setEditing(null);
       setForm(null);
       refresh();
@@ -179,9 +181,13 @@ export function AutoRelistSection() {
       const modeText = rule.marketplace === "ebay"
         ? `recreate eligible eBay listings about ${rule.ebay_recreate_before_gtc_minutes ?? 30} minutes before eBay renews them`
         : `replace eligible ${marketplaceName(rule.marketplace)} listings at least ${rule.min_age_days} days old`;
+      const name = marketplaceName(rule.marketplace);
+      const prompt = rule.paused_reason
+        ? `Resume Auto-Relist for ${name} when available? Auto-Relist is paused. When it resumes, Anteroom will`
+        : `Turn on Auto-Relist for ${name}? Anteroom will`;
       const ok = await confirmDialog(
-        `Turn on Auto-Relist for ${marketplaceName(rule.marketplace)}? Anteroom will ${modeText}, up to ${rule.daily_cap} listings per day. Relisting ends any open offers on the old listing.`,
-        { confirmLabel: "Enable auto-relist" },
+        `${prompt} ${modeText}, up to ${rule.daily_cap} listings per day. Relisting ends any open offers on the old listing.`,
+        { confirmLabel: rule.paused_reason ? "Resume when available" : "Enable auto-relist" },
       );
       if (!ok) return;
     }
@@ -248,25 +254,35 @@ export function AutoRelistSection() {
           const isEditing = editing === rule.marketplace && form !== null;
           return (
             <div key={rule.marketplace} className="px-4 py-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-foreground">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 flex-1 basis-48">
+                  <p className="flex flex-wrap items-center gap-x-2 text-sm font-medium text-foreground">
                     {marketplaceName(rule.marketplace)}
                     {rule.marketplace === "ebay" ? " · Auto-recreate" : " · Auto-relist"}
+                    {rule.paused_reason ? <Badge variant="warning">Paused</Badge> : null}
                   </p>
                   <p className="text-xs text-muted-foreground">{ruleSummary(rule)}</p>
+                  {rule.paused_reason ? (
+                    <p id={`relist-${rule.marketplace}-pause`} className="mt-1 text-xs text-muted-foreground">{rule.paused_reason}</p>
+                  ) : null}
                 </div>
                 <div className="flex items-center gap-3">
                   <Button size="xs" variant="ghost" disabled={busy} onClick={() => openEditor(rule)}>
                     {isEditing ? "Close" : "Configure"}
                   </Button>
-                  <Switch
-                    size="sm"
-                    checked={rule.enabled}
-                    disabled={busy}
-                    aria-label={`Enable auto-relist for ${marketplaceName(rule.marketplace)}`}
-                    onCheckedChange={(checked) => void toggleRule(rule, checked)}
-                  />
+                  <div className="flex items-center gap-2">
+                    {rule.paused_reason ? <span className="text-xs text-muted-foreground">Resume when available</span> : null}
+                    <Switch
+                      size="sm"
+                      checked={rule.enabled}
+                      disabled={busy}
+                      aria-label={rule.paused_reason
+                        ? `Resume ${marketplaceName(rule.marketplace)} Auto-Relist when available`
+                        : `Enable auto-relist for ${marketplaceName(rule.marketplace)}`}
+                      aria-describedby={rule.paused_reason ? `relist-${rule.marketplace}-pause` : undefined}
+                      onCheckedChange={(checked) => void toggleRule(rule, checked)}
+                    />
+                  </div>
                 </div>
               </div>
 

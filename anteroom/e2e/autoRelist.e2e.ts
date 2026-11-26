@@ -1,13 +1,21 @@
 import { expect, test } from "./fixtures";
 
-test("auto-relist recovers from a failed load and only offers supported marketplaces", async ({ page, phone }, info) => {
+test("auto-relist recovers from a failed load and distinguishes a saved rule from a pause", async ({ page, phone }, info) => {
   let fail = true;
   let release: () => void = () => {};
   const delay = new Promise<void>((resolve) => { release = resolve; });
   await page.route("**/api/automations/auto-relist", async (route) => {
     await delay;
     if (fail) await route.fulfill({ status: 503, json: { detail: "Unavailable" } });
-    else await route.continue();
+    else {
+      const response = await route.fetch();
+      const { rules } = await response.json();
+      await route.fulfill({
+        response,
+        json: { rules: rules.map((rule: { marketplace: string }) =>
+          rule.marketplace === "mercari" ? { ...rule, enabled: true } : rule) },
+      });
+    }
   });
   await page.route("**/api/automations/auto-relist/logs?*", (route) => route.fulfill({
     json: { logs: [{
@@ -29,8 +37,11 @@ test("auto-relist recovers from a failed load and only offers supported marketpl
   await expect(retry).toBeVisible({ timeout: 15_000 });
   fail = false;
   await retry.click();
-  await expect(section.getByRole("switch")).toHaveCount(3);
-  await expect(section.getByRole("switch", { name: /Mercari/ })).toHaveCount(0);
+  await expect(section.getByRole("switch")).toHaveCount(4);
+  await expect(section.getByText("Paused", { exact: true })).toBeVisible();
+  await expect(section.getByText(/Anteroom leaves Mercari listings up/)).toBeVisible();
+  await expect(section.getByRole("switch", { name: "Resume Mercari Auto-Relist when available" })).toBeChecked();
+  await expect(section.getByRole("switch", { name: "Enable auto-relist for Mercari" })).toHaveCount(0);
   const activity = section.getByRole("button", { name: "Auto-relist log (1)" });
   await activity.click();
   await expect(section.getByText("Old listing removed. Needs relisting.")).toBeVisible();

@@ -111,17 +111,11 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         )
         self.assertEqual(denied.status_code, 400)
 
-        denied_mercari = self.client.put(
-            "/api/automations/auto-relist/mercari",
-            json={"enabled": True, "confirm": True},
-        )
-        self.assertEqual(denied_mercari.status_code, 400)
-
-        # Auto-relist rules default OFF across all supported marketplaces.
+        # Auto-relist rules default OFF across all 4 marketplaces.
         rules_res = self.client.get("/api/automations/auto-relist")
         self.assertEqual(rules_res.status_code, 200)
         rules = rules_res.json()["rules"]
-        self.assertEqual([r["marketplace"] for r in rules], ["poshmark", "ebay", "depop"])
+        self.assertEqual([r["marketplace"] for r in rules], ["poshmark", "ebay", "mercari", "depop"])
         self.assertTrue(all(r["enabled"] is False for r in rules))
 
         # Enabling auto-relist without confirm=True is refused.
@@ -1466,6 +1460,13 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         posh_pct.price_floor = 7.5
         self.assertEqual(auto_relist.compute_relist_price(8.0, posh_pct), 8.0)
         self.assertEqual(auto_relist.compute_relist_price(9.0, posh_pct), 8.0)
+        # Mercari's form takes whole dollars too.
+        mercari_pct = MarketplaceRelistRule(
+            id=new_id(), marketplace="mercari", enabled=True,
+            price_adjust_mode="percent", price_adjust_value=10.0, price_floor=None,
+        )
+        self.assertEqual(auto_relist.compute_relist_price(6.0, mercari_pct), 5.0)
+        self.assertEqual(auto_relist.compute_relist_price(30.0, mercari_pct), 27.0)
         # Marketplaces that take cents keep them.
         ebay_pct = MarketplaceRelistRule(
             id=new_id(), marketplace="ebay", enabled=True,
@@ -2056,21 +2057,96 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         assert prices is not None
         self.assertEqual(auto_relist.price_for(prices.listing_json, "mercari"), 58.0)
 
-    def test_previously_enabled_mercari_rule_is_ignored(self):
-        mercari = self._mercari_due("Mercari scarf", "m123456783")
-        self.db.add(MarketplaceRelistRule(
-            id=new_id(), marketplace="mercari", enabled=True, min_age_days=30, daily_cap=25,
+    def test_mercari_relist_never_deletes_before_mercari_accepts_a_replacement(self):
+        """Production 2026-11-25: the delete ran, then Mercari refused the replacement draft."""
+        first = self._mercari_due("Mercari coat", "m123456781", age_days=50)
+        second = self._mercari_due("Mercari vest", "m123456782", age_days=45)
+        auto_relist.save_rule(self.db, "mercari", {"enabled": True, "min_age_days": 30, "daily_cap": 10,
+                                                    "price_adjust_mode": "percent", "price_adjust_value": 10},
+                              confirm=True)
+        refused = {"state": "not_saved", "error": "Mercari could not save this listing.", "error_code": "rejected"}
+        with (
+            patch("anteroom.services.marketplace_delist.delist", AsyncMock(return_value={
+                "mercari": {"state": "deleted"},
+            })) as delete,
+            patch("anteroom.services.native_marketplaces.list_now", AsyncMock(return_value=refused)) as publish,
+            patch("anteroom.services.native_marketplaces.save_draft", AsyncMock(return_value=refused)) as draft,
+        ):
+            outcomes = asyncio.run(auto_relist.run_auto_relist(now=_now()))
+            again = asyncio.run(auto_relist.run_auto_relist(now=_now(), respect_backoff=False))
+
+        delete.assert_not_awaited()
+        publish.assert_not_awaited()
+        draft.assert_not_awaited()
+        # One refusal per pass: the oldest listing says why and the rest of Mercari waits.
+        self.assertEqual([(row["conversation_id"], row["status"]) for row in outcomes], [(first[0], "skipped_paused")])
+        self.assertIn("leaves Mercari listings up", outcomes[0]["reason"])
+        self.assertEqual([row["status"] for row in again], ["skipped_paused"])
+        self._assert_mercari_left_up(*first, "m123456781")
+        self._assert_mercari_left_up(*second, "m123456782")
+        self.assertEqual(self.db.query(MarketplaceRelistLog).filter_by(status="relist_pending").count(), 0)
+        # The second pass reports the pause without logging it again.
+        logged = self.db.query(MarketplaceRelistLog).filter_by(marketplace="mercari").all()
+        self.assertEqual([(row.status, row.old_price, row.new_price, row.price_revision_id) for row in logged],
+                         [("skipped_paused", 58.0, 58.0, None)])
+
+    def test_a_paused_mercari_rule_logs_once_a_day_and_uses_none_of_its_cap(self):
+        self._mercari_due("Mercari boots", "m123456785", age_days=50)
+        self._mercari_due("Mercari belt", "m123456786", age_days=45)
+        auto_relist.save_rule(self.db, "mercari", {"enabled": True, "min_age_days": 30, "daily_cap": 1}, confirm=True)
+        start = _now()
+        delete = AsyncMock(return_value={"mercari": {"state": "deleted"}})
+        with patch("anteroom.services.marketplace_delist.delist", delete):
+            for minutes in (0, 5, 10, 60 * 23):
+                asyncio.run(auto_relist.run_auto_relist(now=start + timedelta(minutes=minutes), scheduled=True))
+            self.assertEqual(self.db.query(MarketplaceRelistLog).count(), 1)
+            asyncio.run(auto_relist.run_auto_relist(now=start + timedelta(hours=24, minutes=5), scheduled=True))
+        delete.assert_not_awaited()
+        self.assertEqual(self.db.query(MarketplaceRelistLog).filter_by(status="skipped_paused").count(), 2)
+        rule = next(row for row in auto_relist.list_rules(self.db, now=start + timedelta(hours=24, minutes=6))
+                    if row["marketplace"] == "mercari")
+        self.assertEqual((rule["relisted_today"], rule["remaining_today"]), (0, 1))
+        self.assertIn("leaves Mercari listings up", rule["paused_reason"])
+
+    def test_mercari_relist_refuses_even_an_injected_runner_and_other_marketplaces_still_relist(self):
+        mercari = self._mercari_due("Mercari scarf", "m123456783", age_days=60)
+        conv, _, _ = self._create_draft("Poshmark scarf", price=50.0)
+        posh_old = "5f00000000000000000000e1"
+        self.db.add(MarketplaceListing(
+            id=new_id(), conversation_id=conv.id, marketplace="poshmark", state="published",
+            listing_id=posh_old, listing_url=f"https://poshmark.com/listing/{posh_old}",
+            listed_price=50.0, listed_at=_now() - timedelta(days=40),
         ))
         self.db.commit()
+        for market in ("mercari", "poshmark"):
+            auto_relist.save_rule(self.db, market, {"enabled": True, "min_age_days": 30, "daily_cap": 10}, confirm=True)
+        delisted: list[str] = []
+        listed: list[str] = []
 
-        delister = AsyncMock()
-        lister = AsyncMock()
-        outcomes = asyncio.run(auto_relist.run_auto_relist(now=_now(), delister=delister, lister=lister))
-        self.assertEqual(outcomes, [])
-        delister.assert_not_awaited()
-        lister.assert_not_awaited()
-        self.assertNotIn("mercari", [rule["marketplace"] for rule in auto_relist.list_rules(self.db)])
+        async def delister(conv_id: str, market: str) -> dict:
+            delisted.append(market)
+            return {"ok": True}
+
+        async def lister(conv_id: str, market: str, rev_id: str) -> dict:
+            listed.append(market)
+            return {"ok": True, "listing_id": "5f00000000000000000000e2"}
+
+        outcomes = asyncio.run(auto_relist.run_auto_relist(now=_now(), scheduled=True,
+                                                           delister=delister, lister=lister))
+        self.assertEqual((delisted, listed), (["poshmark"], ["poshmark"]))
+        self.assertEqual(sorted((row["marketplace"], row["status"]) for row in outcomes),
+                         [("mercari", "skipped_paused"), ("poshmark", "completed")])
         self._assert_mercari_left_up(*mercari, "m123456783")
+
+    def test_mercari_relist_pause_shows_in_the_preview_and_dry_run(self):
+        self._mercari_due("Mercari hat", "m123456784")
+        auto_relist.save_rule(self.db, "mercari", {"enabled": True, "min_age_days": 30}, confirm=True)
+        preview = auto_relist.preview_status(self.db, marketplace="mercari")
+        self.assertIn("leaves Mercari listings up", preview["rules"][0]["paused_reason"])
+        self.assertIsNone(auto_relist.preview_status(self.db, marketplace="poshmark")["rules"][0]["paused_reason"])
+        dry = asyncio.run(auto_relist.run_auto_relist(now=_now(), dry_run=True))
+        self.assertEqual([(row["marketplace"], row["status"]) for row in dry], [("mercari", "dry_run")])
+        self.assertIn("leaves Mercari listings up", dry[0]["reason"])
 
 
 if __name__ == "__main__":
