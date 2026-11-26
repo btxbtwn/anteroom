@@ -138,3 +138,82 @@ test("a queued follow-up is still sent after the page reloads", async ({ page, p
   await expect(streaming).toHaveCount(0);
   await expect(page.locator('[data-message-role="assistant"]')).toHaveCount(2);
 });
+
+/** How many different lengths the answer being written shows over `ms`, read once a frame. */
+function countRevealSteps(page: import("@playwright/test").Page, ms: number) {
+  return page.evaluate((duration) => new Promise<number>((resolve) => {
+    const lengths = new Set<number>();
+    const started = performance.now();
+    const read = () => {
+      const row = document.querySelector('[data-message-role="assistant"][aria-busy="true"]');
+      if (row) lengths.add((row.textContent ?? "").length);
+      if (performance.now() - started < duration) requestAnimationFrame(read);
+      else resolve(lengths.size);
+    };
+    read();
+  }), ms);
+}
+
+/** A reply that arrives a few large chunks at a time is shown flowing, each new word fading in. */
+test("a reply delivered in large chunks is revealed word by word", async ({ page, phone }) => {
+  const composer = await openAssistant(page, phone);
+  await composer.fill("Tell me something long [sandbox:burst]");
+  await composer.press("Enter");
+  const streaming = page.locator('[data-message-role="assistant"][aria-busy="true"]');
+  await expect(streaming).toContainText("Sandbox sends this reply", { timeout: 15_000 });
+
+  const word = streaming.locator(".chat-stream-word").first();
+  await expect(word).toBeVisible();
+  expect(await word.evaluate((el) => getComputedStyle(el).animationName)).toBe("chat-word-in");
+  // Six chunks arrive in all, two or three of them in this time; shown as they
+  // land, the answer would take a handful of lengths at most.
+  expect(await countRevealSteps(page, 1500)).toBeGreaterThan(10);
+
+  // Nothing is held back once the reply ends, and the saved answer is plain text again.
+  const answer = page.locator('[data-message-role="assistant"]:not([aria-busy="true"])', { hasText: "The end." });
+  await expect(answer).toHaveCount(1, { timeout: 30_000 });
+  await expect(streaming).toHaveCount(0);
+  await expect(answer.locator(".chat-stream-word")).toHaveCount(0);
+});
+
+/** Reduced motion: text appears as it arrives, with no pacing and no fade. */
+test("with reduced motion a reply shows as it arrives", async ({ page, phone }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const composer = await openAssistant(page, phone);
+  await composer.fill("Tell me something long [sandbox:burst]");
+  await composer.press("Enter");
+  const streaming = page.locator('[data-message-role="assistant"][aria-busy="true"]');
+  await expect(streaming).toContainText("Sandbox sends this reply", { timeout: 15_000 });
+
+  const word = streaming.locator(".chat-stream-word").first();
+  expect(await word.evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
+  expect(await countRevealSteps(page, 1500)).toBeLessThanOrEqual(5);
+
+  const answer = page.locator('[data-message-role="assistant"]:not([aria-busy="true"])', { hasText: "The end." });
+  await expect(answer).toHaveCount(1, { timeout: 30_000 });
+});
+
+/** The messages and the message box share their edges; a phone's box rests at one line and reads at 16px. */
+test("the conversation lines up with the message box, and a phone gets a one-line box", async ({ page, phone }) => {
+  const composer = await openAssistant(page, phone);
+  await composer.fill("Line me up");
+  await composer.press("Enter");
+  const answer = page.locator('[data-message-role="assistant"]:not([aria-busy="true"])');
+  await expect(answer).toHaveCount(1, { timeout: 30_000 });
+
+  const edges = async (selector: string) => {
+    const box = await page.locator(selector).last().boundingBox();
+    return { left: Math.round(box!.x), right: Math.round(box!.x + box!.width) };
+  };
+  expect(await edges('[data-message-role="user"]')).toEqual(await edges('[data-slot="composer-host"]'));
+
+  if (!phone) return;
+  const prose = page.locator('[data-message-role="assistant"] .chat-markdown').last();
+  expect(await prose.evaluate((el) => getComputedStyle(el).fontSize)).toBe("16px");
+  // At rest the box is one touch target tall; it grows with what the seller types.
+  const resting = (await composer.boundingBox())!.height;
+  expect(resting).toBeLessThanOrEqual(52);
+  await composer.fill("A longer note to the assistant ".repeat(8));
+  expect((await composer.boundingBox())!.height).toBeGreaterThan(resting + 40);
+  await composer.fill("");
+});

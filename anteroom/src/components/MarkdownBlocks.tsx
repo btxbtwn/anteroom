@@ -1,11 +1,11 @@
 /**
  * Code blocks and tables in chat markdown, with T3 Code's frames: a code
  * block header naming the language with a copy button, and tables that
- * scroll sideways behind edge fades with a copy-as-Markdown action.
+ * scroll sideways behind edge fades. A table copies as cells, so it pastes
+ * into a spreadsheet: sellers move figures into sheets, not Markdown files.
  *
  * Adapted from T3 Code (MIT, © 2026 T3 Tools Inc.): MarkdownCodeBlock,
- * MarkdownCodeBlockFrame and MarkdownTable in components/ChatMarkdown.tsx,
- * serializeTable in markdown-clipboard.ts.
+ * MarkdownCodeBlockFrame and MarkdownTable in components/ChatMarkdown.tsx.
  */
 import {
   Children,
@@ -22,15 +22,15 @@ import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
-function useCopied(): [boolean, (text: string) => void] {
+function useCopied(): [boolean, (write: () => Promise<void>) => void] {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
     if (timer.current) clearTimeout(timer.current);
   }, []);
-  const copy = useCallback((text: string) => {
+  const copy = useCallback((write: () => Promise<void>) => {
     if (typeof navigator === "undefined" || !navigator.clipboard) return;
-    void navigator.clipboard.writeText(text).then(() => {
+    void write().then(() => {
       if (timer.current) clearTimeout(timer.current);
       setCopied(true);
       timer.current = setTimeout(() => setCopied(false), 1200);
@@ -78,7 +78,7 @@ export function MarkdownCodeBlock({ children }: { children: ReactNode }) {
   if (!block) return <pre>{children}</pre>;
   return (
     <div
-      className="chat-markdown-codeblock my-[0.65rem] overflow-hidden rounded-lg border border-border/70 bg-secondary leading-snug dark:border-transparent dark:bg-input/32"
+      className="chat-markdown-codeblock my-[0.65rem] overflow-hidden rounded-lg border border-border/70 bg-secondary text-sm leading-snug dark:border-transparent dark:bg-input/32"
       data-language={block.language}
       data-wrap="false"
     >
@@ -86,33 +86,57 @@ export function MarkdownCodeBlock({ children }: { children: ReactNode }) {
         <span className="inline-flex min-w-0 items-center gap-1.5 font-mono text-2xs">
           <span className="truncate">{block.language}</span>
         </span>
-        <CopyAction label="Copy code" copied={copied} onCopy={() => copy(block.code.replace(/\n$/, ""))} />
+        <CopyAction label="Copy code" copied={copied} onCopy={() => copy(() => navigator.clipboard.writeText(block.code.replace(/\n$/, "")))} />
       </div>
       <pre>{children}</pre>
     </div>
   );
 }
 
-function cellMarkdown(cell: Element): string {
-  return (cell.textContent ?? "").replace(/\s+/g, " ").trim().replace(/\|/g, "\\|");
+function tableRows(table: Element): string[][] {
+  const rows = [...table.querySelectorAll(":scope > thead > tr, :scope > tbody > tr, :scope > tr")];
+  return rows
+    .map((row) => [...row.children]
+      .filter((cell) => cell.tagName === "TH" || cell.tagName === "TD")
+      .map((cell) => (cell.textContent ?? "").replace(/\s+/g, " ").trim()))
+    .filter((cells) => cells.length > 0);
 }
 
-/** A rendered table back to GitHub-flavored Markdown, column alignment included. */
-export function serializeTableElementToMarkdown(table: Element): string {
-  const rows = [...table.querySelectorAll(":scope > thead > tr, :scope > tbody > tr, :scope > tr")];
-  const lines: string[] = [];
-  for (const row of rows) {
-    const cells = [...row.children].filter((cell) => cell.tagName === "TH" || cell.tagName === "TD");
-    if (!cells.length) continue;
-    lines.push(`| ${cells.map(cellMarkdown).join(" | ")} |`);
-    if (lines.length === 1) {
-      lines.push(`| ${cells.map((cell) => {
-        const align = (cell as HTMLElement).style?.textAlign || cell.getAttribute("align") || "";
-        return align === "center" ? ":---:" : align === "right" ? "---:" : align === "left" ? ":---" : "---";
-      }).join(" | ")} |`);
+/** A rendered table as tab-separated rows, which a spreadsheet pastes one value to a cell. */
+export function tableToTsv(table: Element): string {
+  return tableRows(table).map((cells) => cells.join("\t")).join("\n");
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** The same table as plain HTML, for an email or a document that keeps tables. */
+export function tableToHtml(table: Element): string {
+  const rows = tableRows(table).map((cells, index) => {
+    const tag = index === 0 && table.querySelector(":scope > thead") ? "th" : "td";
+    return `<tr>${cells.map((cell) => `<${tag}>${escapeHtml(cell)}</${tag}>`).join("")}</tr>`;
+  });
+  return `<table>${rows.join("")}</table>`;
+}
+
+/** Puts a table on the clipboard as cells: a sheet, an email and a plain note each take the form they can use. */
+async function copyTable(table: Element): Promise<void> {
+  const tsv = tableToTsv(table);
+  if (typeof ClipboardItem !== "undefined" && navigator.clipboard.write) {
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/plain": new Blob([tsv], { type: "text/plain" }),
+          "text/html": new Blob([tableToHtml(table)], { type: "text/html" }),
+        }),
+      ]);
+      return;
+    } catch {
+      // A browser that refuses rich clipboard items still takes the text.
     }
   }
-  return lines.join("\n");
+  await navigator.clipboard.writeText(tsv);
 }
 
 export function MarkdownTable({ children }: { children: ReactNode }) {
@@ -159,10 +183,11 @@ export function MarkdownTable({ children }: { children: ReactNode }) {
       </div>
       <div className="mt-0.5 flex items-center justify-end select-none">
         <CopyAction
-          label="Copy as Markdown"
+          label="Copy table"
           copied={copied}
           onCopy={() => {
-            if (tableRef.current) copy(serializeTableElementToMarkdown(tableRef.current));
+            const table = tableRef.current;
+            if (table) copy(() => copyTable(table));
           }}
         />
       </div>

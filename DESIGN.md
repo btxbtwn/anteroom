@@ -164,13 +164,23 @@ determinate progress bar only when the number is real.
 **Streaming replies.** A reply shows each word as it arrives: finished
 blocks render as markdown, and the block being written shows up to its last
 whole word, with any bold, italic or code the model has opened closed for it,
-so the seller never sees raw `**` turn into bold. Tables appear once whole. A
+so the seller never sees raw `**` turn into bold. Tables appear once whole.
+Text is revealed at a steady pace that follows how much has arrived, never in
+the chunks the network delivered, and never more than a moment behind; each
+new word fades in. When the reply ends or is stopped, all of it shows at once.
+With reduced motion, text appears as it arrives with no pacing or fade. A
 caret marks where text is arriving; it blinks only when motion is allowed. Stop
 sits where Send was, Esc in the message box does the same, and both keep what
 was already written. The transcript follows new text only while the reader is
 at the end; scrolling up to read stops it and shows **Scroll to end**. Screen
 readers hear that a reply has finished, once, never each word. On the iPhone,
 one haptic marks finished, failed or stopped, never each word.
+
+**Chat layout.** On a phone, replies are set at 16px, the size the message box types
+in, and code stays at 14px. The message box rests at one line (44px, a full
+touch target) and grows with the message. The messages and the message box
+share their left and right edges at every width. A table copies as cells, so
+it pastes into a spreadsheet.
 
 **Busy is a state, not an error.** When something the seller asked for has to
 wait its turn (a marketplace already working on another item, a provider at
@@ -312,4 +322,11 @@ already there; it only shrinks. The rest of this list needs a person's eye.
 - Apple, [Human Interface Guidelines: Feedback](https://developer.apple.com/design/human-interface-guidelines/feedback)
 - Shopify Polaris, [Toast](https://polaris.shopify.com/components/feedback-indicators/toast)
 - W3C, [WCAG 2.2](https://www.w3.org/TR/WCAG22/) (2.5.8 Target Size, 4.1.3 Status Messages)
+- Vercel, [AI SDK `smoothStream`](https://ai-sdk.dev/docs/reference/ai-sdk-core/smooth-stream)
+  (releases a stream word by word at a set delay) and
+  [Streamdown](https://streamdown.ai/docs) with its
+  [animation](https://streamdown.ai/docs/animation) option (completes
+  unterminated markdown; words fade in as they mount)
+- Apple, [Human Interface Guidelines: Typography](https://developer.apple.com/design/human-interface-guidelines/typography)
+  (iOS body text defaults to 17pt)
 - The Fountain Institute, [Signs of a vibe-coded UI](https://www.thefountaininstitute.com/blog/signs-vibe-coded-ui)

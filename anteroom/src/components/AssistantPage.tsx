@@ -36,7 +36,7 @@ import { foldSseEvent } from "./chat/chatStream";
 import { ChatTranscript } from "./chat/ChatTranscript";
 import { FoldedTurnRow, LiveWork } from "./chat/LiveWork";
 import { QueuedMessages } from "./chat/QueuedMessages";
-import { AssistantMessageRow, UserMessageRow } from "./chat/TimelineRows";
+import { AssistantMessageRow, StreamingAssistantRow, UserMessageRow } from "./chat/TimelineRows";
 import { useChatScroll } from "./chat/useChatScroll";
 import { placeTurnFolds, turnHasWork, type FoldedTurn } from "./chat/workLogModel";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
@@ -974,7 +974,8 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
 
   return (
     <div className="assistant-page flex min-h-0 min-w-0 flex-1 flex-col">
-      <ChatTranscript scroll={scroll} busy={Boolean(live)} doneMessage="Answer finished." laneClassName="max-w-208 px-4 pt-8 sm:px-8">
+      {/* The messages share the message box's left and right edges. */}
+      <ChatTranscript scroll={scroll} busy={Boolean(live)} doneMessage="Answer finished." laneClassName="max-w-[calc(var(--chat-content-max-width)+2rem)] px-3 pt-8 sm:px-4">
         <div className="contents" onClick={openLinkedListing}>
           {messages.isLoading && !turns.length ? (
             <div className="flex justify-center py-4"><Spinner size="md" tone="muted" /></div>
@@ -1027,11 +1028,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
                   tailLabel={visible ? "" : liveTail}
                 />
               ) : null}
-              {visible ? (
-                <div className="pb-4">
-                  <AssistantMessageRow text={visible} streaming />
-                </div>
-              ) : null}
+              {visible ? <StreamingAssistantRow received={live.parts.content} /> : null}
             </>
           ) : null}
           <QueuedMessages
