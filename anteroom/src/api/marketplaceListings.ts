@@ -11,6 +11,7 @@ export interface MarketplaceListing {
   at?: string | null;
   /** The marketplace no longer had the listing when Anteroom went to delist it; who removed it isn't known. */
   already_gone?: boolean;
+  verification?: "checking" | "waiting_for_chrome" | "reconnect" | "needs_review" | "still_present" | "removed";
 }
 /** What reading this item's live listings found just now: a sale it had not recorded yet, if any. */
 export interface SalesCheck {

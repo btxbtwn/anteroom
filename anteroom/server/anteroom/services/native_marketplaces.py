@@ -192,8 +192,25 @@ def status(conv_id: str, db: Session, *, conv=None, records: dict | None = None)
     if records is None:
         records = MarketplaceListingRepo(db).for_conversation(conv_id)
     repo = JobRepo(db)
-    for record in records.values():
+    for marketplace, record in records.items():
         record["running"] = _running(db, record)
+        if record.get("state") in UNSETTLED_STATES and not record["running"]:
+            from anteroom.services import cloud_sessions
+            from anteroom.services.extension_connection import current_extension
+
+            needs_chrome = marketplace not in API_MARKETPLACES and record.get("executor") != "cloud"
+            event = repo.latest_event(record["job_id"], "native_result") if marketplace == "depop" and record.get("job_id") else None
+            candidates = (event.payload or {}).get("candidates") if event else None
+            if candidates:
+                record.update(verification="needs_review", candidates=candidates)
+            elif record.get("executor") == "cloud" and not cloud_sessions.has_active_session(marketplace, db):
+                record["verification"] = "reconnect"
+            elif needs_chrome and not current_extension().connected:
+                record["verification"] = "waiting_for_chrome"
+            elif not record.get("job_id") or _auto_check_delay(db, conv_id, marketplace, record["job_id"]) is None:
+                record["verification"] = "needs_review"
+            else:
+                record["verification"] = "checking"
         if record["running"]:
             event = repo.latest_event(record["job_id"], PROGRESS_EVENT)
             record["progress"] = event.payload if event else None
@@ -344,10 +361,23 @@ def _apply_result(db: Session, conv_id: str, marketplace: str, job_id: str, acti
             # A new listing went up, so its age starts over. An Update keeps the date.
             values["listed_at"] = datetime.now(UTC).replace(tzinfo=None)
     stored = _store(db, conv_id, marketplace, values)
+    candidates = []
+    matches = result.get("candidates")
+    if marketplace == "depop" and action in {"list", "publish"} and stored["state"] == "unknown" and isinstance(matches, list):
+        for item in matches[:20]:
+            if not isinstance(item, dict):
+                continue
+            url = item.get("url")
+            if not isinstance(url, str) or not re.fullmatch(r"https://www\.depop\.com/products/[a-z0-9][a-z0-9-]{0,200}/", url):
+                continue
+            photo = str(item.get("photo") or "")
+            allowed = re.fullmatch(r"https://(?:media-photos\.depop\.com|media-photos-depop\.s3-accelerate\.amazonaws\.com)/[a-zA-Z0-9/_.-]+", photo)
+            candidates.append({"url": url, "photo": photo if allowed else None})
     JobRepo(db).add_event(job_id, "native_result", f"native_{marketplace}_{action}", {
         "marketplace": marketplace, "action": action, "ok": result.get("ok") is True, "state": stored["state"],
         "error": stored.get("error"), "error_code": stored.get("error_code"),
         "marketplace_message": stored.get("marketplace_message"),
+        **({"candidates": candidates} if len(candidates) > 1 else {}),
     })
     return stored
 
@@ -881,8 +911,7 @@ async def _send_cancel(operation_id: str) -> None:
     ).model_dump(mode="json"))
 
 
-CHROME_SILENT = ("Chrome has not said whether this {name} action finished. Look for it on {name}: if it is there, "
-                 "use Mark as listed; if not, choose “I checked it myself” and List again.")
+CHROME_SILENT = "{name} has not confirmed the result yet."
 
 
 class _Cancelled(Exception):
@@ -1206,13 +1235,14 @@ async def _read_result(marketplace: str, record: dict, snapshot: dict, candidate
     return reply["result"]
 
 
-async def check_result(conv_id: str, marketplace: Marketplace, body: CheckRequest | None = None) -> dict:
+async def check_result(conv_id: str, marketplace: Marketplace, body: CheckRequest | None = None, *,
+                       expected_job: str | None = None) -> dict:
     """Read-only: ask the marketplace what the last action did, and record it.
 
     The database steps run on worker threads; none holds a connection while the marketplace answers.
     """
     record, snapshot, candidate, context, check_job_id, mark_before = await in_worker_session(
-        _open_check, conv_id, marketplace, body)
+        _open_check, conv_id, marketplace, body, expected_job)
     remembered: list[dict] = []
     try:
         result = await _read_result(marketplace, record, snapshot, candidate, _JobRef(check_job_id),
@@ -1220,17 +1250,19 @@ async def check_result(conv_id: str, marketplace: Marketplace, body: CheckReques
         return await in_worker_session(_settle_check, conv_id, marketplace, record, check_job_id, remembered, result,
                                        mark_before)
     except BaseException:
-        await asyncio.shield(in_worker_session(_fail_check, conv_id, marketplace, check_job_id, remembered))
+        await asyncio.shield(in_worker_session(_fail_check, conv_id, marketplace, record, check_job_id, remembered))
         raise
     finally:
         release_api_job(check_job_id)
 
 
-def _open_check(db: Session, conv_id: str, marketplace: str, body: CheckRequest | None):
+def _open_check(db: Session, conv_id: str, marketplace: str, body: CheckRequest | None, expected_job: str | None):
     from anteroom.services.extension_connection import current_extension
 
     _conversation(db, conv_id)
     record = _record(db, conv_id, marketplace)
+    if expected_job and (record.get("job_id") != expected_job or record.get("state") not in UNSETTLED_STATES):
+        raise NativeMarketplaceError(409, "This marketplace action has already changed.")
     if not record.get("job_id"):
         raise NativeMarketplaceError(409, (
             "Anteroom has no saved action to check. "
@@ -1297,9 +1329,11 @@ def _settle_check(db: Session, conv_id: str, marketplace: str, record: dict, che
 
 def _settle_check_locked(db: Session, conv_id: str, marketplace: str, record: dict, check_job_id: str,
                          remembered: list[dict], result: dict | None, mark_before: dict) -> dict:
-    _keep_remembered(db, conv_id, marketplace, remembered)
     current = _record(db, conv_id, marketplace)
     same_action = current.get("job_id") == record.get("job_id")
+    if not same_action:
+        JobRepo(db).update_status(check_job_id, "completed")
+        return current
     # The seller marked this marketplace (listed with a link, or not listed) after the
     # Check opened. What they saw is newer than this read, whatever state it began in.
     marked = same_action and _seller_mark(db, conv_id, marketplace) != mark_before
@@ -1324,6 +1358,7 @@ def _settle_check_locked(db: Session, conv_id: str, marketplace: str, record: di
                 "answered": result.get("state") if isinstance(result, dict) else None})
         repo.update_status(check_job_id, "completed")
         return current
+    _keep_remembered(db, conv_id, marketplace, remembered)
     if result is None:
         stored = _store(db, conv_id, marketplace, {**_CLEARED_ERROR, "state": "unknown", "error_code": "uncertain",
                                                    "error": CHROME_SILENT.format(name=NAMES[marketplace])})
@@ -1341,8 +1376,9 @@ def _settle_check_locked(db: Session, conv_id: str, marketplace: str, record: di
     return stored
 
 
-def _fail_check(db: Session, conv_id: str, marketplace: str, check_job_id: str, remembered: list[dict]) -> None:
-    _keep_remembered(db, conv_id, marketplace, remembered)
+def _fail_check(db: Session, conv_id: str, marketplace: str, record: dict, check_job_id: str, remembered: list[dict]) -> None:
+    if _record(db, conv_id, marketplace) == record:
+        _keep_remembered(db, conv_id, marketplace, remembered)
     JobRepo(db).update_status(check_job_id, "failed", error="Check did not finish.")
 
 
@@ -1376,16 +1412,36 @@ def mark_interrupted(db: Session, job_id: str) -> None:
                                                              "error_code": "uncertain"})
 
 
-async def reconcile(*, chrome: bool) -> int:
+def _auto_check_delay(db: Session, conv_id: str, marketplace: str, job_id: str) -> float | None:
+    """Space out completed reads of this action. Offline and busy passes spend no attempt."""
+    from anteroom.models.job import Job
+
+    started = db.query(Job.created_at).filter(Job.id == job_id).scalar()
+    if not started:
+        return None
+    checks = (db.query(Job.updated_at).filter(
+        Job.conversation_id == conv_id, Job.current_step == f"native_{marketplace}_check",
+        Job.created_at >= started, Job.status.in_(("failed", "completed")),
+    ).order_by(Job.created_at.desc()).limit(3).all())
+    if len(checks) == 3:
+        return None
+    last_check = checks[0][0] if checks else None
+    if last_check is None:
+        return 0
+    elapsed = (datetime.now(UTC) - last_check.replace(tzinfo=UTC)).total_seconds()
+    return max(0, (60 if len(checks) == 1 else 300) - elapsed)
+
+
+async def reconcile(*, chrome: bool, periodic: bool = False) -> int:
     """Check every unconfirmed record that no job is running. Read-only; never lists or publishes.
 
     Runs on startup (eBay and Etsy) and when Chrome reconnects (all). A record
     whose check cannot run now (another job holds the slot) waits for the next one.
     """
     checked = 0
-    for conv_id, marketplace in await in_worker_session(_reconcile_targets, chrome):
+    for conv_id, marketplace, job_id in await in_worker_session(_reconcile_targets, chrome, periodic):
         try:
-            await check_result(conv_id, marketplace)
+            await check_result(conv_id, marketplace, expected_job=job_id)
             checked += 1
         except NativeMarketplaceError as exc:
             log.info("Reconcile skipped %s for %s: %s", marketplace, conv_id, exc)
@@ -1394,20 +1450,23 @@ async def reconcile(*, chrome: bool) -> int:
     return checked
 
 
-def _reconcile_targets(db: Session, chrome: bool) -> list[tuple[str, str]]:
+def _reconcile_targets(db: Session, chrome: bool, periodic: bool = False) -> list[tuple[str, str, str]]:
     from anteroom.services import cloud_sessions
+    from anteroom.services.extension_connection import current_extension
 
-    targets: list[tuple[str, str]] = []
+    targets: list[tuple[str, str, str]] = []
     for row in MarketplaceListingRepo(db).unsettled():
         if not row.job_id or job_is_live(db, row.job_id):
             continue
+        if periodic and _auto_check_delay(db, row.conversation_id, row.marketplace, row.job_id) != 0:
+            continue
         if row.marketplace in API_MARKETPLACES:
-            targets.append((row.conversation_id, row.marketplace))
+            targets.append((row.conversation_id, row.marketplace, row.job_id))
         elif row.executor == "cloud":
             if cloud_sessions.has_active_session(row.marketplace, db):
-                targets.append((row.conversation_id, row.marketplace))
-        elif chrome:
-            targets.append((row.conversation_id, row.marketplace))
+                targets.append((row.conversation_id, row.marketplace, row.job_id))
+        elif chrome and current_extension().connected:
+            targets.append((row.conversation_id, row.marketplace, row.job_id))
     return targets
 
 

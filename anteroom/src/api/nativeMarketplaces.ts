@@ -20,6 +20,8 @@ export interface NativeDraft {
   retry_after?: string | null;
   /** True while a List, Update or Check job is running in this Studio. */
   running?: boolean;
+  verification?: "checking" | "waiting_for_chrome" | "reconnect" | "needs_review";
+  candidates?: { url: string; photo: string | null }[];
   progress?: { step: string; label: string; index: number; total: number } | null;
   /** The agent that started the running action ("mcp:<name>"); absent for the seller's own. */
   requested_by?: string | null;

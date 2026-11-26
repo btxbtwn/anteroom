@@ -114,6 +114,7 @@ class MarketplaceListing(SellerOwned, Base):
     # Latest verified direct inventory read; listing identity and read-start time
     # keep a later sale or replacement link from reusing stale stock.
     inventory_observation: Mapped[Any] = mapped_column(JSON, nullable=True)
+    removal_check_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
@@ -122,5 +123,5 @@ class MarketplaceListing(SellerOwned, Base):
 # The fields services read and write as a plain dict.
 FIELDS = tuple(
     column.name for column in MarketplaceListing.__table__.columns
-    if column.name not in {"id", "conversation_id", "marketplace", "created_at", "updated_at", "price_recorded_at"}
+    if column.name not in {"id", "conversation_id", "marketplace", "created_at", "updated_at", "price_recorded_at", "removal_check_at"}
 )

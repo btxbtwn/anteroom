@@ -987,15 +987,18 @@ export const api = {
       request<MarketplaceCloudResult>(`/cloud-sessions/${seg(marketplace)}`, { method: "DELETE" }),
   },
   marketplaceListings: {
+    checkRemoval: (convId: string, marketplace: DelistMarketplace) =>
+      request<MarketplaceListings>(`/conversations/${seg(convId)}/marketplace-listings/${seg(marketplace)}/check-removal`, { method: "POST" }),
     get: (convId: string, options?: ReadOptions) => read<MarketplaceListings>(`/conversations/${seg(convId)}/marketplace-listings`, options),
     delist: (convId: string, marketplaces: DelistMarketplace[]) =>
       request<MarketplaceListings>(`/conversations/${seg(convId)}/marketplace-listings/delist`, {
         method: "POST", body: JSON.stringify({ marketplaces, confirm: true }),
       }),
     /** `relinkDeleted`: the seller checked that the listing Anteroom deleted is still live. */
-    mark: (convId: string, marketplace: DelistMarketplace, state: MarketplaceMark, url?: string, relinkDeleted = false) =>
+    mark: (convId: string, marketplace: DelistMarketplace, state: MarketplaceMark, url?: string, relinkDeleted = false, expectedJobId?: string) =>
       request<MarketplaceListings>(`/conversations/${seg(convId)}/marketplace-listings/${seg(marketplace)}/mark`, {
-        method: "POST", body: JSON.stringify({ state, ...(url ? { url } : {}), ...(relinkDeleted ? { relink_deleted: true } : {}) }),
+        method: "POST", body: JSON.stringify({ state, ...(url ? { url } : {}), ...(relinkDeleted ? { relink_deleted: true } : {}),
+          ...(expectedJobId ? { expected_job_id: expectedJobId } : {}) }),
       }),
     recordSale: (convId: string, sale: SellerSale) =>
       request<SellerSaleResult>(`/conversations/${seg(convId)}/marketplace-listings/sold`, {

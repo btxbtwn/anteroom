@@ -5,14 +5,18 @@
 const DELETE_DEADLINE_MS = 60000;
 const MERCARI_GONE = /^Item is no longer available\.?$/i;
 
-async function deletePoshmark(id, deadline, region) {
+async function deletePoshmark(id, deadline, region, readOnly = false) {
   const origin = poshmarkOrigin(region);
   const account = await poshmarkAccount(origin);
   const client = poshmarkClient(deadline, await poshmarkCsrf(deadline, origin), origin);
   // Poshmark answers errors with HTTP 200 and an error body.
   const gone = error => ['PostRemovedError', 'NotFoundError'].includes(error?.marketplace_type);
   const read = async step => {
-    try { return { post: await client.call('GET', `/vm-rest/posts/${id}?app_type=web`, undefined, { step, what: 'the read' }) }; }
+    try {
+      const post = await client.call('GET', `/vm-rest/posts/${id}?app_type=web`, undefined, { step, what: 'the read' });
+      if (!post || typeof post !== 'object') throw marketplaceError('Poshmark returned no listing status.');
+      return { post };
+    }
     catch (error) {
       if (gone(error)) return { post: null, message: error.marketplace_message };
       throw error;
@@ -21,6 +25,7 @@ async function deletePoshmark(id, deadline, region) {
   const { post, message } = await read('read');
   if (!post) return { ok: true, state: 'deleted', already: true, marketplace_message: message };
   if (String(post.creator_id) !== account.user_id) throw marketplaceError('This Poshmark listing belongs to another account.');
+  if (readOnly) return { ok: true, state: 'present' };
   const sold = (post.inventory?.size_quantities || []).some(entry => Number(entry.quantity_sold) > 0);
   if (sold || post.status === 'archived' || ['sold_out', 'not_available'].includes(post.inventory?.status)) {
     throw marketplaceError('This Poshmark listing has sold. It was not deleted.');
@@ -30,7 +35,7 @@ async function deletePoshmark(id, deadline, region) {
   return { ok: true, state: 'deleted' };
 }
 
-async function deleteMercari(id, deadline) {
+async function deleteMercari(id, deadline, _region, readOnly = false) {
   mercariSession = null;
   const session = await mercariCurrentSession(deadline);
   let item;
@@ -45,6 +50,7 @@ async function deleteMercari(id, deadline) {
   if (String(item.seller?.id ?? '') !== String(session.user.userId)) {
     throw marketplaceError('This Mercari listing belongs to another account. It was not deleted.');
   }
+  if (readOnly) return { ok: true, state: 'present' };
   if (item.status !== 'on_sale') {
     throw marketplaceError(`This Mercari listing is not on sale${item.status ? ` (${item.status})` : ''}. It was not deleted.`);
   }
@@ -62,13 +68,16 @@ async function deleteMercari(id, deadline) {
   return { ok: true, state: 'deleted' };
 }
 
-async function deleteDepop(slug, deadline) {
+async function deleteDepop(slug, deadline, _region, readOnly = false) {
   const cookie = await chrome.cookies.get({ url: 'https://www.depop.com/', name: 'access_token' });
   if (!cookie?.value) throw marketplaceError('Reconnect Depop in Anteroom first.', { code: 'signed_out' });
   const call = async (method, path, step) => {
     try {
       const { data } = await marketplaceFetch(`https://webapi.depop.com${path}`, { marketplace: 'depop', step, method, credentials: 'omit', deadline,
         headers: { Accept: 'application/json', Authorization: `Bearer ${decodeURIComponent(cookie.value)}` } });
+      if (method === 'GET' && (!data || typeof data !== 'object' || Array.isArray(data))) {
+        throw marketplaceError('Depop returned no listing status.');
+      }
       return data;
     } catch (error) {
       if (method === 'GET' && error.status === 404) return null;
@@ -77,13 +86,15 @@ async function deleteDepop(slug, deadline) {
   };
   const product = await call('GET', `/presentation/api/v1/products/by-slug/${encodeURIComponent(slug)}/`, 'read');
   const status = String(product?.status || '').toUpperCase();
-  if (!product || status.includes('DELETED')) return { ok: true, state: 'deleted', already: true };
+  if (!product || status === 'DELETED') return { ok: true, state: 'deleted', already: true };
+  if (readOnly && /^\d{1,15}$/.test(String(product.id || ''))) return { ok: true, state: 'present' };
+  if (readOnly) throw marketplaceError('Depop returned no listing ID.');
   if (/SOLD|PURCHASED/.test(status) || product.sold === true) throw marketplaceError('This Depop listing has sold. It was not deleted.');
   const id = String(product.id || '');
   if (!/^\d{1,15}$/.test(id)) throw marketplaceError('Depop did not return this listing\'s ID.', { code: 'schema_drift' });
   await call('DELETE', `/presentation/api/v1/products/${id}/`, 'delete');
   // Depop's read lags the delete: the slug can still look on sale for a moment.
-  const removed = product => !product || String(product.status || '').toUpperCase().includes('DELETED');
+  const removed = product => !product || String(product.status || '').toUpperCase() === 'DELETED';
   let after = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     after = await call('GET', `/presentation/api/v1/products/by-slug/${encodeURIComponent(slug)}/`, 'read-back');
@@ -101,6 +112,18 @@ const MARKETPLACE_DELETE = {
   mercari: [/^m\d{6,}$/, deleteMercari],
   depop: [/^[a-z0-9][a-z0-9-]{0,200}$/, deleteDepop],
 };
+
+async function checkMarketplaceRemoval(context) {
+  const entry = MARKETPLACE_DELETE[context.marketplace];
+  const id = context.listing_id;
+  if (!entry || typeof id !== 'string' || !entry[0].test(id)) return { finished: false };
+  try {
+    const result = await entry[1](id, Date.now() + DELETE_DEADLINE_MS, context.seller_region, true);
+    return { finished: true, result: { ...result, listing_id: id } };
+  } catch {
+    return { finished: false };
+  }
+}
 
 async function runMarketplaceDelete(payload) {
   const entry = MARKETPLACE_DELETE[payload?.marketplace];

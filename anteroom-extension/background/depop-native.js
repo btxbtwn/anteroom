@@ -1159,7 +1159,7 @@ async function depopApiAction(action, payload) {
       // Live edit: read and PUT the product by the slug the seller opened.
       // PUT on the numeric presentation id answers 404.
       // The edit page itself reads by-slug/<slug>/edit-listing/, the owner's document with the price.
-      const updateRead = action === 'update' && method === 'GET' && /^\/presentation\/api\/v1\/products\/(?:by-slug\/[a-z0-9][a-z0-9-]{0,200}\/(?:edit-listing\/)?|[0-9]+\/)$/i.test(path);
+      const updateRead = ['update', 'check_update'].includes(action) && method === 'GET' && /^\/presentation\/api\/v1\/products\/(?:by-slug\/[a-z0-9][a-z0-9-]{0,200}\/(?:edit-listing\/)?|[0-9]+\/)$/i.test(path);
       const updateWrite = action === 'update' && payload.confirm === true && method === 'PUT'
         && /^\/presentation\/api\/v1\/products\/by-slug\/[a-z0-9][a-z0-9-]{0,200}\/$/i.test(path);
       if (!allowedRead && !draftWrite && !publishWrite && !updateRead && !updateWrite) throw marketplaceError('Unsupported Depop action.');
@@ -1263,7 +1263,7 @@ async function depopApiAction(action, payload) {
       return { draft_url: `https://www.depop.com/sellinghub/drafts/edit/${draft.id}/` };
     }
     if (action === 'shop_matches') return { matches: await depopShopMatches(request, payload) };
-    if (!id && action !== 'publish_status' && action !== 'update') throw marketplaceError('A saved Depop draft link is required.');
+    if (!id && !['publish_status', 'update', 'check_update'].includes(action)) throw marketplaceError('A saved Depop draft link is required.');
     if (action === 'read') {
       const draft = await readDraft();
       const detail = [depopReadDigest(draft), depopSanitizedBody(draft)].filter(Boolean).join(' ');
@@ -1379,8 +1379,8 @@ async function depopApiAction(action, payload) {
       if (!/^[A-Za-z0-9_-]+$/.test(String(job.id))) throw marketplaceError('Depop did not confirm the publish result. Check its result before trying again.', { code: 'schema_drift', rejected: false });
       return { publish_job_id: String(job.id) };
     }
-    if (action === 'update') {
-      if (payload.confirm !== true) throw marketplaceError('Confirm updating the live Depop listing.');
+    if (action === 'update' || action === 'check_update') {
+      if (action === 'update' && payload.confirm !== true) throw marketplaceError('Confirm updating the live Depop listing.');
       const slug = String(payload.listing_id || '').trim().toLowerCase();
       if (!/^[a-z0-9][a-z0-9-]{0,200}$/.test(slug)) throw marketplaceError('A Depop listing link is required before updating.');
       const product = await request('GET', `/presentation/api/v1/products/by-slug/${slug}/`);
@@ -1392,7 +1392,7 @@ async function depopApiAction(action, payload) {
         throw marketplaceError('Depop did not return this listing\'s photo ids, so nothing was changed. Check the listing on Depop.',
           { code: 'schema_drift', marketplace_message: depopReadDigest(product) });
       }
-      const updated = await request('PUT', `/presentation/api/v1/products/by-slug/${slug}/`, body);
+      const updated = action === 'update' ? await request('PUT', `/presentation/api/v1/products/by-slug/${slug}/`, body) : product;
       // The PUT answer can be the product as it was before the edit, without a
       // price, so it never decides the outcome. Fresh reads do, with a short
       // wait for Depop's read-after-write lag.
@@ -1428,6 +1428,7 @@ async function depopApiAction(action, payload) {
           marketplace_message: `read back: ${depopLiveDigest(state)} | wanted: ${depopLiveDigest(wanted)} | ${depopSanitizedBody(read)}` });
       }
       const unconfirmed = ['price', 'product_type'].filter(key => wanted[key] != null && wanted[key] !== '' && (state[key] == null || state[key] === ''));
+      if (action === 'check_update' && unconfirmed.length) throw marketplaceError('Depop has not confirmed every changed field.');
       return { ok: true, state: 'published', listing_url: `https://www.depop.com/products/${next}/`, previous_slug: slug, price: state.price ?? null,
         ...(unconfirmed.length ? { warning: `Depop's read did not show the ${unconfirmed.map(key => key === 'product_type' ? 'category' : key).join(' or ')}. Check the live listing.` } : {}) };
     }
@@ -1513,6 +1514,8 @@ async function depopPublishEvidence(request, payload, draftPath, spent = () => f
   // listing repriced or reworded since then is not this publish's product.
   const existed = new Set((before?.seen || []).map(entry => depopListingUrl(entry) || entry));
   const made = after && after.seller_id === before.seller_id ? after.urls.filter(url => !existed.has(url)) : [];
+  if (made.length > 1) return { ...unavailable, draft_posted: true,
+    candidates: made.map(url => ({ url, photo: after.photos?.[url] || null })) };
   return made.length === 1 ? { ...unavailable, complete: true, listing_url: made[0] } : { ...unavailable, draft_posted: true };
 }
 
@@ -1672,6 +1675,7 @@ async function depopShopMatches(request, payload) {
   const scoped = { ...listing, seller_id: userId };
   const matches = new Set();
   const seen = new Set();
+  const photos = {};
   const inventory = `/api/v1/shop/${userId}/products/?limit=200`;
   let offset = '';
   let previousId;
@@ -1685,16 +1689,22 @@ async function depopShopMatches(request, payload) {
     for (const product of depopProductRows(page)) {
       const url = depopListingUrl(product?.slug || product?.url);
       if (url) seen.add(url);
-      if (depopShopProduct(product, scoped)) matches.add(url);
+      if (depopShopProduct(product, scoped)) {
+        matches.add(url);
+        const first = depopPictureRows(product.pictures ?? product.pictures_data ?? product)[0];
+        const photo = first?.formats?.P0?.url || first?.url;
+        if (photo) photos[url] = photo.split('?')[0];
+      }
     }
-    if (page?.meta?.end === true) return { seller_id: userId, urls: [...matches], seen: [...seen] };
+    const snapshot = () => ({ seller_id: userId, urls: [...matches], seen: [...seen], ...(Object.keys(photos).length ? { photos } : {}) });
+    if (page?.meta?.end === true) return snapshot();
     // A page or cursor that repeats means the scan stopped advancing: not read in full.
     const firstId = depopProductRows(page)[0]?.id;
     if (pageNumber && firstId != null && firstId === previousId) return null;
     previousId = firstId;
     const next = depopCursorToken(page?.meta?.last_offset_id);
     // More pages, but no cursor that reaches them: not read in full.
-    if (!next) return page?.meta?.end === false ? null : { seller_id: userId, urls: [...matches], seen: [...seen] };
+    if (!next) return page?.meta?.end === false ? null : snapshot();
     if (next === offset) return null;
     offset = next;
   }
@@ -1766,7 +1776,7 @@ async function runDepopNative(msg, recovery = false) {
   };
   try {
     if (payload.action === 'update') {
-      const updated = await depopAction('update', payload);
+      const updated = await depopAction(recovery ? 'check_update' : 'update', payload);
       const warning = [updated.warning, payload.photo_warning].filter(Boolean).join(' ');
       return { ...updated, ...(warning ? { warning } : {}) };
     }
@@ -1852,6 +1862,8 @@ async function runDepopNative(msg, recovery = false) {
     let postedPolls = 0;
     while (Date.now() < payload.deadline) {
       status = await depopAction('publish_status', { ...payload, evidence_until: evidenceUntil });
+      if (status.candidates?.length > 1) return marketplaceFailure(
+        marketplaceError('More than one new Depop listing matches this item.'), false, { candidates: status.candidates });
       if (status.complete) return { ok: true, state: 'published', draft_url: payload.draft_url, ...(status.listing_url ? { listing_url: status.listing_url } : {}) };
       if (status.status_unavailable && (Date.now() >= evidenceUntil
         || (status.draft_posted ? (postedPolls += 1) >= 2 : (queuedPolls += 1) >= DEPOP_UNAVAILABLE_STATUS_POLLS))) break;

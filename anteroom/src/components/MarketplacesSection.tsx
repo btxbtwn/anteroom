@@ -133,7 +133,7 @@ export function markListedPrefill(entry: MarketplaceListing | undefined, unconfi
   return entry.url ?? "";
 }
 
-interface MarkRequest { marketplace: Marketplace; state: MarketplaceMark; url?: string; relinkDeleted?: boolean }
+interface MarkRequest { marketplace: Marketplace; state: MarketplaceMark; url?: string; relinkDeleted?: boolean; expectedJobId?: string }
 
 /**
  * After the server refuses a link because Anteroom delisted that listing, the
@@ -184,10 +184,22 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
   }
   if (draft && (draft.state === "unknown" || BUSY.has(draft.state))) {
     const href = live?.state === "deleted" ? undefined : live?.url ?? undefined;
+    if (draft.verification === "reconnect") return { tone: "attention", label: `Reconnect ${marketplaceName(marketplace)}`,
+      detail: "Reconnect this marketplace in Settings → Connections. Anteroom will check the result." };
+    if (draft.verification === "waiting_for_chrome") return { tone: "waiting", label: "Waiting for Chrome", href,
+      hrefLabel: "View", detail: "Anteroom will check when Chrome reconnects." };
+    if (draft.verification === "checking") return { tone: "waiting", label: `Checking ${marketplaceName(marketplace)}…`, href,
+      hrefLabel: "View", detail: "You can leave this listing. Its status will update here." };
+    if (draft.candidates?.length) return { tone: "attention", label: "Which listing is yours?", href, hrefLabel: "View",
+      detail: "Several new Depop listings match this item. Choose the one you listed." };
+    if (draft.verification === "needs_review") return { tone: "attention", label: "Needs review", href, hrefLabel: "View",
+      detail: `Anteroom couldn’t confirm the result. Check your ${marketplaceName(marketplace)} shop before trying again.`, said };
     return { tone: "attention", label: "Unconfirmed", href, hrefLabel: "View", detail: draft.error || "Check the result before trying again.", said };
   }
   if (live?.state === "deleting") return { tone: "busy", label: "Delisting…" };
   if (live?.state === "deleted") {
+    if (live.verification === "removed") return { tone: "neutral", label: "No longer listed",
+      detail: `${marketplaceName(marketplace)} confirmed the original listing is gone.` };
     if (draft?.error) return { tone: "failed", label: "Not listed", detail: draft.error, said };
     // The marketplace no longer had it: something else removed it, such as Vendoo or the seller.
     if (live.already_gone) return { tone: "neutral", label: "Already gone", detail: `${marketplaceName(marketplace)} no longer had this listing when Anteroom went to delist it.`,
@@ -195,6 +207,16 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
     return { tone: "neutral", label: "Delisted" };
   }
   if (live?.state === "failed") {
+    if (live.verification === "still_present") return { tone: "attention", label: `Still on ${marketplaceName(marketplace)}`,
+      href: live.url ?? undefined, hrefLabel: "View", detail: "The marketplace still has the original listing." };
+    if (live.verification === "checking") return { tone: "waiting", label: "Checking removal…", href: live.url ?? undefined,
+      hrefLabel: "View", detail: `Anteroom is checking the original listing on ${marketplaceName(marketplace)}.` };
+    if (live.verification === "waiting_for_chrome") return { tone: "waiting", label: "Waiting for Chrome",
+      detail: "Anteroom will check the removal when Chrome reconnects." };
+    if (live.verification === "reconnect") return { tone: "attention", label: "Reconnect marketplace",
+      detail: `Reconnect ${marketplaceName(marketplace)} in Settings → Connections to check this removal.` };
+    if (live.verification === "needs_review") return { tone: "attention", label: "Removal unconfirmed",
+      href: live.url ?? undefined, hrefLabel: "View", detail: "Check whether the original listing is still live." };
     return { tone: "failed", label: "Not delisted", href: live.url ?? undefined, hrefLabel: "View", detail: live.error,
       said: live.marketplace_message ? `${marketplaceName(marketplace)} said: ${live.marketplace_message}` : null };
   }
@@ -324,8 +346,14 @@ export function MarketplacesLayout({
   const liveKey = ["marketplace-listings", convId];
   // List runs in the background: poll while any marketplace action is running.
   const native = useQuery({ queryKey: nativeKey, queryFn: ({ signal }) => api.nativeMarketplaces.status(convId, { signal }),
-    refetchInterval: (query) => Object.values(query.state.data ?? {}).some((draft) => isRunning(draft)) ? pollMs(1500) : false });
-  const live = useQuery({ queryKey: liveKey, queryFn: ({ signal }) => api.marketplaceListings.get(convId, { signal }) });
+    refetchInterval: (query) => {
+      const rows = Object.values(query.state.data ?? {});
+      if (rows.some(isRunning)) return pollMs(1500);
+      return rows.some((draft) => draft.verification && draft.verification !== "needs_review") ? pollMs(5000) : false;
+    } });
+  const live = useQuery({ queryKey: liveKey, queryFn: ({ signal }) => api.marketplaceListings.get(convId, { signal }),
+    refetchInterval: (query) => Object.values(query.state.data ?? {}).some((entry) =>
+      entry.state === "deleting" || ["checking", "waiting_for_chrome", "reconnect"].includes(entry.verification ?? "")) ? pollMs(5000) : false });
   // A save can fix the fields a failed List asked for, which clears that error on the server.
   const seenRevision = useRef({ convId, revisionId });
   useEffect(() => {
@@ -360,7 +388,7 @@ export function MarketplacesLayout({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [convId]);
   const drafts: NativeDrafts = native.data ?? {};
-  const runningKey = Object.entries(drafts).filter(([, draft]) => isRunning(draft)).map(([name]) => name).join(",");
+  const runningKey = Object.entries(drafts).filter(([, draft]) => isRunning(draft) || draft.verification).map(([name]) => name).join(",");
   const wasRunning = useRef({ convId, runningKey });
   useEffect(() => {
     if (wasRunning.current.convId !== convId) {
@@ -488,10 +516,14 @@ export function MarketplacesLayout({
     },
   });
   const mark = useMutation({
-    mutationFn: ({ marketplace, state, url, relinkDeleted }: MarkRequest) =>
-      api.marketplaceListings.mark(convId, marketplace, state, url, relinkDeleted),
+    mutationFn: ({ marketplace, state, url, relinkDeleted, expectedJobId }: MarkRequest) =>
+      api.marketplaceListings.mark(convId, marketplace, state, url, relinkDeleted, expectedJobId),
     retry: false,
-    onSuccess: (data) => { queryClient.setQueryData(liveKey, data); setLinking(null); },
+    onSuccess: (data) => {
+      queryClient.setQueryData(liveKey, data);
+      void queryClient.invalidateQueries({ queryKey: nativeKey });
+      setLinking(null);
+    },
     onError: async (error, request) => {
       // The pasted link is the listing Anteroom deleted. Link it only if the seller just saw it live.
       const resend = await relinkAfterDeletedRefusal(error, request, confirmDialog);
@@ -502,6 +534,12 @@ export function MarketplacesLayout({
       void queryClient.invalidateQueries({ queryKey: nativeKey });
       void queryClient.invalidateQueries({ queryKey: ["conversations"] });
     },
+  });
+  const checkRemoval = useMutation({
+    mutationFn: (marketplace: Marketplace) => api.marketplaceListings.checkRemoval(convId, marketplace),
+    onSuccess: data => queryClient.setQueryData(liveKey, data),
+    onError: (error, marketplace) => setActionErrors(current => ({ ...current, [marketplace]: error.message })),
+    retry: false,
   });
 
   const recordSale = useMutation({
@@ -609,14 +647,7 @@ export function MarketplacesLayout({
     }
     const queued = queuedOn(marketplace);
     if (queued) return <Button size="xs" variant="outline" disabled={queued.starting} onClick={() => waitlist.remove(queued.id)}>Cancel</Button>;
-    if (unconfirmed(marketplace)) {
-      return (
-        <>
-          <Button size="xs" variant="ghost" disabled={startingOn(m)} onClick={() => void resetNow(m)}>I checked it myself…</Button>
-          <Button size="xs" variant="outline" disabled={startingOn(m)} onClick={() => action.mutate({ marketplace: m, kind: "check" })}>Check result</Button>
-        </>
-      );
-    }
+    if (unconfirmed(marketplace)) return null;
     if (updatable(marketplace, status)) {
       // Nothing to send until the listing changes; Update stays in the row's menu.
       if (!outdated(marketplace)) return null;
@@ -648,6 +679,13 @@ export function MarketplacesLayout({
           <EllipsisIcon />
         </MenuTrigger>
         <MenuPopup align="end" width="content">
+          {entry?.state === "failed" && entry.verification && <MenuItem disabled={checkRemoval.isPending}
+            onClick={() => checkRemoval.mutate(marketplace)}>Check removal now</MenuItem>}
+          {unconfirmed(m) && !running(m) && <>
+            <MenuItem onClick={() => action.mutate({ marketplace: m, kind: "check" })}>Check now</MenuItem>
+            <MenuItem onClick={() => void resetNow(m)}>I checked it myself…</MenuItem>
+            <MenuSeparator />
+          </>}
           {canList && <MenuItem disabled={listBlocked(marketplace)} onClick={() => void listNow(m)}>List…</MenuItem>}
           {canList && REMOTE_DRAFT.has(marketplace) && <MenuItem disabled={listBlocked(marketplace)}
             onClick={() => action.mutate({ marketplace: m, kind: "save_draft" })}>Save draft</MenuItem>}
@@ -917,18 +955,30 @@ export function MarketplacesLayout({
           {errorActions(selectedMarketplace)}
           {settings(selectedMarketplace)}
           {linkForm(selectedMarketplace)}
+          {drafts[selectedMarketplace]?.candidates?.map(({ url, photo }) => (
+            <div key={url} className="flex min-w-0 items-center gap-2">
+              {photo && <img src={photo} alt="" className="size-12 rounded object-cover" />}
+              <a href={url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 break-words underline">{url.split("/")[4]}</a>
+              <Button size="xs" variant="outline" disabled={mark.isPending}
+                onClick={() => mark.mutate({ marketplace: selectedMarketplace, state: "listed", url,
+                  expectedJobId: drafts[selectedMarketplace]?.job_id })}>Use this listing</Button>
+            </div>
+          ))}
           {(() => {
             const draft = drafts[selectedMarketplace];
             const name = railLabel(selectedMarketplace);
             if (draft?.state !== "unknown" || draft.draft_url || selectedMarketplace === "poshmark" || selectedMarketplace === "ebay") return null;
             return (
-              <div className="flex items-center gap-2">
-                <Input size="compact" aria-label={`Saved ${name} link`} placeholder="Paste the link if one was created"
-                  value={draftLinks[selectedMarketplace as NativeMarketplace] || ""}
-                  onChange={(event) => setDraftLinks({ ...draftLinks, [selectedMarketplace]: event.target.value })} />
-                <Button size="xs" variant="outline" disabled={startingOn(selectedMarketplace) || !draftLinks[selectedMarketplace as NativeMarketplace]?.trim()}
-                  onClick={() => action.mutate({ marketplace: selectedMarketplace as NativeMarketplace, kind: "check", draftUrl: draftLinks[selectedMarketplace as NativeMarketplace]?.trim() })}>Check link</Button>
-              </div>
+              <details>
+                <summary className="w-fit cursor-pointer text-xs text-muted-foreground">Have a draft link?</summary>
+                <div className="mt-2 flex items-center gap-2">
+                  <Input size="compact" aria-label={`Saved ${name} link`} placeholder="Paste the draft link"
+                    value={draftLinks[selectedMarketplace as NativeMarketplace] || ""}
+                    onChange={(event) => setDraftLinks({ ...draftLinks, [selectedMarketplace]: event.target.value })} />
+                  <Button size="xs" variant="outline" disabled={startingOn(selectedMarketplace) || !draftLinks[selectedMarketplace as NativeMarketplace]?.trim()}
+                    onClick={() => action.mutate({ marketplace: selectedMarketplace as NativeMarketplace, kind: "check", draftUrl: draftLinks[selectedMarketplace as NativeMarketplace]?.trim() })}>Check link</Button>
+                </div>
+              </details>
             );
           })()}
         </section>

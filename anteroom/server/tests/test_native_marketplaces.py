@@ -1438,12 +1438,12 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         with patch.object(native, "SETTLE_DEADLINE_S", 0):
             record = self.list()
         self.assertEqual((record["state"], record["error_code"]), ("unknown", "uncertain"))
-        self.assertIn("Chrome has not said whether this Mercari action finished", record["error"])
+        self.assertIn("Mercari has not confirmed the result", record["error"])
         self.assertEqual(self.client.post(f"{self.base}/mercari/list", json={"revision_id": self.rev.id, "confirm": True}).status_code, 409)
         checked = self.client.post(f"{self.base}/mercari/check")
         self.assertEqual(checked.status_code, 200, checked.text)
         self.assertEqual(checked.json()["state"], "unknown")
-        self.assertIn("I checked it myself", checked.json()["error"])
+        self.assertIn("Mercari has not confirmed the result", checked.json()["error"])
         self.assertEqual(self.client.post(f"{self.base}/mercari/reset", json={}).status_code, 400)
         writes = self.actions()
         reset = self.client.post(f"{self.base}/mercari/reset", json={"confirm": True})
@@ -1455,6 +1455,25 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         self.assertEqual(self.client.post(f"{self.base}/mercari/reset", json={"confirm": True}).status_code, 409)
         self.bridge.side_effect = [{"ok": True, "state": "draft", "draft_url": URLS["mercari"]}, self.published("mercari")]
         self.assertEqual(self.list()["state"], "published")
+
+    def test_depop_choice_only_accepts_a_match_for_the_unresolved_publish(self):
+        url = LIVE["depop"]
+        choices = [{"url": url}, {"url": "https://www.depop.com/products/another-match/"}]
+        self.bridge.side_effect = [
+            {"ok": True, "state": "draft", "draft_url": URLS["depop"]},
+            {"ok": False, "error_code": "uncertain", "candidates": choices},
+        ]
+        job = self.list("depop")["job_id"]
+        status = self.client.get(self.base).json()["depop"]
+        self.assertEqual((status["verification"], [c["url"] for c in status["candidates"]]),
+                         ("needs_review", [c["url"] for c in choices]))
+        mark = f"/api/conversations/{self.conv.id}/marketplace-listings/depop/mark"
+        body = {"url": url, "state": "listed", "expected_job_id": job}
+        self.assertEqual(self.client.post(mark, json={**body, "expected_job_id": "older"}).status_code, 409)
+        self.assertEqual(self.client.post(mark, json=body).status_code, 200)
+        self.assertEqual(self.client.get(self.base).json()["depop"]["state"], "published")
+        self.assertEqual(self.client.post(mark, json=body).status_code, 409)
+        self.assertEqual(self.actions(), ["save_draft", "publish"])
 
     def test_check_reads_the_journal_and_verifies_the_job(self):
         self.bridge.side_effect = BrowserBridgeError("lost")
@@ -1837,6 +1856,21 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         self.assertEqual(self.record("poshmark")["state"], "published")
         self.assertEqual(self.bridge.call_args.args[1], "marketplace.result")
         self.assertFalse(any(call.args[1] == "marketplace.execute" for call in self.bridge.call_args_list))
+
+    def test_background_check_resumes_after_busy_slot_without_resending(self):
+        repo = JobRepo(self.db)
+        job = repo.create(self.conv.id, self.rev.id, LISTING, status="failed", current_step="native_poshmark_list")
+        MarketplaceListingRepo(self.db).save(self.conv.id, "poshmark", {
+            "state": "unknown", "action": "list", "job_id": job.id, "operation_id": job.id,
+        })
+        busy = repo.create(self.conv.id, self.rev.id, LISTING, status="dispatched", current_step="native_poshmark_list")
+        self.assertEqual(asyncio.run(native.reconcile(chrome=True, periodic=True)), 0)
+        repo.update_status(busy.id, "completed")
+        self.bridge.return_value = {"finished": False}
+        self.assertEqual(asyncio.run(native.reconcile(chrome=True, periodic=True)), 1)
+        self.assertEqual(asyncio.run(native.reconcile(chrome=True, periodic=True)), 0)
+        self.bridge.assert_called_once()
+        self.assertEqual(self.bridge.call_args.args[1], "marketplace.result")
 
     def test_the_watchdog_fails_dead_native_jobs_and_leaves_live_ones_alone(self):
         repo = JobRepo(self.db)

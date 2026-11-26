@@ -225,11 +225,12 @@ describe("marketplaces section", () => {
   });
 
   it("offers a result check instead of repeating an uncertain write", () => {
-    const html = render({ mercari: { state: "unknown", revision_id: "current", error: "Check before trying again." } }, {}, { selected: "mercari" });
-    expect(row(html, "Mercari")).toContain("Unconfirmed");
+    const html = render({ mercari: { state: "unknown", verification: "checking", revision_id: "current" } }, {}, { selected: "mercari" });
+    expect(row(html, "Mercari")).toContain("Checking Mercari");
     expect(row(html, "Mercari")).not.toContain('role="status"');
     expect(row(html, "Mercari")).toContain("focus-visible:ring-2 focus-visible:ring-ring");
-    expect(html).toContain("Check result");
+    expect(html).toContain("You can leave this listing");
+    expect(html).not.toContain("Check result");
     expect(html).not.toContain('aria-label="View on Mercari"');
     expect(html).not.toContain("Publish…");
   });
@@ -242,7 +243,7 @@ describe("marketplaces section", () => {
     expect(row(html, "Depop")).toContain("Unconfirmed");
     expect(html).toContain('aria-label="View on Depop"');
     expect(html).toContain(`href="${url}"`);
-    expect(enabledButton(html, "Check result")).toBe(true);
+    expect(enabledButton(html, "Check result")).toBe(false);
     const deleted = render(drafts, { depop: { ...original, state: "deleted" } }, { selected: "depop" });
     expect(deleted).not.toContain(`href="${url}"`);
   });
@@ -274,10 +275,10 @@ describe("marketplaces section", () => {
     expect(running).toContain("Publishing…");
     expect(enabledButton(running, "Cancel")).toBe(true);
     expect(running).not.toContain("List…");
-    const lost = render({ mercari: { state: "unknown", running: false, error: "Chrome has not said whether this Mercari action finished.",
+    const lost = render({ mercari: { state: "unknown", verification: "waiting_for_chrome", running: false, error: "Chrome has not said whether this Mercari action finished.",
       error_code: "uncertain" } }, {}, { selected: "mercari" });
-    expect(enabledButton(lost, "Check result")).toBe(true);
-    expect(enabledButton(lost, "I checked it myself…")).toBe(true);
+    expect(row(lost, "Mercari")).toContain("Waiting for Chrome");
+    expect(enabledButton(lost, "I checked it myself…")).toBe(false);
     // A busy state no job is running any more is unconfirmed, not a spinner.
     const orphan = render({ depop: { state: "saving", running: false } }, {}, { selected: "depop" });
     expect(row(orphan, "Depop")).toContain("Unconfirmed");
