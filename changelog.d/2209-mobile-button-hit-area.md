@@ -1,0 +1,1 @@
+- Keep small buttons and inline text buttons easy to tap on phones by centering their 44-point touch target without enlarging dense desktop controls.
