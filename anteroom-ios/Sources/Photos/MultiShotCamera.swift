@@ -91,7 +91,7 @@ struct MultiShotCamera: View {
         }
         .preferredColorScheme(.dark)
         .sensoryFeedback(.impact(weight: .light), trigger: shots.count)
-        .confirmationDialog(shots.count == 1 ? "Discard 1 photo?" : "Discard \(shots.count) photos?",
+        .confirmationDialog(shots.count <= 1 ? "Discard 1 photo?" : "Discard \(shots.count) photos?",
                             isPresented: $confirmCancel, titleVisibility: .visible) {
             Button("Discard", role: .destructive) { dismiss() }
             Button("Keep taking photos", role: .cancel) {}
@@ -105,7 +105,7 @@ struct MultiShotCamera: View {
             if !shots.isEmpty || shots.isPreparing { tray }
             HStack {
                 Button("Cancel") {
-                    if shots.isEmpty && !shots.isPreparing { dismiss() } else { confirmCancel = true }
+                    if shots.isEmpty && !pending { dismiss() } else { confirmCancel = true }
                 }
                 .frame(minWidth: 88, minHeight: 44, alignment: .leading)
                 Spacer()
@@ -115,10 +115,10 @@ struct MultiShotCamera: View {
                     onDone(shots.all)
                     dismiss()
                 } label: {
-                    if shots.isPreparing { ProgressView() } else { Text(shots.doneTitle).fontWeight(.semibold) }
+                    if pending { ProgressView() } else { Text(shots.doneTitle).fontWeight(.semibold) }
                 }
                 .frame(minWidth: 88, minHeight: 44, alignment: .trailing)
-                .disabled(shots.isPreparing)
+                .disabled(pending)
                 .accessibilityIdentifier("camera-done")
                 .accessibilityLabel(shots.isEmpty ? "Done" : "Add \(shots.countLabel)")
             }
@@ -133,6 +133,9 @@ struct MultiShotCamera: View {
         .padding(.bottom, 8)
         .background(.black.opacity(0.55))
     }
+
+    /// A shot is between the shutter and the tray; Done would leave it behind.
+    private var pending: Bool { shots.shotPending(capturing: camera.capturing) }
 
     private var shutter: some View {
         Button {

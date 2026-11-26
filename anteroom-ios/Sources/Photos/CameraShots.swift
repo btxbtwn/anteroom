@@ -32,6 +32,10 @@ struct CameraShots<Shot> {
         }
     }
 
+    /// Done waits while a shot is on its way: from the shutter until the
+    /// camera hands it over (`capturing`), and while it is being prepared.
+    func shotPending(capturing: Bool) -> Bool { capturing || isPreparing }
+
     var doneTitle: String { entries.isEmpty ? "Done" : "Add \(entries.count)" }
 
     /// Reserves the next place for a shot just taken, or nil at the limit.

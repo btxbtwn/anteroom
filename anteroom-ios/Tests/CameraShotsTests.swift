@@ -14,11 +14,14 @@ struct CameraShotsTests {
         // Two shots taken; the second finishes preparing first. Order follows the shutter.
         let first = shots.begin()!
         let second = shots.begin()!
-        precondition(shots.isPreparing && shots.isEmpty)
+        precondition(shots.isPreparing && shots.isEmpty && shots.shotPending(capturing: false))
         shots.finish(second, with: "B")
         shots.finish(first, with: "A")
         precondition(shots.all == ["A", "B"] && !shots.isPreparing)
         precondition(shots.countLabel == "2 photos" && shots.doneTitle == "Add 2")
+
+        // Done waits for a shot between the shutter and the camera handing it over.
+        precondition(shots.shotPending(capturing: true) && !shots.shotPending(capturing: false))
 
         // Shots still preparing count toward the limit.
         let third = shots.begin()!
