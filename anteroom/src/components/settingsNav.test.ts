@@ -67,6 +67,13 @@ describe("searchSettings", () => {
 });
 
 describe("settings on the web", () => {
+  it("finds the listing quality opt-in only on the web", () => {
+    expect(searchSettings("telemetry", settingsSearchItemsFor(true)).map(item => item.id)).toEqual(["listing-quality"]);
+    expect(searchSettings("help improve listings", settingsSearchItemsFor(true))).toContainEqual(
+      expect.objectContaining({ section: "listings", targetId: "listing-quality" }));
+    expect(searchSettings("telemetry", settingsSearchItemsFor(false))).toEqual([]);
+  });
+
   it("offers account usage to every hosted seller", () => {
     for (const managed of [true, false]) {
       expect(hostedSettingsSections(managed)).toContain("usage");

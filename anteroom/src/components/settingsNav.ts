@@ -62,9 +62,12 @@ export function settingsSectionFor(section: SettingsSectionId, hosted: boolean, 
   return managedAI ? DEFAULT_SETTINGS_SECTION : "providers";
 }
 
+/** Search entries for settings only the web app has. */
+const HOSTED_ONLY_SEARCH_IDS = new Set(["agent-mcp-connections", "listing-quality"]);
+
 /** Settings search entries available in the current runtime. */
 export function settingsSearchItemsFor(hosted: boolean, managedAI = false): readonly SettingsSearchItem[] {
-  if (!hosted) return SETTINGS_SEARCH_ITEMS.filter((item) => item.id !== "agent-mcp-connections" && item.section !== "usage");
+  if (!hosted) return SETTINGS_SEARCH_ITEMS.filter((item) => !HOSTED_ONLY_SEARCH_IDS.has(item.id) && item.section !== "usage");
   return SETTINGS_SEARCH_ITEMS.filter(
     (item) =>
       (item.section === "general" && item.id !== "setup-guide") ||
@@ -81,6 +84,8 @@ export function settingsSearchItemsFor(hosted: boolean, managedAI = false): read
 export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { id: "managed-usage", title: "Metered usage", section: "usage", targetId: "managed-usage",
     searchTerms: ["cost", "billing", "OpenRouter", "Photoroom"] },
+  { id: "listing-quality", title: "Help improve listings", section: "listings", targetId: "listing-quality",
+    searchTerms: ["telemetry", "analytics", "privacy", "share", "usage data", "quality"] },
   {
     id: "listing-mode",
     title: "Use Vendoo",

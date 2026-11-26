@@ -231,6 +231,7 @@ def load_models() -> None:
     from anteroom.models.listing_template import ListingTemplate  # noqa: F401
     from anteroom.models.listing_copy import ListingCopyReceipt  # noqa: F401
     from anteroom.models.listing import Listing, ListingRevision  # noqa: F401
+    from anteroom.models.listing_quality import ListingQualityAttempt  # noqa: F401
     from anteroom.models.job import Job, JobEvent, VendooDraftCache  # noqa: F401
     from anteroom.models.diagnostics import DiagnosticRun, FieldObservation  # noqa: F401
     from anteroom.models.registry import FieldRegistry  # noqa: F401

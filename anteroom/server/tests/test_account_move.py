@@ -188,8 +188,12 @@ def test_import_rows_never_trust_the_mac_for_ownership_or_fields(cloud, signing_
     assert client.get('/api/conversations', headers=alice).json()[0]['title'] == 'Hat'
     newer = client.post('/api/account-import/rows', headers=alice, json={'table': 'conversations', 'rows': [{'id': 'x', 'future_field': 1}]})
     assert newer.status_code == 409 and 'newer version' in newer.json()['detail']
-    for table in ('background_tasks', 'user_secret_references', 'plaid_connections', 'plaid_transactions', 'category_trees', 'nope'):
+    for table in ('background_tasks', 'user_secret_references', 'plaid_connections', 'plaid_transactions', 'category_trees', 'listing_quality_attempts', 'nope'):
         assert client.post('/api/account-import/rows', headers=alice, json={'table': table, 'rows': []}).status_code == 422
+    assert client.post('/api/account-import/rows', headers=alice, json={
+        'table': 'user_preferences', 'rows': [{'id': 'import-consent', 'key': 'listing_quality_telemetry', 'value': True}],
+    }).status_code == 422
+    assert client.get('/api/listing-quality/consent', headers=alice).json() == {'enabled': False}
     assert client.put('/api/account-import/secrets', headers=alice, json={'marketplace-accounts': '{}'}).status_code == 422
     assert client.post('/api/account-import/rows', json={'table': 'conversations', 'rows': [row]}).status_code == 401
 

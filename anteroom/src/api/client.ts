@@ -149,6 +149,8 @@ export function errorMessage(body: ErrorBody, fallback: string): string {
 /** What a plain read accepts: React Query's signal, so a cancelled query stops its request. */
 export interface ReadOptions { signal?: AbortSignal }
 
+export interface ListingQualityConsent { enabled: boolean }
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   if (!options) return read<T>(path);
   return rawRequest<T>(path, options);
@@ -1544,6 +1546,12 @@ export const api = {
         method: "PUT",
         body: JSON.stringify(models),
       }),
+    /** Hosted only: whether this seller shares listing-quality counts. Off until they turn it on. */
+    listingQualityConsent: (options?: ReadOptions) =>
+      read<ListingQualityConsent>("/listing-quality/consent", options),
+    setListingQualityConsent: (enabled: boolean) => request<ListingQualityConsent>("/listing-quality/consent", {
+      method: "PUT", body: JSON.stringify({ enabled }),
+    }),
     sellerRegion: () => read<SellerRegion>("/settings/seller-region"),
     setSellerRegion: (country: SellerCountry) => request<SellerRegion>("/settings/seller-region", {
       method: "PUT", body: JSON.stringify({ country }),

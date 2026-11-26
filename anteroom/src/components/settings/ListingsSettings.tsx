@@ -1,4 +1,6 @@
 import { ListingTemplatesSettings } from "./ListingTemplatesSettings";
+import { ListingQualitySettings } from "./ListingQualitySettings";
+import { useWorkspaceRuntime } from "../../app/runtime";
 import { InventorySettings } from "./InventorySettings";
 import { DescriptionBuilder } from "./DescriptionBuilder";
 import { ListingWarningsSection, PricingRulesSection, ShippingPresetsSection } from "./ListingRulesSettings";
@@ -480,6 +482,7 @@ function ListingFormulasSection() {
 }
 
 export function ListingsSettings({ onOpenListing }: { onOpenListing: (id: string) => void }) {
+  const { hosted } = useWorkspaceRuntime();
   return (
     <>
       <ListingTemplatesSettings onOpenListing={onOpenListing} />
@@ -499,6 +502,7 @@ export function ListingsSettings({ onOpenListing }: { onOpenListing: (id: string
           control={<SimilarItemsButton onSelect={onOpenListing} />}
         />
       </SettingsSection>
+      {hosted ? <ListingQualitySettings /> : null}
     </>
   );
 }

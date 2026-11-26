@@ -53,6 +53,9 @@ def save_feedback(db: Session, conversation_id: str, body: FeedbackInput) -> dic
         "rated_at": datetime.now(UTC).isoformat(),
     }
     row.generation_feedback = feedback
+    from anteroom.services.listing_quality import record_review
+
+    record_review(db, conversation_id)
     db.commit()
     return feedback
 

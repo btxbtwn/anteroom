@@ -118,3 +118,28 @@ trials also found unsupported condition/material claims in structurally valid
 responses. Canonical listing rules now explicitly distinguish inferred descriptors
 from supported facts and leave unsupported required shell material as a blocker.
 No provider substitution or production setting change is included.
+
+## Hosted observations
+
+The hosted operator can call `GET /api/operator/listing-quality` with the
+operator account configured in `ANTEROOM_OPERATOR_USER_ID`. Optional `since`
+and `until` ISO-8601 timestamps select an inclusive start and exclusive end
+based on when generation saved the draft. The default window is 30 days.
+
+- **Correction rate** divides generated attempts with a persisted seller
+  correction by generated attempts the seller explicitly saved or rated.
+  Each attempt contributes at most once. Repeated saves update the comparison
+  against the generated revision. The field rankings list each field's
+  distinct corrected attempts, distinct affected sellers, and share of
+  reviewed attempts, ordered by corrected attempts. Restoring a revision
+  clears the attempt's correction counts and keeps any earlier review.
+  Marketplace-specific labels outside the fixed fields share a marketplace
+  bucket, whose counts describe net edits within that group.
+- **Overwrite rate** divides generated attempts in which a saved generation
+  stage changed a protected seller field by attempts for which a saved stage
+  had a protected seller field to compare.
+  Overwrite counts are grouped by generation stage. When a reset has erased
+  the prior revision before regeneration, there are no prior values to compare.
+- Counts distinguish replaced, cleared and filled values. Only opted-in hosted
+  accounts contribute. Disabling the setting deletes the account's
+  observations. The report returns aggregate counts and fixed field labels.

@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
-from anteroom.services import api_usage
+from anteroom.services import api_usage, listing_quality
 
 router = APIRouter(prefix="/api/operator", tags=["operator"])
 
@@ -41,6 +41,21 @@ def _parse_instant(value: str | None, *, default: datetime) -> datetime:
 def _report_db():
     """Session or engine-backed loader; tests replace this."""
     return None
+
+
+@router.get("/listing-quality")
+def quality_report(request: Request, since: str | None = None, until: str | None = None):
+    _require_operator(request)
+    from anteroom.database import engine
+
+    if engine.dialect.name != "postgresql":
+        raise HTTPException(status_code=503, detail="The cloud database is not configured")
+    now = datetime.now(UTC)
+    start = _parse_instant(since, default=now - timedelta(days=30))
+    end = _parse_instant(until, default=now)
+    if end <= start:
+        raise HTTPException(status_code=422, detail="until must be after since")
+    return listing_quality.operator_report(start, end)
 
 
 @router.get("/usage")

@@ -186,3 +186,6 @@ def remove_photo_selections(db, conversation_id, photo_id):
         listing.current_revision_id = updated.id
         listing.validation_status = None
         listing.validation_errors = None
+        from anteroom.services.listing_quality import record_revision
+
+        record_revision(db, revision, updated)
