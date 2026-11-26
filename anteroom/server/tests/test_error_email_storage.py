@@ -555,7 +555,7 @@ def test_weekly_impact_migration_removes_inherited_default_grants(previous_engin
     if previous_engine.dialect.name != 'postgresql':
         pytest.skip('Postgres role privileges')
     config = alembic_config(previous_engine.url.render_as_string(hide_password=False))
-    command.upgrade(config, 'd5e1b7a3c962')
+    command.upgrade(config, 'f1b4c8d2e930')
     with previous_engine.begin() as db:
         roles = db.scalars(text("SELECT rolname FROM pg_roles WHERE rolname IN "
                                 "('anteroom_api','anteroom_seller','anon','authenticated','service_role')")).all()
