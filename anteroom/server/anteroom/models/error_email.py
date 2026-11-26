@@ -43,3 +43,15 @@ class OperatorEmailGroup(Base):
                             sqlite_where=text('last_sent IS NOT NULL AND payload IS NULL')),
                       CheckConstraint("status IN ('open', 'resolved', 'muted')", name='ck_error_email_group_status'),
                       CheckConstraint('count >= 0', name='ck_error_email_group_count'),)
+
+
+class OperatorEmailOccurrence(Base):
+    __tablename__ = 'error_email_occurrences'
+    __table_args__ = (Index('ix_error_email_occurrences_group_time', 'fingerprint', 'occurred_at', 'id'),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    fingerprint: Mapped[str] = mapped_column(String, nullable=False)
+    occurred_at: Mapped[float] = mapped_column(Float, nullable=False, index=True)
+    seller_digest: Mapped[str | None] = mapped_column(String(64))
+    release: Mapped[str | None] = mapped_column(String(255))
+    stack: Mapped[str | None] = mapped_column(String)

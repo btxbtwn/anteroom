@@ -212,3 +212,12 @@ repairs already-queued Postgres reports in both copies of the outbox under
 the control lock. If storing a batch fails while the database is reachable,
 the handler retries each report individually and counts invalid reports as
 dropped. On connection failures, it retries the reports still in memory.
+
+The operator groups API includes `impact_7d` for the preceding 168 hours. Counts begin
+when upgraded writers collect reports with lifecycle tracking active. A null summary
+means no retained observations. Missing seller attribution is counted separately.
+Release endpoints follow occurrence time. Stack samples contain at most eight code
+locations from one report; unsupported stack formats have no sample. Delivery, muting,
+and reopening do not erase samples. Rows expire from queries at the cutoff and are
+pruned every 30 minutes by the running reporter, including when email has no budget. Seller digests are scoped to one fingerprint and
+never returned by the API. A rollout or dropped report can leave partial coverage.

@@ -140,6 +140,8 @@ class EmailDelivery:
             state = transaction.state
             active = self._lifecycle_active(transaction)
             now = self.clock()
+            if active:
+                transaction.record_occurrences(items, now)
             pending_count: int | None = None
             for report in items:
                 fingerprint = report['severity'] + ':' + report['fingerprint']

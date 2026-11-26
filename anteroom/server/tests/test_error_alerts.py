@@ -22,6 +22,8 @@ def email_store(tmp_path, monkeypatch):
     store = error_email.EmailStore(engine)
     store.table.create(engine)
     store.groups.create(engine)
+    from anteroom.repositories.error_impact import occurrences
+    occurrences.create(engine)
     with engine.begin() as connection:
         connection.execute(store.table.insert().values(id=1, payload={}))
     monkeypatch.setattr(error_email, 'EmailStore', lambda _engine: store)
