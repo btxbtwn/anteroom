@@ -289,6 +289,17 @@ class SuggestionsTest(unittest.TestCase):
         self.assertIn("2 like it sold in the last 60 days", card["reason"])
         self.assertEqual(self._by_title("Old jeans")["similar_sold"], 0)
 
+    def test_cached_inputs_cross_sale_window_and_season_boundary(self):
+        from anteroom.services.suggestions import rank_suggestions, read_suggestion_inputs
+
+        self._stale("Shorts", "2026-03-01", {"brand": "Sample", "ebay_specifics": {"season": "Summer"}})
+        self._sold("Sold shorts", "2026-07-03", {"brand": "Sample"})
+        inputs = read_suggestion_inputs(self.db)
+        before = rank_suggestions(inputs, now=datetime(2026, 8, 31, tzinfo=UTC))[0]
+        after = rank_suggestions(inputs, now=datetime(2026, 9, 2, tzinfo=UTC))[0]
+        self.assertEqual((before["similar_sold"], before["season_fit"]), (1, "in"))
+        self.assertEqual((after["similar_sold"], after["season_fit"]), (0, "off"))
+
     def test_in_season_ranks_first_and_off_season_last(self):
         # NOW is September: Fall and the Winter ahead are in demand.
         self._stale("Plain mug", "2026-03-01T00:00:00Z", {})

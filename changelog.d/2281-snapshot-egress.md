@@ -1,0 +1,1 @@
+- Inventory and Suggestions use less bandwidth when other parts of your shop change. Suggestions update listing ages without downloading the inventory again.

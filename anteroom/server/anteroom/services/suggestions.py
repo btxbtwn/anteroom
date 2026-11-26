@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -90,6 +92,25 @@ MARKETPLACE_LABELS = {
 }
 
 
+@dataclass(frozen=True)
+class SuggestionItem:
+    id: str
+    title: str
+    status: str
+    photo_count: int
+    listing: dict[str, Any] | None
+    cover_url: str | None
+    marketplaces: list[str]
+    listed_at: datetime | None
+
+
+@dataclass(frozen=True)
+class SuggestionInputs:
+    items: list[SuggestionItem]
+    sales: list[tuple[datetime, str, str]]
+    stale_days: int
+
+
 def list_suggestions(
     db: Session,
     *,
@@ -97,10 +118,10 @@ def list_suggestions(
     limit: int = MAX_SUGGESTIONS,
 ) -> list[dict[str, Any]]:
     """Return ranked suggestion cards for the empty workspace and sidebar."""
-    when = now or datetime.now(UTC)
-    if when.tzinfo is None:
-        when = when.replace(tzinfo=UTC)
+    return rank_suggestions(read_suggestion_inputs(db), now=now, limit=limit)
 
+
+def read_suggestion_inputs(db: Session) -> SuggestionInputs:
     from anteroom.services.user_settings import get_stale_listing_days
 
     # Hosted preferences have their own short session. Read them before the
@@ -136,37 +157,52 @@ def list_suggestions(
     db.close()
     with snapshot_step(db, 'ranking'):
         listings = _listing_state(listing_rows)
-        selling = _recent_sales(conversations, listings, when)
-        in_demand = SEASONS_IN_DEMAND[when.month]
-
-        cards: list[dict[str, Any]] = []
+        items = []
+        sales = []
         for conv in conversations:
-            if conv.settled_at is not None or conv.id in busy:
-                continue
+            notes = parse_notes(conv.notes)
             status = str(conv.status or "draft")
-            if status == "sold" or status in BUSY_LISTING_STATUSES:
+            listing = listings.get(conv.id)
+            if listing and (status == "sold" or notes.get("vendooStatus") == "sold"):
+                sold_at = _sale_date(notes)
+                if sold_at and (listing["brand"] or listing["category"]):
+                    sales.append((sold_at, listing["brand"], listing["category"]))
+            if conv.settled_at is not None or conv.id in busy or status == "sold" or status in BUSY_LISTING_STATUSES:
                 continue
-            card = _card_for(
-                conv,
-                status=status,
-                photo_count=photo_counts.get(conv.id, 0),
-                listing=listings.get(conv.id),
-                direct=direct.get(conv.id, {}),
-                cover_photo=covers.get(conv.id),
-                now=when,
-                selling=selling,
-                in_demand=in_demand,
-                stale_days=stale_days,
-            )
-            if card:
-                cards.append(card)
+            cover = covers.get(conv.id)
+            invalid = listing and listing.get("revision_id") and listing.get("validation_status") == "error"
+            items.append(SuggestionItem(
+                id=conv.id, title=(conv.title or "").strip() or "Untitled", status=status,
+                photo_count=photo_counts.get(conv.id, 0), listing=listing, marketplaces=_marketplaces(notes),
+                cover_url=cover_thumb_url(*cover) if cover else (str(notes.get("vendooCoverUrl") or "") or None),
+                listed_at=_listed_at(notes, direct.get(conv.id, {})) if status == "active" and not invalid else None,
+            ))
+        return SuggestionInputs(items, sales, stale_days)
 
-        cards.sort(key=lambda card: (
-            -int(card["score"]),
-            -int(card["age_days"] or 0),
-            str(card["conversation_id"]),
-        ))
-        return cards[: max(0, int(limit))]
+
+def rank_suggestions(inputs: SuggestionInputs, *, now: datetime | None = None,
+                     limit: int = MAX_SUGGESTIONS) -> list[dict[str, Any]]:
+    when = now or datetime.now(UTC)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    since = when - timedelta(days=SELLING_WINDOW_DAYS)
+    selling = RecentSales(Counter(), Counter(), Counter())
+    for sold_at, brand, category in inputs.sales:
+        if since <= sold_at <= when:
+            if brand:
+                selling.brands[brand] += 1
+            if category:
+                selling.categories[category] += 1
+            if brand and category:
+                selling.pairs[brand, category] += 1
+    cards = []
+    for item in inputs.items:
+        card = _card_for(item, now=when, selling=selling, in_demand=SEASONS_IN_DEMAND[when.month],
+                         stale_days=inputs.stale_days)
+        if card:
+            cards.append(card)
+    cards.sort(key=lambda card: (-int(card["score"]), -int(card["age_days"] or 0), str(card["conversation_id"])))
+    return cards[:max(0, int(limit))]
 
 
 def _photo_counts(db: Session) -> dict[str, int]:
@@ -272,44 +308,27 @@ def _seasons(field: Any, cues: str) -> frozenset[str]:
     return frozenset(season for season, count in hits.items() if count == best)
 
 
-def _recent_sales(
-    conversations, listings: dict[str, dict[str, Any]], now: datetime,
-) -> list[dict[str, str]]:
-    """Brand and category of each item sold in the last ``SELLING_WINDOW_DAYS``."""
-    since = now - timedelta(days=SELLING_WINDOW_DAYS)
-    sales: list[dict[str, str]] = []
-    for conv in conversations:
-        notes = parse_notes(conv.notes)
-        if str(conv.status or "") != "sold" and str(notes.get("vendooStatus") or "") != "sold":
-            continue
-        dates = notes.get("vendooDates")
-        if not isinstance(dates, dict):
-            dates = {}
-        sale = notes.get("vendooSale")
-        if not isinstance(sale, dict):
-            sale = {}
-        sold_at = _parse_moment(str(dates.get("sold") or sale.get("soldAt") or ""))
-        if sold_at is None or not since <= sold_at <= now:
-            continue
-        facets = listings.get(conv.id) or {}
-        if facets.get("brand") or facets.get("category"):
-            sales.append({"brand": facets.get("brand") or "", "category": facets.get("category") or ""})
-    return sales
+def _sale_date(notes: dict) -> datetime | None:
+    dates = notes.get("vendooDates")
+    sale = notes.get("vendooSale")
+    sold = dates.get("sold") if isinstance(dates, dict) else None
+    sold_at = sale.get("soldAt") if isinstance(sale, dict) else None
+    return _parse_moment(str(sold or sold_at or ""))
 
 
-def _selling_like(facets: dict[str, Any] | None, sales: list[dict[str, str]]) -> tuple[int, int]:
-    """How many recent sales share this item's brand or category, and their points."""
-    brand = (facets or {}).get("brand") or ""
-    category = (facets or {}).get("category") or ""
-    count = points = 0
-    for sale in sales:
-        earned = (SAME_BRAND_POINTS if brand and sale["brand"] == brand else 0) + (
-            SAME_CATEGORY_POINTS if category and sale["category"] == category else 0
-        )
-        if earned:
-            count += 1
-            points += earned
-    return count, min(points, MAX_SELLING_POINTS)
+@dataclass
+class RecentSales:
+    brands: Counter[str]
+    categories: Counter[str]
+    pairs: Counter[tuple[str, str]]
+
+    def matching(self, listing: dict[str, Any] | None) -> tuple[int, int]:
+        facets = listing or {}
+        pair = facets.get("brand", ""), facets.get("category", "")
+        brands, categories = self.brands[pair[0]], self.categories[pair[1]]
+        count = brands + categories - self.pairs[pair]
+        points = SAME_BRAND_POINTS * brands + SAME_CATEGORY_POINTS * categories
+        return count, min(points, MAX_SELLING_POINTS)
 
 
 def _season_fit(facets: dict[str, Any] | None, in_demand: tuple[str, ...]) -> str | None:
@@ -321,20 +340,14 @@ def _season_fit(facets: dict[str, Any] | None, in_demand: tuple[str, ...]) -> st
 
 
 def _card_for(
-    conv,
+    item: SuggestionItem,
     *,
-    status: str,
-    photo_count: int,
-    listing: dict[str, Any] | None,
-    cover_photo: tuple[str, str | None] | None,
     now: datetime,
-    selling: list[dict[str, str]] | None = None,
-    in_demand: tuple[str, ...] = (),
-    stale_days: int = 60,
-    direct: dict[str, dict] | None = None,
+    selling: RecentSales,
+    in_demand: tuple[str, ...],
+    stale_days: int,
 ) -> dict[str, Any] | None:
-    notes = parse_notes(conv.notes)
-    marketplaces = _marketplaces(notes)
+    status, listing, marketplaces = item.status, item.listing, item.marketplaces
     has_revision = bool(listing and listing.get("revision_id"))
     kind: str | None = None
     reason = ""
@@ -347,7 +360,7 @@ def _card_for(
         kind = KIND_FAILED
         reason = "The last listing task failed"
         score = KIND_BASE_SCORE[KIND_FAILED]
-    elif status == "draft" and photo_count > 0 and not has_revision:
+    elif status == "draft" and item.photo_count > 0 and not has_revision:
         kind = KIND_READY_TO_GENERATE
         reason = "Photos are ready to generate a listing"
         score = KIND_BASE_SCORE[KIND_READY_TO_GENERATE]
@@ -356,10 +369,10 @@ def _card_for(
         reason = "Listing fields need to be fixed before listing"
         score = KIND_BASE_SCORE[KIND_FIX_VALIDATION]
     elif status == "active":
-        days = _listed_days_ago(notes, direct or {}, now)
+        days = (now - item.listed_at).days if item.listed_at and item.listed_at <= now else None
         if days is not None and days >= stale_days:
             kind = KIND_STALE_ACTIVE
-            similar_sold, selling_points = _selling_like(listing, selling or [])
+            similar_sold, selling_points = selling.matching(listing)
             season_fit = _season_fit(listing, in_demand)
             season_points = {"in": SEASON_POINTS, "off": -SEASON_POINTS}.get(season_fit or "", 0)
             reason = _stale_reason(days, marketplaces, similar_sold, season_fit)
@@ -376,19 +389,14 @@ def _card_for(
     if not kind:
         return None
 
-    cover = (
-        cover_thumb_url(*cover_photo)
-        if cover_photo
-        else (str(notes.get("vendooCoverUrl") or "") or None)
-    )
     return {
-        "conversation_id": conv.id,
+        "conversation_id": item.id,
         "kind": kind,
-        "title": (conv.title or "").strip() or "Untitled",
+        "title": item.title,
         "reason": reason,
         "action": "open",
         "score": score,
-        "cover_photo_url": cover,
+        "cover_photo_url": item.cover_url,
         "age_days": days if kind == KIND_STALE_ACTIVE else None,
         "similar_sold": similar_sold,
         "season_fit": season_fit,
@@ -402,7 +410,7 @@ def _marketplaces(notes: dict[str, Any]) -> list[str]:
     return [str(item) for item in raw if str(item).strip()]
 
 
-def _listed_days_ago(notes: dict[str, Any], direct: dict[str, dict], now: datetime) -> int | None:
+def _listed_at(notes: dict[str, Any], direct: dict[str, dict]) -> datetime | None:
     text = oldest_live_listed_at(notes, direct).strip()
     if not text:
         return None
@@ -412,8 +420,7 @@ def _listed_days_ago(notes: dict[str, Any], direct: dict[str, dict], now: dateti
         return None
     if listed.tzinfo is None:
         listed = listed.replace(tzinfo=UTC)
-    days = int((now - listed).total_seconds() // timedelta(days=1).total_seconds())
-    return days if days >= 0 else None
+    return listed
 
 
 def _stale_reason(

@@ -21,7 +21,7 @@ def test_shared_build_survives_disconnect_and_keeps_sellers_separate(monkeypatch
     entered, release, checked = threading.Event(), threading.Event(), threading.Event()
     versions, builds = [], []
 
-    def version(owner):
+    def version(owner, _name):
         versions.append(owner.seller_id)
         if len(versions) >= 10:
             checked.set()
@@ -63,7 +63,7 @@ def test_change_during_build_is_not_cached_and_failed_reads_can_retry(monkeypatc
 
     cache = snapshots.SellerReadSnapshots()
     versions = [0]
-    monkeypatch.setattr(snapshots, '_version', lambda _: versions[0])
+    monkeypatch.setattr(snapshots, '_version', lambda *_: versions[0])
     monkeypatch.setattr(snapshots, '_load', lambda owner, read: read(owner))
 
     def changing(_db):
@@ -88,10 +88,10 @@ def test_change_during_build_is_not_cached_and_failed_reads_can_retry(monkeypatc
     asyncio.run(run())
 
 
-def test_time_based_suggestions_refresh_without_rebuilding_unchanged_inventory(monkeypatch):
+def test_time_based_reads_refresh_without_rebuilding_unchanged_inventory(monkeypatch):
     cache = snapshots.SellerReadSnapshots()
     clock, builds = [0], []
-    monkeypatch.setattr(snapshots, '_version', lambda _: 1)
+    monkeypatch.setattr(snapshots, '_version', lambda *_: 1)
     monkeypatch.setattr(snapshots, 'monotonic', lambda: clock[0])
 
     def load(owner, read):
@@ -103,10 +103,10 @@ def test_time_based_suggestions_refresh_without_rebuilding_unchanged_inventory(m
     async def run():
         with use(context('alice')):
             assert await cache.read('inventory', lambda db: None) == 1
-            assert await cache.read('suggestions', lambda db: None, refresh_seconds=60) == 2
+            assert await cache.read('still_listed', lambda db: None, refresh_seconds=60) == 2
             clock[0] = 61
             assert await cache.read('inventory', lambda db: None) == 1
-            assert await cache.read('suggestions', lambda db: None, refresh_seconds=60) == 3
+            assert await cache.read('still_listed', lambda db: None, refresh_seconds=60) == 3
 
     asyncio.run(run())
 
@@ -154,7 +154,7 @@ def test_busy_membership_changes_the_version_but_lease_renewals_do_not(cloud, si
     alice = headers(signing_keys)
     identity = client.post('/api/drafts', headers=alice, json={'title': 'Busy tee'}).json()['id']
     owner = for_seller(USER_ID)
-    idle = snapshots._version(owner)
+    idle = snapshots._version(owner, 'inventory')
     # The trusted worker also uses SQL outside SellerDatabaseSession. Cache
     # correctness cannot depend exclusively on ORM feed notifications.
     with Session(engine) as db:
@@ -162,18 +162,18 @@ def test_busy_membership_changes_the_version_but_lease_renewals_do_not(cloud, si
         db.add(task)
         db.commit()
         task_id = task.id
-    busy = snapshots._version(owner)
+    busy = snapshots._version(owner, 'inventory')
     assert busy != idle
     with Session(engine) as db:
         task = db.get(BackgroundTask, task_id)
         task.status = 'running'
         task.leased_until = datetime.now(UTC) + timedelta(minutes=2)
         db.commit()
-    assert snapshots._version(owner) == busy
+    assert snapshots._version(owner, 'inventory') == busy
     with Session(engine) as db:
         db.get(BackgroundTask, task_id).status = 'cancelled'
         db.commit()
-    assert snapshots._version(owner) == idle
+    assert snapshots._version(owner, 'inventory') == idle
 
 
 def test_inventory_read_keeps_a_draft_busy_on_another_process(cloud, signing_keys):  # noqa: F811
@@ -218,7 +218,7 @@ def test_slow_line_separates_waiting_on_a_discarded_build_from_rebuilding(monkey
     cache = snapshots.SellerReadSnapshots()
     versions, checks, entered, release = [0], [], threading.Event(), threading.Event()
 
-    def version(_owner):
+    def version(_owner, _name):
         checks.append(True)
         return versions[0]
 
@@ -272,7 +272,7 @@ def test_parallel_reads_share_a_build_even_when_writes_keep_it_out_of_cache(monk
     checks, builds = [], []
     version = [0]
 
-    def check(_owner):
+    def check(_owner, _name):
         return version[0]
 
     in_thread = snapshots._in_thread
@@ -479,7 +479,7 @@ def test_step_diagnostics_follow_shared_build_and_reset_on_cache_hit(monkeypatch
 
     owner = replace(context('private seller identity'), session_factory=sessionmaker(engine))
     cache, reports = snapshots.SellerReadSnapshots(), []
-    monkeypatch.setattr(snapshots, '_version', lambda _: 1)
+    monkeypatch.setattr(snapshots, '_version', lambda *_: 1)
     monkeypatch.setattr(snapshots, 'note', lambda **fields: reports.append(fields))
 
     def read(db):
@@ -531,11 +531,11 @@ def test_open_screens_share_one_still_listed_read_per_seller(cloud, signing_keys
     alice, bob = headers(signing_keys), headers(signing_keys, BOB)
     version, checks, asked, reads = snapshots._version, [], threading.Event(), []
 
-    def counted(owner):
+    def counted(owner, name):
         checks.append(True)
         if len(checks) >= 6:
             asked.set()
-        return version(owner)
+        return version(owner, name)
 
     monkeypatch.setattr(snapshots, '_version', counted)
 

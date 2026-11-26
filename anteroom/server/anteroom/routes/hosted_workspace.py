@@ -3,6 +3,7 @@
 Every query uses the verified seller session. No desktop services are imported
 or started, and no request accepts an owner, file path or operational identity.
 """
+import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Annotated, Literal
@@ -146,10 +147,10 @@ async def list_conversations(request: Request):
 
 @router.get('/suggestions', response_model=SuggestionsResponse)
 async def suggestions(request: Request):
-    from anteroom.services.suggestions import list_suggestions
+    from anteroom.services.suggestions import rank_suggestions, read_suggestion_inputs
 
-    return await request.app.state.seller_reads.read('suggestions',
-                                                    lambda db: {'suggestions': list_suggestions(db)}, refresh_seconds=60)
+    inputs = await request.app.state.seller_reads.read('suggestions', read_suggestion_inputs)
+    return {'suggestions': await asyncio.to_thread(rank_suggestions, inputs)}
 
 
 def inventory_response(db):
