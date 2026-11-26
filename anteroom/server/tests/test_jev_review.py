@@ -8,7 +8,7 @@ import httpx
 from sqlalchemy.orm import sessionmaker
 
 from anteroom.database import Base
-from anteroom.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
+from anteroom.repositories.queries import ConversationRepo, ListingRepo
 from anteroom.services import jev_review, listing_persistence, native_contract, user_settings
 from anteroom.services import business_context, category_fields  # noqa: F401 - register commit listeners before the first write
 from anteroom.services.listing_generate import notes_fingerprint, photo_fingerprint
@@ -96,11 +96,34 @@ def test_seller_changes_during_review_take_precedence(draft, action):
                 "wrong0": {"type": "noul", "noul": 1}}
 
     with patch.object(jev_review, "_decide", decide):
-        if action == "disable":
-            assert asyncio.run(jev_review.review_generation(*args)) is None
-        else:
-            with pytest.raises(RevisionConflict):
-                asyncio.run(jev_review.review_generation(*args))
+        assert asyncio.run(jev_review.review_generation(*args)) is None
+    assert all(rev.source != "jev_review" for rev in ListingRepo(db).get_revisions(identity))
+
+
+def test_seller_edit_during_review_still_finishes_generation(draft, monkeypatch):
+    from anteroom.services import listing_generation
+
+    db, identity, initial, _, quote = draft
+    user_settings.set_ui_prefs(jev_field_review=True)
+    monkeypatch.setattr("anteroom.services.native_field_fill.fill_native_fields", AsyncMock(return_value=None))
+    monkeypatch.setattr("anteroom.services.marketplaces.get_selected_marketplaces", lambda: ["ebay"])
+
+    async def decide(*_):
+        listing_persistence.save_revision(db, identity, {**initial.listing_json, "title": "My jacket"},
+                                          source="user_form", expected_revision_id=initial.id)
+        return {"field0": {"type": "choice", "choice": "Cotton", "probabilities": {"Cotton": 1}},
+                "wrong0": {"type": "noul", "noul": 1}}
+
+    summaries = []
+    monkeypatch.setattr(listing_generation, "_finish_summary", lambda *args: summaries.append(args))
+    with patch.object(jev_review, "_decide", decide):
+        asyncio.run(listing_generation._finish_generation_background(
+            identity, initial.listing_json, evidence=quote, provider=object(), review_evidence=quote,
+            review_notes=notes_fingerprint(None), expected_revision_id=initial.id,
+            expected_photo_fingerprint=photo_fingerprint([]),
+        ))
+    assert len(summaries) == 1
+    db.expire_all()
     assert all(rev.source != "jev_review" for rev in ListingRepo(db).get_revisions(identity))
 
 

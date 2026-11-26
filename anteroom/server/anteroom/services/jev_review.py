@@ -200,6 +200,20 @@ def _finish_review(db, conv_id, photos, expected_notes, revision_id, changes, fa
 
 
 async def review_generation(conv_id: str, evidence: str, photos: str, listing: dict, notes: str) -> dict | None:
+    """Return the corrected listing, or None when nothing was saved.
+
+    A seller change during the review wins: the stale correction is dropped and
+    generation finishes as it would without Jev (a photo change still
+    supersedes it through the generation finish's own photo checks).
+    """
+    try:
+        return await _review(conv_id, evidence, photos, listing, notes)
+    except RevisionConflict as exc:
+        log.info("Jev review skipped for %s: %s", conv_id, exc)
+        return None
+
+
+async def _review(conv_id: str, evidence: str, photos: str, listing: dict, notes: str) -> dict | None:
     if not evidence or not listing.get(native_contract.EVIDENCE_KEY):
         return None
     if not await asyncio.to_thread(user_settings.jev_review_enabled):
