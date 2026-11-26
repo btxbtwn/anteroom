@@ -114,8 +114,8 @@ def record_openrouter(
     ))
 
 
-def record_photoroom(*, edit_label: str, conversation_id: str | None = None) -> None:
-    """Persist one managed Photoroom image credit at the configured rate card."""
+def record_photoroom(*, edit_label: str, basic: bool, conversation_id: str | None = None) -> None:
+    """Record one managed call. A Basic removal uses one fifth of a Plus image credit."""
     from anteroom.services.photoroom import managed_photoroom_enabled
 
     if not managed_photoroom_enabled():
@@ -128,7 +128,7 @@ def record_photoroom(*, edit_label: str, conversation_id: str | None = None) -> 
         provider="photoroom",
         kind="edit",
         model_or_edit=(edit_label or "")[:256],
-        cost_usd=photoroom_cost_usd(),
+        cost_usd=photoroom_cost_usd() / (5 if basic else 1),
         cost_source="rate_card",
         units=1,
         conversation_id=conversation_id,
