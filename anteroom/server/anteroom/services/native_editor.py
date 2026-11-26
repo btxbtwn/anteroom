@@ -375,6 +375,8 @@ async def ebay_form(snapshot: dict, *, fresh_choices: bool = False) -> dict:
         raise raw_selling
     if isinstance(raw_choices, BaseException):
         raise raw_choices
+    if isinstance(promotion_rows, BaseException):
+        raise promotion_rows
     schema = raw_schema
     variations = raw_variations
     selling = raw_selling

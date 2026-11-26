@@ -51,8 +51,10 @@ def _eligible(campaign: dict, marketplace: str) -> bool:
 
 async def campaigns() -> list[dict]:
     options: list[dict] = []
+    from anteroom.services.marketplace_schemas import shared_ebay_client
+
     async with asyncio.timeout(25):
-        client = await EbayClient.connect()
+        client = await shared_ebay_client()
         marketplace = (await asyncio.to_thread(seller_region)).ebay_marketplace
         for offset in range(0, 10000, 100):
             page = await client.request("GET", CAMPAIGNS, params={
@@ -67,8 +69,10 @@ async def campaigns() -> list[dict]:
 async def suggested_rate(listing_id: str) -> str:
     if not re.fullmatch(r"[0-9]{6,20}", listing_id):
         return ""
+    from anteroom.services.marketplace_schemas import shared_ebay_client
+
     async with asyncio.timeout(15):
-        client = await EbayClient.connect()
+        client = await shared_ebay_client()
         page = await client.request("POST", "/sell/recommendation/v1/find",
                                     params={"filter": "recommendationTypes:{AD}"},
                                     body={"listingIds": [listing_id]})

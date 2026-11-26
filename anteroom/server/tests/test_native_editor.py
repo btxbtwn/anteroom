@@ -104,7 +104,7 @@ class NativeEditorTest(unittest.TestCase):
             form = asyncio.run(native_editor.ebay_form(self.listing))
         self.assertEqual(form["marketplace"], "ebay")
         self.assertTrue(form["fields"])
-        promotion = next(row for row in form["fields"] if row["key"] == "ebay_specifics.promotion.enabled")
+        promotion = next(row for row in form["fields"] if row.get("key") == "ebay_specifics.promotion.enabled")
         self.assertEqual(promotion["section"], "Promote your listing")
         self.assertIs(promotion["value"], False)
         self.bridge.assert_not_called()
@@ -389,7 +389,11 @@ class NativeEditorTest(unittest.TestCase):
                 result = answer.json()
                 self.assertTrue(result["page_labels"])
                 rows = result["fields"]
-                self.assertEqual([row["value"] for row in rows], ["cotton", "Edited description", 20])
+                # eBay's Promote your listing rows are read live and appended after the saved ones.
+                self.assertEqual([row["path"] for row in rows[3:]], [
+                    "ebay_specifics.promotion.enabled", "ebay_specifics.promotion.campaignId",
+                    "ebay_specifics.promotion.adRate"])
+                self.assertEqual([row["value"] for row in rows[:3]], ["cotton", "Edited description", 20])
                 self.assertEqual(rows[0]["section"], "Details")
                 self.assertEqual(rows[0]["width"], "half")
                 self.assertEqual(rows[0]["option_values"], {"Cotton": "cotton"})

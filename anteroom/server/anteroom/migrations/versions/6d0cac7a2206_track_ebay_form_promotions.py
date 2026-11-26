@@ -17,6 +17,9 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Adopting a database from before migrations creates the column with its tables.
+    if "ebay_promotion" in {column["name"] for column in sa.inspect(op.get_bind()).get_columns("marketplace_listings")}:
+        return
     op.add_column("marketplace_listings", sa.Column("ebay_promotion", sa.JSON(), nullable=True))
 
 
