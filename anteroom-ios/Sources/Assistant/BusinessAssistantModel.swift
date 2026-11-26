@@ -216,6 +216,11 @@ final class BusinessAssistantModel {
             }
         }
         paint()
+        // Nothing more is coming: the last word no longer waits for the one after it.
+        if followThread == thread, var finished = live {
+            finished.ended = true
+            setLive(finished)
+        }
         // Picking a conversation back up with nothing being written is not an answer.
         let answered = question != nil || live?.text.isEmpty == false
         if answered, !Task.isCancelled, followThread == thread {

@@ -82,6 +82,8 @@ export function settingsSearchItemsFor(hosted: boolean, managedAI = false): read
 }
 
 export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
+  { id: "subscription-plan", title: "Plan & Smart Credits", section: "usage", targetId: "subscription-plan",
+    searchTerms: ["plan", "subscription", "tier", "credits", "smart credits", "upgrade", "free", "lister", "starter", "pro", "business"] },
   { id: "managed-usage", title: "Metered usage", section: "usage", targetId: "managed-usage",
     searchTerms: ["cost", "billing", "OpenRouter", "Photoroom"] },
   { id: "listing-quality", title: "Help improve listings", section: "listings", targetId: "listing-quality",
