@@ -1,0 +1,1 @@
+- Set up Promoted Listings on the eBay form and confirm the ad rate when you list or update.

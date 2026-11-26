@@ -85,7 +85,7 @@ def update_listing(conv_id: str, body: ListingSave, db: Session = Depends(get_db
     from anteroom.services.listing_editor import save_listing_edit
 
     try:
-        return save_listing_edit(conv_id, body.listing, db, expected_revision_id=body.expected_revision_id)
+        return save_listing_edit(conv_id, body.listing, db, expected_revision_id=body.expected_revision_id, seller_form=True)
     except RevisionConflict as exc:
         raise HTTPException(409, "This listing changed. Reload it before saving your edits.") from exc
 

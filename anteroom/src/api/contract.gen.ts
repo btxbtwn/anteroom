@@ -347,6 +347,15 @@ export interface ErrorDetail {
   detail: string;
 }
 
+export interface EtsyPackage {
+  item_weight: number;
+  item_length: number;
+  item_width: number;
+  item_height: number;
+  item_weight_unit: string;
+  item_dimensions_unit: string;
+}
+
 export interface Expense {
   incurred_date: string;
   amount_cents: number;
@@ -406,6 +415,16 @@ export interface FavoriteResult {
 
 export interface HTTPValidationError {
   detail?: ValidationError[];
+}
+
+export interface ListRequest {
+  revision_id: string;
+  confirm?: boolean;
+  confirmed_ebay_ad_rate?: string | null;
+  shipping_profile_id?: string | null;
+  readiness_state_id?: string | null;
+  return_policy_id?: string | null;
+  etsy_package?: EtsyPackage | null;
 }
 
 /** The listing's current revision, its revision pointer and its validation. */

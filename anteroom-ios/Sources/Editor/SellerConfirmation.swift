@@ -12,10 +12,12 @@ struct SellerConfirmation: Sendable, Equatable {
     let action: Action
     /// In the order the seller saw them.
     let marketplaces: [String]
+    let ebayAdRate: String?
 
-    fileprivate init(action: Action, marketplaces: [String]) {
+    fileprivate init(action: Action, marketplaces: [String], ebayAdRate: String? = nil) {
         self.action = action
         self.marketplaces = marketplaces
+        self.ebayAdRate = ebayAdRate
     }
 
     /// Whether the seller confirmed `action` on every one of `marketplaces`.
@@ -38,22 +40,41 @@ struct SellerConfirmationRequest: Identifiable, Equatable {
     let title: String
     let message: String
     let button: String
+    var ebayAdRate: String? = nil
 
     var id: String { "\(action.rawValue):\(marketplaces.joined(separator: ","))" }
 
-    static func list(title: String, marketplace: String, priceLabel: String? = nil) -> Self {
+    static func ebayPromotion(in listing: [String: JSONValue]?) -> String? {
+        guard listing?.value(at: "ebay_specifics.promotion.enabled") == .bool(true),
+              let value = listing?.value(at: "ebay_specifics.promotion.adRate"),
+              let rate = value.number, (2...100).contains(rate) else { return nil }
+        return value.text
+    }
+
+    private static func addingPromotion(_ message: String, _ marketplaces: [String], _ promotion: String?) -> String {
+        guard marketplaces.contains("ebay"), let promotion else { return message }
+        return message + "\n" + "eBay will promote this listing at \(promotion)% on attributed sales."
+    }
+
+    static func list(title: String, marketplace: String, priceLabel: String? = nil, ebayPromotion: String? = nil) -> Self {
         let question = MarketplaceActions.listQuestion(title: title, marketplace: marketplace, priceLabel: priceLabel)
-        return Self(action: .list, marketplaces: [marketplace], title: question.title, message: question.message, button: question.button)
+        return Self(action: .list, marketplaces: [marketplace], title: question.title,
+                    message: addingPromotion(question.message, [marketplace], ebayPromotion), button: question.button,
+                    ebayAdRate: marketplace == "ebay" ? ebayPromotion : nil)
     }
 
-    static func listEverywhere(title: String, marketplaces: [String]) -> Self {
+    static func listEverywhere(title: String, marketplaces: [String], ebayPromotion: String? = nil) -> Self {
         let question = MarketplaceActions.listEverywhereQuestion(title: title, marketplaces: marketplaces)
-        return Self(action: .list, marketplaces: marketplaces, title: question.title, message: question.message, button: question.button)
+        return Self(action: .list, marketplaces: marketplaces, title: question.title,
+                    message: addingPromotion(question.message, marketplaces, ebayPromotion), button: question.button,
+                    ebayAdRate: marketplaces.contains("ebay") ? ebayPromotion : nil)
     }
 
-    static func update(title: String, marketplace: String) -> Self {
+    static func update(title: String, marketplace: String, ebayPromotion: String? = nil) -> Self {
         let question = MarketplaceActions.updateQuestion(title: title, marketplace: marketplace)
-        return Self(action: .update, marketplaces: [marketplace], title: question.title, message: question.message, button: question.button)
+        return Self(action: .update, marketplaces: [marketplace], title: question.title,
+                    message: addingPromotion(question.message, [marketplace], ebayPromotion), button: question.button,
+                    ebayAdRate: marketplace == "ebay" ? ebayPromotion : nil)
     }
 
     static func delist(title: String, marketplaces: [String]) -> Self {
@@ -72,7 +93,7 @@ extension View {
                                                 set: { if !$0 { request.wrappedValue = nil } }),
                            titleVisibility: .visible, presenting: request.wrappedValue) { pending in
             Button(pending.button, role: pending.action == .delist ? .destructive : nil) {
-                onConfirm(SellerConfirmation(action: pending.action, marketplaces: pending.marketplaces))
+                onConfirm(SellerConfirmation(action: pending.action, marketplaces: pending.marketplaces, ebayAdRate: pending.ebayAdRate))
             }
             Button("Cancel", role: .cancel) {}
         } message: { pending in

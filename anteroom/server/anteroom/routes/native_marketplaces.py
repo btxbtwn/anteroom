@@ -64,12 +64,12 @@ async def preflight(conv_id: str, revision_id: str | None = None):
 # each database step on a worker thread with a short session of its own.
 @router.post("/{marketplace}/list")
 async def list_now(conv_id: str, marketplace: Marketplace, body: ListRequest):
-    return await _reply(native.list_now(conv_id, marketplace, body))
+    return await _reply(native.list_now(conv_id, marketplace, body, require_ad_rate=True))
 
 
 @router.post("/{marketplace}/update")
 async def update_live(conv_id: str, marketplace: Marketplace, body: ListRequest):
-    return await _reply(native.update_live(conv_id, marketplace, body))
+    return await _reply(native.update_live(conv_id, marketplace, body, require_ad_rate=True))
 
 
 @router.post("/{marketplace}/draft")

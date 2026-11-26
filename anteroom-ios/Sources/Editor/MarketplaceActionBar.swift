@@ -163,14 +163,14 @@ struct MarketplaceActionBar: View {
         } else if row.canList {
             let wait = model.retryIn(marketplace)
             Button(busy ? "Working…" : wait > 0 ? "Retry in \(wait)s" : "List on \(name)") {
-                confirming = .list(title: editor.title, marketplace: marketplace)
+                confirming = .list(title: editor.title, marketplace: marketplace, ebayPromotion: editor.ebayAdRate)
             }
             .workspaceProminentButton()
             .frame(minHeight: 44)
             .disabled(busy || wait > 0 || unsaved || blocked)
         } else if row.canUpdate {
             Button(busy ? "Working…" : "Update on \(name)") {
-                confirming = .update(title: editor.title, marketplace: marketplace)
+                confirming = .update(title: editor.title, marketplace: marketplace, ebayPromotion: editor.ebayAdRate)
             }
             .modifier(UpdateButtonStyle(prominent: row.outdated))
             .frame(minHeight: 44)

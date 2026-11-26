@@ -65,7 +65,7 @@ def _preload_form_caches(
                 ),
                 db=db,
             )
-        return schemas, {"ebay-policies": saved_choices.read_entry("ebay-policies", db=db)}
+        return schemas, {name: saved_choices.read_entry(name, db=db) for name in ("ebay-policies", "ebay-campaigns")}
 
     if marketplace == "etsy":
         from anteroom.services.direct_categories import direct_category_id
@@ -122,6 +122,13 @@ def form_snapshot(db: Session, conv_id: str, marketplace: str, revision_id: str 
     # A draft nobody has generated yet still opens every form, empty, for the seller to fill in.
     listing_json = revision.listing_json if revision else {}
     snapshot = direct_preflight.prepare(db, conv, listing_json, marketplace)
+    if marketplace == "ebay":
+        from anteroom.models.marketplace_listing import LIVE_STATES, MarketplaceListing
+
+        live_id = db.query(MarketplaceListing.listing_id).filter_by(
+            conversation_id=conv_id, marketplace="ebay",
+        ).filter(MarketplaceListing.state.in_(LIVE_STATES)).scalar()
+        snapshot["_promotion_listing_id"] = live_id
     schemas, choices = _preload_form_caches(db, snapshot, marketplace) if preload else ({}, {})
     db.rollback()
     return FormSnapshot(snapshot=snapshot, listing_json=listing_json, schemas=schemas, choices=choices)
@@ -150,6 +157,10 @@ async def build_form(snapshot: dict, listing_json: dict, marketplace: str, *, re
 
         saved_form = await asyncio.to_thread(native_contract.editor_form, listing_json, marketplace, values=snapshot)
         if saved_form is not None:
+            if marketplace == "ebay":
+                saved_form["fields"] = [row for row in saved_form["fields"]
+                                        if not str(row.get("key")).startswith("ebay_specifics.promotion.")]
+                saved_form["fields"].extend(await _ebay_promotion_fields(snapshot))
             return saved_form
         # Stale saved choices must be rebuilt from the current catalog below.
         # Rejecting here leaves the editor empty with no way to reload them.
@@ -348,11 +359,12 @@ async def ebay_form(snapshot: dict, *, fresh_choices: bool = False) -> dict:
     # All five independent eBay reads run concurrently and share one lazy client on cache misses.
     with marketplace_schemas.schema_session(fresh=fresh_choices):
         schema_task = asyncio.create_task(load_schema())
-        raw_schema, raw_variations, raw_selling, raw_choices = await asyncio.gather(
+        raw_schema, raw_variations, raw_selling, raw_choices, promotion_rows = await asyncio.gather(
             schema_task,
             _ebay_variations_field(snapshot, category, schema_task, strict=fresh_choices),
             _ebay_format_fields(snapshot, category, details, strict=fresh_choices),
             _ebay_choices(snapshot, fresh=fresh_choices),
+            _ebay_promotion_fields(snapshot, fresh=fresh_choices),
             return_exceptions=True,
         )
     if isinstance(raw_schema, BaseException):
@@ -501,8 +513,54 @@ async def ebay_form(snapshot: dict, *, fresh_choices: bool = False) -> dict:
               options=[f"{percent}%" for percent in CHARITY_PERCENTS],
               option_values={f"{percent}%": percent for percent in CHARITY_PERCENTS},
               help="If your item sells, you will donate the percentage of your item's final sale price to the charity you chose."),
+        *promotion_rows,
     ]
     return {"marketplace": "ebay", "native": True, "known": True, "category_id": category, "fields": fields}
+
+
+async def _ebay_promotion_fields(snapshot: dict, *, fresh: bool = False) -> list[dict]:
+    from anteroom.services import ebay_listing_promotion as promotion, saved_choices
+    from anteroom.services.marketplace_accounts import account_id
+    chosen = promotion.choice(snapshot)
+
+    async def options() -> tuple[list[dict], str]:
+        try:
+            account = await account_id("ebay")
+            if not account:
+                return [], "Connect eBay in Settings → Connections to see your campaigns."
+            rows = (await promotion.campaigns() if fresh else await saved_choices.kept(
+                "ebay-campaigns", account, promotion.campaigns))
+        except Exception:  # noqa: BLE001 - optional account access must not block the form
+            return [], "eBay campaigns are unavailable. Check access in Marketplaces → eBay → Marketing."
+        return rows, "" if rows else (
+            "You have no running General campaigns for manually selected listings. "
+            "Create one in Marketplaces → eBay → Marketing."
+        )
+
+    async def suggestion() -> str:
+        try:
+            return await promotion.suggested_rate(str(snapshot.get("_promotion_listing_id") or ""))
+        except Exception:  # noqa: BLE001 - suggestions are optional
+            return ""
+
+    (campaigns, note), suggested = await asyncio.gather(options(), suggestion())
+    values = {str(row.get("campaignName") or row["campaignId"]): str(row["campaignId"])
+              for row in campaigns if row.get("campaignId")}
+    if len(values) < len(campaigns):
+        values = {f"{row.get('campaignName') or 'Campaign'} ({row['campaignId']})": str(row["campaignId"])
+                  for row in campaigns if row.get("campaignId")}
+    rate_hint = f"Suggested ad rate from eBay: {suggested}%." if suggested else "Enter a rate from 2% to 100%."
+    return [
+        field(f"{promotion.PREFIX}.enabled", "Promoted Listings", chosen.get("enabled") is True,
+              section=promotion.SECTION, input_type="boolean",
+              help=note or "The ad fee is charged at your rate on attributed sales."),
+        field(f"{promotion.PREFIX}.campaignId", "Select campaign", chosen.get("campaignId"),
+              section=promotion.SECTION, selection_only=True, options=list(values), option_values=values,
+              options_source="marketplace", help=note, width="half"),
+        field(f"{promotion.PREFIX}.adRate", "Ad rate (%)", chosen.get("adRate"),
+              section=promotion.SECTION, input_type="number", min_value=2, max_value=100, step=0.1,
+              help=rate_hint, width="half"),
+    ]
 
 
 async def _ebay_variations_field(

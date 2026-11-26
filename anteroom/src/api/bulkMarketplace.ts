@@ -10,6 +10,7 @@ export interface BulkMarketplaceRow {
   skipped: { marketplace: DelistMarketplace; reason: string }[];
   skip_reason: string | null;
   review_token: string | null;
+  ebay_ad_rate?: string;
 }
 export interface BulkMarketplacePreview { action: BulkMarketplaceAction; marketplaces: DelistMarketplace[]; rows: BulkMarketplaceRow[] }
 export interface BulkMarketplacePerform {

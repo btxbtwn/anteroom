@@ -21,6 +21,7 @@ export type WaitingAction = {
   marketplace: NativeMarketplace;
   kind: WaitingKind;
   revisionId: string;
+  confirmedEbayAdRate?: string;
   /** Its turn's request is in flight. */
   starting: boolean;
   /** Why it stopped when its turn came. A stopped action is kept until dismissed. */

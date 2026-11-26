@@ -1406,6 +1406,49 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Reco
 async def execute(action: str, snapshot: dict, photos: list, binding: dict,
                   record: RecordFn, active: ActiveFn, *, confirm: bool = False,
                   conversation_id: str = "") -> dict:
+    from anteroom.services import ebay_listing_promotion
+
+    promotion = ebay_listing_promotion.choice(snapshot)
+    previous = binding.get("ebay_promotion") or {}
+    enabled = promotion.get("enabled")
+    should_apply = confirm is True and ebay_listing_promotion.has_change(action, promotion, previous)
+    selected = None
+    if should_apply and enabled is True:
+        try:
+            selected = ebay_listing_promotion.validate(promotion)
+            if listing_format(snapshot)["format"] == AUCTION:
+                raise missing("Promoted Listings requires a fixed-price eBay listing.", f"{ebay_listing_promotion.PREFIX}.enabled")
+        except (ListingProblem, ValueError) as exc:
+            return _failure(exc, None)
+    result = await _execute_listing(action, snapshot, photos, binding, record, active, confirm=confirm,
+                                    conversation_id=conversation_id)
+    if should_apply and result.get("state") == "published":
+        return await _apply_promotion(result, selected, previous, record, active)
+    return result
+
+
+async def _apply_promotion(result: dict, selected: tuple[str, Decimal] | None, previous: dict,
+                           record: RecordFn, active: ActiveFn) -> dict:
+    from anteroom.services import ebay_listing_promotion
+
+    listing_id = str(result["listing_url"]).rsplit("/", 1)[-1]
+    if not selected and previous.get("listing_id") != listing_id:
+        return result
+    try:
+        async with asyncio.timeout(45):
+            if not await _is_active(active):
+                raise EbayFailure("The eBay promotion step was cancelled.")
+            await ebay_listing_promotion.reconcile(
+                await EbayClient.connect(), listing_id, selected, previous,
+                lambda values: _record(record, values), lambda: _is_active(active))
+    except Exception:  # noqa: BLE001 - a failed ad or journal write cannot undo confirmed publication
+        return {**result, "warning": ebay_listing_promotion.UNCONFIRMED}
+    return result
+
+
+async def _execute_listing(action: str, snapshot: dict, photos: list, binding: dict,
+                           record: RecordFn, active: ActiveFn, *, confirm: bool,
+                           conversation_id: str) -> dict:
     if action == "update":
         if confirm is not True:
             return failure("Confirm updating the live eBay listing.", "rejected", safe=True)

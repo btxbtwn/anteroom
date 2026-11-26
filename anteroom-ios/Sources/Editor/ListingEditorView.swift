@@ -255,7 +255,7 @@ struct ListingEditorView: View {
             }
         }) {
             MarketplaceActionsView(api: model.api, listingID: model.listingID,
-                                   revisionID: model.revisionID, title: model.title) { prompt in
+                                   revisionID: model.revisionID, title: model.title, ebayPromotion: model.ebayAdRate) { prompt in
                 assistantPrompt = prompt
                 showingMarketplaces = false
             }

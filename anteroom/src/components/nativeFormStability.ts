@@ -203,6 +203,10 @@ export function nativeFieldVisible(field: NativeFormRow, context: NativeFieldCon
   }
   if (context.tab === "ebay") {
     const auction = ebayFormat(context) === "AUCTION";
+    if (field.key.startsWith("ebay_specifics.promotion.")) {
+      const enabled = shownChoice(context.fields, context.local, context.listing, "ebay_specifics.promotion.enabled") === "true";
+      return field.key.endsWith(".enabled") ? !auction || enabled : !auction && enabled;
+    }
     const varied = ebayVaried(context.listing);
     // eBay's page: an auction has a duration and bids instead of an item price; Buy It Now runs until cancelled.
     if (EBAY_AUCTION_PRICE_KEYS.has(field.key) || field.key === "ebay_specifics.listingDuration") return auction;

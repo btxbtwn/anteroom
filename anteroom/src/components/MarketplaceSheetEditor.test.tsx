@@ -466,7 +466,7 @@ describe("MarketplaceSheetEditor", () => {
       });
       await flushMicrotasks();
 
-      expect(listSpy).toHaveBeenCalledWith("conv-1", "depop", "rev-fresh");
+      expect(listSpy).toHaveBeenCalledWith("conv-1", "depop", "rev-fresh", undefined);
     } finally {
       await act(() => root.unmount());
     }

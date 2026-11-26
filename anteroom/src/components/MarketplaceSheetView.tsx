@@ -8,6 +8,7 @@ import type { ListingDocument, ListingSheetCell, ListingSheetRow } from "../api/
 import { useWorkspaceRuntime } from "../app/runtime";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
 import { cn } from "../lib/utils";
+import { ebayPromotionMessage, ebayPromotionRate } from "../listingPaths";
 import { BulkMarketplaceDialog } from "./BulkMarketplaceDialog";
 import { marketplaceCell, type MarketplaceCell, type MarketplaceCellKind } from "./inventoryTable";
 import { marketplaceName } from "./marketplaceNames";
@@ -584,10 +585,10 @@ export function MarketplaceSheetView({
               marketLabel={marketLabel}
               isListing={isListingConfirm}
               onCancel={() => setConfirmList(null)}
-              onConfirm={(revisionId) => {
+              onConfirm={(revisionId, confirmedEbayAdRate) => {
                 const submittedId = confirmList.listing.id;
                 listMutation.mutate(
-                  { convId: submittedId, revisionId },
+                  { convId: submittedId, revisionId, confirmedEbayAdRate },
                   {
                     onSuccess: () =>
                       setConfirmList((cur) =>
@@ -755,7 +756,7 @@ function DesktopConfirmListBody({
   marketLabel: string;
   isListing: boolean;
   onCancel: () => void;
-  onConfirm: (revisionId: string) => void;
+  onConfirm: (revisionId: string, confirmedEbayAdRate?: string) => void;
 }) {
   const queryClient = useQueryClient();
   const edits = useMemo(() => listingEdits(queryClient, confirmList.listing.id), [queryClient, confirmList.listing.id]);
@@ -791,6 +792,9 @@ function DesktopConfirmListBody({
           <> for <span className="font-medium tabular-nums">{priceLabel}</span></>
         ) : null}?
       </p>
+      {marketplace === "ebay" && ebayPromotionMessage(cachedDoc?.listing) && (
+        <p className="text-xs text-foreground">{ebayPromotionMessage(cachedDoc?.listing)}</p>
+      )}
       {snapshotDrifted && !isListing && !editState.saving ? (
         <p className="text-xs text-warning-foreground">
           This listing changed. Cancel and click List again to review the latest details.
@@ -810,7 +814,7 @@ function DesktopConfirmListBody({
           type="button"
           size="xs"
           disabled={isListing || editState.saving || snapshotDrifted}
-          onClick={() => onConfirm(confirmList.revisionId)}
+          onClick={() => onConfirm(confirmList.revisionId, marketplace === "ebay" ? ebayPromotionRate(cachedDoc?.listing) : undefined)}
         >
           {isListing || editState.saving ? <Spinner size="sm" /> : <CheckIcon className="size-3.5" />}
           {editState.saving ? "Saving…" : `List on ${marketLabel}`}

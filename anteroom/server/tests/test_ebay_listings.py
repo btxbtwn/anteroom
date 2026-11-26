@@ -27,6 +27,8 @@ LISTING = {
 
 
 class Client:
+    seller = ("fake-ebay-account", "0")
+
     def __init__(self, policies=1, aspects=None, conditions=None, locations=None):
         self.policies = policies
         self.conditions = conditions
@@ -40,9 +42,30 @@ class Client:
         self.location_conflict = False
         # "saved": the create is stored, then eBay answers 503. "down": it never lands.
         self.location_fault = None
+        self.ad = {}
+        self.ad_failure = False
 
     async def request(self, method, path, **kwargs):
         self.calls.append((method, path, kwargs))
+        campaign = "/sell/marketing/v1/ad_campaign/42"
+        if path == campaign:
+            return {"marketplaceId": "EBAY_US", "campaignStatus": "RUNNING",
+                    "fundingStrategy": {"fundingModel": "COST_PER_SALE"}}
+        if path == f"{campaign}/ad":
+            return {"ads": [self.ad] if self.ad else []}
+        if path == f"{campaign}/bulk_create_ads_by_listing_id":
+            item, = kwargs["body"]["requests"]
+            assert self.offers["offer-1"]["status"] == "PUBLISHED"
+            if self.ad_failure:
+                return {"responses": [{"listingId": item["listingId"], "statusCode": 409}]}
+            self.ad = {**item, "adId": "ad-1"}
+            return {"responses": [{"listingId": item["listingId"], "statusCode": 201}]}
+        if path == f"{campaign}/ad/ad-1/update_bid":
+            self.ad.update(kwargs["body"])
+            return {}
+        if path == f"{campaign}/ad/ad-1" and method == "DELETE":
+            self.ad.clear()
+            return {}
         if path.endswith("get_item_aspects_for_category") and self.aspects is not None:
             return {"aspects": self.aspects}
         if path.endswith("get_item_aspects_for_category"):
@@ -118,6 +141,41 @@ class Client:
 
 
 class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
+    async def test_listing_applies_saved_promotion_and_live_updates_change_or_remove_it(self):
+        client = Client()
+        snapshot = {**LISTING, "ebay_specifics": {**LISTING["ebay_specifics"],
+                    "promotion": {"enabled": True, "campaignId": "42", "adRate": "5.5"}}}
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("list", snapshot, [self.photo], self.binding, self.record,
+                                                 self.active, confirm=True, conversation_id="abc123")
+            self.assertEqual(result["state"], "published")
+            self.assertNotIn("warning", result)
+            self.assertEqual(client.ad, {"listingId": "123456789012", "bidPercentage": "5.5", "adId": "ad-1"})
+            snapshot["ebay_specifics"]["promotion"]["adRate"] = "6.0"
+            updated = await ebay_listings.execute("update", snapshot, [self.photo], self.binding, self.record,
+                                                  self.active, confirm=True)
+            self.assertEqual(updated["state"], "published")
+            self.assertEqual(client.ad["bidPercentage"], "6.0")
+            snapshot["ebay_specifics"]["promotion"]["enabled"] = False
+            disabled = await ebay_listings.execute("update", snapshot, [self.photo], self.binding, self.record,
+                                                   self.active, confirm=True)
+            self.assertEqual(disabled["state"], "published")
+            self.assertFalse(client.ad)
+            self.assertIsNone(self.binding["ebay_promotion"])
+
+    async def test_failed_ad_preserves_the_live_result(self):
+        client = Client()
+        client.ad_failure = True
+        snapshot = {**LISTING, "ebay_specifics": {**LISTING["ebay_specifics"],
+                    "promotion": {"enabled": True, "campaignId": "42", "adRate": "5.5"}}}
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("list", snapshot, [self.photo], self.binding, self.record,
+                                                 self.active, confirm=True, conversation_id="abc123")
+        self.assertEqual(result["state"], "published")
+        self.assertIn("promotion", result["warning"].lower())
+        self.assertEqual(self.binding["ebay_listing_id"], "123456789012")
+        self.assertFalse(client.ad)
+
     def test_offer_controls_and_category_metadata_are_not_product_aspects(self):
         listing = {"ebay_specifics": {
             "autoAccept": 14, "minimumOffer": 12, "category_path": ["Men", "T-Shirts"],

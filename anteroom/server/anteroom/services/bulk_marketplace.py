@@ -139,6 +139,13 @@ def review_row(db: Session, conv_id: str, action: str, marketplaces: list[str]) 
     if not row["marketplaces"]:
         row["skip_reason"] = "Nothing to do on the chosen marketplaces."
         return row
+    if "ebay" in row["marketplaces"] and action in {"list", "update", "relist"}:
+        from anteroom.services.ebay_listing_promotion import choice
+
+        revision = ListingRepo(db).get_revision(row["revision_id"])
+        promotion = choice(revision.listing_json) if revision and isinstance(revision.listing_json, dict) else {}
+        if promotion.get("enabled") is True:
+            row["ebay_ad_rate"] = str(promotion.get("adRate") or "")
     basis, _targets = approval_snapshot(db, conv_id, row["marketplaces"], includes_prices=action in {"list", "relist", "update"})
     row["review_token"] = _token(action, row["marketplaces"], basis)
     return row

@@ -153,6 +153,10 @@ enum EbayFormRules {
     static func visible(_ key: String, shown: (String) -> String, varied: Bool) -> Bool {
         if key == "ebay_specifics.schedule.startAt" { return shown("ebay_specifics.schedule.enabled") == "true" }
         let auction = shown("ebay_specifics.listingFormat") == "AUCTION"
+        if key.hasPrefix("ebay_specifics.promotion.") {
+            let enabled = shown("ebay_specifics.promotion.enabled") == "true"
+            return key.hasSuffix(".enabled") ? !auction || enabled : !auction && enabled
+        }
         // An auction has a duration and bids instead of an item price; Buy It Now runs until cancelled.
         if auctionPriceKeys.contains(key) || key == "ebay_specifics.listingDuration" { return auction }
         if key == "ebay_specifics.price" { return !auction }

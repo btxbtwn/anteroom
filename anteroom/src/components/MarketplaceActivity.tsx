@@ -17,8 +17,8 @@ import { toastManager } from "./ui/toast";
 export const waitlist = new MarketplaceWaitlist((action) => {
   if (action.kind === "delist") return api.marketplaceListings.delist(action.convId, [action.marketplace]);
   if (action.kind === "save_draft") return api.nativeMarketplaces.saveDraft(action.convId, action.marketplace, action.revisionId);
-  if (action.kind === "update") return api.nativeMarketplaces.update(action.convId, action.marketplace, action.revisionId);
-  return api.nativeMarketplaces.list(action.convId, action.marketplace, action.revisionId);
+  if (action.kind === "update") return api.nativeMarketplaces.update(action.convId, action.marketplace, action.revisionId, action.confirmedEbayAdRate);
+  return api.nativeMarketplaces.list(action.convId, action.marketplace, action.revisionId, action.confirmedEbayAdRate);
 });
 
 const VERB: Record<WaitingAction["kind"], string> = { list: "List", update: "Update", save_draft: "Save draft", delist: "Delist" };

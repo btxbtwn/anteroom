@@ -1365,13 +1365,16 @@ async def run_auto_relist(
                 res = await wait_for_native_result(conv_id, marketplace, res)
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": str(exc)}
-        ok = res.get("state") in LIVE_STATES and not res.get("error")
+        from anteroom.services.ebay_listing_promotion import WARNING_CODE
+
+        error = None if res.get("error_code") == WARNING_CODE else res.get("error")
+        ok = res.get("state") in LIVE_STATES and not error
         new_id_val = res.get("listing_id") or extract_listing_id(marketplace, res.get("listing_url"))
         return {
             "ok": ok,
             "listing_id": new_id_val,
             "listing_url": res.get("listing_url"),
-            "error": res.get("error"),
+            "error": error,
             "timed_out": bool(res.get("timed_out")),
             "native_job_id": res.get("job_id"),
         }

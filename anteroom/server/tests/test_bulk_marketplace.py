@@ -141,12 +141,32 @@ def test_preview_names_what_each_item_would_do_and_sends_nothing(db, client, cal
     assert rows["Live coat"]["marketplaces"] == ["poshmark"]
     assert "Choose Relist" in rows["Live coat"]["skipped"][0]["reason"]
     assert rows["Fresh coat"]["marketplaces"] == ["ebay", "poshmark"] and rows["Fresh coat"]["review_token"]
+    assert "ebay_ad_rate" not in rows["Fresh coat"]
     assert rows["Sold coat"]["skip_reason"] and rows["Sold coat"]["review_token"] is None
 
     delist = {row["title"]: row for row in _preview(client, [live.id, fresh.id], "delist", ["ebay", "poshmark"])}
     assert delist["Live coat"]["marketplaces"] == ["ebay"]
     assert delist["Fresh coat"]["skip_reason"] == "Nothing to do on the chosen marketplaces."
     assert calls == []
+
+
+@pytest.mark.parametrize("source", ["mcp", "bulk_edit", "generation"])
+def test_bulk_review_only_uses_the_sellers_persisted_promotion(db, client, source):
+    conv = _item(db)
+    attempted = {"title": "Coat", "price": 40, "ebay_specifics": {
+        "promotion": {"enabled": True, "campaignId": "42", "adRate": "7.5"},
+    }}
+    unauthorized = listing_persistence.save_revision(db, conv.id, attempted, source)
+    assert "promotion" not in unauthorized.listing_json["ebay_specifics"]
+    row, = _preview(client, [conv.id], "list", ["ebay"])
+    assert "ebay_ad_rate" not in row
+
+    approved = listing_persistence.save_revision(db, conv.id, attempted, "user_form")
+    edited = listing_persistence.save_revision(db, conv.id, {"title": "New title", "price": 40}, source,
+                                              parent_revision_id=approved.id)
+    assert edited.listing_json["ebay_specifics"]["promotion"] == attempted["ebay_specifics"]["promotion"]
+    row, = _preview(client, [conv.id], "list", ["ebay"])
+    assert row["ebay_ad_rate"] == "7.5"
 
 
 def test_perform_requires_confirmation_and_the_exact_reviewed_action(db, client, calls):

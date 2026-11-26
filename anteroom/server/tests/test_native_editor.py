@@ -104,6 +104,9 @@ class NativeEditorTest(unittest.TestCase):
             form = asyncio.run(native_editor.ebay_form(self.listing))
         self.assertEqual(form["marketplace"], "ebay")
         self.assertTrue(form["fields"])
+        promotion = next(row for row in form["fields"] if row["key"] == "ebay_specifics.promotion.enabled")
+        self.assertEqual(promotion["section"], "Promote your listing")
+        self.assertIs(promotion["value"], False)
         self.bridge.assert_not_called()
 
     def test_category_failure_types_distinguish_known_api_and_database_failures(self):
@@ -789,6 +792,7 @@ class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
                           "Irregular package"]),
             ("Preferences", ["Item location", "Return policy"]),
             ("Charity", ["Charity", "Percentage"]),
+            ("Promote your listing", ["Promoted Listings", "Select campaign", "Ad rate (%)"]),
         ])
         # What eBay's page keeps behind its buttons.
         self.assertEqual({(row["label"], row["reveal"]) for row in form["fields"] if row.get("reveal")}, {
@@ -811,7 +815,7 @@ class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([row["label"] for row in form["fields"] if row.get("width") == "half"], [
             "Category", "Second category", "First category", "Second category", "Custom item specific", "Custom detail",
             "Minimum offer", "Auto accept", "Listing start time", "Your cost", "Quantity in lot", "Package dimensions (in.)",
-            "Charity", "Percentage"])
+            "Charity", "Percentage", "Select campaign", "Ad rate (%)"])
         # Weight in lbs. and oz. and the dimensions share one row, as on eBay's page.
         self.assertEqual([label for label, row in fields.items() if row.get("width") == "quarter"], [
             "Package weight (lbs.)", "Package weight (oz.)"])

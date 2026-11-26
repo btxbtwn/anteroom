@@ -15,6 +15,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from anteroom.config import PORT, WEB_PORT
 from anteroom.services import listing_persistence
 from anteroom.services.photo_store import LocalPhotoStore
 from anteroom.database import Base, get_db
@@ -102,8 +103,8 @@ class WebSocketOriginTest(unittest.TestCase):
     def test_rejects_loopback_lookalike_origins(self):
         from anteroom.services.extension_connection import _ws_origin_allowed
 
-        self.assertTrue(_ws_origin_allowed("http://127.0.0.1:4318"))
-        self.assertTrue(_ws_origin_allowed("http://127.0.0.1:5173"))
+        self.assertTrue(_ws_origin_allowed(f"http://127.0.0.1:{PORT}"))
+        self.assertTrue(_ws_origin_allowed(f"http://127.0.0.1:{WEB_PORT}"))
         self.assertTrue(_ws_origin_allowed("chrome-extension://empinkdlhndpfoigoipbiiofaeepcheo"))
         self.assertFalse(_ws_origin_allowed("chrome-extension://abcdefghijklmnopabcdefghijklmnop"))
         self.assertFalse(_ws_origin_allowed("http://127.0.0.1.evil.example:4318"))

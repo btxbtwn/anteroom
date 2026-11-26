@@ -102,6 +102,7 @@ class EtsyPackage(BaseModel):
 class ListRequest(BaseModel):
     revision_id: str
     confirm: bool = False
+    confirmed_ebay_ad_rate: str | None = None
     shipping_profile_id: str | None = None
     readiness_state_id: str | None = None
     return_policy_id: str | None = None
@@ -281,6 +282,10 @@ def _outcome(marketplace: str, action: str, record: dict, result: dict) -> dict:
         warning = str(result.get("warning") or "").strip()
         if warning and state in {"published", "pending_review"}:
             values["error"] = warning[:300]
+            if marketplace == "ebay":
+                from anteroom.services.ebay_listing_promotion import WARNING_CODE
+
+                values["error_code"] = WARNING_CODE
         if marketplace == "etsy":
             values.update(etsy_pending_write=None)
         if url:
@@ -445,11 +450,31 @@ def _photos(db: Session, conv_id: str, snapshot: dict, marketplace: str) -> tupl
 
 
 async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str,
-                 relist_rule_id: str | None = None, requested_by: str | None = None) -> dict:
+                 relist_rule_id: str | None = None, requested_by: str | None = None, *,
+                 require_ad_rate: bool = False) -> dict:
     """Check, ask Chrome or eBay, then open the job. Each database step runs on a worker thread
     with its own session, so no pooled connection is held while Chrome or eBay answers."""
     snapshot, photos, deleted_here = await in_worker_session(_check_start, conv_id, marketplace, body, kind)
     if marketplace == "ebay":
+        if require_ad_rate:
+            from anteroom.services.ebay_listing_promotion import choice, validate
+            from anteroom.services.listing_result import ListingProblem
+
+            promotion = choice(snapshot)
+            if promotion.get("enabled") is True:
+                try:
+                    _, rate = validate(promotion)
+                except ListingProblem as exc:
+                    raise NativeMarketplaceError(400, str(exc)) from exc
+                from decimal import Decimal, InvalidOperation
+
+                try:
+                    matches_rate = Decimal(body.confirmed_ebay_ad_rate or "") == rate
+                except InvalidOperation:
+                    matches_rate = False
+                if not matches_rate:
+                    raise NativeMarketplaceError(409, f"Confirm the saved {rate}% ad rate in the eBay form. "
+                                                 "Update Anteroom if this device cannot confirm it.")
         await _require_ebay()
     elif marketplace == "etsy":
         await _require_etsy()
@@ -741,18 +766,19 @@ async def shared_preflight(conv_id: str, revision_id: str | None = None) -> dict
 
 
 async def list_now(conv_id: str, marketplace: Marketplace, body: ListRequest, *,
-                   relist_rule_id: str | None = None, requested_by: str | None = None) -> dict:
+                   relist_rule_id: str | None = None, requested_by: str | None = None,
+                   require_ad_rate: bool = False) -> dict:
     """Start listing on one marketplace in one seller-confirmed step. Returns at once; poll status.
 
     ``requested_by`` names the agent the seller allowed to ask for it (``services/mcp_marketplace_tools.py``).
     """
-    return await _start(conv_id, marketplace, body, "list", relist_rule_id, requested_by)
+    return await _start(conv_id, marketplace, body, "list", relist_rule_id, requested_by, require_ad_rate=require_ad_rate)
 
 
 async def update_live(conv_id: str, marketplace: Marketplace, body: ListRequest, *,
-                      requested_by: str | None = None) -> dict:
+                      requested_by: str | None = None, require_ad_rate: bool = False) -> dict:
     """Write the listing saved in Anteroom onto the one already live. One confirmation, never a second listing."""
-    return await _start(conv_id, marketplace, body, "update", requested_by=requested_by)
+    return await _start(conv_id, marketplace, body, "update", requested_by=requested_by, require_ad_rate=require_ad_rate)
 
 
 async def save_draft(conv_id: str, marketplace: Marketplace, revision_id: str, *,
@@ -1011,6 +1037,11 @@ async def _execute_step(job_id: str, conv_id: str, marketplace: str, step: str, 
                 marketplace, stored, snapshot, stored.get("draft_url"), job, context=None,
                 remember=remember)
             if checked is not None:
+                if marketplace == "ebay" and checked.get("state") == "published":
+                    from anteroom.services.ebay_listing_promotion import UNCONFIRMED, choice, has_change
+
+                    if has_change(step, choice(snapshot), binding.get("ebay_promotion") or {}):
+                        checked["warning"] = UNCONFIRMED
                 stored = await _joined_worker_session(_apply_result, conv_id, marketplace, job_id, step, checked)
         return stored
     payload = await asyncio.to_thread(_execute_payload, marketplace, step, binding, snapshot, photos, warning)
@@ -1060,11 +1091,14 @@ def _finish_job(db: Session, job_id: str, conv_id: str, marketplace: str) -> Non
     if record.get("job_id") == job_id and record.get("state") in BUSY_STATES:
         # The worker ended without an answer for the step it was on.
         record = _store(db, conv_id, marketplace, {**_CLEARED_ERROR, "state": "unknown", "error": UNKNOWN, "error_code": "uncertain"})
-    live = record.get("state") in {"published", "pending_review"} and not record.get("error")
+    from anteroom.services.ebay_listing_promotion import WARNING_CODE
+
+    has_error = record.get("error") and record.get("error_code") != WARNING_CODE
+    live = record.get("state") in LIVE_STATES and not has_error
     if (job.cancel_requested or job_cancel_requested(job_id)) and not live:
         repo.update_status(job_id, "cancelled", job.current_step, error="Cancelled.")
         repo.add_event(job_id, "cancelled", job.current_step)
-    elif record.get("job_id") == job_id and not record.get("error") and record.get("state") in {"published", "pending_review", "draft"}:
+    elif record.get("job_id") == job_id and not has_error and record.get("state") in {*LIVE_STATES, "draft"}:
         repo.update_status(job_id, "completed", job.current_step)
     else:
         repo.update_status(job_id, "failed", job.current_step, error=record.get("error") or UNKNOWN)

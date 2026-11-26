@@ -29,6 +29,27 @@ Photo selection/order and the marketplace's media limits also need to be checked
 per marketplace. A shared General field or account setting must be identified
 as such; it must not silently override an explicit marketplace selection.
 
+## Promote your listing on eBay
+
+The fixed-price eBay form starts with Promoted Listings off. The seller chooses
+a running General campaign with manually selected listings and a fixed ad rate,
+then enters a rate from 2% to 100% (one decimal place). Anteroom saves the
+choice with the listing. Create campaigns in Marketplaces → eBay → Marketing.
+
+List and Update apply the saved choice after eBay confirms the listing is live.
+Confirmation names eBay and the rate. Turning the switch off removes the ad
+managed by the form on the next confirmed Update. If eBay does not confirm the
+ad change, Anteroom shows the listing as live with a promotion warning. Update
+reads the campaign again before retrying. Bulk, scheduled and MCP actions use
+the saved choice.
+
+eBay's public [Recommendation API](https://developer.ebay.com/api-docs/sell/static/marketing/pl-reco-api.html)
+needs a live listing ID. The form displays eBay's trending ad rate for the
+live item when the account has access. Drafts have no suggested rate. The form
+uses existing boolean, select and number controls. Installed iPhone builds
+can decode the added fields. To publish an opted-in listing from a device, use
+a build that confirms the saved ad rate.
+
 ## Live Update on Mercari
 
 Added in 0.1.432. Each site's own edit request was read from its public web

@@ -219,7 +219,9 @@ struct MarketplaceFormView: View {
 
     private func shown(_ key: String, _ form: NativeForm) -> String {
         guard let field = form.fields.first(where: { $0.key == key }) else { return "" }
-        let text = model.value(field)?.text ?? ""
+        let value = model.value(field)
+        if case .bool(let enabled) = value { return enabled ? "true" : "false" }
+        let text = value?.text ?? ""
         return field.stored(for: text)
     }
 }

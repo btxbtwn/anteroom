@@ -28,7 +28,7 @@ function defaultFuture(): string {
   return `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())}T${pad(next.getHours())}:${pad(next.getMinutes())}`;
 }
 
-export function DraftScheduleControl({ convId }: { convId: string }) {
+export function DraftScheduleControl({ convId, ebayPromotion }: { convId: string; ebayPromotion?: string }) {
   const queryClient = useQueryClient();
   const scheduleQuery = useQuery({
     queryKey: ["draft-schedule", convId],
@@ -77,7 +77,7 @@ export function DraftScheduleControl({ convId }: { convId: string }) {
       return;
     }
     const ok = await confirmDialog(
-      `Schedule this draft to publish on ${markets.map(marketplaceName).join(", ")} at ${parsed.toLocaleString()}? If you edit this draft before then, Anteroom will unschedule it automatically.`,
+      `Schedule this draft to publish on ${markets.map(marketplaceName).join(", ")} at ${parsed.toLocaleString()}? If you edit this draft before then, Anteroom will unschedule it automatically.${markets.includes("ebay") && ebayPromotion ? `\n${ebayPromotion}` : ""}`,
       { confirmLabel: "Schedule publish" },
     );
     if (!ok) return;

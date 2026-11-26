@@ -34,6 +34,10 @@ struct EbayFormTests {
         precondition(!EbayFormRules.visible("ebay_specifics.bestOffer.enabled", shown: shown, varied: true))
         precondition(!EbayFormRules.visible("ebay_specifics.schedule.startAt", shown: shown, varied: false))
         precondition(EbayFormRules.visible("ebay_specifics.variations", shown: shown, varied: false))
+        precondition(EbayFormRules.visible("ebay_specifics.promotion.enabled", shown: shown, varied: false))
+        precondition(!EbayFormRules.visible("ebay_specifics.promotion.adRate", shown: shown, varied: false))
+        values["ebay_specifics.promotion.enabled"] = "true"
+        precondition(EbayFormRules.visible("ebay_specifics.promotion.adRate", shown: shown, varied: false))
         values["ebay_specifics.bestOffer.enabled"] = "false"
         values["ebay_specifics.schedule.enabled"] = "true"
         let shownAgain: (String) -> String = { values[$0] ?? "" }

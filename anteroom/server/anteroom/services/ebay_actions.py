@@ -197,10 +197,19 @@ def ad_rate(value: str) -> Decimal:
     return rate
 
 
-async def campaign_ads(client: EbayClient, target: str) -> list[dict]:
+def ad_creation(path: str, listing_ids: list[str], rate: Decimal) -> dict:
+    return {"method": "POST", "path": f"{path}/bulk_create_ads_by_listing_id", "body": {"requests": [
+        {"listingId": identifier, "bidPercentage": str(rate)} for identifier in listing_ids
+    ]}}
+
+
+async def campaign_ads(client: EbayClient, target: str, *, listing_id: str = "") -> list[dict]:
     ads = []
     for offset in range(0, 10000, 200):
-        body = await client.request("GET", f"/sell/marketing/v1/ad_campaign/{target}/ad", params={"limit": 200, "offset": offset})
+        params: dict = {"limit": 200, "offset": offset}
+        if listing_id:
+            params["listing_ids"] = listing_id
+        body = await client.request("GET", f"/sell/marketing/v1/ad_campaign/{target}/ad", params=params)
         items = body.get("ads", [])
         ads.extend(items)
         if not body.get("next") and offset + len(items) >= body.get("total", 0):
@@ -438,9 +447,7 @@ async def prepare(client: EbayClient, kind: str, payload: dict) -> dict:
         plan["context"] = {key: campaign.get(key) for key in ("campaignName", "campaignStatus", "startDate", "endDate", "fundingStrategy")}
         # The Marketing API accepts 500 listing IDs per request.
         for offset in range(0, len(ids), 500):
-            operation("POST", f"{path}/bulk_create_ads_by_listing_id", {"requests": [
-                {"listingId": identifier, "bidPercentage": str(rate)} for identifier in ids[offset:offset + 500]
-            ]})
+            plan["operations"].append(ad_creation(path, ids[offset:offset + 500], rate))
         plan["summary"] = [
             f"Promote {len(ids)} selected listings in {campaign.get('campaignName') or data['campaign_id']}",
             f"Ad rate: {rate}% of attributed sales",
@@ -574,6 +581,14 @@ def _ad_result(operations: list[dict], results: list[dict]) -> tuple[str, str]:
     if missing:
         message += " eBay did not confirm these listing IDs: " + ", ".join(sorted(missing)) + ". Check eBay before trying again."
     return ("unknown" if missing else "sent" if accepted else "failed"), message
+
+
+async def create_listing_ad(client: EbayClient, path: str, listing_id: str, rate: Decimal) -> None:
+    operation = ad_creation(path, [listing_id], rate)
+    response = await client.request(operation["method"], operation["path"], body=operation["body"])
+    state, message = _ad_result([operation], [response])
+    if state != "sent":
+        raise EbayFailure(message, 409)
 
 
 async def execute(action_id: str, kind: str, payload: dict) -> dict:

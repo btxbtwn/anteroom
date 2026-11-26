@@ -999,7 +999,8 @@ struct MarketplaceQuickEditSheet: View {
                         confirmingList = SellerConfirmationRequest.list(
                             title: listing.displayTitle,
                             marketplace: marketplace,
-                            priceLabel: confirmedPrice
+                            priceLabel: confirmedPrice,
+                            ebayPromotion: SellerConfirmationRequest.ebayPromotion(in: model.document)
                         )
                     }
                 } label: {

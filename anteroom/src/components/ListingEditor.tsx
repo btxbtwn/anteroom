@@ -290,6 +290,7 @@ export function ListingEditor({
           </AlertDescription>
         </Alert> :
       <Layout key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle}
+        savedListing={data?.listing}
         disabled={writing || unsaved} etsyEligible={etsyEligible} onAskChat={askChat} onEditField={openBlocker} ids={tabs}
         onPrepare={(tab) => {
           if (vendoo) return;
@@ -1241,7 +1242,7 @@ export function StructuredEditor({
                 const source = !nativeTab && f.optionsSource && f.optionsSource !== "saved"
                   ? f.optionsSource === "marketplace" ? "Marketplace choices" : f.optionsSource === "vendoo" ? "Imported category choices" : "Reference choices"
                   : null;
-                const ask = onAskChat && !f.locked ? () => onAskChat(
+                const ask = onAskChat && !f.locked && !f.key.startsWith("ebay_specifics.promotion.") ? () => onAskChat(
                   `Fill or correct only ${marketplaceName(tab)} / ${f.label}${f.section ? ` (${f.section})` : ""} using the photos and seller evidence. Preserve all other fields.`,
                 ) : undefined;
                 const tools = source || ask ? <FieldTools label={f.label} source={source} onAsk={ask} /> : null;

@@ -33,9 +33,10 @@ export function readyMarketplaces(choices: readonly ListChoice[]): NativeMarketp
  * is named in full and opens that field on its marketplace's form, as an error
  * summary links to the field it is about.
  */
-export function ListEverywhereDialog({ title, choices, onConfirm, onClose, onEditField }: {
+export function ListEverywhereDialog({ title, choices, onConfirm, onClose, onEditField, ebayPromotion }: {
   title: string;
   choices: readonly ListChoice[];
+  ebayPromotion?: string;
   onConfirm: (marketplaces: NativeMarketplace[]) => void;
   onClose: () => void;
   /** Open the editor at a field on a marketplace's form. */
@@ -60,6 +61,7 @@ export function ListEverywhereDialog({ title, choices, onConfirm, onClose, onEdi
           <DialogDescription>Each marketplace you pick gets a live listing from what's saved in Anteroom.</DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-3 text-sm">
+          {chosen.includes("ebay") && ebayPromotion && <p>{ebayPromotion}</p>}
           <div className="flex items-center gap-2">
             <Button size="xs" variant="outline" disabled={!ready.length}
               onClick={() => setPicked(new Set(ready))}>Select all ready</Button>

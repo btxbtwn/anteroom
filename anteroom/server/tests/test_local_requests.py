@@ -9,6 +9,7 @@ from fastapi import FastAPI, WebSocket
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from anteroom.config import PORT, WEB_PORT
 from anteroom.main import app
 from anteroom.services import local_requests, tailscale_serve
 
@@ -44,8 +45,8 @@ def test_untrusted_host_cannot_read_pairing_token(host):
 
 @pytest.mark.parametrize("headers", [
     {},
-    {"Origin": "http://127.0.0.1:4318", "Sec-Fetch-Site": "same-origin"},
-    {"Origin": "http://127.0.0.1:5173", "Sec-Fetch-Site": "same-site"},
+    {"Origin": f"http://127.0.0.1:{PORT}", "Sec-Fetch-Site": "same-origin"},
+    {"Origin": f"http://127.0.0.1:{WEB_PORT}", "Sec-Fetch-Site": "same-site"},
     {"Origin": "chrome-extension://empinkdlhndpfoigoipbiiofaeepcheo"},
 ])
 def test_local_app_cli_and_extension_can_read_health(headers):
@@ -158,7 +159,7 @@ def test_foreign_websocket_is_rejected_before_accepting():
     with pytest.raises(WebSocketDisconnect) as refused, client.websocket_connect("/socket", headers={"Origin": "https://foreign.example"}):
         pass
     assert refused.value.code == 1008
-    with client.websocket_connect("/socket", headers={"Origin": "http://127.0.0.1:4318"}) as ws:
+    with client.websocket_connect("/socket", headers={"Origin": f"http://127.0.0.1:{PORT}"}) as ws:
         assert ws.receive_text() == "trusted"
 
 

@@ -1701,6 +1701,22 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         self.assertEqual(checked.await_args.args[0]["ebay_offer_id"], "9")
         self.assertEqual(JobRepo(self.db).get(record["job_id"]).status, "completed")
 
+    def test_an_ebay_ad_failure_keeps_the_publication_completed(self):
+        from anteroom.services import ebay_listings
+        from anteroom.services.ebay_listing_promotion import UNCONFIRMED, WARNING_CODE
+
+        execute = AsyncMock(return_value={
+            "ok": True, "state": "published", "listing_url": "https://www.ebay.com/itm/123456789012",
+            "warning": UNCONFIRMED,
+        })
+        with (
+            patch("anteroom.services.ebay_client.EbayClient.connect", AsyncMock()),
+            patch.object(ebay_listings, "execute", execute),
+        ):
+            record = self.list("ebay")
+        self.assertEqual((record["state"], record["error_code"], record["error"]), ("published", WARNING_CODE, UNCONFIRMED))
+        self.assertEqual(JobRepo(self.db).get(record["job_id"]).status, "completed")
+
     def test_a_refused_ebay_publish_leaves_a_resumable_draft_with_its_ids(self):
         from anteroom.services import ebay_listings
 

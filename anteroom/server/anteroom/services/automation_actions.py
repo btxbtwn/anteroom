@@ -224,7 +224,15 @@ async def _native_one(conv_id: str, name: str, revision_id: str, kind: str) -> d
     if (job is not None and job[0] != "completed") or refused:
         fallback = "The marketplace did not confirm publication." if kind == "list" else "The marketplace did not confirm the update."
         return {"marketplace": name, "ok": False, "error": (job[1] if job else result.get("error")) or fallback}
-    return {"marketplace": name, "ok": True, "detail": _brief(result)}
+    detail = _brief(result)
+    if name == "ebay" and job is not None:
+        from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
+        from anteroom.services.ebay_listing_promotion import WARNING_CODE
+
+        final = await _db_work(lambda db: MarketplaceListingRepo(db).get(conv_id, "ebay"))
+        if final.get("job_id") == result["job_id"] and final.get("error_code") == WARNING_CODE:
+            detail.update(state=final["state"], warning=final["error"])
+    return {"marketplace": name, "ok": True, "detail": detail}
 
 
 async def wait_for_native_result(conv_id: str, marketplace: str, started: dict, *, session_factory=None) -> dict:

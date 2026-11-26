@@ -1,6 +1,7 @@
 import { listingScreenRead } from "./listingScreen";
 import { reportError } from "./errorReports";
 import type { VendooDraft } from "./vendooDraft";
+import type { ListRequest } from "./contract.gen";
 import type { AttentionItem, AttentionResolveInput, AttentionResolveResult, AttentionRestoreInput, AttentionRestoreResult, AttentionSnoozeInput, AttentionSnoozeResult, ConnectionStatus, CsvInput, CsvResult, CurrencyReport, Expense, ExpenseInput, ExpenseUpdate, MarketplaceCloudResult, MarketplaceCloudSessions, MileageAmount, MileageInput, OfferLogResponse, PlaidExchange, PlaidLinkToken, PlaidStatus, PreferredName, PreferredNameInput } from "./contract.gen";
 import { ApiRequestError, currentHostedSession, retryAfterMs, studioFetch, studioUpload, hasHostedApiSession } from "./transport";
 import { trackPhotoUpload } from "../photoUploads";
@@ -1029,13 +1030,13 @@ export const api = {
       request<NativeDraft>(`/conversations/${seg(convId)}/native-marketplaces/${seg(marketplace)}/draft`, {
         method: "POST", body: JSON.stringify({ revision_id: revisionId }),
       }),
-    list: (convId: string, marketplace: NativeMarketplace, revisionId: string) =>
+    list: (convId: string, marketplace: NativeMarketplace, revisionId: string, confirmedEbayAdRate?: string) =>
       request<NativeDraft>(`/conversations/${seg(convId)}/native-marketplaces/${seg(marketplace)}/list`, {
-        method: "POST", body: JSON.stringify({ revision_id: revisionId, confirm: true }),
+        method: "POST", body: JSON.stringify({ revision_id: revisionId, confirm: true, confirmed_ebay_ad_rate: confirmedEbayAdRate } satisfies ListRequest),
       }),
-    update: (convId: string, marketplace: NativeMarketplace, revisionId: string) =>
+    update: (convId: string, marketplace: NativeMarketplace, revisionId: string, confirmedEbayAdRate?: string) =>
       request<NativeDraft>(`/conversations/${seg(convId)}/native-marketplaces/${seg(marketplace)}/update`, {
-        method: "POST", body: JSON.stringify({ revision_id: revisionId, confirm: true }),
+        method: "POST", body: JSON.stringify({ revision_id: revisionId, confirm: true, confirmed_ebay_ad_rate: confirmedEbayAdRate } satisfies ListRequest),
       }),
     cancel: (convId: string, marketplace: NativeMarketplace) =>
       request<NativeDraft>(`/conversations/${seg(convId)}/native-marketplaces/${seg(marketplace)}/cancel`, { method: "POST" }),

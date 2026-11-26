@@ -235,6 +235,7 @@ def test_publish_names_marketplaces_carries_confirm_and_pins_the_revision(servic
     for args, kwargs in calls.values():
         body = args[2]
         assert (body.revision_id, body.confirm) == (revision_id, True)
+        assert body.confirmed_ebay_ad_rate is None
         assert kwargs["requested_by"] == "mcp:Cursor"
 
     updated, is_error = _call(client, "send_unsent_edits", {**base, "marketplaces": ["ebay"], "confirm": True}, bearer)
@@ -445,6 +446,7 @@ def test_a_publish_an_agent_scheduled_names_it_on_the_jobs_that_publish_it(monke
     assert outcomes[0]["status"] == "published", outcomes
     (args, kwargs), = started.calls
     assert args[:2] == (conv_id, "ebay") and kwargs["requested_by"] == "mcp:Claude"
+    assert (args[2].revision_id, args[2].confirm, args[2].confirmed_ebay_ad_rate) == (revision_id, True, None)
     # Outside a scheduled publish, nobody is named.
     assert draft_scheduling.scheduled_requester() is None
     with SessionLocal() as db:
