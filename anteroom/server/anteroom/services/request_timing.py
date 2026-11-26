@@ -80,6 +80,7 @@ class RequestTimingMiddleware:
             failed = True
             raise
         finally:
+            phases.close()
             if failed:
                 scope["anteroom_request_phases"] = phases.snapshot()
             request_phases.current.reset(phase_token)

@@ -8,22 +8,44 @@ from time import monotonic
 from sqlalchemy import event
 
 
+# Values and field cardinality are fixed even if a future caller passes a dynamic label.
+_PHASES = frozenset({'db_sql_ms', 'db_held_ms', 'db_pool_wait_ms', 'db_acquire_ms', 'db_read_ms', 'encode_ms'})
+
+
 class Phases:
     def __init__(self):
         self.lock = Lock()
         self.elapsed = defaultdict(float)
         self.active = {}
+        self.closed = False
 
     def start(self, name):
-        span = object()
+        if self.closed or name not in _PHASES:
+            return None
         with self.lock:
+            if self.closed:
+                return None
+            span = object()
             self.active[span] = (name, monotonic())
-        return span
+            return span
 
     def finish(self, span):
         with self.lock:
-            name, started = self.active.pop(span)
-            self.elapsed[name] += monotonic() - started
+            entry = self.active.pop(span, None)
+            if entry is not None:
+                name, started = entry
+                self.elapsed[name] += monotonic() - started
+
+    def close(self):
+        # A child task or worker thread may outlive its ASGI request. Freeze
+        # outstanding times here, then ignore late completions and new work.
+        with self.lock:
+            self.closed = True
+            if self.active:
+                now = monotonic()
+                for name, started in self.active.values():
+                    self.elapsed[name] += now - started
+                self.active.clear()
 
     def snapshot(self):
         with self.lock:
@@ -39,7 +61,9 @@ current: ContextVar[Phases | None] = ContextVar('request_phases', default=None)
 
 def start(name):
     phases = current.get()
-    return (phases, phases.start(name)) if phases is not None else None
+    if phases is not None and (span := phases.start(name)) is not None:
+        return phases, span
+    return None
 
 
 def finish(timer):

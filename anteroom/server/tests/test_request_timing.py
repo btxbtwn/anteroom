@@ -217,3 +217,36 @@ def test_fast_failed_request_includes_db_and_encoding_phases(caplog):
             assert phase + '=' in access.call_args.args[-1]
     finally:
         engine.dispose()
+
+
+def test_inherited_worker_cannot_record_after_request_or_leak_dynamic_keys():
+    from anteroom import request_phases
+
+    async def scenario():
+        release = asyncio.Event()
+        child = None
+
+        async def app(_scope, _receive, send):
+            async def deferred():
+                with request_phases.measure("encode_ms"):
+                    await release.wait()
+                frozen = request_phases.current.get().snapshot()
+                with request_phases.measure("db_sql_ms"), request_phases.measure("private request value"):
+                    pass
+                assert request_phases.current.get().snapshot() == frozen
+                return frozen
+
+            nonlocal child
+            child = asyncio.create_task(deferred())
+            await asyncio.sleep(0)
+            await send({"type": "http.response.start", "status": 200})
+
+        async def send(_message):
+            pass
+
+        await RequestTimingMiddleware(app)({"type": "http", "method": "GET"}, None, send)
+        release.set()
+        assert set(await child) == {"encode_ms"}
+        assert request_phases.current.get() is None
+
+    asyncio.run(scenario())
