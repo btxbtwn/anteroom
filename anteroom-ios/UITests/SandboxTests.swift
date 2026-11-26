@@ -936,10 +936,13 @@ final class SoldAndScheduleSandboxTests: XCTestCase {
     private func openMarketplaces(_ title: String, app: XCUIApplication) {
         let listing = app.staticTexts[title].firstMatch
         XCTAssertTrue(listing.waitForExistence(timeout: 30))
+        for _ in 0..<4 where !listing.isHittable { app.collectionViews.firstMatch.swipeUp() }
         let actions = app.buttons["Listing actions"]
-        for _ in 0..<3 where !actions.waitForExistence(timeout: 15) {
+        for _ in 0..<4 where !actions.exists {
             if listing.exists && listing.isHittable { listing.tap() }
+            _ = actions.waitForExistence(timeout: 20)
         }
+        XCTAssertTrue(actions.exists, "The listing opens")
         openManage(app)
     }
 
