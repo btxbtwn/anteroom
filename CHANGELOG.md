@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1282 — 2026-11-26
+
+- Keep cloud pages and scheduled automations from stalling for 30 seconds to 15 minutes when a connection to the cloud database stops answering. Anteroom now drops that connection within seconds and opens a fresh one.
+
 ## 0.1.1281 — 2026-11-26
 
 - Settings → Usage now lets you pick the last 30 days or a calendar month, charts what you spent each day (with a table of the same numbers), lists which AI models and photo edits the money went on, and downloads every charge as a CSV.
