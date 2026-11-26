@@ -44,7 +44,9 @@ import type {
   AIKeyProvider,
   KeyProviderId,
   ModelFavorite,
+  ManagedUsage,
   ProviderUsageLimits,
+  SubscriptionSummary,
   PhotoProviderChoice,
   ListingDocument,
   ListingRevision,
@@ -115,6 +117,7 @@ import type { ChromeImportMarketplace, ImportMarketplace, ImportReview, Marketpl
 import type { EtsyListing, EtsyListingState, EtsyOrders, EtsyOrderStatus, EtsyPage, EtsyShop } from "./etsy";
 
 const BASE = "/api";
+const seg = (value: string) => encodeURIComponent(value);
 
 /** The contract's error answers (ErrorDetail, and FastAPI's HTTPValidationError for a 422), or
  * another route's own detail object. */
@@ -494,7 +497,7 @@ async function refreshMarketplaceForm(
   revisionId: string,
   options?: ReadOptions,
 ): Promise<{ revision_id: string }> {
-  const path = `/conversations/${convId}/native-marketplaces/${marketplace}/form/refresh`;
+  const path = `/conversations/${seg(convId)}/native-marketplaces/${seg(marketplace)}/form/refresh`;
   for (let attempt = 1; ; attempt++) {
     let response: Response;
     try {
@@ -584,23 +587,23 @@ export const api = {
     ),
   },
   vendooDraft: {
-    check: (id: string) => request<VendooDraft>(`/conversations/${id}/vendoo-draft/check`, { method: "POST" }),
-    status: (id: string) => request<VendooDraft>(`/conversations/${id}/vendoo-draft`),
-    send: (id: string, revisionId: string) => request<VendooDraft>(`/conversations/${id}/vendoo-draft`, { method: "POST", body: JSON.stringify({ revision_id: revisionId }) }),
+    check: (id: string) => request<VendooDraft>(`/conversations/${seg(id)}/vendoo-draft/check`, { method: "POST" }),
+    status: (id: string) => request<VendooDraft>(`/conversations/${seg(id)}/vendoo-draft`),
+    send: (id: string, revisionId: string) => request<VendooDraft>(`/conversations/${seg(id)}/vendoo-draft`, { method: "POST", body: JSON.stringify({ revision_id: revisionId }) }),
   },
   marketplaceMedia: {
     rules: () => request<MarketplaceMediaRules>("/marketplace-media"),
   },
   listingVideos: {
-    list: (convId: string) => request<ListingVideoLibrary>(`/conversations/${convId}/videos`),
-    delete: (convId: string, videoId: string) => request<OkResponse>(`/conversations/${convId}/videos/${videoId}`, { method: "DELETE" }),
+    list: (convId: string) => request<ListingVideoLibrary>(`/conversations/${seg(convId)}/videos`),
+    delete: (convId: string, videoId: string) => request<OkResponse>(`/conversations/${seg(convId)}/videos/${seg(videoId)}`, { method: "DELETE" }),
     /** On the web: a short-lived address to play a video from the seller's private storage. */
     link: (videoId: string, signal?: AbortSignal) =>
       request<{ url: string; expires_in: number }>(`/videos/${encodeURIComponent(videoId)}/link`, { signal }),
     upload: async (convId: string, file: File): Promise<ListingVideo> => {
       const form = new FormData();
       form.append("file", file);
-      const response = await studioFetch(`${BASE}/conversations/${convId}/videos`, { method: "POST", body: form });
+      const response = await studioFetch(`${BASE}/conversations/${seg(convId)}/videos`, { method: "POST", body: form });
       const data = await response.json();
       if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "The video could not be uploaded.");
       return data;
@@ -634,14 +637,14 @@ export const api = {
   },
   chromeImport: {
     importCandidates: (marketplace: ChromeImportMarketplace, cursor: string | null) =>
-      request<MarketplaceImportPage>(`/chrome-import/${marketplace}/active${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`),
+      request<MarketplaceImportPage>(`/chrome-import/${seg(marketplace)}/active${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`),
     importListing: (marketplace: ChromeImportMarketplace, listing: string, linkConversationId?: string) =>
-      request<MarketplaceImportResult>(`/chrome-import/${marketplace}`, {
+      request<MarketplaceImportResult>(`/chrome-import/${seg(marketplace)}`, {
         method: "POST", body: JSON.stringify({ listing, ...(linkConversationId ? { link_conversation_id: linkConversationId } : {}) }),
       }),
     /** Import all: a listing that looks like an existing item is left for the seller, not imported. */
     importNew: (marketplace: ChromeImportMarketplace, listing: string, account?: string) =>
-      request<MarketplaceImportResult | MarketplaceImportHeld>(`/chrome-import/${marketplace}`, {
+      request<MarketplaceImportResult | MarketplaceImportHeld>(`/chrome-import/${seg(marketplace)}`, {
         method: "POST", body: JSON.stringify({ listing, unless_matched: true, ...(account ? { account } : {}) }),
       }),
   },
@@ -705,7 +708,7 @@ export const api = {
     },
     /** The same, from a saved listing's photos. */
     readSaved: (convId: string, garment: string) =>
-      request<MeasurementReadResult>(`/conversations/${convId}/measurements/read`, {
+      request<MeasurementReadResult>(`/conversations/${seg(convId)}/measurements/read`, {
         method: "POST",
         body: JSON.stringify({ garment }),
       }),
@@ -719,14 +722,14 @@ export const api = {
     },
     /** The same, from a saved listing's photos. */
     readSaved: (convId: string) =>
-      request<SizeTagReadResult>(`/conversations/${convId}/size-tags/read`, {
+      request<SizeTagReadResult>(`/conversations/${seg(convId)}/size-tags/read`, {
         method: "POST",
       }),
   },
   assistant: {
     threads: (options?: ReadOptions) => read<AssistantThread[]>("/assistant/threads", options),
     createThread: () => request<AssistantThread>("/assistant/threads", { method: "POST" }),
-    deleteThread: (id: string) => request<{ ok: boolean }>(`/assistant/threads/${id}`, { method: "DELETE" }),
+    deleteThread: (id: string) => request<{ ok: boolean }>(`/assistant/threads/${seg(id)}`, { method: "DELETE" }),
     messages: (threadId?: string, options?: ReadOptions) =>
       read<AssistantMessage[]>(`/assistant/messages${threadId ? `?thread_id=${encodeURIComponent(threadId)}` : ""}`, options),
     /** What the seller told the assistant about how they run the shop. */
@@ -778,14 +781,14 @@ export const api = {
     stop: () => request<{ ok: boolean }>("/assistant/messages/stop", { method: "POST" }),
     /** Write the changes an answer proposed. Resolves with the answer and what became of each listing. */
     applyChanges: (messageId: string) =>
-      request<AssistantMessage>(`/assistant/messages/${messageId}/changes/apply`, { method: "POST" }),
+      request<AssistantMessage>(`/assistant/messages/${seg(messageId)}/changes/apply`, { method: "POST" }),
     dismissChanges: (messageId: string) =>
-      request<AssistantMessage>(`/assistant/messages/${messageId}/changes/dismiss`, { method: "POST" }),
+      request<AssistantMessage>(`/assistant/messages/${seg(messageId)}/changes/dismiss`, { method: "POST" }),
     /** Save the automation an answer drafted. It does not run until its schedule is due, or you run it. */
     confirmAutomation: (messageId: string) =>
-      request<AssistantMessage>(`/assistant/messages/${messageId}/automation/confirm`, { method: "POST" }),
+      request<AssistantMessage>(`/assistant/messages/${seg(messageId)}/automation/confirm`, { method: "POST" }),
     dismissAutomation: (messageId: string) =>
-      request<AssistantMessage>(`/assistant/messages/${messageId}/automation/dismiss`, { method: "POST" }),
+      request<AssistantMessage>(`/assistant/messages/${seg(messageId)}/automation/dismiss`, { method: "POST" }),
   },
   automations: {
     list: () => request<Automation[]>("/automations"),
@@ -796,16 +799,16 @@ export const api = {
     create: (body: AutomationBody) =>
       request<Automation>("/automations", { method: "POST", body: JSON.stringify(body) }),
     update: (id: string, body: AutomationBody) =>
-      request<Automation>(`/automations/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
-    pause: (id: string) => request<Automation>(`/automations/${id}/pause`, { method: "POST" }),
-    resume: (id: string) => request<Automation>(`/automations/${id}/resume`, { method: "POST" }),
-    remove: (id: string) => request<{ ok: boolean; id: string }>(`/automations/${id}`, { method: "DELETE" }),
+      request<Automation>(`/automations/${seg(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
+    pause: (id: string) => request<Automation>(`/automations/${seg(id)}/pause`, { method: "POST" }),
+    resume: (id: string) => request<Automation>(`/automations/${seg(id)}/resume`, { method: "POST" }),
+    remove: (id: string) => request<{ ok: boolean; id: string }>(`/automations/${seg(id)}`, { method: "DELETE" }),
     run: (id: string, dryRun = false) =>
-      request<AutomationRun>(`/automations/${id}/run`, { method: "POST", body: JSON.stringify({ dry_run: dryRun }) }),
-    history: (id: string) => request<AutomationHistory>(`/automations/${id}/history`),
+      request<AutomationRun>(`/automations/${seg(id)}/run`, { method: "POST", body: JSON.stringify({ dry_run: dryRun }) }),
+    history: (id: string) => request<AutomationHistory>(`/automations/${seg(id)}/history`),
     approvals: () => request<AutomationApproval[]>("/automations/approvals"),
     approve: (row: AutomationApproval) =>
-      request<AutomationApproval>(`/automations/approvals/${row.id}/approve`, { method: "POST", body: JSON.stringify({ confirm: true, action: row.action, marketplaces: row.marketplaces, revision_id: row.revision_id, review_token: row.review_token }) }),
+      request<AutomationApproval>(`/automations/approvals/${seg(row.id)}/approve`, { method: "POST", body: JSON.stringify({ confirm: true, action: row.action, marketplaces: row.marketplaces, revision_id: row.revision_id, review_token: row.review_token }) }),
     scheduledDrafts: (options?: ReadOptions) => read<{ drafts: DraftScheduleState[] }>("/automations/scheduled-drafts", options).then((r) => r.drafts),
     scheduledDraftLogs: (limit = 50) =>
       request<{ logs: ScheduledPublishLog[] }>(`/automations/scheduled-drafts/logs?limit=${limit}`).then((r) => r.logs),
@@ -826,7 +829,7 @@ export const api = {
       return request<{ logs: AutoRelistLog[] }>(`/automations/auto-relist/logs?${params}`).then((r) => r.logs);
     },
     saveAutoRelistRule: (marketplace: AutoRelistMarketplace, body: AutoRelistRuleBody) =>
-      request<AutoRelistRule>(`/automations/auto-relist/${marketplace}`, {
+      request<AutoRelistRule>(`/automations/auto-relist/${seg(marketplace)}`, {
         method: "PUT",
         body: JSON.stringify(body),
       }),
@@ -868,12 +871,12 @@ export const api = {
   },
   saleCalendar: {
     record: (record: SaleRecord) => request<{ id: string }>("/analytics/calendar/records", { method: "POST", body: JSON.stringify(record) }),
-    editRecord: (id: string, record: SaleRecord) => request<{ id: string }>(`/analytics/calendar/records/${id}`, { method: "PUT", body: JSON.stringify(record) }),
+    editRecord: (id: string, record: SaleRecord) => request<{ id: string }>(`/analytics/calendar/records/${seg(id)}`, { method: "PUT", body: JSON.stringify(record) }),
     get: (timezone: string) => request<SaleCalendarData>(`/analytics/calendar?timezone=${encodeURIComponent(timezone)}`),
     create: (plan: SalePlan) => request<{ id: string }>("/analytics/calendar", { method: "POST", body: JSON.stringify(plan) }),
-    update: (id: string, plan: SalePlan) => request<{ id: string }>(`/analytics/calendar/${id}`, { method: "PUT", body: JSON.stringify(plan) }),
-    status: (id: string, status: SaleEventStatus) => request<{ ok: boolean }>(`/analytics/calendar/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
-    remove: (id: string) => request<{ ok: boolean }>(`/analytics/calendar/${id}`, { method: "DELETE" }),
+    update: (id: string, plan: SalePlan) => request<{ id: string }>(`/analytics/calendar/${seg(id)}`, { method: "PUT", body: JSON.stringify(plan) }),
+    status: (id: string, status: SaleEventStatus) => request<{ ok: boolean }>(`/analytics/calendar/${seg(id)}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
+    remove: (id: string) => request<{ ok: boolean }>(`/analytics/calendar/${seg(id)}`, { method: "DELETE" }),
   },
 
   boxes: {
@@ -881,8 +884,8 @@ export const api = {
     create: (body: SourceBoxInput) =>
       request<SourceBoxes>("/boxes", { method: "POST", body: JSON.stringify(body) }),
     update: (id: string, body: Partial<SourceBoxInput>) =>
-      request<SourceBoxes>(`/boxes/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
-    remove: (id: string) => request<SourceBoxes>(`/boxes/${id}`, { method: "DELETE" }),
+      request<SourceBoxes>(`/boxes/${seg(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
+    remove: (id: string) => request<SourceBoxes>(`/boxes/${seg(id)}`, { method: "DELETE" }),
   },
   ebay: {
     importCandidates: (page: number) => request<MarketplaceImportPage>(`/ebay/import/active?page=${page}`),
@@ -894,7 +897,7 @@ export const api = {
       method: "POST", body: JSON.stringify({ listing_id: listingId, unless_matched: true }),
     }),
     read: (section: string, params: Record<string, string | number> = {}) =>
-      request<EbayPageData>(`/ebay/read/${section}?${new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]))}`),
+      request<EbayPageData>(`/ebay/read/${seg(section)}?${new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]))}`),
     listing: (id: string) => request<EbayListing>(`/ebay/listing/${encodeURIComponent(id)}`),
     preview: (kind: string, payload: EbayPayload) => request<EbayReview>("/ebay/actions/preview", {
       method: "POST", body: JSON.stringify({ kind, payload }),
@@ -953,68 +956,68 @@ export const api = {
           ...(waterfallSteps?.length ? { waterfall_steps: waterfallSteps } : {}),
         }),
       }),
-    pause: (ruleId?: string) => request<OkResponse>(ruleId ? `/ebay-offers/rules/${ruleId}/pause` : "/ebay-offers/pause", { method: "POST" }),
-    checked: (attemptId: string) => request<OkResponse>(`/ebay-offers/attempts/${attemptId}/checked`, {
+    pause: (ruleId?: string) => request<OkResponse>(ruleId ? `/ebay-offers/rules/${seg(ruleId)}/pause` : "/ebay-offers/pause", { method: "POST" }),
+    checked: (attemptId: string) => request<OkResponse>(`/ebay-offers/attempts/${seg(attemptId)}/checked`, {
       method: "POST", body: JSON.stringify({ confirm: true }),
     }),
   },
   directConnections: {
     status: () => request<DirectConnectionsStatus>("/marketplace-accounts"),
     connect: (marketplace: DirectMarketplace) =>
-      request<{ authorizeUrl: string }>(`/marketplace-accounts/${marketplace}/connect`, { method: "POST" }),
+      request<{ authorizeUrl: string }>(`/marketplace-accounts/${seg(marketplace)}/connect`, { method: "POST" }),
     finish: (marketplace: DirectMarketplace, state: string, claim: string) =>
-      request<{ marketplace: DirectMarketplace; label: string | null }>(`/marketplace-accounts/${marketplace}/finish`, {
+      request<{ marketplace: DirectMarketplace; label: string | null }>(`/marketplace-accounts/${seg(marketplace)}/finish`, {
         method: "POST", body: JSON.stringify({ state, claim }),
       }),
     cancel: (marketplace: DirectMarketplace) =>
-      request<OkResponse>(`/marketplace-accounts/${marketplace}/connect`, { method: "DELETE" }),
+      request<OkResponse>(`/marketplace-accounts/${seg(marketplace)}/connect`, { method: "DELETE" }),
     disconnect: (marketplace: DirectMarketplace) =>
-      request<OkResponse>(`/marketplace-accounts/${marketplace}`, { method: "DELETE" }),
+      request<OkResponse>(`/marketplace-accounts/${seg(marketplace)}`, { method: "DELETE" }),
   },
   marketplaceSessions: {
     status: () => request<ExtensionSessions>("/marketplaces/sessions"),
     connect: (marketplace: ExtensionSessionMarket) =>
-      request<ExtensionSessionConnect>(`/marketplaces/${marketplace}/connect`, { method: "POST" }),
+      request<ExtensionSessionConnect>(`/marketplaces/${seg(marketplace)}/connect`, { method: "POST" }),
   },
   cloudSessions: {
     status: (options?: ReadOptions) => read<MarketplaceCloudSessions>("/cloud-sessions", options),
     connectToken: (marketplace: ExtensionSessionMarket) =>
-      request<CloudConnectTokenResponse>(`/cloud-sessions/${marketplace}/connect-token`, { method: "POST" }),
+      request<CloudConnectTokenResponse>(`/cloud-sessions/${seg(marketplace)}/connect-token`, { method: "POST" }),
     verify: (marketplace: ExtensionSessionMarket) =>
-      request<MarketplaceCloudResult>(`/cloud-sessions/${marketplace}/verify`, { method: "POST" }),
+      request<MarketplaceCloudResult>(`/cloud-sessions/${seg(marketplace)}/verify`, { method: "POST" }),
     disconnect: (marketplace: ExtensionSessionMarket) =>
-      request<MarketplaceCloudResult>(`/cloud-sessions/${marketplace}`, { method: "DELETE" }),
+      request<MarketplaceCloudResult>(`/cloud-sessions/${seg(marketplace)}`, { method: "DELETE" }),
   },
   marketplaceListings: {
-    get: (convId: string, options?: ReadOptions) => read<MarketplaceListings>(`/conversations/${convId}/marketplace-listings`, options),
+    get: (convId: string, options?: ReadOptions) => read<MarketplaceListings>(`/conversations/${seg(convId)}/marketplace-listings`, options),
     delist: (convId: string, marketplaces: DelistMarketplace[]) =>
-      request<MarketplaceListings>(`/conversations/${convId}/marketplace-listings/delist`, {
+      request<MarketplaceListings>(`/conversations/${seg(convId)}/marketplace-listings/delist`, {
         method: "POST", body: JSON.stringify({ marketplaces, confirm: true }),
       }),
     /** `relinkDeleted`: the seller checked that the listing Anteroom deleted is still live. */
     mark: (convId: string, marketplace: DelistMarketplace, state: MarketplaceMark, url?: string, relinkDeleted = false) =>
-      request<MarketplaceListings>(`/conversations/${convId}/marketplace-listings/${marketplace}/mark`, {
+      request<MarketplaceListings>(`/conversations/${seg(convId)}/marketplace-listings/${seg(marketplace)}/mark`, {
         method: "POST", body: JSON.stringify({ state, ...(url ? { url } : {}), ...(relinkDeleted ? { relink_deleted: true } : {}) }),
       }),
     recordSale: (convId: string, sale: SellerSale) =>
-      request<SellerSaleResult>(`/conversations/${convId}/marketplace-listings/sold`, {
+      request<SellerSaleResult>(`/conversations/${seg(convId)}/marketplace-listings/sold`, {
         method: "POST", body: JSON.stringify(sale),
       }),
     checkSales: (convId: string) =>
-      request<SalesCheck>(`/conversations/${convId}/marketplace-listings/check-sales`, { method: "POST" }),
+      request<SalesCheck>(`/conversations/${seg(convId)}/marketplace-listings/check-sales`, { method: "POST" }),
   },
   nativeMarketplaces: {
     refreshForm: (convId: string, marketplace: string, revisionId: string, options?: ReadOptions) =>
       refreshMarketplaceForm(convId, marketplace, revisionId, options),
     form: (convId: string, marketplace: string, revisionId?: string | null, options?: ReadOptions) =>
       read<MarketplaceForm>(
-        `/conversations/${convId}/native-marketplaces/${marketplace}/form${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`,
+        `/conversations/${seg(convId)}/native-marketplaces/${seg(marketplace)}/form${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`,
         options,
       ),
-    status: (convId: string, options?: ReadOptions) => read<NativeDrafts>(`/conversations/${convId}/native-marketplaces`, options),
+    status: (convId: string, options?: ReadOptions) => read<NativeDrafts>(`/conversations/${seg(convId)}/native-marketplaces`, options),
     /** One answer for every marketplace. Screens asking about the same revision at once share one server build. */
     preflight: (convId: string, revisionId?: string | null) =>
-      request<NativePreflight>(`/conversations/${convId}/native-marketplaces/preflight${
+      request<NativePreflight>(`/conversations/${seg(convId)}/native-marketplaces/preflight${
         revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
     /** The fields each listing still needs per marketplace; the inventory asks for the rows on screen. */
     readiness: (convIds: readonly string[]) =>
@@ -1025,37 +1028,37 @@ export const api = {
       request<ListingSheetResponse>(
         `/listing-sheet?marketplace=${encodeURIComponent(marketplace)}&${convIds.map((id) => `ids=${encodeURIComponent(id)}`).join("&")}`),
     saveDraft: (convId: string, marketplace: NativeMarketplace, revisionId: string) =>
-      request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/draft`, {
+      request<NativeDraft>(`/conversations/${seg(convId)}/native-marketplaces/${seg(marketplace)}/draft`, {
         method: "POST", body: JSON.stringify({ revision_id: revisionId }),
       }),
     list: (convId: string, marketplace: NativeMarketplace, revisionId: string) =>
-      request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/list`, {
+      request<NativeDraft>(`/conversations/${seg(convId)}/native-marketplaces/${seg(marketplace)}/list`, {
         method: "POST", body: JSON.stringify({ revision_id: revisionId, confirm: true }),
       }),
     update: (convId: string, marketplace: NativeMarketplace, revisionId: string) =>
-      request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/update`, {
+      request<NativeDraft>(`/conversations/${seg(convId)}/native-marketplaces/${seg(marketplace)}/update`, {
         method: "POST", body: JSON.stringify({ revision_id: revisionId, confirm: true }),
       }),
     cancel: (convId: string, marketplace: NativeMarketplace) =>
-      request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/cancel`, { method: "POST" }),
+      request<NativeDraft>(`/conversations/${seg(convId)}/native-marketplaces/${seg(marketplace)}/cancel`, { method: "POST" }),
     reset: (convId: string, marketplace: NativeMarketplace) =>
-      request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/reset`, {
+      request<NativeDraft>(`/conversations/${seg(convId)}/native-marketplaces/${seg(marketplace)}/reset`, {
         method: "POST", body: JSON.stringify({ confirm: true }),
       }),
     check: (convId: string, marketplace: NativeMarketplace, draftUrl?: string) =>
-      request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/check`, {
+      request<NativeDraft>(`/conversations/${seg(convId)}/native-marketplaces/${seg(marketplace)}/check`, {
         method: "POST", body: JSON.stringify(draftUrl ? { draft_url: draftUrl } : {}),
       }),
   },
   templates: {
     list: () => request<{templates: ListingTemplate[]}>("/listing-templates"),
-    source: (id: string) => request<TemplateSource>(`/listing-templates/source/${id}`),
-    save: (body: TemplateSave, id?: string) => request<ListingTemplate>(id ? `/listing-templates/${id}` : "/listing-templates", { method: id ? "PUT" : "POST", body: JSON.stringify(body) }),
-    remove: (id: string, revision: number) => request<OkResponse>(`/listing-templates/${id}?expected_revision=${revision}`, {method:"DELETE"}),
-    draft: (id: string, body: TemplateDraft) => request<{conversation_id:string}>(`/listing-templates/${id}/draft`, {method:"POST",body:JSON.stringify(body)}),
-    draftResult: (id: string, requestId: string) => request<{conversation_id:string}>(`/listing-templates/${id}/draft-result/${requestId}`),
-    preview: (id: string, body: TemplateApply) => request<TemplateReview>(`/listing-templates/${id}/apply-preview`, {method:"POST",body:JSON.stringify(body)}),
-    apply: (id: string, body: TemplateApproval) => request<{ok:boolean;changed:boolean}>(`/listing-templates/${id}/apply`, {method:"POST",body:JSON.stringify(body)}),
+    source: (id: string) => request<TemplateSource>(`/listing-templates/source/${seg(id)}`),
+    save: (body: TemplateSave, id?: string) => request<ListingTemplate>(id ? `/listing-templates/${seg(id)}` : "/listing-templates", { method: id ? "PUT" : "POST", body: JSON.stringify(body) }),
+    remove: (id: string, revision: number) => request<OkResponse>(`/listing-templates/${seg(id)}?expected_revision=${revision}`, {method:"DELETE"}),
+    draft: (id: string, body: TemplateDraft) => request<{conversation_id:string}>(`/listing-templates/${seg(id)}/draft`, {method:"POST",body:JSON.stringify(body)}),
+    draftResult: (id: string, requestId: string) => request<{conversation_id:string}>(`/listing-templates/${seg(id)}/draft-result/${seg(requestId)}`),
+    preview: (id: string, body: TemplateApply) => request<TemplateReview>(`/listing-templates/${seg(id)}/apply-preview`, {method:"POST",body:JSON.stringify(body)}),
+    apply: (id: string, body: TemplateApproval) => request<{ok:boolean;changed:boolean}>(`/listing-templates/${seg(id)}/apply`, {method:"POST",body:JSON.stringify(body)}),
   },
   bulkEdit: {
     preview: (conversationIds: string[], edits: BulkEdits) => request<{ rows: BulkReviewRow[] }>("/listings/bulk-edit/preview", { method: "POST", body: JSON.stringify({ conversation_ids: conversationIds, edits }) }),
@@ -1128,7 +1131,7 @@ export const api = {
       if (options.conversationId) params.set("conversation_id", options.conversationId);
       return read<{ sales: MarketplaceSale[] }>(`/marketplace-sales?${params}`, readOptions);
     },
-    dismiss: (saleId: string) => request<OkResponse>(`/marketplace-sales/${saleId}/dismiss`, { method: "POST" }),
+    dismiss: (saleId: string) => request<OkResponse>(`/marketplace-sales/${seg(saleId)}/dismiss`, { method: "POST" }),
     stillListed: (readOptions?: ReadOptions) => read<StillListedResponse>("/marketplace-sales/still-listed", readOptions),
     tracker: (limit = 200) => request<SaleTrackerResponse>(`/marketplace-sales/tracker?limit=${limit}`),
     retryTrackerEvent: (eventId: string) =>
@@ -1152,70 +1155,70 @@ export const api = {
     }>("/status", options),
 
   generationFeedback: {
-    get: (id: string) => read<{ revision_id: string; feedback: GenerationRating | null } | null>(`/conversations/${id}/generation-feedback`),
-    save: (id: string, revisionId: string, feedback: GenerationRating) => request<GenerationRating>(`/conversations/${id}/generation-feedback`, {
+    get: (id: string) => read<{ revision_id: string; feedback: GenerationRating | null } | null>(`/conversations/${seg(id)}/generation-feedback`),
+    save: (id: string, revisionId: string, feedback: GenerationRating) => request<GenerationRating>(`/conversations/${seg(id)}/generation-feedback`, {
       method: "PUT", body: JSON.stringify({ revision_id: revisionId, ...feedback }),
     }),
     summary: () => read<{ up: number; down: number; issues: Record<string, number> }>("/generation-feedback"),
   },
   conversations: {
     copyBatchPreview: (ids: string[]) => request<{ rows: BatchCopyPreviewRow[] }>("/listings/copies/preview", { method: "POST", body: JSON.stringify({ conversation_ids: ids }) }),
-    copyResult: (id: string, requestId: string) => request<Conversation>(`/conversations/${id}/copy-result/${requestId}`),
-    copyPreview: (id: string) => request<CopyPreview>(`/conversations/${id}/copy-preview`),
-    copy: (id: string, body: CopyListingRequest) => request<Conversation>(`/conversations/${id}/copy`, { method: "POST", body: JSON.stringify(body) }),
+    copyResult: (id: string, requestId: string) => request<Conversation>(`/conversations/${seg(id)}/copy-result/${seg(requestId)}`),
+    copyPreview: (id: string) => request<CopyPreview>(`/conversations/${seg(id)}/copy-preview`),
+    copy: (id: string, body: CopyListingRequest) => request<Conversation>(`/conversations/${seg(id)}/copy`, { method: "POST", body: JSON.stringify(body) }),
     list: (options?: ReadOptions) => read<ConversationSummary[]>("/conversations", options),
-    get: (id: string, options?: ReadOptions) => read<Conversation>(`/conversations/${id}`, options),
+    get: (id: string, options?: ReadOptions) => read<Conversation>(`/conversations/${seg(id)}`, options),
     /** Item Details as Regenerate will start from them; nothing is saved. */
-    regenerateDetails: (id: string) => read<{ notes: string | null }>(`/conversations/${id}/regenerate-details`),
+    regenerateDetails: (id: string) => read<{ notes: string | null }>(`/conversations/${seg(id)}/regenerate-details`),
     create: (body?: ConversationInput) =>
       request<Conversation>("/conversations", { method: "POST", body: JSON.stringify(body || {}) }),
     update: (id: string, body: ConversationInput) =>
-      request<Conversation>(`/conversations/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+      request<Conversation>(`/conversations/${seg(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
     /** Stars or unstars an item. Not an edit: the item keeps its place and its last-updated time. */
     setFavorite: (id: string, favorite: boolean) =>
       request<FavoriteResult>(`/conversations/${encodeURIComponent(id)}/favorite`, { method: "PUT", body: JSON.stringify({ favorite } satisfies FavoriteInput) }),
     /** Deletes a new listing only while it is still blank; the server decides. `keepalive` outlives a closing tab. */
     discardBlank: (id: string, options?: { keepalive?: boolean }) =>
-      request<{ discarded: boolean }>(`/conversations/${id}/discard-blank`, { method: "POST", keepalive: options?.keepalive }),
+      request<{ discarded: boolean }>(`/conversations/${seg(id)}/discard-blank`, { method: "POST", keepalive: options?.keepalive }),
     settle: (id: string) =>
-      request<Conversation>(`/conversations/${id}/settle`, { method: "POST" }),
+      request<Conversation>(`/conversations/${seg(id)}/settle`, { method: "POST" }),
     unsettle: (id: string) =>
-      request<Conversation>(`/conversations/${id}/unsettle`, { method: "POST" }),
+      request<Conversation>(`/conversations/${seg(id)}/unsettle`, { method: "POST" }),
     stop: (id: string) =>
-      request<{ ok: boolean }>(`/conversations/${id}/stop`, { method: "POST" }),
+      request<{ ok: boolean }>(`/conversations/${seg(id)}/stop`, { method: "POST" }),
     cancelGeneration: (id: string) =>
-      request<{ ok: boolean }>(`/conversations/${id}/generate/cancel`, { method: "POST" }),
-    activity: (id: string, options?: ReadOptions) => read<ConversationActivity>(`/conversations/${id}/activity`, options),
-    messages: (id: string, options?: ReadOptions) => read<Message[]>(`/conversations/${id}/messages`, options),
+      request<{ ok: boolean }>(`/conversations/${seg(id)}/generate/cancel`, { method: "POST" }),
+    activity: (id: string, options?: ReadOptions) => read<ConversationActivity>(`/conversations/${seg(id)}/activity`, options),
+    messages: (id: string, options?: ReadOptions) => read<Message[]>(`/conversations/${seg(id)}/messages`, options),
     /** The item's photos, or with `marketplace` the photos added on that marketplace's form only. */
     photos: (id: string, marketplace?: string, options?: ReadOptions) =>
-      read<ListingPhoto[]>(`/conversations/${id}/photos${marketplace ? `?marketplace=${encodeURIComponent(marketplace)}` : ""}`, options),
+      read<ListingPhoto[]>(`/conversations/${seg(id)}/photos${marketplace ? `?marketplace=${encodeURIComponent(marketplace)}` : ""}`, options),
     deletePhoto: (convId: string, photoId: string) =>
-      request<OkResponse>(`/conversations/${convId}/photos/${photoId}`, { method: "DELETE" }),
+      request<OkResponse>(`/conversations/${seg(convId)}/photos/${seg(photoId)}`, { method: "DELETE" }),
     /** Rotate the stored image clockwise by `degrees` (90, -90 or 180). */
     rotatePhoto: (convId: string, photoId: string, degrees: 90 | -90 | 180) =>
-      request<ListingPhoto>(`/conversations/${convId}/photos/${photoId}/rotate`, {
+      request<ListingPhoto>(`/conversations/${seg(convId)}/photos/${seg(photoId)}/rotate`, {
         method: "POST",
         body: JSON.stringify({ degrees }),
       }),
     /** Replace a photo's edits; the server renders them from the kept original. */
     editPhoto: (convId: string, photoId: string, edits: PhotoEdits) =>
-      request<ListingPhoto>(`/conversations/${convId}/photos/${photoId}/edits`, {
+      request<ListingPhoto>(`/conversations/${seg(convId)}/photos/${seg(photoId)}/edits`, {
         method: "PUT",
         body: JSON.stringify(edits),
       }),
     resetPhoto: (convId: string, photoId: string) =>
-      request<ListingPhoto>(`/conversations/${convId}/photos/${photoId}/edits`, { method: "DELETE" }),
+      request<ListingPhoto>(`/conversations/${seg(convId)}/photos/${seg(photoId)}/edits`, { method: "DELETE" }),
     /** AI Studio (Photoroom) on several photos at once; each keeps its upload so Reset returns to it. */
     photoStudio: (convId: string, photoIds: string[], options: StudioOptions, signal?: AbortSignal, review?: PhotoStudioRequest["review"]) =>
-      request<PhotoStudioResult>(`/conversations/${convId}/photos/studio`, {
+      request<PhotoStudioResult>(`/conversations/${seg(convId)}/photos/studio`, {
         method: "POST",
         body: JSON.stringify({ photo_ids: photoIds, options, review } satisfies PhotoStudioRequest),
         signal,
       }),
     /** A smaller JPEG of unsaved edits; `crop: false` keeps the whole frame to draw the crop on. */
     previewPhotoEdits: async (convId: string, photoId: string, edits: PhotoEdits, crop: boolean, signal?: AbortSignal) => {
-      const res = await studioFetch(`${BASE}/conversations/${convId}/photos/${photoId}/edits/preview?crop=${crop}`, {
+      const res = await studioFetch(`${BASE}/conversations/${seg(convId)}/photos/${seg(photoId)}/edits/preview?crop=${crop}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(edits),
@@ -1228,14 +1231,14 @@ export const api = {
       return res.blob();
     },
     delete: (id: string) =>
-      request<DeleteConversationResult>(`/conversations/${id}`, { method: "DELETE" }),
+      request<DeleteConversationResult>(`/conversations/${seg(id)}`, { method: "DELETE" }),
     reset: (id: string, opts?: { keepInputs?: boolean }) =>
-      requestWithTimeout<Conversation>(`/conversations/${id}/reset`, {
+      requestWithTimeout<Conversation>(`/conversations/${seg(id)}/reset`, {
         method: "POST",
         body: JSON.stringify({ keep_inputs: Boolean(opts?.keepInputs) }),
       }, "Resetting the listing took too long. Check the listing before trying Regenerate again; you do not need to restart Anteroom."),
     reorderPhotos: (convId: string, orderedIds: string[]) =>
-      request<OkResponse>(`/conversations/${convId}/photos/order`, {
+      request<OkResponse>(`/conversations/${seg(convId)}/photos/order`, {
         method: "PATCH",
         body: JSON.stringify(orderedIds),
       }),
@@ -1272,7 +1275,7 @@ export const api = {
       const form = new FormData();
       files.forEach((f) => form.append("files", f));
       if (marketplace) form.append("marketplace", marketplace);
-      return studioFetch(`${BASE}/conversations/${convId}/photos`, { method: "POST", body: form }).then(
+      return studioFetch(`${BASE}/conversations/${seg(convId)}/photos`, { method: "POST", body: form }).then(
         async (r) => {
           const data = await r.json();
           if (!r.ok) {
@@ -1293,26 +1296,26 @@ export const api = {
   },
 
   listings: {
-    get: (convId: string, options?: ReadOptions) => read<ListingDocument>(`/conversations/${convId}/listing`, options),
+    get: (convId: string, options?: ReadOptions) => read<ListingDocument>(`/conversations/${seg(convId)}/listing`, options),
     /** The marketplace forms for this listing's category (the eBay and Etsy editors read these). */
     fields: (convId: string, options?: ReadOptions) =>
-      read<{ ok: boolean; forms: MarketplaceForm[] }>(`/conversations/${convId}/vendoo-api/fields`, options),
+      read<{ ok: boolean; forms: MarketplaceForm[] }>(`/conversations/${seg(convId)}/vendoo-api/fields`, options),
     update: (convId: string, listing: ListingData, expectedRevisionId: string) =>
-      request<ListingSaveResult>(`/conversations/${convId}/listing`, {
+      request<ListingSaveResult>(`/conversations/${seg(convId)}/listing`, {
         method: "PUT",
         body: JSON.stringify({ listing, expected_revision_id: expectedRevisionId } satisfies ListingSave),
       }),
     validate: (convId: string) =>
-      request<ListingValidation>(`/conversations/${convId}/listing/validate`, { method: "POST" }),
-    revisions: (convId: string) => request<ListingRevision[]>(`/conversations/${convId}/revisions`),
+      request<ListingValidation>(`/conversations/${seg(convId)}/listing/validate`, { method: "POST" }),
+    revisions: (convId: string) => request<ListingRevision[]>(`/conversations/${seg(convId)}/revisions`),
     revision: (convId: string, revisionId: string) =>
-      request<{ id: string; listing: ListingData }>(`/conversations/${convId}/revisions/${revisionId}`),
+      request<{ id: string; listing: ListingData }>(`/conversations/${seg(convId)}/revisions/${seg(revisionId)}`),
     restore: (convId: string, revisionId: string, expectedRevisionId: string) =>
-      request<RevisionRestoreResult>(`/conversations/${convId}/revisions/${revisionId}/restore`, {
+      request<RevisionRestoreResult>(`/conversations/${seg(convId)}/revisions/${seg(revisionId)}/restore`, {
         method: "POST", body: JSON.stringify({ expected_revision_id: expectedRevisionId }),
       }),
     priceDropPreview: (convId: string) =>
-      request<PriceDropPreview>(`/conversations/${convId}/price-drop/preview`, { method: "POST" }),
+      request<PriceDropPreview>(`/conversations/${seg(convId)}/price-drop/preview`, { method: "POST" }),
     /** Stream sold comps: each source's progress, then the preview they imply. */
     priceDropComps: async (
       convId: string,
@@ -1323,7 +1326,7 @@ export const api = {
       },
       signal?: AbortSignal,
     ): Promise<void> => {
-      const res = await studioFetch(`${BASE}/conversations/${convId}/price-drop/comps`, {
+      const res = await studioFetch(`${BASE}/conversations/${seg(convId)}/price-drop/comps`, {
         method: "POST",
         headers: { Accept: "text/event-stream" },
         cache: "no-store",
@@ -1346,7 +1349,7 @@ export const api = {
       convId: string,
       body: { price: number; expected_revision_id: string; percent?: number | null; mode: "percent" | "comps" | "custom" },
     ) =>
-      requestWithTimeout<PriceDropApplyResult>(`/conversations/${convId}/price-drop`, {
+      requestWithTimeout<PriceDropApplyResult>(`/conversations/${seg(convId)}/price-drop`, {
         method: "POST",
         body: JSON.stringify(body),
       }, "Saving the price took too long. Check the listing's price before confirming again; you do not need to restart Anteroom."),
@@ -1373,7 +1376,7 @@ export const api = {
       const query = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : "";
       return read<Job[]>(`/jobs${query}`, options);
     },
-    cancel: (id: string) => request<Job>(`/jobs/${id}/cancel`, { method: "POST" }),
+    cancel: (id: string) => request<Job>(`/jobs/${seg(id)}/cancel`, { method: "POST" }),
   },
 
   settings: {
@@ -1466,19 +1469,19 @@ export const api = {
     testCursor: () => request<{ ok: boolean; error?: string | null }>("/settings/cursor/test", { method: "POST" }),
     aiKeys: () => request<{ providers: AIKeyProvider[] }>("/settings/ai-keys"),
     setAIKey: (id: KeyProviderId, apiKey: string) =>
-      request<{ ok: boolean }>(`/settings/ai-keys/${id}`, {
+      request<{ ok: boolean }>(`/settings/ai-keys/${seg(id)}`, {
         method: "PUT",
         body: JSON.stringify({ api_key: apiKey }),
       }),
-    deleteAIKey: (id: KeyProviderId) => request<{ ok: boolean }>(`/settings/ai-keys/${id}`, { method: "DELETE" }),
+    deleteAIKey: (id: KeyProviderId) => request<{ ok: boolean }>(`/settings/ai-keys/${seg(id)}`, { method: "DELETE" }),
     testAIKey: (id: KeyProviderId) =>
-      request<{ ok: boolean; error?: string | null }>(`/settings/ai-keys/${id}/test`, { method: "POST" }),
-    aiKeyModels: (id: KeyProviderId) => request<AIKeyModels>(`/settings/ai-keys/${id}/models`),
+      request<{ ok: boolean; error?: string | null }>(`/settings/ai-keys/${seg(id)}/test`, { method: "POST" }),
+    aiKeyModels: (id: KeyProviderId) => request<AIKeyModels>(`/settings/ai-keys/${seg(id)}/models`),
     setAIKeyModels: (
       id: KeyProviderId,
       models: { vision_model?: string; listing_model?: string; reasoning_effort?: string },
     ) =>
-      request<{ ok: boolean; vision_model?: string; listing_model?: string }>(`/settings/ai-keys/${id}/models`, {
+      request<{ ok: boolean; vision_model?: string; listing_model?: string }>(`/settings/ai-keys/${seg(id)}/models`, {
         method: "PUT",
         body: JSON.stringify(models),
       }),
@@ -1491,6 +1494,9 @@ export const api = {
       const scheme = window.location.protocol === "https:" ? "wss" : "ws";
       return `${scheme}://${window.location.host}${BASE}/settings/claude/terminal?cols=${cols}&rows=${rows}`;
     },
+    managedUsage: (period = "30d") => request<ManagedUsage>(`/settings/managed-usage?period=${period}`),
+    managedUsageCsv: (period: string) => `${BASE}/settings/managed-usage.csv?period=${period}`,
+    subscription: () => request<SubscriptionSummary>("/settings/subscription"),
     /** Each provider's subscription usage. `refresh` skips the server's short cache. */
     usageLimits: (refresh = false) =>
       request<{ ok: boolean; providers: ProviderUsageLimits[] }>(

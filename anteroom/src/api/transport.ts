@@ -21,8 +21,17 @@ export function hasHostedApiSession() { return hostedSession !== null; }
 /** The signed-in session, so per-account caches can tell when it changes. */
 export function currentHostedSession(): HostedApiSession | null { return hostedSession; }
 
+function hasDotSegment(input: string): boolean {
+  const path = input.split(/[?#]/, 1)[0];
+  return path.split("/").some((segment) => {
+    const decoded = segment.replace(/%2e/gi, ".");
+    return decoded === "." || decoded === "..";
+  });
+}
+
 async function executeStudioFetch(input: string, options: RequestInit, session: HostedApiSession | null): Promise<Response> {
   if (hostedSession !== session) throw new Error("Your account changed. Open the request again.");
+  if (hasDotSegment(input)) throw new Error("Anteroom API requests must stay on their route.");
   if (!session) {
     const response = await fetch(input, options);
     if (hostedSession !== session) throw new Error("Your account changed. Open the request again.");
@@ -127,6 +136,10 @@ async function executeStudioUpload(
     } finally {
       notifyUploadComplete();
     }
+  }
+  if (hasDotSegment(input)) {
+    notifyUploadComplete();
+    throw new Error("Anteroom API requests must stay on their route.");
   }
   const url = new URL(input, session.origin);
   if (url.origin !== session.origin || !url.pathname.startsWith("/api/")) {

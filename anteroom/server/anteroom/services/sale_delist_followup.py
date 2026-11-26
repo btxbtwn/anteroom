@@ -156,6 +156,40 @@ def still_listed(db: Session) -> list[dict]:
     return list(found.values())
 
 
+def pin_first_delist(db: Session, conv_id: str, sale_ids: list[str]) -> tuple[list[str], dict[str, str]]:
+    """Pin what each sale left up elsewhere, as the follow-up would, for the delist right after the sale.
+
+    Returns the other marketplaces where the item is live, and the pinned listings
+    of the first sale among them: the first delist deletes only those, as its retries do.
+    """
+    from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
+    from anteroom.services.marketplace_delist import MARKETPLACES, _notes_dict, listings, pin_sale
+    from anteroom.services.vendoo_import import parse_notes
+
+    known = listings(db, conv_id)
+    conv = db.get(Conversation, conv_id)
+    marks = _notes_dict(parse_notes(conv.notes if conv else None), "marketplaceMarks")
+    native = MarketplaceListingRepo(db).for_conversation(conv_id)
+    live = [name for name in MARKETPLACES
+            if (entry := known.get(name)) and entry.get("state") == "live" and entry.get("listing_id")
+            and not entry.get("sold_here")]
+    targets: dict[str, str] = {}
+    for index, sale_id in enumerate(sale_ids):
+        sale = db.get(MarketplaceSale, sale_id)
+        if sale is None:
+            continue
+        sold_at = _time(sale.sold_at or sale.received_at)
+        left = {name: str(entry["listing_id"]) for name in MARKETPLACES
+                if (entry := known.get(name)) and name != sale.marketplace and entry.get("listing_id")
+                and not entry.get("sold_here") and entry.get("state") != "deleted"
+                and not _went_up_after(name, str(entry["listing_id"]), native, marks, sold_at)}
+        pinned = pin_sale(db, conv_id, sale_id, left)
+        if index == 0:
+            targets = {name: item for name, item in pinned.items()
+                       if name in live and str(known[name]["listing_id"]) == item}
+    return live, targets
+
+
 def _sweep(db: Session, *, act: bool) -> list[tuple[str, str, dict[str, str]]]:
     """Pin what each new sale left up, then list the pinned listings due another delist.
 

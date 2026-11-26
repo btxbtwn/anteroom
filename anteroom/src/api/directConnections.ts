@@ -23,6 +23,8 @@ export interface DirectConnectionsStatus {
     running: boolean;
     connected: boolean;
     lastError: string | null;
+    /** A sale event skipped after repeated failures; shown even while connected. */
+    skippedEvent: string | null;
     lastEventAt: number | null;
   };
 }

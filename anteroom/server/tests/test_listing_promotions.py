@@ -138,6 +138,7 @@ class ListingPromotionsTest(unittest.TestCase):
         self.bridge.assert_not_called()
 
     def test_depop_offer_finishes_without_claiming_the_preview_count_was_delivered(self):
+        self.enterContext(patch("anteroom.services.cloud_sessions.has_active_session", return_value=True))
         conv = ConversationRepo(self.db).create(title="Depop tee")
         conv.notes = merge_notes(conv.notes, {"vendooListingUrls": {"depop": "https://www.depop.com/products/seller-vintage-tee/"}})
         self.db.commit()

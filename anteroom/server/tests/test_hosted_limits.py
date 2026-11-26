@@ -383,7 +383,6 @@ def test_relay_ensure_device_sends_hosted_register_secret_when_configured(monkey
     async def fake_http():
         yield FakeClient()
 
-    monkeypatch.setattr(relay_client, 'get_relay_device', lambda: None)
     monkeypatch.setattr(relay_client, 'set_relay_device', lambda d: saved.update(d))
     monkeypatch.setattr(relay_client, 'http_client', fake_http)
 

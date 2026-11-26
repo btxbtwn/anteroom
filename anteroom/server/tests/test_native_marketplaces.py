@@ -204,6 +204,7 @@ class NativeMarketplacesTest(unittest.TestCase):
 
     def test_depop_publish_without_identity_stays_unconfirmed_and_cannot_republish(self):
         self.enterContext(patch("socket.socket.connect", side_effect=AssertionError("offline fixture")))
+        self.enterContext(patch("anteroom.services.cloud_sessions.has_active_session", return_value=True))
 
         async def answer(_job, kind, payload, **_kwargs):
             self.assertEqual(kind, "marketplace.execute")
@@ -213,13 +214,15 @@ class NativeMarketplacesTest(unittest.TestCase):
 
         self.bridge.side_effect = answer
         result = self.list("depop")
+        self.assertEqual(MarketplaceListingRepo(self.db).get(self.conv.id, "depop")["executor"], "chrome")
         self.assertEqual(result["state"], "unknown", result)
         self.assertEqual(result["error_code"], "uncertain")
         retry = self.client.post(f"{self.base}/depop/list", json={"revision_id": self.rev.id, "confirm": True})
         self.assertEqual(retry.status_code, 409, retry.text)
         self.assertEqual(self.actions(), ["save_draft", "publish"])
-        delist = self.client.post(f"/api/conversations/{self.conv.id}/marketplace-listings/delist",
-                                 json={"marketplaces": ["depop"], "confirm": True})
+        with patch("anteroom.services.cloud_sessions.has_active_session", return_value=False):
+            delist = self.client.post(f"/api/conversations/{self.conv.id}/marketplace-listings/delist",
+                                     json={"marketplaces": ["depop"], "confirm": True})
         self.assertEqual(delist.status_code, 409, delist.text)
 
         self.bridge.side_effect = None

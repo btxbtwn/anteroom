@@ -284,6 +284,11 @@ class FakeResponse:
 
 
 class SignInTest(unittest.TestCase):
+    def tearDown(self):
+        from test_marketplace_accounts import clear_sign_ins
+
+        clear_sign_ins()
+
     def test_sign_in_finishes_only_with_the_claim_its_browser_brought_back(self):
         calls = []
 
@@ -321,7 +326,8 @@ class SignInTest(unittest.TestCase):
                 self.assertNotIn(("GET", "/studio/oauth/result", {"state": "someone-elses", "claim": "c1"}), calls)
                 done = await marketplace_accounts.finish_sign_in("ebay", "s1", "c1")
                 self.assertEqual(done, {"marketplace": "ebay", "label": "cris"})
-                await marketplace_accounts._pending[("", "ebay")].task
+                # The finish stops the watcher; it does not wait out the relay's 15 minutes.
+                self.assertNotIn(("", "ebay"), marketplace_accounts._watchers)
                 listen.assert_called_once()
 
         asyncio.run(scenario())
@@ -348,7 +354,7 @@ class SignInTest(unittest.TestCase):
                 await marketplace_accounts.start_sign_in("ebay")
                 with self.assertRaises(marketplace_accounts.RelayError):
                     await marketplace_accounts.finish_sign_in("ebay", "s3", "forged")
-                await marketplace_accounts._pending[("", "ebay")].task
+                self.assertNotIn(("", "ebay"), marketplace_accounts._watchers)
 
         asyncio.run(scenario())
         self.assertNotIn("ebay", keychain.get_marketplace_accounts())
@@ -367,7 +373,7 @@ class SignInTest(unittest.TestCase):
                  mock.patch.object(marketplace_accounts, "POLL_INTERVAL_S", 0), \
                  mock.patch.object(marketplace_accounts.webbrowser, "open"):
                 await marketplace_accounts.start_sign_in("etsy")
-                await marketplace_accounts._pending[("", "etsy")].task
+                await marketplace_accounts._watchers[("", "etsy")]
 
         asyncio.run(scenario())
         status = marketplace_accounts.status()["accounts"]["etsy"]
@@ -436,8 +442,8 @@ class StreamTest(unittest.TestCase):
             if event["seq"] == 2:
                 raise RuntimeError("database busy")
 
-        through = asyncio.run(relay_client._process([{"seq": 1}, {"seq": 2}, {"seq": 3}], handle))
-        self.assertEqual(through, 1)
+        result = asyncio.run(relay_client._process([{"seq": 1}, {"seq": 2}, {"seq": 3}], handle))
+        self.assertEqual(result, (1, True))
 
 
 class AutodelistOptionTest(unittest.TestCase):
@@ -481,13 +487,14 @@ class AutodelistOptionTest(unittest.TestCase):
         created = self.handle(_ebay_event())
         seen = {}
 
-        async def fake_delist(conv_id, markets, confirm):
-            seen["call"] = (conv_id, list(markets), confirm)
+        async def fake_delist(conv_id, markets, confirm, *, expected, sale_id):
+            seen["call"] = (conv_id, list(markets), confirm, expected, sale_id)
             return {name: {"state": "deleted"} for name in markets}
 
         with mock.patch("anteroom.services.marketplace_delist.delist", fake_delist):
             notes = asyncio.run(marketplace_accounts.autodelist_for_sales(created, session_factory=self.Session))
-        self.assertEqual(seen["call"], (self.tee, ["etsy"], True))
+        # The first delist names the listing pinned for the sale, so it runs the same guards as its retries.
+        self.assertEqual(seen["call"], (self.tee, ["etsy"], True, {"etsy": "555"}, created[0]))
         self.assertEqual(notes[created[0]], "Delisted from Etsy.")
 
 
@@ -497,7 +504,7 @@ class AutodelistOptionTest(unittest.TestCase):
 
         calls = []
 
-        async def fake_delist(conv_id, markets, confirm):
+        async def fake_delist(conv_id, markets, confirm, **_guards):
             calls.append(markets)
             raise DelistError(409, "Connect Chrome first.")
 

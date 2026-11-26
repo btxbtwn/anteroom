@@ -30,7 +30,14 @@ const ERRORS: Record<string, string> = {
   rate_limited: "Poshmark asked you to wait. Try again later.",
   schema_drift: "Poshmark's form changed. Anteroom needs an update before showing it.",
 };
-const BRIDGE_ACTIONS = ["poshmark.form.read", "marketplace.actions", "marketplace.regions", "marketplace.sessions", "marketplace.sales_history", "marketplace.promotions", "marketplace.import", "vendoo.drafts", "marketplace.signed_approvals", "marketplace.signed_commands", "marketplace.cloud_connect"];
+/** What a Bridge may declare it runs for the hosted API: marketplace actions, each named read,
+ * and checking the server's signed approval on every write. */
+export const RELAY_CAPABILITIES = [
+  "marketplace.actions", "marketplace.regions", "marketplace.sessions", "marketplace.sales_history",
+  "marketplace.promotions", "marketplace.import", "marketplace.form.read", "vendoo.drafts",
+  "marketplace.signed_approvals", "marketplace.signed_commands",
+] as const;
+const BRIDGE_ACTIONS: readonly string[] = ["poshmark.form.read", ...RELAY_CAPABILITIES, "marketplace.cloud_connect"];
 /** The connection a Bridge reported, keeping only states and actions this page knows. */
 function toConnection(data: Record<string, unknown>): CloudConnection {
   const state = data.state === "connected" || data.state === "disconnected" || data.state === "pending" ? data.state : "unavailable";

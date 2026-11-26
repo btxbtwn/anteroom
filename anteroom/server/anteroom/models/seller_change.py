@@ -83,6 +83,8 @@ TOPIC_BY_TABLE: dict[str, str | None] = {
     # Streamed generation progress: the device running it already polls live.
     "background_task_events": None,
     "cloud_operation_journals": None,
+    # A sign-in in progress; the device that started it watches it itself.
+    "marketplace_sign_ins": None,
     "cloud_session_audit": None,
     "category_field_schemas": None,
     "category_nodes": None,
@@ -92,6 +94,8 @@ TOPIC_BY_TABLE: dict[str, str | None] = {
     "field_registry": None,
     "generation_timings": None,
     "api_usage_events": None,
+    "seller_plans": "settings",
+    "plan_usage_events": None,
     "listing_corrections": None,
     "photo_fingerprints": None,
     "vendoo_draft_cache": None,

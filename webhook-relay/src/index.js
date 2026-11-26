@@ -1,4 +1,5 @@
 import { Directory } from "./directory.js";
+import { CALL_TIMEOUT_MS } from "./deadline.js";
 import {
   ebayAuthorizeUrl,
   ebayResearch,
@@ -112,24 +113,19 @@ function ebayNotificationAge(payload) {
   return Number.isFinite(time) ? Date.now() - time : null;
 }
 
-// Field names only, for logging an event Anteroom could not route.
-function shape(value, depth = 0) {
-  if (Array.isArray(value)) return value.length ? [shape(value[0], depth + 1)] : [];
-  if (value && typeof value === "object" && depth < 4) {
-    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, shape(v, depth + 1)]));
-  }
-  return typeof value;
-}
-
 function bearer(request) {
   const header = request.headers.get("authorization") ?? "";
   return header.startsWith("Bearer ") ? header.slice(7).trim() : "";
 }
 
-async function authenticate(request, env) {
-  const token = bearer(request);
-  if (!token) return null;
-  return directory(env).deviceForToken(await sha256Hex(token));
+async function ipRateLimited(request, limiter) {
+  if (!limiter) return false;
+  const { success } = await limiter.limit({ key: request.headers.get("cf-connecting-ip") ?? "unknown" });
+  return !success;
+}
+
+function rateLimitResponse() {
+  return json({ error: "too many requests" }, 429, { "retry-after": "60" });
 }
 
 // --- Marketplace webhooks -------------------------------------------------
@@ -157,7 +153,7 @@ async function handleEbayNotification(request, env) {
     publicKeyPem = await ebayPublicKey(env, header.kid, request.headers.get("cf-connecting-ip") ?? "unknown");
   } catch (error) {
     console.error("[EBAY]", error.message);
-    if (error.status === 429) return json({ error: "too many requests" }, 429);
+    if (error.rateLimited) return json({ error: "too many requests" }, 429);
     return json({ error: "could not fetch eBay public key" }, 500);
   }
   if (!(await verifyEbaySignature({ rawBody, signature: header.signature, publicKeyPem }))) {
@@ -173,16 +169,22 @@ async function handleEbayNotification(request, env) {
   const userId = event.ids.userId?.[0];
   const dir = directory(env);
   const deviceId = userId ? await dir.deviceForAccount("ebay", userId) : null;
-  // A notification this device already has (even acknowledged) is a retry or a replay: do nothing twice.
-  const box = deviceId ? inbox(env, deviceId) : null;
-  if (box && (await box.seen(event.dedupeKey))) return new Response(null, { status: 204 });
-  if (event.eventType === "MARKETPLACE_ACCOUNT_DELETION" && userId) await dir.unlink("ebay", userId);
-  if (!box) {
+  if (!deviceId) {
     // Not one of our sellers (or eBay's portal test). Acknowledge so eBay stops retrying.
-    console.log("[EBAY]", event.eventType, "for an unlinked account", userId ?? `(no user ID; fields: ${JSON.stringify(shape(payload?.notification?.data))})`);
+    console.log("[EBAY]", event.eventType, "for an unlinked account");
     return new Response(null, { status: 204 });
   }
-  await box.add(event);
+  const box = inbox(env, deviceId);
+  const { duplicate } = await box.add(event);
+  // Keep the link until the event is durable so eBay can retry a failed write.
+  if (event.eventType === "MARKETPLACE_ACCOUNT_DELETION") {
+    if (!duplicate) await dir.unlink("ebay", userId, deviceId);
+    else {
+      // A retry can finish an interrupted unlink. Leave later sign-ins intact.
+      const receivedAt = await box.firstReceivedAt(event.dedupeKey);
+      if (receivedAt !== null) await dir.unlink("ebay", userId, deviceId, receivedAt);
+    }
+  }
   return new Response(null, { status: 204 });
 }
 
@@ -292,13 +294,17 @@ function tokenSet(body) {
   };
 }
 
+async function ensureEbaySaleNotifications(env, url, accessToken, signal) {
+  const destinationId = await ensureEbayDestination(env, ebayEndpoint(env, url), signal);
+  await ensureEbaySubscriptions(env, accessToken, destinationId, signal);
+}
+
 async function completeEbay(env, url, code) {
   const tokens = await ebayExchangeCode(env, code);
   const user = await ebayUser(env, tokens.access_token);
   const warnings = [];
   try {
-    const destinationId = await ensureEbayDestination(env, ebayEndpoint(env, url));
-    await ensureEbaySubscriptions(env, tokens.access_token, destinationId);
+    await ensureEbaySaleNotifications(env, url, tokens.access_token);
   } catch (error) {
     console.error("[EBAY] subscription", error.message);
     warnings.push("Sale notifications could not be turned on yet; Anteroom will retry.");
@@ -367,7 +373,7 @@ async function handleOAuthCallback(env, marketplace, url) {
 // The app's secret refreshes only accounts that signed in through this device,
 // so a refresh token on its own is not enough to mint access tokens. Anteroom
 // answers 401 by asking the seller to sign in again, which relinks the account.
-async function handleOAuthRefresh(request, env, deviceId, marketplace) {
+async function handleOAuthRefresh(request, env, url, deviceId, marketplace, ctx) {
   const { tooLarge, body } = await readJson(request);
   if (tooLarge) return json({ error: "body too large" }, 413);
   const refreshToken = typeof body?.refreshToken === "string" ? body.refreshToken : "";
@@ -384,6 +390,10 @@ async function handleOAuthRefresh(request, env, deviceId, marketplace) {
       const tokens = await ebayRefresh(env, refreshToken);
       const user = await ebayUser(env, tokens.access_token);
       if (!(await linked("ebay", user.userId))) return notLinked();
+      const signal = AbortSignal.timeout(CALL_TIMEOUT_MS);
+      ctx.waitUntil(ensureEbaySaleNotifications(env, url, tokens.access_token, signal).catch(() => {
+        console.error("[EBAY] sale notification setup failed after refresh");
+      }));
       return json({ tokens: tokenSet(tokens) });
     }
     if (marketplace === "etsy") {
@@ -429,7 +439,7 @@ async function handleEtsyProxy(request, env, deviceId, path) {
 
 // --- Studio ---------------------------------------------------------------
 
-async function handleStudio(request, env, url, deviceId) {
+async function handleStudio(request, env, url, deviceId, ctx) {
   const box = inbox(env, deviceId);
   const { pathname } = url;
   if (pathname === "/studio/ebay/research" && request.method === "POST") {
@@ -478,7 +488,10 @@ async function handleStudio(request, env, url, deviceId) {
     return json({ ok: true });
   }
   const start = /^\/studio\/oauth\/(ebay|etsy)\/start$/.exec(pathname);
-  if (start && request.method === "POST") return handleOAuthStart(env, deviceId, start[1], url);
+  if (start && request.method === "POST") {
+    if (await ipRateLimited(request, env.OAUTH_START_LIMITER)) return rateLimitResponse();
+    return handleOAuthStart(env, deviceId, start[1], url);
+  }
   if (pathname === "/studio/oauth/result" && request.method === "GET") {
     const state = url.searchParams.get("state") ?? "";
     const claim = url.searchParams.get("claim");
@@ -489,7 +502,7 @@ async function handleStudio(request, env, url, deviceId) {
     return json({ status: "done", ...outcome.result });
   }
   const refresh = /^\/studio\/oauth\/(ebay|etsy)\/refresh$/.exec(pathname);
-  if (refresh && request.method === "POST") return handleOAuthRefresh(request, env, deviceId, refresh[1]);
+  if (refresh && request.method === "POST") return handleOAuthRefresh(request, env, url, deviceId, refresh[1], ctx);
   if (pathname.startsWith("/studio/etsy/v3/application/")) {
     return handleEtsyProxy(request, env, deviceId, pathname.slice("/studio/etsy/v3/application/".length));
   }
@@ -497,7 +510,7 @@ async function handleStudio(request, env, url, deviceId) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const { pathname } = url;
     if (pathname === "/" || pathname === "/health") return json({ ok: true });
@@ -508,12 +521,19 @@ export default {
     }
     if (pathname === "/etsy" && request.method === "POST") return handleEtsyWebhook(request, env);
     const callback = /^\/oauth\/(ebay|etsy)\/callback$/.exec(pathname);
-    if (callback && request.method === "GET") return handleOAuthCallback(env, callback[1], url);
+    if (callback && request.method === "GET") {
+      if (await ipRateLimited(request, env.OAUTH_CALLBACK_LIMITER)) return rateLimitResponse();
+      return handleOAuthCallback(env, callback[1], url);
+    }
     if (pathname === "/devices" && request.method === "POST") return handleRegister(request, env);
     if (pathname.startsWith("/studio/")) {
-      const deviceId = await authenticate(request, env);
+      const token = bearer(request);
+      if (!token) return json({ error: "unauthorized" }, 401);
+      // The Directory lookup decides whether the bearer is valid, so bound lookups here.
+      if (await ipRateLimited(request, env.STUDIO_AUTH_LIMITER)) return rateLimitResponse();
+      const deviceId = await directory(env).deviceForToken(await sha256Hex(token));
       if (!deviceId) return json({ error: "unauthorized" }, 401);
-      return handleStudio(request, env, url, deviceId);
+      return handleStudio(request, env, url, deviceId, ctx);
     }
     return json({ error: "not found" }, 404);
   },

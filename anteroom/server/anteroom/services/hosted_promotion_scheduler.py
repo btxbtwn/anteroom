@@ -144,7 +144,7 @@ async def check_cloud_sellers(
     from anteroom.services import cloud_sessions
 
     owners_by_seller: dict[str, list[str]] = {}
-    for marketplace in sorted(cloud_sessions.SUPPORTED_CLOUD_MARKETPLACES):
+    for marketplace in sorted(cloud_sessions.CLOUD_WRITE_MARKETPLACES):
         owners = await asyncio.to_thread(cloud_sessions.active_owners, engine, marketplace)
         for seller in owners:
             owners_by_seller.setdefault(seller, []).append(marketplace)
@@ -175,5 +175,11 @@ async def serve_cloud(engine) -> None:
     startup = True
     while True:
         await asyncio.sleep(promotion_automations.TICK_S)
-        await check_cloud_sellers(engine, recovered, like_checks, startup=startup)
-        startup = False
+        try:
+            await check_cloud_sellers(engine, recovered, like_checks, startup=startup)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - a failed pass must not stop the scheduler
+            log.exception('Cloud promotion check pass failed. The next scheduled pass will run.')
+        else:
+            startup = False
