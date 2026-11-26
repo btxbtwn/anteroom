@@ -1,4 +1,5 @@
 import { noteDatabaseResponse } from "./databaseReachability";
+import { photoDeleteGate } from "./pendingPhotoDeletes";
 import { scheduleRequest } from "./requestScheduler";
 
 /** The existing API client uses this for desktop HTTP and authenticated cloud HTTP. */
@@ -54,7 +55,9 @@ async function executeStudioFetch(input: string, options: RequestInit, session: 
 
 export function studioFetch(input: string, options: RequestInit = {}): Promise<Response> {
   const session = hostedSession;
-  return scheduleRequest(input, options, () => executeStudioFetch(input, options, session));
+  const gate = photoDeleteGate(input, options.method);
+  if (!gate) return scheduleRequest(input, options, () => executeStudioFetch(input, options, session));
+  return gate.then(() => scheduleRequest(input, options, () => executeStudioFetch(input, options, session)));
 }
 
 export interface StudioUploadOptions {

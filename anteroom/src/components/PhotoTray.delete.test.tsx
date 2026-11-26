@@ -51,6 +51,55 @@ it("hides a removed photo immediately and restores it when Undo is clicked witho
   }
 });
 
+it("a marketplace action right after a removal waits for the photo to be deleted first", async () => {
+  const photo = { id: "photo1", conversation_id: "fixture", original_filename: "fixture.jpg", mime_type: "image/jpeg", size_bytes: 10, display_order: 0, width: 80, height: 100, url: "/api/photos/photo1", created_at: "2026-11-16T00:00:00" };
+  const photos = [photo];
+  const order: string[] = [];
+  const read = vi.spyOn(api.conversations, "photos").mockImplementation(async () => photos);
+  const remove = vi.spyOn(api.conversations, "deletePhoto").mockImplementation(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    order.push("delete");
+    return { ok: true };
+  });
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    order.push(`${init?.method ?? "GET"} ${String(input)}`);
+    return new Response(JSON.stringify({ marketplace: "ebay", state: "listed" }), { status: 200, headers: { "Content-Type": "application/json" } });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } });
+  client.setQueryData(["photos", "fixture"], photos);
+  client.setQueryData(["conversation", "fixture"], { id: "fixture", status: "draft" });
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(
+      <WorkspaceRuntimeProvider value={desktopRuntime}>
+        <QueryClientProvider client={client}>
+          <ToastProvider>
+            <PhotoTray convId="fixture" />
+          </ToastProvider>
+        </QueryClientProvider>
+      </WorkspaceRuntimeProvider>,
+    ));
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('[aria-label="Delete photo 1"]')!.click();
+    });
+    expect(remove).not.toHaveBeenCalled();
+
+    // A plain field save keeps Undo available.
+    await act(async () => { await api.conversations.update("fixture", { title: "Coat" }); });
+    expect(remove).not.toHaveBeenCalled();
+
+    await act(async () => { await api.nativeMarketplaces.list("fixture", "ebay", "rev1"); });
+    expect(remove).toHaveBeenCalledWith("fixture", "photo1");
+    expect(order.slice(-2)).toEqual(["delete", "POST /api/conversations/fixture/native-marketplaces/ebay/list"]);
+  } finally {
+    await act(async () => root.unmount());
+    vi.unstubAllGlobals();
+    client.clear(); host.remove(); read.mockRestore(); remove.mockRestore();
+  }
+});
+
 it("shows a refused photo removal and clears that error on a successful retry", async () => {
   const photo = { id: "photo1", conversation_id: "fixture", original_filename: "fixture.jpg", mime_type: "image/jpeg", size_bytes: 10, display_order: 0, width: 80, height: 100, url: "/api/photos/photo1", created_at: "2026-11-16T00:00:00" };
   let photos = [photo];

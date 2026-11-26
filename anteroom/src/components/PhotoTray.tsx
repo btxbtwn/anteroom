@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { refreshInventory } from "../api/inventoryRefresh";
+import { trackPendingPhotoDelete } from "../api/pendingPhotoDeletes";
 import { groupImageFilesByFolder, moveItem, type PhotoFolderGroup } from "../photoDrop";
 import type { ListingPhoto } from "../api/types";
 import { toastManager } from "./ui/toast";
@@ -96,9 +97,14 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
     const targetConvId = convId;
     setUploadError(null);
     setPendingRemoveIds((prev) => new Set(prev).add(photoId));
+    // Listing actions wait for this removal (see api/pendingPhotoDeletes), so
+    // they never read a photo the seller removed.
+    let committed: Promise<void> | null = null;
+    let untrack = () => {};
     const handle = showUndoToast({
       title: "Photo removed",
       onUndo: () => {
+        untrack();
         pendingToastsRef.current.delete(photoId);
         if (!mountedRef.current || convIdRef.current !== targetConvId) return;
         setPendingRemoveIds((prev) => {
@@ -110,8 +116,13 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
       },
       onCommit: () => {
         pendingToastsRef.current.delete(photoId);
-        void commitDelete(targetConvId, photoId);
+        committed ??= commitDelete(targetConvId, photoId).finally(() => untrack());
+        return committed;
       },
+    });
+    untrack = trackPendingPhotoDelete(targetConvId, () => {
+      handle.flush();
+      return committed ?? Promise.resolve();
     });
     pendingToastsRef.current.set(photoId, handle);
   };
