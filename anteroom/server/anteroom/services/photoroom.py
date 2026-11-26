@@ -1,7 +1,7 @@
 """AI Studio: Photoroom's Image Editing API, run on a listing photo the seller picks.
 
-Background removal on any solid colour, AI shadows, ghost mannequin, flat lay and
-virtual models come from Photoroom's ``POST /v2/edit``
+Plain cutouts use Photoroom's Basic removal API. Guided cutouts, AI shadows,
+ghost mannequin, flat lay and virtual models use ``POST /v2/edit``
 (https://docs.photoroom.com/getting-started/api-reference-openapi). Anteroom
 sends one photo per call and keeps the result beside the untouched upload, so
 Reset always goes back to the original (``services/photo_edits.py``).
@@ -23,12 +23,13 @@ from io import BytesIO
 from typing import Literal, cast
 
 import httpx
-from PIL import Image
+from PIL import Image, ImageOps
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 log = logging.getLogger(__name__)
 
 ENDPOINT = "https://image-api.photoroom.com/v2/edit"
+REMOVE_BACKGROUND_ENDPOINT = "https://sdk.photoroom.com/v1/segment"
 KEY_ACCOUNT = "photoroom-api-key"
 MANAGED_KEY_ENV = "ANTEROOM_MANAGED_PHOTOROOM_KEY"
 # Generative edits take tens of seconds; nothing Photoroom documents takes longer.
@@ -100,8 +101,16 @@ class StudioOptions(BaseModel):
         self.background = self.background.upper()
         return self
 
+    @property
+    def plain_cutout(self) -> bool:
+        return self.remove_background and not (
+            self.keep or self.exclude or self.shadow or self.flat_lay or self.ghost_mannequin or self.virtual_model
+        )
+
     def form(self) -> dict[str, str]:
         """Photoroom's form fields for these options."""
+        if self.plain_cutout:
+            return {"size": "full", "crop": "false", "format": "png", "channels": "rgba"}
         if self.virtual_model is not None:
             # Both keep the generated scene, as Photoroom's Virtual Model example sends them.
             fields = {"removeBackground": "false", "referenceBox": "originalImage", "virtualModel.mode": "ai.auto"}
@@ -196,6 +205,27 @@ def _prepare_upload(data: bytes) -> tuple[bytes, str, str]:
     return buffer.getvalue(), "photo.jpg", "image/jpeg"
 
 
+def _frame_cutout(data: bytes, background: str) -> bytes:
+    """Match Plus's centered subject, fit to the original canvas without cropping."""
+    from anteroom.services import image_decode
+
+    try:
+        cutout, _ = image_decode.decode(data)
+    except ValueError as exc:
+        raise PhotoroomError("Photoroom returned an unreadable cutout.") from exc
+    cutout = cutout.convert("RGBA")
+    bounds = cutout.getchannel("A").getbbox()
+    if bounds is None:
+        raise PhotoroomError("Photoroom returned an empty cutout.")
+    subject = ImageOps.contain(cutout.crop(bounds), cutout.size, Image.Resampling.LANCZOS)
+    canvas = Image.new("RGB", cutout.size, background)
+    offset = ((canvas.width - subject.width) // 2, (canvas.height - subject.height) // 2)
+    canvas.paste(subject, offset, subject.getchannel("A"))
+    result = BytesIO()
+    canvas.save(result, "PNG")
+    return result.getvalue()
+
+
 def _error_message(response: httpx.Response) -> str:
     detail = ""
     try:
@@ -203,6 +233,8 @@ def _error_message(response: httpx.Response) -> str:
         error = body.get("error") if isinstance(body, dict) else None
         if isinstance(error, dict):
             detail = str(error.get("message") or error.get("detail") or "")
+        elif isinstance(body, dict) and isinstance(body.get("detail"), str):
+            detail = body["detail"]
     except ValueError:
         pass
     detail = " ".join(detail.split())[:200]
@@ -235,15 +267,16 @@ async def edit(image: bytes, options: StudioOptions) -> bytes:
     if not key:
         raise PhotoroomError("Add a Photoroom API key in Settings → Providers to use AI Studio.", 400)
     payload, filename, mime = await asyncio.to_thread(_prepare_upload, image)
+    basic = options.plain_cutout
     timeout = httpx.Timeout(CALL_DEADLINE_SEC, connect=CONNECT_TIMEOUT_SEC)
     try:
         async with asyncio.timeout(CALL_DEADLINE_SEC):
             async with _client(timeout) as client:
                 response = await client.post(
-                    ENDPOINT,
+                    REMOVE_BACKGROUND_ENDPOINT if basic else ENDPOINT,
                     headers={"x-api-key": key, "Accept": "image/png, application/json"},
                     data=options.form(),
-                    files={"imageFile": (filename, payload, mime)},
+                    files={"image_file" if basic else "imageFile": (filename, payload, mime)},
                 )
     except TimeoutError:
         raise PhotoroomError("Photoroom did not finish this photo in time. Try again.", 504) from None
@@ -261,7 +294,9 @@ async def edit(image: bytes, options: StudioOptions) -> bytes:
     if source == "server":
         from anteroom.services import api_usage
         # The ledger insert is a database round trip; keep it off the event loop.
-        await asyncio.to_thread(api_usage.record_photoroom, edit_label=options.label())
+        await asyncio.to_thread(api_usage.record_photoroom, edit_label=options.label(), basic=basic)
+    if basic:
+        return await asyncio.to_thread(_frame_cutout, response.content, options.background)
     return response.content
 
 

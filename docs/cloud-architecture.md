@@ -133,13 +133,13 @@ The design does not assume a Mac.
 
 | Seller has | What works |
 |---|---|
-| iPhone or web only | Everything that runs on the server: generation, editing, photos, history, analytics. eBay and Etsy list through their official APIs. Once Poshmark or Depop is connected in Cloud, listing actions, sales checks, imports, and promotions for that marketplace run server-side while Chrome is closed. Mercari always runs in Chrome. |
+| iPhone or web only | Everything that runs on the server: generation, editing, photos, history, analytics. eBay and Etsy list through their official APIs. Poshmark Cloud supports listing actions, sales checks, imports, and promotions while Chrome is closed. Depop Cloud supports sales checks, imports, and standalone delists. Mercari always runs in Chrome. |
 | Any computer with desktop Chrome | The above, plus Poshmark, Mercari, Depop actions through the Bridge extension, and one-time Cloud session connect or reconnect. |
 | The Mac app | The above, plus Mac-only work: Apple Vision background removal and local SDK sign-ins. |
 
 ### Opt-in marketplace Cloud sessions
 
-Hosted accounts can run Poshmark and Depop actions server-side.
+Hosted accounts can opt in to server-side Poshmark and Depop actions.
 `ANTEROOM_CLOUD_MARKETPLACES=poshmark,depop` makes both available for sellers to connect.
 Mercari is not a cloud marketplace (removed 2026-11-24, #2029): Mercari's Cloudflare edge
 answers every server request to `www.mercari.com/v1/api` with a challenge (`403`,
@@ -148,6 +148,12 @@ through, and Mercari has no server API for sellers. Every Mercari action runs in
 seller's Chrome. Do not work around the challenge (proxies, clearance cookies, disguised
 browsers); add Mercari back only through an authorized Mercari API.
 Local desktop mode is unchanged and stays strictly on local Chrome.
+
+Depop rejects cloud draft creation and photo upload with an HTML access block.
+Draft saves, publishing, live edits, Auto-Relist, and offers use the seller's
+connected Chrome. Auto-Relist checks shipping and verifies access to drafts through
+Chrome before removing the old listing. The cloud runner logs Depop HTTP status,
+response format, and outcome without recording URLs, bodies, or cookies.
 
 - **One-time direct capture:** When the seller chooses **Connect in Cloud** in
   Settings → Connections and approves in the extension's `cloud-session-connect.html`
@@ -182,9 +188,10 @@ Local desktop mode is unchanged and stays strictly on local Chrome.
   before each delist; approved photos are loaded directly from `photo_store()` with
   SHA-256 verification.
 
-Depop uploads are verified by the worker before replacing Vault credentials.
-A verified reconnect resumes rules paused by a cloud disconnect. Depop uses its
-recent-like feed.
+Depop sign-ins are verified by the worker before replacing Vault credentials.
+Depop offers follow the seller's saved rule settings in Chrome. Sellers can
+turn paused Depop offer rules back on after connecting Chrome. Verified cloud
+reconnects can still resume Poshmark rules paused by a cloud disconnect.
 
 ## Next steps (2026-10-31)
 

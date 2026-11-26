@@ -64,7 +64,7 @@ try {
   result.timings.newDraftMs = since(start);
   result.id = new URL(page.url()).searchParams.get("listing");
   // On a phone a hosted draft opens on Listing; photos are staged in the chat composer.
-  if (phone) await page.getByRole("tab", { name: "Chat" }).click().catch(() => {});
+  if (phone) await page.getByRole("tablist", { name: "Listing views" }).getByRole("tab", { name: /^Ant\b/ }).click().catch(() => {});
   await shot("1-new-draft");
 
   await page.locator('input[type="file"]').first().setInputFiles(photos);

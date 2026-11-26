@@ -20,6 +20,7 @@ import os
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from anteroom.services import process_handoff
 from anteroom.services.automation_scheduler import TICK_SECONDS, bind_db_gate, tick
 from anteroom.services.hosted_context import for_seller
 from anteroom.services.service_context import use
@@ -82,6 +83,8 @@ async def serve(engine, *, max_concurrency: int | None = None) -> None:
             for owner in owners:
                 if owner in running:
                     continue  # Still running; the next poll picks up any newly due work.
+                if process_handoff.draining():
+                    break  # This Machine is stopping; running ticks finish, the next Machine starts new ones.
                 running[owner] = asyncio.create_task(run_guarded(owner))
             await asyncio.sleep(TICK_SECONDS)
     finally:

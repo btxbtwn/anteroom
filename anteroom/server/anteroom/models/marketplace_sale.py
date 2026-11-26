@@ -80,6 +80,8 @@ class SaleSyncEvent(SellerOwned, Base):
     __table_args__ = (
         Index("ix_sale_sync_events_owner_created", "user_id", "created_at"),
         Index("ix_sale_sync_events_sale_target", "user_id", "sale_id", "target_marketplace"),
+        Index("uq_sale_sync_events_seller_sale_target_action", "user_id", "sale_id", "target_marketplace", "action",
+              unique=True),
         ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
             name="fk_sale_sync_events_seller_conversation_id", deferrable=True, initially="DEFERRED"),
     )

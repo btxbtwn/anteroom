@@ -88,9 +88,11 @@ These override everything below.
   When disk is short, an APFS clone costs almost no space and is still a
   separate install: `cp -c -R <worktree>/anteroom/.venv anteroom/.venv` (and
   the same for `node_modules`) from a worktree on the same `uv.lock` and
-  `package-lock.json`, then `.venv/bin/python -m pip install --no-deps
-  --no-build-isolation -e .` in the fix worktree so the editable install
-  points at its own code. Then rewrite the console scripts' shebangs, which
+  `package-lock.json`, then `.venv/bin/python -m pip install --no-deps -e .`
+  in the fix worktree so the editable install points at its own code. Leave
+  out `--no-build-isolation`: the venv has no setuptools, so it fails with
+  "Cannot import 'setuptools.build_meta'" and leaves the install pointing at
+  the source worktree (2026-11-25). Then rewrite the console scripts' shebangs, which
   still name the source venv's interpreter (and so its editable install):
   `grep -lI <source>/anteroom/.venv .venv/bin/* | xargs sed -i '' "s#<source>/anteroom/.venv#$PWD/.venv#g"`,
   and check `head -1 .venv/bin/lint-imports` names this worktree. `check.sh`
@@ -304,7 +306,10 @@ Every run, in this order:
      most), not the photo tray's;
    - hosted web (`./sandbox.sh --hosted`, UI 5175, API 4320, sign in as
      `alice@sandbox.test` / `sandbox`). On a phone a new draft opens on its
-     Listing tab; switch to Chat before staging photos in the composer.
+     Listing tab; switch to the chat tab before staging photos in the
+     composer. Since #2078 that tab is named **Ant** (the `Listing views`
+     tab list), not Chat; the journey's old `Chat` click did nothing and the
+     hosted phone journey timed out (2026-11-25).
      Hosted API calls need a bearer token: a `fetch` from the page has none
      and gets 401. Get one with `POST /local/auth/v1/token?grant_type=password`
      and the same email and password, then call the publish routes at

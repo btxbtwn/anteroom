@@ -1,6 +1,10 @@
-"""Hosted API entry point. Seller data routes join after tenant isolation ships.
+"""Hosted API entry point.
 
-Unlike the desktop app, this starts no Chrome, Keychain or automation services.
+Unlike the desktop app, this starts no local Chrome or Keychain. When
+``ANTEROOM_BACKGROUND_WORKER=1``, its lifespan starts the durable draft worker
+and scheduled services under ``process_handoff`` leases, split by
+``ANTEROOM_PROCESS_ROLE`` (``schedulers`` on ``worker``/``all``; ``chrome`` on
+``web``/``all``).
 """
 
 from __future__ import annotations
@@ -73,7 +77,13 @@ def _skip_client_warning(scope, route, status: int, *, fly_replay: bool) -> bool
         return True
     if scope["method"] == "HEAD" and status == 405:
         return True
-    if getattr(route, "path", None) == "/api/marketplaces/sessions" and status == 409:
+    template = getattr(route, "path", None)
+    if template == "/api/mcp" and scope["method"] == "GET" and status == 405:
+        # MCP explicitly returns 405 when unsolicited SSE is unsupported.
+        return True
+    if template == "/api/marketplaces/sessions" and status == 409:
+        return True
+    if status == 402:
         return True
     return False
 
@@ -329,9 +339,15 @@ class SellerSessionMiddleware:
             )
         else:
             scope.setdefault("state", {})["seller"] = identity
+            from dataclasses import replace
+
             from anteroom.services.hosted_context import for_seller
-            from anteroom.services.service_context import use
-            with use(for_seller(identity.user_id, context_token)):
+            from anteroom.services.service_context import ServiceContext, use
+            context = for_seller(identity.user_id, context_token)
+            email = getattr(identity, "email", None)
+            if isinstance(context, ServiceContext) and email and not context.seller_email:
+                context = replace(context, seller_email=email)
+            with use(context):
                 await self.app(scope, receive, send)
             return
         await response(scope, receive, send)
@@ -429,12 +445,23 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             # or the request loop while it waits for the database.
             def start():
                 loops = []
+                stop_requested = threading.Event()
+
+                def watch_scheduler(done_future, name: str) -> None:
+                    if stop_requested.is_set() or stopping.is_set() or process_handoff.draining():
+                        return
+                    exc = None if done_future.cancelled() else done_future.exception()
+                    logging.getLogger(__name__).critical(
+                        'Background scheduler %s stopped unexpectedly', name, exc_info=exc,
+                    )
+
                 for serve, name in jobs:
                     loop = BackgroundLoop(name)
-                    loop.run(serve())
+                    loop.run(serve()).add_done_callback(lambda done, name=name: watch_scheduler(done, name))
                     loops.append(loop)
 
                 def stop():
+                    stop_requested.set()
                     threads = [threading.Thread(target=loop.stop) for loop in loops]
                     for thread in threads:
                         thread.start()
@@ -508,20 +535,32 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             if watching_chrome_waits:
                 chrome_wait_connections.unwatch(database_engine)
             process_handoff.begin_draining()
-            try:
-                await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(handoff)), timeout=30)
-            except Exception:
-                logging.getLogger(__name__).warning('Scheduled work did not stop before shutdown')
             stopping.set()
-            try:
-                if worker is not None:
+
+            async def handoff_done():
+                try:
+                    # Lets a running relist or scheduled publish finish (process_handoff.DRAIN_GRACE_S).
+                    await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(handoff)),
+                                           timeout=process_handoff.HANDOFF_WAIT_S)
+                except Exception:
+                    logging.getLogger(__name__).warning('Scheduled work did not stop before shutdown')
+
+            async def worker_done():
+                if worker is None:
+                    return
+                try:
                     # A disconnected browser does not mean its draft is done.
                     # Let the current task save before cancelling the background loop.
                     await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(worker)), timeout=120)
-            except TimeoutError:
-                logging.getLogger(__name__).warning('Draft worker exceeded the shutdown grace period')
-            except Exception:
-                logging.getLogger(__name__).warning('Draft worker stopped before shutdown completed')
+                except TimeoutError:
+                    logging.getLogger(__name__).warning('Draft worker exceeded the shutdown grace period')
+                except Exception:
+                    logging.getLogger(__name__).warning('Draft worker stopped before shutdown completed')
+
+            try:
+                # Both have been draining since the stop signal. Waiting side by side keeps
+                # request draining (120 s) + this (120 s) + stopping loops under kill_timeout 300 s.
+                await asyncio.gather(handoff_done(), worker_done())
             finally:
                 await asyncio.gather(*(asyncio.to_thread(background.stop) for background in backgrounds))
                 await asyncio.to_thread(task_signals.stop)
@@ -668,6 +707,9 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(account_router)
     from anteroom.routes.operator_usage import router as operator_usage_router
     app.include_router(operator_usage_router)
+    from anteroom.routes.subscriptions import operator_router as operator_plans_router, router as subscriptions_router
+    app.include_router(subscriptions_router)
+    app.include_router(operator_plans_router)
     from anteroom.routes.listings import apply_price_drop, preview_price_drop, stream_price_drop_comps
     from anteroom.services.hosted_limits import limit_seller_submissions
     app.add_api_route('/api/conversations/{conv_id}/price-drop/preview', preview_price_drop, methods=['POST'])

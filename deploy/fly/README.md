@@ -77,7 +77,13 @@ code one release behind it. Change the schema in two releases:
 2. **Contract.** Drop or rename the old column, table or constraint only in a
    later release, after the release that stopped using it is live. A
    destructive change always waits one release behind the code that stops
-   using it.
+   using it. Any revision that drops a column, table or function in
+   `upgrade()` (`op.drop_column`, `batch_op.drop_column`, `op.drop_table`, or
+   raw SQL `DROP COLUMN` / `DROP TABLE` / `DROP FUNCTION`) must declare a
+   module-level `CONTRACT_AFTER` naming the earlier PR or release that stopped
+   using the object (for example, `CONTRACT_AFTER = "#1234"`). CI enforces this
+   in `anteroom/server/tests/test_migration_locking.py`; dropping an index does
+   not break older queries and does not require the marker.
 
 To roll back the code, redeploy the previous image by its label. Labels are
 `v<version>-<first 8 characters of the commit>`, as the **Build the image**
@@ -112,10 +118,12 @@ context is the repository root. The allowlist in `.dockerignore` excludes
 local data, photos, databases, credentials, tests and the extension.
 
 The configuration runs two process groups from one image. `app` (role `web`,
-one performance CPU, 2 GB) serves HTTPS with a health check and is kept running
+one performance CPU, 4 GB — raised from 2 GB as an incident mitigation on
+2026-11-22, #1816) serves HTTPS with a health check and is kept running
 (`auto_stop_machines = 'off'`, `min_machines_running = 1`). `worker` (role
 `worker`, one shared CPU, 2 GB) has no public service and runs the draft worker,
-the scheduled automations, offer checks and Sourcing refreshes. Machines without
+scheduled automations, offer checks, the job watchdog, sales sync, Plaid expense
+sync, and cloud marketplace sale checks and promotions. Machines without
 a service are never auto-stopped. Supabase's project URL is
 public configuration. No database password, service-role key, provider key or
 seller data is needed for this first deployment. Later hosted data routes
@@ -139,10 +147,18 @@ move a running Machine.
 
 ## Shutdown during deployments
 
-Fly sends SIGTERM with a 300-second grace period. Uvicorn allows active requests
-120 seconds to finish; the draft worker then stops claiming tasks and has up to
-120 seconds to save its current draft before the background loop is stopped.
-This also drains draft work whose browser has disconnected. Work that exceeds
+Fly sends SIGTERM with a 300-second grace period. On the signal, the Machine
+releases its Mac and Chrome routes at once (its listening socket is closed), the
+draft worker stops claiming tasks, and Auto-Relist and scheduled publishing start
+no new listing. A relist or scheduled publish already talking to a marketplace gets
+up to 75 seconds to finish while this Machine keeps renewing the scheduler lease,
+so the new Machine does not start its schedulers until the old one hands over.
+Then the schedulers stop and the lease is released.
+Meanwhile Uvicorn allows active requests 120 seconds to finish. After that the
+app waits, side by side, up to 120 seconds for the handoff and up to 120
+seconds for the draft worker to save its current draft, then stops the
+background loops (up to 20 seconds), which keeps the whole stop under 300
+seconds. This also drains draft work whose browser has disconnected. Work that exceeds
 the grace period remains protected by its expiring lease and is never marked
 complete or replayed automatically. The seller must review the saved draft and
 retry interrupted work. A new web version offers a Reload app button instead
@@ -361,8 +377,9 @@ Edits are billed to the Photoroom account behind the managed key.
 
 When managed OpenRouter and/or Photoroom keys are set, each successful call is
 recorded against the seller who made it. OpenRouter costs come from the
-provider's `usage.cost`; Photoroom uses a flat rate card
-(`ANTEROOM_PHOTOROOM_COST_USD`, default `0.10` per successful edit).
+provider's `usage.cost`. Photoroom uses `ANTEROOM_PHOTOROOM_COST_USD` for a Plus
+edit (default $0.10). A plain solid-background cutout uses the Basic endpoint
+and costs one fifth of that rate (default $0.02).
 
 Set `ANTEROOM_OPERATOR_USER_ID` to your Supabase user id, then export:
 
@@ -381,4 +398,22 @@ Or via the CLI against a signed-in operator session:
 
 ```sh
 anteroom api request GET /api/operator/usage --query format=csv
+```
+
+### Subscription tiers & Smart Credits
+
+Hosted accounts default to the **Free** tier (10 distinct items listed/month, 50 Smart Credits/month) unless assigned a paid or internal tier in `seller_plans` or matched by `ANTEROOM_UNLIMITED_EMAILS` (comma-separated emails; defaults to the two approved owner accounts). Local desktop accounts are never limited.
+
+Operators (`ANTEROOM_OPERATOR_USER_ID`) can inspect and assign plans:
+
+```sh
+# List assigned plans and current-month usage
+curl -sS -H "Authorization: Bearer <operator-access-token>" \
+  "https://api.myanteroom.com/api/operator/plans"
+
+# Assign a seller to a tier (free, lister, starter, pro, business, unlimited)
+curl -sS -X PUT -H "Authorization: Bearer <operator-access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"plan_id":"pro","billing_interval":"monthly","note":"Beta subscriber"}' \
+  "https://api.myanteroom.com/api/operator/plans/<seller-user-id>"
 ```

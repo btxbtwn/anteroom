@@ -170,7 +170,8 @@ def check_room(db: Session, conv_id: str, adding: int) -> int:
     return count
 
 
-def _refuse_late_commit(db: Session, expired: Callable[[], bool]) -> None:
+def refuse_late_commit(db: Session, expired: Callable[[], bool]) -> None:
+    """Refuse to commit ``db`` once the MCP call has timed out: its client was told nothing was saved."""
     def check(*_args) -> None:
         if expired():
             raise TimeoutError
@@ -180,7 +181,7 @@ def _refuse_late_commit(db: Session, expired: Callable[[], bool]) -> None:
 
 def save_photos(db: Session, conv_id: str, metas: list[dict[str, Any]], expired: Callable[[], bool]) -> tuple[list[str], int]:
     """Add stored photos to the listing, all in one commit, after checking again that they fit."""
-    _refuse_late_commit(db, expired)
+    refuse_late_commit(db, expired)
     # Lock the listing, so two uploads at once cannot pass the photo limit together.
     db.scalar(select(Conversation.id).where(Conversation.id == conv_id).with_for_update())
     count = check_room(db, conv_id, len(metas))

@@ -235,9 +235,10 @@ export function ComposerPromptEditor({
         instance.view.focus();
       },
       editorProps: {
-        // T3 Code's composer editor classes.
+        // T3 Code's composer editor classes. On a phone the box rests at one line
+        // (44px, a full touch target) and grows as the seller types, as the iPhone app's does.
         attributes: {
-          class: "composer-tiptap -m-1 block max-h-52 min-h-19.5 overflow-y-auto p-1 whitespace-pre-wrap wrap-break-word bg-transparent leading-relaxed text-foreground focus:outline-none",
+          class: "composer-tiptap -m-1 block max-h-52 min-h-19.5 max-sm:min-h-11 overflow-y-auto p-1 whitespace-pre-wrap wrap-break-word bg-transparent leading-relaxed text-foreground focus:outline-none",
           role: "textbox",
           "aria-multiline": "true",
           "aria-label": "Message",

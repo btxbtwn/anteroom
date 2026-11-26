@@ -110,50 +110,22 @@ test('Depop delists only after confirmation and verifies removal', async () => {
   ]);
 });
 
-test('Depop cloud auto-relist keeps the old listing when its drafts session is refused', async () => {
-  const requests = [];
-  const { result } = await executeMarketplaceOperation({
-    marketplace: 'depop', cookies: [depopCookie],
-    command: {
-      type: 'marketplace.delete',
-      payload: { marketplace: 'depop', listing_id: 'seller-coat', confirm: true, action: 'relist' },
-    },
-    httpFetch: async (url, options) => {
-      requests.push([options.method, new URL(url).pathname]);
-      return json({ message: 'Unauthorized' }, 401);
-    },
-  });
-  assert.equal(result.error_code, 'signed_out');
-  assert.deepEqual(requests, [['GET', '/presentation/api/v1/drafts/']]);
-});
-
-test('Depop cloud checks relist shipping with read-only requests', async () => {
-  const requests = [];
-  const { result } = await executeMarketplaceOperation({
-    marketplace: 'depop', cookies: [depopCookie],
-    command: { type: 'marketplace.form', payload: {
-      marketplace: 'depop', check_relist_shipping: true,
-      listing: { price: 10.8, direct_category_ids: { depop: 'womenswear_jeans' },
-        depop_specifics: { parcelSize: 'Extra extra small' } },
-    } },
-    httpFetch: async (url, options) => {
-      const { pathname, searchParams } = new URL(url);
-      requests.push(options.method);
-      if (pathname.endsWith('/attributes/')) return json({
-        department: [{ id: 'womenswear' }],
-        group: [{ id: 'bottoms', department: ['womenswear'], product_types: [{ id: 'jeans' }] }],
-        generic_attributes: [],
-      });
-      if (pathname.endsWith('/size-mapping/')) return json({ category_size_mapping: [], size_sets: [] });
-      if (pathname.endsWith('/addresses/')) return json([{ id: 8, country_code: 'US' }]);
-      assert.equal(pathname, '/presentation/api/v1/shipping/providers/depop/');
-      assert.equal(searchParams.get('item_cost'), '10.80');
-      assert.equal(searchParams.get('product_type'), 'jeans');
-      return json([{ id: 'USPS', parcel_sizes: [{ id: 'under_8oz', title: 'Extra small' }] }]);
-    },
-  });
-  assert.equal(result.ok, false);
-  assert.equal(result.error_code, 'missing_fields');
-  assert.match(result.error, /does not offer Extra extra small/);
-  assert.deepEqual(requests, ['GET', 'GET', 'GET', 'GET']);
+test('the Depop cloud runner refuses listing writes, offer sends and relist deletes', async () => {
+  for (const [type, action] of [
+    ['marketplace.execute', 'save_draft'],
+    ['marketplace.execute', 'publish'],
+    ['marketplace.execute', 'update'],
+    ['marketplace.promote', 'offer'],
+    ['marketplace.delete', 'relist'],
+  ]) {
+    const { result } = await executeMarketplaceOperation({
+      marketplace: 'depop', cookies: [depopCookie],
+      command: { type, job_id: 'fixture-depop-operation',
+        payload: { marketplace: 'depop', action, operation_id: 'fixture-depop-operation', listing_id: 'seller-coat', confirm: true } },
+      httpFetch: () => assert.fail('Unexpected Depop request'),
+    });
+    assert.equal(result.error_code, 'rejected');
+    assert.equal(result.safe_to_retry, true);
+    assert.match(result.error, /Chrome/);
+  }
 });

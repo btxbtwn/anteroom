@@ -6,6 +6,125 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1283 — 2026-11-26
+
+- Add hosted subscription tiers (Free, Lister, Starter, Pro, Business) with unified monthly Smart Credits for AI listing generation and AI Studio edits, unlimited manual and bulk cross-listing on all paid tiers, and a Plan & Smart Credits view in Settings → Usage.
+
+## 0.1.1282 — 2026-11-26
+
+- Keep cloud pages and scheduled automations from stalling for 30 seconds to 15 minutes when a connection to the cloud database stops answering. Anteroom now drops that connection within seconds and opens a fresh one.
+
+## 0.1.1281 — 2026-11-26
+
+- Settings → Usage now lets you pick the last 30 days or a calendar month, charts what you spent each day (with a table of the same numbers), lists which AI models and photo edits the money went on, and downloads every charge as a CSV.
+
+## 0.1.1280 — 2026-11-26
+
+- Stop Anteroom's own pre-release checks from failing at random on the test that covers finishing a relist or scheduled publish during an update.
+
+## 0.1.1279 — 2026-11-26
+
+- Chat replies now flow in at a steady pace with each new word fading in, instead of jumping forward a chunk at a time. With reduced motion on, text simply appears as it arrives.
+- On the iPhone, a reply being written no longer shows raw `**` or half-written links, and tables are drawn as tables instead of rows of `|` characters.
+- On a phone, the message box rests at one line and grows as you type, and replies are set in larger 16px text.
+- The Assistant's messages line up with its message box.
+- Copying a table from a reply now pastes into a spreadsheet as cells.
+
+## 0.1.1278 — 2026-11-26
+
+- Plain background removal now uses Photoroom’s lower-cost API, including when you choose a solid background color.
+
+## 0.1.1277 — 2026-11-26
+
+- See your account’s OpenRouter calls, Photoroom edits, and costs for the last 30 days in Settings → Usage on the web.
+
+## 0.1.1276 — 2026-11-26
+
+- Keep small buttons and inline text buttons easy to tap on phones by centering their 44-point touch target without enlarging dense desktop controls.
+
+## 0.1.1275 — 2026-11-26
+
+- Depop drafts, publishing, edits, relists, and offers use your signed-in Chrome. Depop Cloud still handles sales checks, imports, and standalone delists.
+- Depop Cloud keeps your saved sign-in when Depop returns an access block, so you can distinguish a blocked request from an expired session.
+
+## 0.1.1274 — 2026-11-25
+
+- Connecting eBay or Etsy on the web no longer fails with "not started here" when Anteroom updates while you are signing in.
+- An eBay or Etsy sign-in link now works for 15 minutes, as long as the relay keeps it, and can't be used twice.
+
+## 0.1.1273 — 2026-11-25
+
+- An update to myanteroom.com no longer cuts off an Auto-Relist or scheduled publish that is already running, so a listing is no longer left down by a deploy. A running one gets up to 75 seconds to finish, and the next ones wait for the new version.
+
+## 0.1.1272 — 2026-11-25
+
+- Keep expected MCP connection checks out of operator error emails.
+
+## 0.1.1271 — 2026-11-25
+
+- Mercari Auto-Relist no longer deletes a live Mercari listing first. Mercari could refuse the replacement after the delete and leave the item off Mercari, so Auto-Relist now leaves Mercari listings up with their price unchanged and says so in the Auto-relist log. Poshmark, eBay and Depop Auto-Relist, and listing or delisting on Mercari yourself, work as before.
+
+## 0.1.1270 — 2026-11-25
+
+- An Auto-Relist that stops before the old listing is deleted now records the try as failed and puts back the price it lowered, so the listing is relisted again on a later pass instead of being skipped for good.
+
+## 0.1.1269 — 2026-11-25
+
+- Check remaining stock for new eBay and Etsy sales on the web and apply your post-sale automation settings.
+- Keep sales syncing when an event repeatedly fails or another seller's check is slow.
+
+## 0.1.1268 — 2026-11-25
+
+- Fixed duplicate entries in the sale tracker when Anteroom checks the same sale in two places at once.
+
+## 0.1.1267 — 2026-11-25
+
+- With Delist the other marketplaces on, the delist right after a sale keeps to the listings the sale left up: a listing you put up again after the sale is left alone, and the delist stops if the order is refunded or cancelled or you turn the setting off partway.
+
+## 0.1.1266 — 2026-11-25
+
+- Refuse AI agent tool calls that have no declared permission entry, and log a warning if background photo cleanup fails after an agent call.
+
+## 0.1.1265 — 2026-11-25
+
+- Retry sale events on the Mac after a temporary error so sale alerts and delist-after-sale can still run.
+- Keep the Mac connected to its existing sale inbox when Keychain access returns.
+
+## 0.1.1264 — 2026-11-25
+
+- Fix Chrome form refreshes from the web asking to update Anteroom Bridge when the extension already supports form reads.
+- Ignore invalid listing links and encode listing IDs in API requests so a bad link cannot trigger unexpected requests.
+- Clear a previous account's saved workspace and photo thumbnails from a shared browser after a session expires while the tab is closed, and remove other accounts' cached thumbnails on sign-in.
+
+## 0.1.1263 — 2026-11-25
+
+- Keep operator email moving when a diagnostic report contains malformed text or fails to save.
+- Space out operator email retries during SMTP outages and stop stalled sends before another worker can retry them.
+
+## 0.1.1262 — 2026-11-25
+
+- Guard database updates against dropping tables, columns, or functions before the previous hosted release stops using them.
+
+## 0.1.1261 — 2026-11-25
+
+- Resume cloud sale checks and scheduled promotions automatically after a temporary database outage.
+
+## 0.1.1260 — 2026-11-25
+
+- Update hosted deployment, process-lease, error-alert, and webhook-relay documentation to match current server behavior.
+
+## 0.1.1259 — 2026-11-25
+
+- AI assistants connected to Anteroom can now start generating the drafts they name, like Generate or Bulk upload's Create and generate. Generation stops at a saved draft and never publishes.
+
+## 0.1.1258 — 2026-11-25
+
+- AI assistants connected to Anteroom can now read a listing's size tag and its yardstick measurements from its saved photos, like the Read size tags and Read measurements buttons in Item Details, and save them to Item Details before generating.
+
+## 0.1.1257 — 2026-11-25
+
+- Let a connected AI agent reload a draft's marketplace form, like Reload choices in the editor, so drafts it fixes can be listed or scheduled.
+
 ## 0.1.1256 — 2026-11-25
 
 - When auto-relist drops a price, the new price now also saves as the item's General price. Other marketplaces keep their own prices.

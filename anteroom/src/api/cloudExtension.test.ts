@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { RELAY_CAPABILITIES } from "../cloud/chromeRelay";
 import { cloudExtension } from "./cloudExtension";
 const ORIGIN = "https://myanteroom.com";
 const ACCOUNT = { id: "11111111-1111-4111-8111-111111111111", email: "alice@example.com", access_token: "never-forward-this" };
@@ -50,6 +51,14 @@ describe("cloud extension transport", () => {
     c.reply({ data: { ...c.sent[0].data, source: "anteroom-extension", version: 1, ok: true, state: "hacked",
       extensionVersion: "x".repeat(50), supportedActions: ["marketplace.actions", "unknown", 7] } });
     await expect(pending).resolves.toEqual({ ok: true, state: "unavailable", extensionVersion: "x".repeat(30), supportedActions: ["marketplace.actions"] });
+  });
+  it("keeps every relay capability (including marketplace.form.read) from a Bridge's status", async () => {
+    const c = channel(); const pending = cloudExtension(ACCOUNT, c.target).status();
+    c.reply({ data: { ...c.sent[0].data, source: "anteroom-extension", version: 1, ok: true, state: "connected",
+      extensionVersion: "0.2.99", supportedActions: [...RELAY_CAPABILITIES] } });
+    await expect(pending).resolves.toEqual({
+      ok: true, state: "connected", extensionVersion: "0.2.99", supportedActions: [...RELAY_CAPABILITIES],
+    });
   });
   it("never opens the bridge from an unapproved origin", async () => {
     const c = channel("https://evil.example");

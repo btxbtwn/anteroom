@@ -85,3 +85,100 @@ test("a small button answers a tap anywhere in a 44 point square on a phone", as
   expect(reach.targetHeight).toBeGreaterThanOrEqual(44);
   expect(reach.hitsButton).toBe(true);
 });
+
+test("xs, icon-xs, and aligned buttons have centered 44 point hit areas on a phone", async ({ page, phone }) => {
+  test.skip(!phone, "A mouse pointer keeps the drawn size as the hit area.");
+
+  // 1. Settings -> Connections: size="xs" button stays compact visually (<=28px) with a >=44px hit area.
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Connections", exact: true }).click();
+  const closeNav = page.getByRole("button", { name: "Close navigation" });
+  if (await closeNav.isVisible()) await closeNav.click();
+
+  const connectButton = page.getByRole("button", { name: "Connect", exact: true }).first();
+  await expect(connectButton).toBeVisible();
+  await connectButton.scrollIntoViewIfNeeded();
+  const xsMeasure = await connectButton.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const after = getComputedStyle(element, "::after");
+    const cx = rect.left + rect.width / 2;
+    const hitBelow = document.elementFromPoint(cx, rect.bottom + 6);
+    const hitAbove = document.elementFromPoint(cx, rect.top - 6);
+    return {
+      drawnHeight: rect.height,
+      targetWidth: parseFloat(after.width),
+      targetHeight: parseFloat(after.height),
+      hitsBelow: hitBelow !== null && element.contains(hitBelow),
+      hitsAbove: hitAbove !== null && element.contains(hitAbove),
+    };
+  });
+  expect(xsMeasure.drawnHeight).toBeLessThanOrEqual(28);
+  expect(xsMeasure.targetWidth).toBeGreaterThanOrEqual(44);
+  expect(xsMeasure.targetHeight).toBeGreaterThanOrEqual(44);
+  expect(xsMeasure.hitsBelow).toBe(true);
+  expect(xsMeasure.hitsAbove).toBe(true);
+
+  // 2. Marketplaces -> eBay -> Sale calendar: size="icon-xs" stays <=28x28px visually with >=44x44px hit area.
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Marketplaces", exact: true }).click();
+  const prevMonth = page.getByRole("button", { name: "Previous month", exact: true });
+  await expect(prevMonth).toBeVisible();
+  await prevMonth.scrollIntoViewIfNeeded();
+  const iconXsMeasure = await prevMonth.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const after = getComputedStyle(element, "::after");
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const hitLeft = document.elementFromPoint(cx - 18, cy);
+    const hitRight = document.elementFromPoint(cx + 18, cy);
+    const hitBottom = document.elementFromPoint(cx, cy + 18);
+    return {
+      drawnWidth: rect.width,
+      drawnHeight: rect.height,
+      targetWidth: parseFloat(after.width),
+      targetHeight: parseFloat(after.height),
+      hitsLeft: hitLeft !== null && element.contains(hitLeft),
+      hitsRight: hitRight !== null && element.contains(hitRight),
+      hitsBottom: hitBottom !== null && element.contains(hitBottom),
+    };
+  });
+  expect(iconXsMeasure.drawnWidth).toBeLessThanOrEqual(28);
+  expect(iconXsMeasure.drawnHeight).toBeLessThanOrEqual(28);
+  expect(iconXsMeasure.targetWidth).toBeGreaterThanOrEqual(44);
+  expect(iconXsMeasure.targetHeight).toBeGreaterThanOrEqual(44);
+  expect(iconXsMeasure.hitsLeft).toBe(true);
+  expect(iconXsMeasure.hitsRight).toBe(true);
+  expect(iconXsMeasure.hitsBottom).toBe(true);
+
+  // 3. Listing editor: justify-start Button centers its ::after without horizontal drift,
+  //    and a text-xs InlineButton ("Show more") still provides a >=44x44px hit area.
+  await openInventory(page, phone);
+  await page.getByRole("list", { name: "Listings" }).getByRole("link").first().click();
+  await page.getByRole("tab", { name: "Listing" }).click();
+
+  const formPicker = page.getByRole("button", { name: /^Form,/ }).first();
+  await expect(formPicker).toBeVisible();
+  await formPicker.scrollIntoViewIfNeeded();
+  const alignedMeasure = await formPicker.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const after = getComputedStyle(element, "::after");
+    // When ::after is centered on a justify-start button, its resolved horizontal center matches the button's.
+    const borderLeft = parseFloat(getComputedStyle(element).borderLeftWidth) || 0;
+    const borderRight = parseFloat(getComputedStyle(element).borderRightWidth) || 0;
+    const paddingWidth = rect.width - borderLeft - borderRight;
+    const leftVal = parseFloat(after.left);
+    const widthVal = parseFloat(after.width);
+    const translate = after.translate;
+    const tx = translate && translate !== "none" ? -widthVal / 2 : 0;
+    const afterCenterX = leftVal + tx + widthVal / 2;
+    return {
+      driftX: Math.abs(afterCenterX - paddingWidth / 2),
+      targetHeight: parseFloat(after.height),
+    };
+  });
+  expect(alignedMeasure.targetHeight).toBeGreaterThanOrEqual(44);
+  expect(alignedMeasure.driftX).toBeLessThanOrEqual(1);
+});

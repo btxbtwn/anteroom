@@ -255,6 +255,10 @@ class MarketplaceRelistLog(SellerOwned, Base):
     new_listing_id: Mapped[str | None] = mapped_column(String, nullable=True)
     old_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     new_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # The price revision this attempt saved and the one it replaced, so an unsettled
+    # attempt puts back only its own price.
+    price_revision_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    original_revision_id: Mapped[str | None] = mapped_column(String, nullable=True)
     # completed, relist_pending, failed, down_needs_relist (older rows may say skipped_active_offer or skipped_offer_unverified)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)

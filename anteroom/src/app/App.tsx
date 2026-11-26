@@ -108,7 +108,7 @@ export function App() {
     dispatchOpenListing({ type: "open", id });
   }, []);
   const clearListingWorkspace = (id: string) => dispatchOpenListing({ type: "clear", id });
-  const listingFromUrl = Boolean(new URLSearchParams(window.location.search).get("listing"));
+  const listingFromUrl = Boolean(initialOpenListing(new URLSearchParams(window.location.search).get("listing")));
   const [suggestionsVisited, setSuggestionsVisited] = useState(false);
   const [returnToSuggestions, setReturnToSuggestions] = useState(false);
   // The assistant is home, on the Mac and signed in alike; a listing link opens that listing.

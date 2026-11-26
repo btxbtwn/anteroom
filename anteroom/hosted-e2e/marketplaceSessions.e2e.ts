@@ -42,7 +42,11 @@ test("cloud connections can be checked with Chrome closed", async ({ page }, inf
   }));
   let rejectDepopTest!: () => void;
   const depopTest = new Promise<void>(resolve => { rejectDepopTest = resolve; });
+  let depopBlocked = true;
   await page.route("**/api/cloud-sessions/depop/verify", async route => {
+    if (depopBlocked) return route.fulfill({ json: {
+      ok: false, session: depopCloud, error: "Depop blocked the Cloud connection test. Try again later.",
+    } });
     await depopTest;
     await route.fulfill({ json: {
       ok: false, session: cloud("depop", "expired"), error: "Depop asked to sign in again.",
@@ -74,6 +78,12 @@ test("cloud connections can be checked with Chrome closed", async ({ page }, inf
   const depop = page.locator("#chrome-depop");
   const depopHosted = depop.getByRole("group", { name: "Cloud", exact: true });
   await expect(depopHosted).toContainText("Signed in as depop-cloud");
+  await expect(depopHosted.getByRole("button", { name: "Sign in to Depop in Cloud" }))
+    .toHaveAccessibleDescription("Anteroom saves an encrypted sign-in for sales checks, imports, and standalone delists. Keep Chrome connected for drafts, publishing, edits, relists, and offers.");
+  await depopHosted.getByRole("button", { name: "Test Depop cloud connection" }).click();
+  await expect(depopHosted.getByText("Depop blocked the Cloud connection test. Try again later.", { exact: true })).toBeVisible();
+  await expect(depopHosted.getByRole("button", { name: "Disconnect Depop from Cloud" })).toBeVisible();
+  depopBlocked = false;
   await depopHosted.getByRole("button", { name: "Test Depop cloud connection" }).click();
   await expect(depopHosted.getByText("Testing connection…", { exact: true })).toBeVisible();
   // Keep the follow-up status request in flight. The test reply itself must update the badge.

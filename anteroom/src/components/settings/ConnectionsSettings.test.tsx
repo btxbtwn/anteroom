@@ -183,7 +183,7 @@ describe("Connections settings", () => {
     expect(html).not.toContain('aria-label="Sign in to Mercari in Cloud"');
     expect(html).toContain("Keep your sign-in in your browser. Leave Chrome open for listing actions and sales checks.");
     expect(html).toContain("Anteroom saves an encrypted sign-in so listing actions, sales checks, and enabled automations can run with Chrome closed.");
-    expect(html).toContain("One connection per marketplace is enough.");
+    expect(html).toContain("Keep Chrome connected for drafts, publishing, edits, relists, and offers.");
     expect(html).not.toContain("old-cloud-account");
   });
 
