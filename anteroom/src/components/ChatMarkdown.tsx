@@ -3,8 +3,9 @@ import { cn } from "../lib/utils";
 
 const MarkdownRenderer = lazy(() => import("./MarkdownRenderer"));
 
-/** T3 Code's transcript prose: the size, leading and color of a chat message. */
-export const CHAT_PROSE_CLASS = "text-sm leading-relaxed text-foreground/[calc(80%+var(--appearance-contrast-boost)/5)]";
+/** T3 Code's transcript prose: the size, leading and color of a chat message.
+ * A phone reads it at 16px, the size its message box types in. */
+export const CHAT_PROSE_CLASS = "text-sm max-sm:text-base leading-relaxed text-foreground/[calc(80%+var(--appearance-contrast-boost)/5)]";
 
 interface Props {
   text: string;
