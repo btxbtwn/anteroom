@@ -38,6 +38,7 @@ import { MarketplacesLayout, useReportFixTargets } from "./MarketplacesSection";
 import { confirmDialog } from "../ui/confirmDialog";
 import { useChatBusy } from "./chat/liveChatStore";
 import { MenuItem } from "./ui/menu";
+import { ListingActionsMenu } from "./ListingReviewActions";
 import { FavoriteToggle } from "./favorites";
 import { type ListingReviewTab } from "./ListingReviewTabs";
 import type { BulkListingUploadResult } from "../bulkPhotoUpload";
@@ -298,12 +299,17 @@ export function ListingEditor({
           if (!unsaved && data?.current_revision_id) void prefetchListingForm(queryClient, convId, tab, data.listing, data.current_revision_id);
         }}
         selected={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
-        railActions={runtime.features.has("generation") ? <RegenerateListingButton convId={convId} variant="outline" size="sm" onRegenerated={onCleared} /> : undefined}
-        railFavorite={conversation ? <FavoriteToggle id={convId} title={String(listing.title || conversation.title || "Listing")} favorite={Boolean(conversation.favorite)} /> : undefined}
-        railMenuItems={<MenuItem variant="destructive" disabled={clearing.isPending} onClick={() => void clearing.clear()}>
-          {clearing.isPending ? "Clearing…" : "Clear listing"}
-        </MenuItem>}
-        railStatus={editState.saving ? <span role="status" className="text-xs text-muted-foreground">{generating ? "Saving once Ant finishes…" : "Saving…"}</span> : undefined}
+        {...(vendoo
+          ? vendooRail({ convId, conversation, title: String(listing.title || conversation?.title || "Listing"),
+            generation: runtime.features.has("generation"), saving: editState.saving, generating, onCleared })
+          : {
+            railActions: runtime.features.has("generation") ? <RegenerateListingButton convId={convId} variant="outline" size="sm" onRegenerated={onCleared} /> : undefined,
+            railFavorite: conversation ? <FavoriteToggle id={convId} title={String(listing.title || conversation.title || "Listing")} favorite={Boolean(conversation.favorite)} /> : undefined,
+            railMenuItems: <MenuItem variant="destructive" disabled={clearing.isPending} onClick={() => void clearing.clear()}>
+              {clearing.isPending ? "Clearing…" : "Clear listing"}
+            </MenuItem>,
+            railStatus: editState.saving ? <span role="status" className="text-xs text-muted-foreground">{generating ? editorCopy(false).savingAfterAnt : "Saving…"}</span> : undefined,
+          })}
         onSelect={(id) => {
           setFieldTarget(null);
           setEditTab(id);
@@ -388,6 +394,30 @@ export function editorCopy(vendoo: boolean) {
     noExactMatch: (name: string) => `${name} has no exact match. Check this category.`,
     categoryFormMissing: (name: string) => `Some of ${name}'s fields for this category may be missing. Check the listing on ${name} before you publish.`,
     choicesMissing: (name: string) => `${name}'s choices for this field didn't load.`,
+  };
+}
+
+/**
+ * The Vendoo listing mode's rail, exactly as it was before the direct editor's
+ * toolbar: Regenerate, then the favorite and the "More listing actions" menu.
+ * The seller asked for that mode to stay as it is; pinned by VendooLayout.test.tsx.
+ */
+export function vendooRail({ convId, conversation, title, generation, saving, generating, onCleared }: {
+  convId: string;
+  conversation?: { favorite?: boolean | null } | null;
+  title: string;
+  generation: boolean;
+  saving: boolean;
+  generating: boolean;
+  onCleared?: () => void;
+}) {
+  return {
+    railActions: generation ? <RegenerateListingButton convId={convId} variant="ghost-muted" onRegenerated={onCleared} /> : undefined,
+    railMenu: <span className="flex items-center gap-0.5">
+      {conversation ? <FavoriteToggle id={convId} title={title} favorite={Boolean(conversation.favorite)} /> : null}
+      <ListingActionsMenu convId={convId} onCleared={onCleared} />
+    </span>,
+    railStatus: saving ? <span role="status" className="text-xs text-muted-foreground">{generating ? editorCopy(true).savingAfterAnt : "Saving…"}</span> : undefined,
   };
 }
 

@@ -291,6 +291,9 @@ export function MarketplacesLayout({
   railActions?: ReactNode;
   /** The listing's favorite toggle, after the toolbar's buttons. */
   railFavorite?: ReactNode;
+  /** The listing's overflow menu as one node. Only the Vendoo layout reads it;
+      this layout builds its own menu from `railMenuItems`. */
+  railMenu?: ReactNode;
   /** Editor-owned items for the listing's "…" menu, e.g. Clear listing. */
   railMenuItems?: ReactNode;
   /** The listing's sync state, at the start of the toolbar. */
