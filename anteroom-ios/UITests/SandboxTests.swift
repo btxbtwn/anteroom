@@ -922,7 +922,10 @@ final class SoldAndScheduleSandboxTests: XCTestCase {
         if outside.exists { outside.tap() } else { app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.08)).tap() }
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: delist)
         waitForExpectations(timeout: 10)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Sold'")).firstMatch.waitForExistence(timeout: 30))
+        // Poshmark, where it sold, now reads sold (its row is back at the top of the list).
+        let sold = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Poshmark, Sold'")).firstMatch
+        for _ in 0..<3 where !sold.exists { app.swipeDown() }
+        XCTAssertTrue(sold.waitForExistence(timeout: 30), "Poshmark shows the sale")
         keep(app, "Marketplaces after the sale")
     }
 
