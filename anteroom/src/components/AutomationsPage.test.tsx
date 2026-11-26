@@ -78,7 +78,8 @@ describe("AutomationsPage", () => {
   it("opens on one list, with the forms behind New automation", () => {
     const html = render();
     expect(html).toContain("Automations");
-    expect(html).toContain("nothing lists or delists until you approve each item");
+    expect(html).toContain("Schedule price drops, relists, offers, sharing and follows.");
+    expect(html.indexOf('aria-label="Your automations"')).toBeLessThan(html.indexOf('aria-label="Offer activity"'));
     expect(html).toContain("New automation");
     // eBay offers is a row in the same list, not a block of settings.
     expect(html).toContain("eBay offers");
@@ -126,8 +127,11 @@ describe("AutomationsPage", () => {
     const html = render();
     expect(html).toContain("Waiting for approval");
     expect(html).toContain("Blue tee");
-    expect(html).toContain("Relist · eBay · waiting");
+    expect(html).toContain("Relist · eBay · Awaiting approval");
     expect(html).toContain("Review and approve");
+    const web = hosted(["inventory"]);
+    expect(web).toContain('aria-describedby="approval-reason-p1"');
+    expect(web).toContain("Open Anteroom on your Mac to approve this action.");
   });
 
   it("on the web, shows eBay offers only while the offer timer runs", () => {
