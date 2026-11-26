@@ -16,14 +16,18 @@ from anteroom.repositories.queries import ConversationRepo, ListingRepo
 def _publish_category_fills(db):
     if db.in_nested_transaction():
         return
-    from anteroom.services.native_field_fill import category_saved
-    for _transaction, args in db.info.pop("category_fills", []):
-        category_saved(*args)
-    from anteroom.services.native_marketplaces import forget_unpinned_preflight
+    fills = db.info.pop("category_fills", [])
+    if fills:
+        from anteroom.services.native_field_fill import category_saved
+        for _transaction, args in fills:
+            category_saved(*args)
+    saved = db.info.pop("saved_listings", ())
+    if saved:
+        from anteroom.services.native_marketplaces import forget_unpinned_preflight
 
-    # A preflight that names no revision must not join a build that read the one before.
-    for conv_id in db.info.pop("saved_listings", ()):
-        forget_unpinned_preflight(conv_id)
+        # A preflight that names no revision must not join a build that read the one before.
+        for conv_id in saved:
+            forget_unpinned_preflight(conv_id)
 
 
 @event.listens_for(Session, "before_flush")
