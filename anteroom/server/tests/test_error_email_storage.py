@@ -548,3 +548,39 @@ def test_weekly_impact_survives_delivery_and_counts_distinct_sellers(previous_en
     assert 'alice' not in str(impact) and 'bob' not in str(impact)
     store.prune_occurrences((clock + timedelta(days=8)).timestamp())
     assert store.list_groups('open')[0]['impact_7d'] is None
+
+
+def test_weekly_impact_migration_removes_inherited_default_grants(previous_engine):
+    """Exercise broad deployment defaults on a disposable database before upgrading."""
+    if previous_engine.dialect.name != 'postgresql':
+        pytest.skip('Postgres role privileges')
+    config = alembic_config(previous_engine.url.render_as_string(hide_password=False))
+    command.upgrade(config, 'd5e1b7a3c962')
+    with previous_engine.begin() as db:
+        roles = db.scalars(text("SELECT rolname FROM pg_roles WHERE rolname IN "
+                                "('anteroom_api','anteroom_seller','anon','authenticated','service_role')")).all()
+        for obj in ('TABLES', 'SEQUENCES'):
+            db.exec_driver_sql(f"ALTER DEFAULT PRIVILEGES GRANT ALL ON {obj} TO PUBLIC, {', '.join(roles)}")
+    migrate(previous_engine)
+    with previous_engine.begin() as db:
+        table = 'error_email_occurrences'
+        seq = table + '_id_seq'
+        def permitted(role, obj, privilege, *, sequence=False):
+            check = 'has_sequence_privilege' if sequence else 'has_table_privilege'
+            return db.scalar(text(f'SELECT {check}(:role, :obj, :privilege)'),
+                             dict(role=role, obj=obj, privilege=privilege))
+
+        for role in ('anteroom_seller', 'anon', 'authenticated', 'service_role'):
+            if db.scalar(text('SELECT 1 FROM pg_roles WHERE rolname=:role'), {'role': role}):
+                for privilege in ('SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'):
+                    assert not permitted(role, table, privilege), (role, privilege)
+                for privilege in ('SELECT', 'UPDATE', 'USAGE'):
+                    assert not permitted(role, seq, privilege, sequence=True), (role, privilege)
+        for privilege in ('SELECT', 'INSERT', 'DELETE'):
+            assert permitted('anteroom_api', table, privilege)
+        for privilege in ('UPDATE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'):
+            assert not permitted('anteroom_api', table, privilege)
+        assert permitted('anteroom_api', seq, 'USAGE', sequence=True)
+        assert not permitted('anteroom_api', seq, 'UPDATE', sequence=True)
+        assert not permitted('anteroom_api', seq, 'SELECT', sequence=True)
+        assert db.scalar(text("SELECT relrowsecurity FROM pg_class WHERE oid='error_email_occurrences'::regclass"))

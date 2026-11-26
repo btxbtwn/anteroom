@@ -22,7 +22,9 @@ def upgrade() -> None:
         op.create_index('ix_error_email_occurrences_occurred_at', table, ['occurred_at'])
     if db.dialect.name == 'postgresql':
         op.execute(f'ALTER TABLE {table} ENABLE ROW LEVEL SECURITY')
-        for role in ('PUBLIC', 'anteroom_seller', 'anon', 'authenticated'):
+        # Default privileges can include direct grants (including to roles
+        # with BYPASSRLS). Clear them before granting the writer its minimum.
+        for role in ('PUBLIC', 'anteroom_seller', 'anon', 'authenticated', 'service_role', 'anteroom_api'):
             if role == 'PUBLIC' or db.scalar(sa.text('SELECT 1 FROM pg_roles WHERE rolname=:role'), {'role': role}):
                 op.execute(f'REVOKE ALL ON {table} FROM {role}')
                 op.execute(f'REVOKE ALL ON SEQUENCE {table}_id_seq FROM {role}')
