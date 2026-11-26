@@ -53,7 +53,14 @@ struct TodayTests {
         precondition(TodayText.targetProblem("", metric: "profit") == "Enter a target greater than zero.")
         precondition(TodayText.targetProblem("0", metric: "sales") != nil)
         precondition(TodayText.targetProblem("120", metric: "sell_through_rate") == "Sell-through rate target cannot exceed 100%.")
-        precondition(TodayText.targetProblem("2,000", metric: "profit") == nil && TodayText.target("2,000") == 2000)
+        precondition(TodayText.targetProblem("2,000", metric: "profit", locale: us) == nil && TodayText.target("2,000", locale: us) == 2000)
+        precondition(TodayText.target("1,250", locale: us) == 1250 && TodayText.target("12.5", locale: us) == 12.5)
+        // A decimal-comma phone types "12,5": that is 12.5, not 125.
+        let de = Locale(identifier: "de_DE")
+        precondition(TodayText.target("12,5", locale: de) == 12.5 && TodayText.target("1.250", locale: de) == 1250)
+        precondition(TodayText.targetProblem("35,5", metric: "sell_through_rate", locale: de) == nil)
+        precondition(TodayText.target(TodayText.targetText(12.5, locale: de), locale: de) == 12.5)
+        precondition(TodayText.targetText(2000, locale: us) == "2,000" && TodayText.target("", locale: us) == nil)
         precondition(TodayText.metricPlaceholder("listings") == "100" && TodayText.periodLabel("quarterly") == "Quarterly")
 
         // A goal edit sends only what it names; an empty label clears it.

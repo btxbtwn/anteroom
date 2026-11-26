@@ -14,9 +14,17 @@ struct TodayView: View {
     @State private var editing: GoalForm?
     @State private var goalToDelete: GoalProgress?
     @State private var deleting: Set<String> = []
+    /// Bumped by every read and goal change; only the newest one may set `home`.
+    @State private var generation = 0
+    @Environment(\.scenePhase) private var scenePhase
 
     enum Destination: Hashable {
         case attention, analytics
+    }
+
+    private struct LiveKey: Hashable {
+        let listings: Int
+        let jobs: Int
     }
 
     var body: some View {
@@ -47,9 +55,17 @@ struct TodayView: View {
             }
             .task { await load() }
             .refreshable { await load() }
-            // Changes made on another device or by Anteroom (a sale, a finished job) show here too.
-            .onChange(of: live?.listings) { _, _ in Task { await load() } }
-            .onChange(of: live?.jobs) { _, _ in Task { await load() } }
+            // Changes made on another device or by Anteroom (a sale, a finished job) show here too;
+            // a burst of changes rebuilds Today once, and a newer change cancels the older wait.
+            .task(id: LiveKey(listings: live?.listings ?? 0, jobs: live?.jobs ?? 0)) {
+                guard home != nil, (live?.listings ?? 0) + (live?.jobs ?? 0) > 0 else { return }
+                try? await Task.sleep(for: .milliseconds(1500))
+                if !Task.isCancelled { await load() }
+            }
+            // Back in the app after a while (overnight), today's numbers and pacing have moved on.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active && home != nil { Task { await load() } }
+            }
             // Back from Needs attention, show what was resolved or snoozed there.
             .onChange(of: path.count) { old, new in if new < old { Task { await load() } } }
             .reloadingOnReturn(when: home == nil && error != nil) { await load() }
@@ -168,16 +184,20 @@ struct TodayView: View {
     // MARK: Loading and changes
 
     private func load() async {
+        generation += 1
+        let mine = generation
         do {
             let loaded = try await api.homeSummary()
             try Task.checkCancellation()
+            // A newer read or a goal change answered after this one started.
+            guard mine == generation else { return }
             home = loaded
             error = nil
             badge?.show(loaded.counts.active)
         } catch is CancellationError {
             // A newer load owns the result.
         } catch {
-            if !error.isCancellation { self.error = error.localizedDescription }
+            if mine == generation && !error.isCancellation { self.error = error.localizedDescription }
         }
     }
 
@@ -185,6 +205,8 @@ struct TodayView: View {
     private func apply(_ result: GoalChangeResult) {
         goalError = nil
         if let fresh = result.home {
+            // Reads that started before the change must not put the old goals back.
+            generation += 1
             home = fresh
             badge?.show(fresh.counts.active)
         } else {
@@ -261,7 +283,7 @@ struct GoalForm: Identifiable {
         goalID = goal?.id
         period = goal?.period ?? "monthly"
         metric = goal?.metric ?? "profit"
-        target = goal.map { $0.target == $0.target.rounded() ? String(Int($0.target)) : String($0.target) } ?? ""
+        target = goal.map { TodayText.targetText($0.target) } ?? ""
         label = goal?.customLabel ?? ""
     }
 }

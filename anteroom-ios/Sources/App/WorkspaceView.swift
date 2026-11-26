@@ -144,9 +144,13 @@ struct WorkspaceView: View {
                 await attention.refresh()
             }
         }
-        // A sale or a finished job elsewhere can raise an alert.
-        .onChange(of: session.changes.listings) { _, _ in Task { await attention.refresh() } }
-        .onChange(of: session.changes.jobs) { _, _ in Task { await attention.refresh() } }
+        // A sale or a finished job elsewhere can raise an alert; a burst of
+        // changes reads the badge once, and a newer change cancels the older wait.
+        .task(id: [session.changes.listings, session.changes.jobs]) {
+            guard session.changes.listings + session.changes.jobs > 0 else { return }
+            try? await Task.sleep(for: .milliseconds(1500))
+            if !Task.isCancelled { await attention.refresh() }
+        }
     }
 
     private var startupView: some View {

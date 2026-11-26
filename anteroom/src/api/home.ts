@@ -1,17 +1,16 @@
 import type {
+  AttentionInbox,
   AttentionItem,
   AttentionResolution,
   AttentionSnooze,
   GoalChangeResult,
   GoalProgress,
   HomeSummary,
-  HomeToday,
 } from "./contract.gen";
 
 export type GoalPeriod = GoalProgress["period"];
 export type GoalMetric = GoalProgress["metric"];
 export type GoalPace = GoalProgress["pace"];
-export type HomeTodaySummary = HomeToday;
 export type SellerGoalProgress = GoalProgress;
 
 export type { AttentionItem, AttentionTarget } from "./contract.gen";
@@ -22,7 +21,7 @@ export type HomeMutationResponse = GoalChangeResult;
 
 const ATTENTION_DISMISS_DAYS = 7;
 
-type AttentionLists = Pick<HomeSummaryResponse, "needs_attention" | "dismissed" | "resolved">;
+type AttentionLists = Pick<AttentionInbox, "needs_attention" | "dismissed" | "resolved">;
 
 function withLists(home: HomeSummaryResponse, lists: AttentionLists): HomeSummaryResponse {
   const by_kind: Record<string, number> = {};

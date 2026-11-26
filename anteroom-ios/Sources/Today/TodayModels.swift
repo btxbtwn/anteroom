@@ -94,15 +94,33 @@ enum TodayText {
     }
 
     /// Why a goal can't be saved yet, or nil when it can.
-    static func targetProblem(_ text: String, metric: String) -> String? {
-        let cleaned = text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: "")
-        guard let target = Double(cleaned), target.isFinite, target > 0 else { return "Enter a target greater than zero." }
+    static func targetProblem(_ text: String, metric: String, locale: Locale = .current) -> String? {
+        guard let target = target(text, locale: locale), target.isFinite, target > 0 else { return "Enter a target greater than zero." }
         if metric == "sell_through_rate" && target > 100 { return "Sell-through rate target cannot exceed 100%." }
         return nil
     }
 
-    static func target(_ text: String) -> Double? {
-        Double(text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ""))
+    /// The typed target in the phone's own number format: "12,5" is 12.5 and
+    /// "1.250" is 1250 in Germany, "1,250" is 1250 in the US.
+    static func target(_ text: String, locale: Locale = .current) -> Double? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        return numberFormatter(locale).number(from: trimmed)?.doubleValue
+    }
+
+    /// A target as the goal sheet prefills it, in the same format `target` reads.
+    static func targetText(_ value: Double, locale: Locale = .current) -> String {
+        numberFormatter(locale).string(from: NSNumber(value: value)) ?? String(value)
+    }
+
+    private static func numberFormatter(_ locale: Locale) -> NumberFormatter {
+        let formatter = NumberFormatter()
+        formatter.locale = locale
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = true
+        formatter.maximumFractionDigits = 6
+        formatter.isLenient = true
+        return formatter
     }
 
     /// The tab badge: the active count, nothing when there is none.
