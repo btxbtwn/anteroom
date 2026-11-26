@@ -11,10 +11,12 @@ type InputProps = Omit<InputPrimitive.Props & React.RefAttributes<HTMLInputEleme
   font?: "default" | "mono";
   unstyled?: boolean;
   nativeInput?: boolean;
+  inputClassName?: string;
 };
 
 function Input({
   className,
+  inputClassName: extraInputClassName,
   size = "default",
   font = "default",
   unstyled = false,
@@ -32,6 +34,7 @@ function Input({
       "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
     props.type === "file" &&
       "text-muted-foreground file:me-3 file:bg-transparent file:font-medium file:text-foreground file:text-sm",
+    extraInputClassName,
   );
   let inputElement: React.ReactElement;
 

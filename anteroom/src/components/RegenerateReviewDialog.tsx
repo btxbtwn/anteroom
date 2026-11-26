@@ -1,16 +1,31 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { RotateCwIcon, XIcon } from "lucide-react";
 import { api } from "../api/client";
 import { BULK_READ_CONCURRENCY, mapWithConcurrency } from "../lib/concurrency";
+import { cn } from "../lib/utils";
 import type { ListingPhoto } from "../api/types";
 import { moveItem } from "../photoDrop";
 import { applyReading, readEach } from "../measurementReading";
 import { applySizeTagReading } from "../sizeTagReading";
+import { Button } from "./ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "./ui/dialog";
+import { Input } from "./ui/input";
 import { toastManager } from "./ui/toast";
+import { toggleVariants } from "./ui/toggle";
 import { PhotoZoom } from "./BulkUploadDialog";
 import { photoThumbUrl } from "../photoThumb";
 import { StudioImage } from "./StudioImage";
+import { FormError, FormField } from "./WorkspacePage";
 import {
   GARMENTS,
   garmentFields,
@@ -58,9 +73,11 @@ interface RowState {
 
 /**
  * Regenerate's version of the bulk upload window: each listing's photos
- * (drag to reorder), size, SKU, COG, labels and measurements, checked before
- * anything is wiped. Edits are written back to Item Details, which the
- * rewrite keeps and treats as fact. Only the x and Cancel close it.
+ * (drag to reorder), size, SKU, cost of goods, labels and measurements,
+ * checked before anything is wiped. Edits are written back to Item Details,
+ * which the rewrite keeps and treats as fact. Outside clicks are ignored so a
+ * stray click cannot discard edits; Escape, the close button and Cancel close
+ * it whenever a save is not in progress.
  */
 export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) {
   const [rows, setRows] = useState<Record<string, RowState> | null>(null);
@@ -81,15 +98,6 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
   }, [rows]);
   const formRef = useRef<HTMLFormElement>(null);
   const count = listings.length;
-
-  useEffect(() => {
-    // Escape only puts an enlarged photo away; it never closes the window.
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setZoom(null);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -274,103 +282,117 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
 
   const noun = count === 1 ? "listing" : "listings";
 
-  return createPortal(
-    <div className="confirm-dialog bulk-upload-dialog" role="presentation">
-      <div className="confirm-dialog-backdrop" />
-      <form
-        ref={formRef}
-        className="confirm-dialog-popup bulk-upload-popup"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="regenerate-review-title"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void rewrite();
-        }}
-      >
-        <button
-          type="button"
-          className="confirm-dialog-close"
-          disabled={saving}
-          onClick={onClose}
-          aria-label="Close without rewriting"
+  return (
+    <Dialog
+      open
+      disablePointerDismissal
+      onOpenChange={(open) => {
+        if (!open && !zoom && !savingRef.current) onClose();
+      }}
+    >
+      <DialogPopup showCloseButton={false} className="max-w-3xl">
+        <form
+          ref={formRef}
+          className="flex min-h-0 flex-1 flex-col"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void rewrite();
+          }}
         >
-          x
-        </button>
-        <div className="confirm-dialog-header">
-          <h2 id="regenerate-review-title" className="confirm-dialog-title">
-            Review {count} {noun} before rewriting
-          </h2>
-          <p className="confirm-dialog-description">
-            Drag photos to set their order; the first one is the cover, and a click enlarges one. Rotate or remove a photo from its corners.
-            Chat and every generated field are discarded, then each listing is written again from its
-            photos and these details concurrently. Flaws and notes are kept.
-            {" "}Read size tags and Read measurements fill blank sizes and measurements from the photos; check them before rewriting.
+          <DialogClose
+            aria-label="Close without rewriting"
+            disabled={saving}
+            className="absolute end-2 top-2"
+            render={<Button size="icon" variant="ghost" />}
+          >
+            <XIcon />
+          </DialogClose>
+          <DialogHeader className="pe-12 max-sm:px-4 max-sm:pt-4 max-sm:pb-2">
+            <DialogTitle>Review {count} {noun} before rewriting</DialogTitle>
+            <DialogDescription>
+              Drag photos to set their order; the first one is the cover, and a click enlarges one. Rotate or remove a photo from its corners.
+              Chat and every generated field are discarded, then each listing is written again from its
+              photos and these details concurrently. Flaws and notes are kept.
+              {" "}Read size tags and Read measurements fill blank sizes and measurements from the photos; check them before rewriting.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="space-y-4 max-sm:px-4">
+            <ul
+              className="m-0 flex list-none flex-col gap-2.5 p-0"
+              aria-label="Each listing's photos and details"
+            >
+              {rows
+                ? listings.map((listing) => (
+                  <ReviewRow
+                    key={listing.id}
+                    listing={listing}
+                    row={rows[listing.id]!}
+                    onChange={(patch) => setDetails(listing.id, patch)}
+                    onSizeChange={(value) => {
+                      setAnnounceSizes(false);
+                      // An edit settles the old warning; a running read's note stays so a photo removal can still void it.
+                      updateRow(listing.id, (row) => ({
+                        ...row,
+                        details: { ...row.details, size: value },
+                        sizeSuggested: false,
+                        sizeReview: false,
+                        sizeWarning: undefined,
+                        ...(row.sizeNote === READING_SIZE_NOTE ? {} : { sizeNote: undefined }),
+                      }));
+                    }}
+                    onPhotoRemoved={() => handlePhotoRemoved(listing.id)}
+                    removalDisabled={saving}
+                    guardPhotoRemoval={guardPhotoRemoval}
+                    onZoom={(index) => setZoom({ convId: listing.id, index })}
+                    onInputKeyDown={onInputKeyDown}
+                  />
+                ))
+                : (
+                  <li className="bulk-upload-group flex min-w-0 flex-col gap-2.5 rounded-xl border border-border/60 bg-card/40 p-3">
+                    <span className="text-2xs text-muted-foreground">Loading…</span>
+                  </li>
+                )}
+            </ul>
+            {error ? <FormError>{error}</FormError> : null}
+          </DialogPanel>
+          <p className="sr-only" role="status">
+            {announceSizes && rows
+              ? `Size tags read. ${Object.values(rows).filter((row) => row.sizeSuggested).length} filled, ${Object.values(rows).filter((row) => row.sizeReview).length} to check.`
+              : ""}
           </p>
-        </div>
-        <ul className="bulk-upload-groups" aria-label="Each listing's photos and details">
-          {rows
-            ? listings.map((listing) => (
-              <ReviewRow
-                key={listing.id}
-                listing={listing}
-                row={rows[listing.id]!}
-                onChange={(patch) => setDetails(listing.id, patch)}
-                onSizeChange={(value) => {
-                  setAnnounceSizes(false);
-                  // An edit settles the old warning; a running read's note stays so a photo removal can still void it.
-                  updateRow(listing.id, (row) => ({
-                    ...row,
-                    details: { ...row.details, size: value },
-                    sizeSuggested: false,
-                    sizeReview: false,
-                    sizeWarning: undefined,
-                    ...(row.sizeNote === READING_SIZE_NOTE ? {} : { sizeNote: undefined }),
-                  }));
-                }}
-                onPhotoRemoved={() => handlePhotoRemoved(listing.id)}
-                removalDisabled={saving}
-                guardPhotoRemoval={guardPhotoRemoval}
-                onZoom={(index) => setZoom({ convId: listing.id, index })}
-                onInputKeyDown={onInputKeyDown}
-              />
-            ))
-            : <li className="bulk-upload-group"><span className="photo-tray-meta">Loading…</span></li>}
-        </ul>
-        <p className="sr-only" role="status">
-          {announceSizes && rows
-            ? `Size tags read. ${Object.values(rows).filter((row) => row.sizeSuggested).length} filled, ${Object.values(rows).filter((row) => row.sizeReview).length} to check.`
-            : ""}
-        </p>
-        {error ? <p className="bulk-measure-error" role="alert">{error}</p> : null}
-        <div className="confirm-dialog-footer">
-          <button type="button" className="btn btn-ghost" disabled={saving} onClick={onClose}>
-            Cancel
-          </button>
-          <span className="bulk-measure-spacer" />
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={saving || !rows || sizeReading !== null}
-            title="Fill blank sizes from the size tag in each listing's photos"
-            onClick={() => void readSizeTags()}
-          >
-            {sizeReading ? `Reading tags ${sizeReading.done} of ${sizeReading.total}…` : "Read size tags"}
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={saving || !rows || reading !== null}
-            title="Fill blank measurements from photos with a yardstick on the item"
-            onClick={() => void readMeasurements()}
-          >
-            {reading ? `Reading ${reading.done} of ${reading.total}…` : "Read measurements"}
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={saving || !rows || pendingRemovals > 0 || reading !== null || sizeReading !== null}>
-            {saving ? "Saving…" : `Rewrite ${count}`}
-          </button>
-        </div>
-      </form>
+          <DialogFooter className="flex-col-reverse gap-2 max-sm:px-4 max-sm:py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+            <Button type="button" variant="ghost" className="sm:me-auto" disabled={saving} onClick={onClose}>
+              Cancel
+            </Button>
+            <div className="grid grid-cols-2 gap-2 sm:contents">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={saving || !rows || sizeReading !== null}
+                title="Fill blank sizes from the size tag in each listing's photos"
+                onClick={() => void readSizeTags()}
+              >
+                {sizeReading ? `Reading tags ${sizeReading.done} of ${sizeReading.total}…` : "Read size tags"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={saving || !rows || reading !== null}
+                title="Fill blank measurements from photos with a yardstick on the item"
+                onClick={() => void readMeasurements()}
+              >
+                {reading ? `Reading ${reading.done} of ${reading.total}…` : "Read measurements"}
+              </Button>
+            </div>
+            <Button
+              type="submit"
+              disabled={saving || !rows || pendingRemovals > 0 || reading !== null || sizeReading !== null}
+            >
+              {saving ? "Saving…" : `Rewrite ${count}`}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogPopup>
       {zoom ? (
         <ReviewZoom
           convId={zoom.convId}
@@ -379,8 +401,7 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
           onClose={() => setZoom(null)}
         />
       ) : null}
-    </div>,
-    document.body,
+    </Dialog>
   );
 }
 
@@ -408,13 +429,25 @@ function ReviewRow({
   const { details, suggested, readNote, sizeSuggested, sizeReview, sizeNote } = row;
   const title = listing.title || "Untitled";
   return (
-    <li className="bulk-upload-group">
-      <div className="bulk-measure-head">
-        <span className="bulk-measure-title" title={title}>{title}</span>
-        <label className="bulk-measure-size">
-          <span className="label">Size</span>
-          <input
-            className={`input${sizeSuggested ? " is-suggested" : ""}${sizeReview ? " needs-review" : ""}`}
+    <li className="bulk-upload-group flex min-w-0 flex-col gap-2.5 rounded-xl border border-border/60 bg-card/40 p-3">
+      <div className="flex flex-wrap items-end justify-between gap-2.5 sm:flex-nowrap">
+        <span
+          className="min-w-0 flex-1 basis-full truncate font-medium text-foreground text-sm sm:basis-0"
+          title={title}
+        >
+          {title}
+        </span>
+        <FormField label="Size" className="min-w-[7.5rem] flex-1 sm:w-32 sm:min-w-0 sm:flex-none">
+          <Input
+            size="sm"
+            className={cn(
+              sizeSuggested && "border-dashed border-info",
+              sizeReview && "border-warning",
+            )}
+            inputClassName={cn(
+              sizeSuggested && "is-suggested",
+              sizeReview && "needs-review",
+            )}
             type="text"
             autoComplete="off"
             placeholder="From the tag"
@@ -425,11 +458,11 @@ function ReviewRow({
             onChange={(event) => onSizeChange(event.target.value)}
             onKeyDown={onInputKeyDown}
           />
-        </label>
-        <label className="bulk-measure-sku">
-          <span className="label">SKU</span>
-          <input
-            className="input"
+        </FormField>
+        <FormField label="SKU" className="min-w-[7.5rem] flex-1 sm:w-32 sm:min-w-0 sm:flex-none">
+          <Input
+            size="sm"
+            font="mono"
             type="text"
             autoComplete="off"
             spellCheck={false}
@@ -438,8 +471,12 @@ function ReviewRow({
             onChange={(event) => onChange({ sku: event.target.value })}
             onKeyDown={onInputKeyDown}
           />
-        </label>
-        <div className="pr-pills item-garment-pills" role="radiogroup" aria-label={`Garment type for ${title}`}>
+        </FormField>
+        <div
+          className="flex w-fit shrink-0 gap-0.5 rounded-lg bg-input/40 p-0.5"
+          role="radiogroup"
+          aria-label={`Garment type for ${title}`}
+        >
           {GARMENTS.map((g) => (
             <button
               key={g.id}
@@ -447,7 +484,8 @@ function ReviewRow({
               role="radio"
               tabIndex={-1}
               aria-checked={g.id === details.garment}
-              className={`pr-pill${g.id === details.garment ? " is-active" : ""}`}
+              data-pressed={g.id === details.garment ? "" : undefined}
+              className={cn(toggleVariants({ variant: "segmented", size: "segmented" }))}
               onClick={() => onChange({ garment: g.id })}
             >
               {g.label}
@@ -462,40 +500,48 @@ function ReviewRow({
         removalDisabled={removalDisabled}
         guardPhotoRemoval={guardPhotoRemoval}
       />
-      <div className="bulk-measure-fields">
-        {garmentFields(details.garment).map((field) => (
-          <label className="bulk-measure-field" key={`${details.garment}-${field.key}`}>
-            <span className="label">{field.label}</span>
-            <input
-              className={`input${suggested.includes(field.key) ? " is-suggested" : ""}`}
-              type="number"
-              step="0.25"
-              min="0"
-              inputMode="decimal"
-              title={suggested.includes(field.key) ? "Read from the photos. Check it before rewriting." : undefined}
-              value={details.measurements[field.key] || ""}
-              onChange={(event) => onChange({
-                measurements: { ...details.measurements, [field.key]: event.target.value },
-              })}
-              onKeyDown={onInputKeyDown}
-            />
-          </label>
-        ))}
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+        {garmentFields(details.garment).map((field) => {
+          const isSuggested = suggested.includes(field.key);
+          return (
+            <FormField label={field.label} key={`${details.garment}-${field.key}`}>
+              <Input
+                size="sm"
+                className={cn(isSuggested && "border-dashed border-info")}
+                inputClassName={isSuggested ? "is-suggested" : undefined}
+                type="number"
+                step="0.25"
+                min="0"
+                inputMode="decimal"
+                title={isSuggested ? "Read from the photos. Check it before rewriting." : undefined}
+                value={details.measurements[field.key] || ""}
+                onChange={(event) => onChange({
+                  measurements: { ...details.measurements, [field.key]: event.target.value },
+                })}
+                onKeyDown={onInputKeyDown}
+              />
+            </FormField>
+          );
+        })}
       </div>
       {sizeNote ? (
         <p
           id={`regenerate-size-note-${listing.id}`}
-          className={`bulk-upload-help bulk-measure-note${sizeReview ? " needs-review" : ""}`}
+          className={cn(
+            "m-0 text-2xs leading-snug",
+            sizeReview ? "text-warning-foreground" : "text-muted-foreground",
+          )}
         >
           {sizeNote}
         </p>
       ) : null}
-      {readNote ? <p className="bulk-upload-help bulk-measure-note">{readNote}</p> : null}
-      <div className="bulk-measure-fields">
-        <label className="bulk-measure-field">
-          <span className="label">Cost of goods (COG)</span>
-          <input
-            className="input"
+      {readNote ? (
+        <p className="m-0 text-2xs leading-snug text-muted-foreground">{readNote}</p>
+      ) : null}
+      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-4">
+        <FormField label="Cost of goods">
+          <Input
+            size="sm"
             type="number"
             min="0"
             step="0.01"
@@ -505,18 +551,17 @@ function ReviewRow({
             onChange={(event) => onChange({ cog: event.target.value })}
             onKeyDown={onInputKeyDown}
           />
-        </label>
-        <label className="bulk-measure-field bulk-measure-labels">
-          <span className="label">Labels</span>
-          <input
-            className="input"
+        </FormField>
+        <FormField label="Labels" className="sm:col-span-3">
+          <Input
+            size="sm"
             type="text"
             placeholder="To List, Bin 4"
             value={details.labels}
             onChange={(event) => onChange({ labels: event.target.value })}
             onKeyDown={onInputKeyDown}
           />
-        </label>
+        </FormField>
       </div>
     </li>
   );
@@ -668,7 +713,7 @@ export function ReviewPhotos({
               if (!rotate.isPending) rotate.mutate({ photoId: photo.id, degrees: 90 });
             }}
           >
-            ↻
+            <RotateCwIcon className="size-2.5" aria-hidden="true" />
           </button>
           {/* A listing keeps at least one photo; there is nothing to rewrite from otherwise. */}
           {canReorder ? (
@@ -686,7 +731,7 @@ export function ReviewPhotos({
                 else void deletePhoto(photo.id);
               }}
             >
-              x
+              <XIcon className="size-2.5" aria-hidden="true" />
             </button>
           ) : null}
         </div>

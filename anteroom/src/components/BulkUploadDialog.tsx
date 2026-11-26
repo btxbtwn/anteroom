@@ -1,18 +1,33 @@
 import { useWorkspaceRuntime } from "../app/runtime";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
+import { ChevronLeftIcon, ChevronRightIcon, RotateCcwIcon, RotateCwIcon, XIcon } from "lucide-react";
 import { api } from "../api/client";
 import type { SourceBox } from "../api/types";
 import { rotationForTurns, type BulkUploadDefaults, type BulkUploadItem, type PhotoRotation } from "../bulkPhotoUpload";
+import { cn } from "../lib/utils";
 import { formatMoney } from "./analyticsFormat";
 import { BOXES_QUERY_KEY, boxStoreName } from "./boxPurchases";
 import { GARMENTS, garmentFields, guessGarment, type Garment } from "./garmentMeasurements";
 import { dragHasFiles, listingTitleForFolder, moveItem, type PhotoFolderGroup } from "../photoDrop";
 import { applyReading, readEach } from "../measurementReading";
 import { applySizeTagReading } from "../sizeTagReading";
+import { Button } from "./ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "./ui/dialog";
+import { Input } from "./ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
+import { toggleVariants } from "./ui/toggle";
 import { StudioImage } from "./StudioImage";
+import { FormField } from "./WorkspacePage";
 
 interface Props {
   groups: PhotoFolderGroup[];
@@ -67,10 +82,10 @@ type Row = {
 
 /**
  * Everything a bulk upload needs in one window, before anything is created:
- * photo order, the box, COG and labels every draft shares, and each item's
- * own size, SKU and measurements. Click a photo to read the tape in it, or to turn
- * it the right way up. Only the x and Cancel close it, so a stray click
- * outside cannot throw away what was typed.
+ * photo order, the box, cost of goods and labels every draft shares, and each
+ * item's own size, SKU and measurements. Click a photo to enlarge or turn it.
+ * Outside clicks are ignored so a stray click cannot throw away what was typed;
+ * Escape, the close button and Cancel close it cleanly.
  */
 /** The chosen box as the seller reads it. */
 function boxLabel(boxes: readonly SourceBox[], boxId: string | undefined): string {
@@ -324,19 +339,6 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
     }));
   };
 
-  useEffect(() => {
-    const focusTimer = window.setTimeout(() => cogRef.current?.focus(), 0);
-    // Escape only puts an enlarged photo away; it never closes the window.
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setZoom(null);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.clearTimeout(focusTimer);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, []);
-
   const cogNumber = defaults.cog.trim() ? Number(defaults.cog) : null;
   const invalidCog = cogNumber !== null && (!Number.isFinite(cogNumber) || cogNumber < 0);
 
@@ -363,304 +365,358 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
 
   const zoomFiles = zoom ? groups[zoom.group]!.files : [];
 
-  return createPortal(
-    <div className="confirm-dialog bulk-upload-dialog" role="presentation">
-      <div className="confirm-dialog-backdrop" />
-      <form
-        ref={formRef}
-        className="confirm-dialog-popup bulk-upload-popup"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="bulk-upload-title"
-        onSubmit={(event) => {
-          event.preventDefault();
-          confirm(true);
-        }}
-      >
-        <button type="button" className="confirm-dialog-close" onClick={onCancel} aria-label="Cancel bulk upload">
-          x
-        </button>
-        <div className="confirm-dialog-header">
-          <h2 id="bulk-upload-title" className="confirm-dialog-title">
-            Set details for {count} listings
-          </h2>
-          <p className="confirm-dialog-description">
-            Box, COG and labels go on every draft. Add each item's size, SKU and measurements
-            below; check anything read from photos before creating.
-          </p>
-        </div>
-        <div className="bulk-upload-fields">
-          {boxes.length ? (
-            <div className="bulk-upload-field">
-              <span className="label">Box</span>
-              <Select
-                value={defaults.boxId || ""}
-                onValueChange={(value) => setDefaults((current) => ({ ...current, boxId: value || undefined }))}
-              >
-                <SelectTrigger aria-label="Box">
-                  <SelectValue>{boxLabel(boxes, defaults.boxId)}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup>
-                  <SelectItem value="">Not from a box</SelectItem>
-                  {boxes.map((row) => (
-                    <SelectItem key={row.id} value={row.id}>{boxStoreName(row.store)} · {row.title}</SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-            </div>
-          ) : null}
-          <label className="bulk-upload-field">
-            <span className="label">Cost of goods (COG)</span>
-            <input
-              ref={cogRef}
-              className="input"
-              type="number"
-              min="0"
-              step="0.01"
-              inputMode="decimal"
-              placeholder={box?.cost_per_piece != null ? box.cost_per_piece.toFixed(2) : "0.00"}
-              value={defaults.cog}
-              onChange={(event) => setDefaults((current) => ({ ...current, cog: event.target.value }))}
-              onKeyDown={onInputKeyDown}
-            />
-            {box?.cost_per_piece != null ? (
-              <span className="bulk-upload-help">Leave blank to use the box's {formatMoney(box.cost_per_piece)} a piece.</span>
-            ) : null}
-          </label>
-          <label className="bulk-upload-field">
-            <span className="label">Labels</span>
-            <input
-              className="input"
-              type="text"
-              placeholder="To List, Bin 4"
-              value={defaults.labels}
-              onChange={(event) => setDefaults((current) => ({ ...current, labels: event.target.value }))}
-              onKeyDown={onInputKeyDown}
-            />
-            <span className="bulk-upload-help">Separate multiple labels with commas.</span>
-          </label>
-        </div>
-        <ul className="bulk-upload-groups" aria-label="Each listing's photos, size, SKU and measurements">
-          {groups.map((group, groupIndex) => {
-            const title = listingTitleForFolder(group.folder);
-            const row = rows[groupIndex]!;
-            return (
-              <li key={group.folder ?? groupIndex} className="bulk-upload-group">
-                <div className="bulk-measure-head">
-                  <span className="bulk-measure-title" title={title}>
-                    {title}
-                    <span className="photo-tray-meta"> · {group.files.length} photos</span>
+  return (
+    <Dialog
+      open
+      disablePointerDismissal
+      onOpenChange={(open) => {
+        if (!open && !zoom) onCancel();
+      }}
+    >
+      <DialogPopup showCloseButton={false} initialFocus={cogRef} className="max-w-3xl">
+        <form
+          ref={formRef}
+          className="flex min-h-0 flex-1 flex-col"
+          onSubmit={(event) => {
+            event.preventDefault();
+            confirm(true);
+          }}
+        >
+          <DialogClose
+            aria-label="Cancel bulk upload"
+            className="absolute end-2 top-2"
+            render={<Button size="icon" variant="ghost" />}
+          >
+            <XIcon />
+          </DialogClose>
+          <DialogHeader className="pe-12 max-sm:px-4 max-sm:pt-4 max-sm:pb-2">
+            <DialogTitle>Set details for {count} listings</DialogTitle>
+            <DialogDescription>
+              Box, cost of goods and labels go on every draft. Add each item's size, SKU and measurements
+              below; check anything read from photos before creating.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="space-y-4 max-sm:px-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]">
+              {boxes.length ? (
+                <FormField label="Box">
+                  <Select
+                    value={defaults.boxId || ""}
+                    onValueChange={(value) => setDefaults((current) => ({ ...current, boxId: value || undefined }))}
+                  >
+                    <SelectTrigger aria-label="Box">
+                      <SelectValue>{boxLabel(boxes, defaults.boxId)}</SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup>
+                      <SelectItem value="">Not from a box</SelectItem>
+                      {boxes.map((row) => (
+                        <SelectItem key={row.id} value={row.id}>{boxStoreName(row.store)} · {row.title}</SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                </FormField>
+              ) : null}
+              <FormField label="Cost of goods">
+                <Input
+                  ref={cogRef}
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  aria-invalid={invalidCog || undefined}
+                  placeholder={box?.cost_per_piece != null ? box.cost_per_piece.toFixed(2) : "0.00"}
+                  value={defaults.cog}
+                  onChange={(event) => setDefaults((current) => ({ ...current, cog: event.target.value }))}
+                  onKeyDown={onInputKeyDown}
+                />
+                {box?.cost_per_piece != null ? (
+                  <span className="font-normal text-2xs text-muted-foreground">
+                    Leave blank to use the box's {formatMoney(box.cost_per_piece)} a piece.
                   </span>
-                  <label className="bulk-measure-size">
-                    <span className="label">Size</span>
-                    <input
-                      className={`input${row.sizeSuggested ? " is-suggested" : ""}${row.sizeReview ? " needs-review" : ""}`}
-                      type="text"
-                      autoComplete="off"
-                      placeholder="From the tag"
-                      aria-label={`Size for ${title}`}
-                      aria-describedby={row.sizeNote ? `bulk-size-note-${groupIndex}` : undefined}
-                      title={row.sizeSuggested ? "Read from the size tag. Check it before creating." : undefined}
-                      value={row.size}
-                      onChange={(event) => {
-                        setAnnounceSizes(false);
-                        // An edit settles the old warning; a running read's note stays so a photo removal can still void it.
-                        setRow(groupIndex, {
-                          size: event.target.value, sizeSuggested: false, sizeReview: false, sizeWarning: undefined,
-                          ...(row.sizeNote === READING_SIZE_NOTE ? {} : { sizeNote: undefined }),
-                        });
-                      }}
-                      onKeyDown={onInputKeyDown}
-                    />
-                  </label>
-                  <label className="bulk-measure-sku">
-                    <span className="label">SKU</span>
-                    <input
-                      className="input"
-                      type="text"
-                      autoComplete="off"
-                      spellCheck={false}
-                      aria-label={`SKU for ${title}`}
-                      value={row.sku}
-                      onChange={(event) => setRow(groupIndex, { sku: event.target.value })}
-                      onKeyDown={onInputKeyDown}
-                    />
-                  </label>
-                  <div className="pr-pills item-garment-pills" role="radiogroup" aria-label={`Garment type for ${title}`}>
-                    {GARMENTS.map((g) => (
-                      <button
-                        key={g.id}
-                        type="button"
-                        role="radio"
-                        tabIndex={-1}
-                        aria-checked={g.id === row.garment}
-                        className={`pr-pill${g.id === row.garment ? " is-active" : ""}`}
-                        onClick={() => {
-                          if (g.id === row.garment) return;
-                          measureAbortsRef.current.get(groupIndex)?.abort();
-                          measureAbortsRef.current.delete(groupIndex);
-                          setRow(groupIndex, {
-                            garment: g.id,
-                            ...(row.readNote === READING_MEASUREMENTS_NOTE ? { readNote: undefined } : {}),
-                          });
-                        }}
+                ) : null}
+              </FormField>
+              <FormField label="Labels">
+                <Input
+                  type="text"
+                  placeholder="To List, Bin 4"
+                  value={defaults.labels}
+                  onChange={(event) => setDefaults((current) => ({ ...current, labels: event.target.value }))}
+                  onKeyDown={onInputKeyDown}
+                />
+                <span className="font-normal text-2xs text-muted-foreground">
+                  Separate multiple labels with commas.
+                </span>
+              </FormField>
+            </div>
+            <ul
+              className="m-0 flex list-none flex-col gap-2.5 p-0"
+              aria-label="Each listing's photos, size, SKU and measurements"
+            >
+              {groups.map((group, groupIndex) => {
+                const title = listingTitleForFolder(group.folder);
+                const row = rows[groupIndex]!;
+                return (
+                  <li
+                    key={group.folder ?? groupIndex}
+                    className="bulk-upload-group flex min-w-0 flex-col gap-2.5 rounded-xl border border-border/60 bg-card/40 p-3"
+                  >
+                    <div className="flex flex-wrap items-end justify-between gap-2.5 sm:flex-nowrap">
+                      <span
+                        className="min-w-0 flex-1 basis-full truncate font-medium text-foreground text-sm sm:basis-0"
+                        title={title}
                       >
-                        {g.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="photo-strip">
-                  {group.files.map((file, photoIndex) => {
-                    const spot = { group: groupIndex, photo: photoIndex };
-                    const canReorder = group.files.length > 1;
-                    const isDragging = dragFrom?.group === groupIndex && dragFrom.photo === photoIndex;
-                    const isDropTarget = dropOn?.group === groupIndex && dropOn.photo === photoIndex;
-                    return (
-                      <div
-                        key={`${file.name}-${file.lastModified}-${file.size}`}
-                        className={[
-                          "photo-thumb",
-                          canReorder ? "photo-thumb-reorderable" : "",
-                          isDragging ? "is-dragging" : "",
-                          isDropTarget ? "is-drop-target" : "",
-                        ].filter(Boolean).join(" ")}
-                        draggable={canReorder}
-                        title={canReorder ? `${file.name} · drag to reorder, click to enlarge` : file.name}
-                        onClick={() => setZoom(spot)}
-                        onDragStart={(event) => {
-                          event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData("text/plain", file.name);
-                          setDragFrom(spot);
-                        }}
-                        onDragOver={(event) => {
-                          if (!dragFrom || dragFrom.group !== groupIndex || isDragging) return;
-                          event.preventDefault();
-                          event.stopPropagation();
-                          event.dataTransfer.dropEffect = "move";
-                          if (!isDropTarget) setDropOn(spot);
-                        }}
-                        onDrop={(event) => {
-                          if (dragHasFiles(event.dataTransfer)) return;
-                          event.preventDefault();
-                          event.stopPropagation();
-                          dropPhoto(spot);
-                        }}
-                        onDragEnd={resetDrag}
-                      >
-                        {previewUrls.has(file) ? (
-                          <img
-                            src={previewUrls.get(file)}
-                            alt=""
-                            loading="lazy"
-                            decoding="async"
-                            draggable={false}
-                            style={turns.get(file) ? { transform: `rotate(${turns.get(file)! * 90}deg)` } : undefined}
-                          />
-                        ) : null}
-                        <div className="photo-thumb-num">{String(photoIndex + 1).padStart(2, "0")}</div>
-                        <button
-                          type="button"
-                          tabIndex={-1}
-                          className="photo-thumb-rotate"
-                          aria-label={`Rotate photo ${photoIndex + 1} right`}
-                          title="Rotate right"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            rotate(file, 90);
+                        {title}
+                        <span className="font-normal text-2xs text-muted-foreground"> · {group.files.length} photos</span>
+                      </span>
+                      <FormField label="Size" className="min-w-[7.5rem] flex-1 sm:w-32 sm:min-w-0 sm:flex-none">
+                        <Input
+                          size="sm"
+                          className={cn(
+                            row.sizeSuggested && "border-dashed border-info",
+                            row.sizeReview && "border-warning",
+                          )}
+                          inputClassName={cn(
+                            row.sizeSuggested && "is-suggested",
+                            row.sizeReview && "needs-review",
+                          )}
+                          type="text"
+                          autoComplete="off"
+                          placeholder="From the tag"
+                          aria-label={`Size for ${title}`}
+                          aria-describedby={row.sizeNote ? `bulk-size-note-${groupIndex}` : undefined}
+                          title={row.sizeSuggested ? "Read from the size tag. Check it before creating." : undefined}
+                          value={row.size}
+                          onChange={(event) => {
+                            setAnnounceSizes(false);
+                            // An edit settles the old warning; a running read's note stays so a photo removal can still void it.
+                            setRow(groupIndex, {
+                              size: event.target.value, sizeSuggested: false, sizeReview: false, sizeWarning: undefined,
+                              ...(row.sizeNote === READING_SIZE_NOTE ? {} : { sizeNote: undefined }),
+                            });
                           }}
-                        >
-                          ↻
-                        </button>
-                        {canReorder ? (
+                          onKeyDown={onInputKeyDown}
+                        />
+                      </FormField>
+                      <FormField label="SKU" className="min-w-[7.5rem] flex-1 sm:w-32 sm:min-w-0 sm:flex-none">
+                        <Input
+                          size="sm"
+                          font="mono"
+                          type="text"
+                          autoComplete="off"
+                          spellCheck={false}
+                          aria-label={`SKU for ${title}`}
+                          value={row.sku}
+                          onChange={(event) => setRow(groupIndex, { sku: event.target.value })}
+                          onKeyDown={onInputKeyDown}
+                        />
+                      </FormField>
+                      <div
+                        className="flex w-fit shrink-0 gap-0.5 rounded-lg bg-input/40 p-0.5"
+                        role="radiogroup"
+                        aria-label={`Garment type for ${title}`}
+                      >
+                        {GARMENTS.map((g) => (
                           <button
+                            key={g.id}
                             type="button"
+                            role="radio"
                             tabIndex={-1}
-                            className="photo-thumb-delete"
-                            aria-label={`Remove photo ${photoIndex + 1}`}
-                            title="Remove photo"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              removePhoto(spot);
+                            aria-checked={g.id === row.garment}
+                            data-pressed={g.id === row.garment ? "" : undefined}
+                            className={cn(toggleVariants({ variant: "segmented", size: "segmented" }))}
+                            onClick={() => {
+                              if (g.id === row.garment) return;
+                              measureAbortsRef.current.get(groupIndex)?.abort();
+                              measureAbortsRef.current.delete(groupIndex);
+                              setRow(groupIndex, {
+                                garment: g.id,
+                                ...(row.readNote === READING_MEASUREMENTS_NOTE ? { readNote: undefined } : {}),
+                              });
                             }}
                           >
-                            x
+                            {g.label}
                           </button>
-                        ) : null}
+                        ))}
                       </div>
-                    );
-                  })}
-                </div>
-                <div className="bulk-measure-fields">
-                  {garmentFields(row.garment).map((field) => (
-                    <label className="bulk-measure-field" key={`${row.garment}-${field.key}`}>
-                      <span className="label">{field.label}</span>
-                      <input
-                        className={`input${row.suggested.includes(field.key) ? " is-suggested" : ""}`}
-                        type="number"
-                        step="0.25"
-                        min="0"
-                        inputMode="decimal"
-                        title={row.suggested.includes(field.key) ? "Read from the photos. Check it before creating." : undefined}
-                        value={row.measurements[field.key] || ""}
-                        onChange={(event) => setRow(groupIndex, {
-                          measurements: { ...row.measurements, [field.key]: event.target.value },
-                          suggested: row.suggested.filter((key) => key !== field.key),
-                        })}
-                        onKeyDown={onInputKeyDown}
-                      />
-                    </label>
-                  ))}
-                </div>
-                {row.sizeNote ? (
-                  <p
-                    id={`bulk-size-note-${groupIndex}`}
-                    className={`bulk-upload-help bulk-measure-note${row.sizeReview ? " needs-review" : ""}`}
-                  >
-                    {row.sizeNote}
-                  </p>
-                ) : null}
-                {row.readNote ? <p className="bulk-upload-help bulk-measure-note">{row.readNote}</p> : null}
-              </li>
-            );
-          })}
-        </ul>
-        <p className="sr-only" role="status">
-          {announceSizes
-            ? `Size tags read. ${rows.filter((row) => row.sizeSuggested).length} filled, ${rows.filter((row) => row.sizeReview).length} to check.`
-            : ""}
-        </p>
-        <div className="confirm-dialog-footer">
-          <button type="button" className="btn btn-ghost" onClick={onCancel}>
-            Cancel
-          </button>
-          <span className="bulk-measure-spacer" />
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={sizeReading !== null || !runtime.features.has("generation")}
-            title="Fill blank sizes from the size tag in each item's photos"
-            onClick={() => void readSizeTags()}
-          >
-            {sizeReading ? `Reading tags ${sizeReading.done} of ${sizeReading.total}…` : "Read size tags"}
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={reading !== null || !runtime.features.has("generation")}
-            title="Fill blank measurements from photos with a yardstick on the item"
-            onClick={() => void readMeasurements()}
-          >
-            {reading ? `Reading ${reading.done} of ${reading.total}…` : "Read measurements"}
-          </button>
-          <button type="button" className="btn btn-secondary" disabled={invalidCog || reading !== null || sizeReading !== null} onClick={() => confirm(false)}>
-            Create drafts only
-          </button>
-          {runtime.features.has("generation") && <button type="submit" className="btn btn-primary" disabled={invalidCog || reading !== null || sizeReading !== null}>
-            Create and generate {count}
-          </button>}
-        </div>
-      </form>
+                    </div>
+                    <div className="photo-strip">
+                      {group.files.map((file, photoIndex) => {
+                        const spot = { group: groupIndex, photo: photoIndex };
+                        const canReorder = group.files.length > 1;
+                        const isDragging = dragFrom?.group === groupIndex && dragFrom.photo === photoIndex;
+                        const isDropTarget = dropOn?.group === groupIndex && dropOn.photo === photoIndex;
+                        return (
+                          <div
+                            key={`${file.name}-${file.lastModified}-${file.size}`}
+                            className={[
+                              "photo-thumb",
+                              canReorder ? "photo-thumb-reorderable" : "",
+                              isDragging ? "is-dragging" : "",
+                              isDropTarget ? "is-drop-target" : "",
+                            ].filter(Boolean).join(" ")}
+                            draggable={canReorder}
+                            title={canReorder ? `${file.name} · drag to reorder, click to enlarge` : file.name}
+                            onClick={() => setZoom(spot)}
+                            onDragStart={(event) => {
+                              event.dataTransfer.effectAllowed = "move";
+                              event.dataTransfer.setData("text/plain", file.name);
+                              setDragFrom(spot);
+                            }}
+                            onDragOver={(event) => {
+                              if (!dragFrom || dragFrom.group !== groupIndex || isDragging) return;
+                              event.preventDefault();
+                              event.stopPropagation();
+                              event.dataTransfer.dropEffect = "move";
+                              if (!isDropTarget) setDropOn(spot);
+                            }}
+                            onDrop={(event) => {
+                              if (dragHasFiles(event.dataTransfer)) return;
+                              event.preventDefault();
+                              event.stopPropagation();
+                              dropPhoto(spot);
+                            }}
+                            onDragEnd={resetDrag}
+                          >
+                            {previewUrls.has(file) ? (
+                              <img
+                                src={previewUrls.get(file)}
+                                alt=""
+                                loading="lazy"
+                                decoding="async"
+                                draggable={false}
+                                style={turns.get(file) ? { transform: `rotate(${turns.get(file)! * 90}deg)` } : undefined}
+                              />
+                            ) : null}
+                            <div className="photo-thumb-num">{String(photoIndex + 1).padStart(2, "0")}</div>
+                            <button
+                              type="button"
+                              tabIndex={-1}
+                              className="photo-thumb-rotate"
+                              aria-label={`Rotate photo ${photoIndex + 1} right`}
+                              title="Rotate right"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                rotate(file, 90);
+                              }}
+                            >
+                              <RotateCwIcon className="size-2.5" aria-hidden="true" />
+                            </button>
+                            {canReorder ? (
+                              <button
+                                type="button"
+                                tabIndex={-1}
+                                className="photo-thumb-delete"
+                                aria-label={`Remove photo ${photoIndex + 1}`}
+                                title="Remove photo"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  removePhoto(spot);
+                                }}
+                              >
+                                <XIcon className="size-2.5" aria-hidden="true" />
+                              </button>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+                      {garmentFields(row.garment).map((field) => {
+                        const isSuggested = row.suggested.includes(field.key);
+                        return (
+                          <FormField label={field.label} key={`${row.garment}-${field.key}`}>
+                            <Input
+                              size="sm"
+                              className={cn(isSuggested && "border-dashed border-info")}
+                              inputClassName={isSuggested ? "is-suggested" : undefined}
+                              type="number"
+                              step="0.25"
+                              min="0"
+                              inputMode="decimal"
+                              title={isSuggested ? "Read from the photos. Check it before creating." : undefined}
+                              value={row.measurements[field.key] || ""}
+                              onChange={(event) => setRow(groupIndex, {
+                                measurements: { ...row.measurements, [field.key]: event.target.value },
+                                suggested: row.suggested.filter((key) => key !== field.key),
+                              })}
+                              onKeyDown={onInputKeyDown}
+                            />
+                          </FormField>
+                        );
+                      })}
+                    </div>
+                    {row.sizeNote ? (
+                      <p
+                        id={`bulk-size-note-${groupIndex}`}
+                        className={cn(
+                          "m-0 text-2xs leading-snug",
+                          row.sizeReview ? "text-warning-foreground" : "text-muted-foreground",
+                        )}
+                      >
+                        {row.sizeNote}
+                      </p>
+                    ) : null}
+                    {row.readNote ? (
+                      <p className="m-0 text-2xs leading-snug text-muted-foreground">{row.readNote}</p>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </DialogPanel>
+          <p className="sr-only" role="status">
+            {announceSizes
+              ? `Size tags read. ${rows.filter((row) => row.sizeSuggested).length} filled, ${rows.filter((row) => row.sizeReview).length} to check.`
+              : ""}
+          </p>
+          <DialogFooter className="grid grid-cols-2 gap-2 max-sm:px-4 max-sm:py-3 sm:flex sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+            <Button type="button" variant="ghost" className="max-sm:order-4 sm:me-auto" onClick={onCancel}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="max-sm:order-2"
+              disabled={sizeReading !== null || !runtime.features.has("generation")}
+              title="Fill blank sizes from the size tag in each item's photos"
+              onClick={() => void readSizeTags()}
+            >
+              {sizeReading ? `Reading tags ${sizeReading.done} of ${sizeReading.total}…` : "Read size tags"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="max-sm:order-3"
+              disabled={reading !== null || !runtime.features.has("generation")}
+              title="Fill blank measurements from photos with a yardstick on the item"
+              onClick={() => void readMeasurements()}
+            >
+              {reading ? `Reading ${reading.done} of ${reading.total}…` : "Read measurements"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className={cn(
+                "max-sm:order-5",
+                !runtime.features.has("generation") && "max-sm:col-span-2 max-sm:order-1",
+              )}
+              disabled={invalidCog || reading !== null || sizeReading !== null}
+              onClick={() => confirm(false)}
+            >
+              Create drafts only
+            </Button>
+            {runtime.features.has("generation") && (
+              <Button
+                type="submit"
+                className="max-sm:col-span-2 max-sm:order-1"
+                disabled={invalidCog || reading !== null || sizeReading !== null}
+              >
+                Create and generate {count}
+              </Button>
+            )}
+          </DialogFooter>
+        </form>
+      </DialogPopup>
       {zoom ? (
         <PhotoZoom
           urls={zoomFiles.map((file) => previewUrls.get(file) || "")}
@@ -671,8 +727,7 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
           onClose={() => setZoom(null)}
         />
       ) : null}
-    </div>,
-    document.body,
+    </Dialog>
   );
 }
 
@@ -695,55 +750,98 @@ export function PhotoZoom({
   onClose: () => void;
 }) {
   const step = (delta: number) => onStep((index + delta + urls.length) % urls.length);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    ref.current?.focus();
-  }, []);
 
   return (
-    <div
-      ref={ref}
-      className="photo-lightbox"
-      role="dialog"
-      aria-modal="true"
-      tabIndex={-1}
-      aria-label={`Photo ${index + 1} of ${urls.length}`}
-      onKeyDown={(event) => {
-        if (event.key === "ArrowLeft") step(-1);
-        if (event.key === "ArrowRight") step(1);
-      }}
-      onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
-    >
-      <button type="button" className="photo-lightbox-close" onClick={onClose} aria-label="Close">
-        x
-      </button>
-      <div className="photo-lightbox-rotate">
-        <button type="button" onClick={() => onRotate(-90)} disabled={rotating} aria-label="Rotate left" title="Rotate left">
-          ↺
-        </button>
-        <button type="button" onClick={() => onRotate(90)} disabled={rotating} aria-label="Rotate right" title="Rotate right">
-          ↻
-        </button>
-      </div>
-      {urls.length > 1 && (
-        <button type="button" className="photo-lightbox-nav photo-lightbox-prev" onClick={() => step(-1)} aria-label="Previous photo">
-          ‹
-        </button>
-      )}
-      <StudioImage
-        className={`photo-lightbox-image${turns % 2 ? " is-quarter-turned" : ""}`}
-        style={turns ? { transform: `rotate(${turns * 90}deg)` } : undefined}
-        src={urls[index]}
-        alt={`Photo ${index + 1}`}
-        onClick={onClose}
-      />
-      {urls.length > 1 && (
-        <button type="button" className="photo-lightbox-nav photo-lightbox-next" onClick={() => step(1)} aria-label="Next photo">
-          ›
-        </button>
-      )}
-      <div className="photo-lightbox-meta">{String(index + 1).padStart(2, "0")} / {String(urls.length).padStart(2, "0")}</div>
-    </div>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogPopup
+        variant="media"
+        showCloseButton={false}
+        bottomStickOnMobile={false}
+        className="row-start-1 h-full max-h-[92vh] w-[92vw] max-w-[92vw] items-center justify-center overflow-visible"
+        aria-label={`Photo ${index + 1} of ${urls.length}`}
+        onKeyDown={(event) => {
+          if (urls.length < 2) return;
+          if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            step(-1);
+          }
+          if (event.key === "ArrowRight") {
+            event.preventDefault();
+            step(1);
+          }
+        }}
+        onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
+      >
+        <DialogTitle className="sr-only">Photo {index + 1} of {urls.length}</DialogTitle>
+        <Button
+          size="icon-sm"
+          variant="media-close"
+          className="absolute top-0 right-0 z-20"
+          aria-label="Close"
+          onClick={onClose}
+        >
+          <XIcon />
+        </Button>
+        {urls.length > 1 && (
+          <Button
+            size="icon"
+            variant="media-navigation"
+            className="left-0"
+            aria-label="Previous photo"
+            onClick={() => step(-1)}
+          >
+            <ChevronLeftIcon className="size-5" />
+          </Button>
+        )}
+        <div className="relative isolate z-10 flex max-h-full max-w-[calc(92vw-96px)] flex-col items-center">
+          <StudioImage
+            className={cn(
+              "photo-lightbox-image max-h-[80vh] w-auto max-w-full rounded-lg border border-border/70 object-contain shadow-2xl transition-transform",
+              turns % 2 ? "is-quarter-turned" : undefined,
+            )}
+            style={turns ? { transform: `rotate(${turns * 90}deg)` } : undefined}
+            src={urls[index]}
+            alt={`Photo ${index + 1}`}
+            onClick={onClose}
+          />
+          <div className="mt-2 flex items-center gap-1.5 text-white/80 text-xs">
+            <Button
+              variant="overlay"
+              size="icon-micro"
+              onClick={() => onRotate(-90)}
+              disabled={rotating}
+              aria-label="Rotate left"
+              title="Rotate left"
+            >
+              <RotateCcwIcon />
+            </Button>
+            <span className="font-mono tabular-nums" aria-live="polite">
+              {String(index + 1).padStart(2, "0")} / {String(urls.length).padStart(2, "0")}
+            </span>
+            <Button
+              variant="overlay"
+              size="icon-micro"
+              onClick={() => onRotate(90)}
+              disabled={rotating}
+              aria-label="Rotate right"
+              title="Rotate right"
+            >
+              <RotateCwIcon />
+            </Button>
+          </div>
+        </div>
+        {urls.length > 1 && (
+          <Button
+            size="icon"
+            variant="media-navigation"
+            className="right-0"
+            aria-label="Next photo"
+            onClick={() => step(1)}
+          >
+            <ChevronRightIcon className="size-5" />
+          </Button>
+        )}
+      </DialogPopup>
+    </Dialog>
   );
 }
