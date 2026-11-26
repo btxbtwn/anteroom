@@ -1,0 +1,1 @@
+- Settings → Usage now lets you pick the last 30 days or a calendar month, charts what you spent each day (with a table of the same numbers), lists which AI models and photo edits the money went on, and downloads every charge as a CSV.

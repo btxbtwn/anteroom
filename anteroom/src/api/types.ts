@@ -323,6 +323,37 @@ export interface ProviderUsageLimits {
   plan?: string;
   unavailable?: { reason: "unsupported" | "probeFailed"; message?: string };
 }
+/** One model or kind of photo edit inside a metered service. */
+export interface ManagedUsageItem {
+  label: string;
+  count: number;
+  usd: number;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+export interface ManagedUsageService {
+  count: number;
+  usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  /** What the service was used for, costliest first; the rows add up to `usd`. */
+  items: ManagedUsageItem[];
+}
+
+/** A seller's own costs on Anteroom-run services for one period. Days and months are UTC. */
+export interface ManagedUsage {
+  /** `30d` or a `YYYY-MM` month; `end` is exclusive. */
+  period: { id: string; start: string; end: string };
+  /** Months the seller can pick, newest first. */
+  months: string[];
+  total_usd: number;
+  openrouter: ManagedUsageService;
+  photoroom: ManagedUsageService;
+  /** Every day of the period, oldest first, with each service's cost. */
+  days: { date: string; openrouter: number; photoroom: number }[];
+}
+
 /** "same" reads photos with the listing provider. */
 export type PhotoProviderChoice = "same" | ListingProviderId;
 
