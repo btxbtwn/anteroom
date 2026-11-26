@@ -904,7 +904,12 @@ final class TodaySandboxTests: XCTestCase {
         let count = active.label.split(separator: " ").last.flatMap { Int($0) } ?? 0
         XCTAssertEqual(badge.isEmpty ? 0 : Int(badge.split(separator: " ").first ?? "") ?? -1, count,
                        "The Today badge is the active count")
-        app.navigationBars.buttons["Today"].firstMatch.tap()
+        let attention = app.navigationBars["Needs attention"]
+        for _ in 0..<3 where attention.exists {
+            attention.buttons["BackButton"].tap()
+            _ = open.waitForExistence(timeout: 10)
+        }
+        XCTAssertFalse(attention.exists, "Back returns to Today")
 
         // Add a goal, see its progress, then delete it after confirming.
         let add = app.buttons["today-add-goal"]
@@ -916,9 +921,9 @@ final class TodaySandboxTests: XCTestCase {
         target.typeText("40")
         keep(app, "New goal")
         app.buttons["Save goal"].tap()
-        let goal = app.staticTexts["Monthly profit"].firstMatch
+        let goal = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Monthly profit'")).firstMatch
         XCTAssertTrue(goal.waitForExistence(timeout: 30), "The new goal shows on Today")
-        XCTAssertTrue(app.staticTexts["/ $40"].exists)
+        XCTAssertTrue(goal.label.contains("/ $40"), "The goal shows its target")
         keep(app, "Today with a goal")
         goal.swipeLeft()
         app.buttons["Delete"].firstMatch.tap()

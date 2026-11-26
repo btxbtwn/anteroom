@@ -136,6 +136,7 @@ struct TodayView: View {
             }
             ForEach(goals) { goal in
                 GoalRow(goal: goal)
+                    .accessibilityElement(children: .combine)
                     .contentShape(Rectangle())
                     .onTapGesture { editing = GoalForm(goal) }
                     .disabled(deleting.contains(goal.id))
