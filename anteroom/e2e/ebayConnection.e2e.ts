@@ -44,6 +44,6 @@ test("disconnected eBay leads with connection and keeps local sale plans availab
     await page.evaluate(dark => document.documentElement.classList.toggle("dark", dark), scheme === "dark");
     await page.screenshot({ path: info.outputPath(`ebay-workspace-${scheme}.png`) });
   }
-  await page.getByText("Sale calendar", { exact: true }).click();
+  await page.locator("summary", { hasText: "Sale calendar" }).click();
   await expect(page.getByRole("button", { name: "Plan a sale", exact: true })).toBeEnabled();
 });
