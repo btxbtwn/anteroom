@@ -143,8 +143,9 @@ class AccessLogMiddleware:
                 http_log.warning("%s %s answered %s", scope["method"], template, status)
             request_context.reset(context)
             # 499: the client closed the connection before any response started.
-            access_log.info("%s %s %s %dms", scope["method"], template, status or (500 if failed else 499),
-                            round((time.perf_counter() - started) * 1000))
+            access_log.info("%s %s %s %dms%s", scope["method"], template, status or (500 if failed else 499),
+                            round((time.perf_counter() - started) * 1000),
+                            "".join(f" {k}={v}" for k, v in scope.get("anteroom_request_phases", {}).items()))
 
 
 def _build_csp(supabase_url: str) -> str:

@@ -1,0 +1,1 @@
+- Slow and failed hosted requests record database timing, including how long the connection was held. Category tree responses also measure encoding.

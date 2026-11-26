@@ -15,8 +15,9 @@ from typing import Any
 
 from sqlalchemy.exc import TimeoutError as PoolTimeout
 from sqlalchemy.pool import QueuePool
+from sqlalchemy.util.queue import Queue
 
-from anteroom import app_module_path
+from anteroom import app_module_path, request_phases
 
 _MAX_HOLDERS = 20
 _MAX_FRAMES = 6
@@ -37,8 +38,16 @@ def _checkout_site() -> list[str]:
     return sites
 
 
+class _TimedQueue(Queue):
+    def get(self, block=True, timeout=None):
+        with request_phases.measure('db_pool_wait_ms'):
+            return super().get(block, timeout)
+
+
 class DiagnosticQueuePool(QueuePool):
     """QueuePool with the same capacity/waits and an in-memory timeout snapshot."""
+
+    _queue_class = _TimedQueue
 
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
@@ -53,11 +62,16 @@ class DiagnosticQueuePool(QueuePool):
         holder = {'started': time.monotonic(), 'execution': 'async_task' if task else 'thread',
                   'checkout_stack': _checkout_site()}
         with self._holders_lock:
-            self._holders[id(record)] = holder
+            # QueuePool may recurse into _do_get during an overflow race.
+            if id(record) not in self._holders:
+                holder['request_timer'] = request_phases.start('db_held_ms')
+                self._holders[id(record)] = holder
 
     def _do_return_conn(self, record) -> None:
         with self._holders_lock:
-            self._holders.pop(id(record), None)
+            holder = self._holders.pop(id(record), None)
+        if holder is not None:
+            request_phases.finish(holder.get('request_timer'))
         super()._do_return_conn(record)
 
     def _timeout_snapshot(self) -> dict[str, Any]:
@@ -72,6 +86,10 @@ class DiagnosticQueuePool(QueuePool):
                          'execution': holder['execution'], 'checkout_stack': holder['checkout_stack']}
                         for holder in holders[:_MAX_HOLDERS]],
         }
+
+    def connect(self):
+        with request_phases.measure('db_acquire_ms'):
+            return super().connect()
 
     def _do_get(self):
         try:

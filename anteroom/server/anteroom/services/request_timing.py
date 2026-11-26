@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from time import perf_counter
 
+from anteroom import request_phases
 from anteroom.services.hosted_browser_relay import WAIT_S
 
 log = logging.getLogger(__name__)
@@ -51,8 +52,13 @@ class RequestTimingMiddleware:
         started = time.perf_counter()
         details: dict[str, int | str] = {}
 
+        phases = request_phases.Phases()
+        failed = True
+
         async def timed_send(message):
+            nonlocal failed
             if message["type"] == "http.response.start":
+                failed = message["status"] >= 400
                 elapsed = time.perf_counter() - started
                 route = getattr(scope.get("route"), "path", "unmatched")
                 allowance = SLOW_SECONDS
@@ -60,13 +66,21 @@ class RequestTimingMiddleware:
                 if scope["method"] == "GET" and route == "/api/browser-relay/next" and message["status"] in (200, 204):
                     allowance += WAIT_S
                 if elapsed >= allowance:
+                    details.update(phases.snapshot())
                     log.warning("Slow response: %s %s %s %dms%s", scope["method"], route,
                                 message["status"], round(elapsed * 1000),
                                 "".join(f" {name}={value}" for name, value in details.items()))
             await send(message)
 
         token = _details.set(details)
+        phase_token = request_phases.current.set(phases)
         try:
             await self.app(scope, receive, timed_send)
+        except Exception:
+            failed = True
+            raise
         finally:
+            if failed:
+                scope["anteroom_request_phases"] = phases.snapshot()
+            request_phases.current.reset(phase_token)
             _details.reset(token)

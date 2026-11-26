@@ -779,3 +779,11 @@ app, the Chrome extension, the webhook relay, and errors that code catches
 without logging outside the shared request, query, mutation and job paths.
 Device failures returned to a hosted job are covered by the failed-job report;
 standalone device crashes still need device-side reporting.
+
+Slow response lines and failed request diagnostics use cumulative milliseconds across
+this request's worker threads. `db_pool_wait_ms` times queue retrieval;
+`db_acquire_ms` also includes opening a new DB connection when necessary.
+`db_held_ms` spans acquisition through pool return and `db_sql_ms` measures driver
+execution. For category tree cache misses, `db_read_ms` includes fetching and
+materializing rows, and `encode_ms` covers building, encoding and hashing the response.
+Overlapping phases are not additive. An absent field means the phase was not observed.
