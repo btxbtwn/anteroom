@@ -14,11 +14,13 @@ import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon } from "lucide-r
 import { cn } from "../../lib/utils";
 import { STRIP_THUMB_SIZE } from "../../photoThumb";
 import { CHAT_PROSE_CLASS, ChatMarkdown } from "../ChatMarkdown";
+import { streamingDisplayText } from "../streamingText";
 import { WorkingDuration } from "../WorkingDuration";
 import { Button } from "../ui/button";
 import { Dialog, DialogPopup } from "../ui/dialog";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { useSmoothText } from "./smoothText";
 
 /** One image the seller attached to a message. */
 export interface MessageAttachment {
@@ -278,6 +280,33 @@ export function AssistantMessageRow({
           </div>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The reply being written. `received` is everything that has arrived so far;
+ * it is revealed at a steady pace however unevenly it came, and the block
+ * being written shows up to its last whole word with open markup closed.
+ * Once the reply is `complete` and all of it is showing, it is shown as sent.
+ */
+export function StreamingAssistantRow({
+  received,
+  complete = false,
+  display,
+}: {
+  received: string;
+  complete?: boolean;
+  /** Turns the text to show into what the seller reads, when a chat hides part of a reply. */
+  display?: (text: string) => string;
+}) {
+  const shown = useSmoothText(received);
+  const text = complete && shown.length === received.length ? shown : streamingDisplayText(shown);
+  const visible = display ? display(text) : text;
+  if (!visible) return null;
+  return (
+    <div className="pb-4">
+      <AssistantMessageRow text={visible} streaming />
     </div>
   );
 }

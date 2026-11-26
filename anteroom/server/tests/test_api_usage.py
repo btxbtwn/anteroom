@@ -84,7 +84,7 @@ def test_managed_photoroom_success_records_rate_card_cost(db, monkeypatch):
 
     monkeypatch.setenv(photoroom.MANAGED_KEY_ENV, "sk_pr_managed")
     with service_context.use(_context(SELLER_B, SessionLocal)):
-        api_usage.record_photoroom(edit_label="Ghost mannequin, shadow")
+        api_usage.record_photoroom(edit_label="Ghost mannequin, shadow", basic=False)
     rows = db.scalars(select(ApiUsageEvent)).all()
     assert len(rows) == 1
     assert rows[0].user_id == SELLER_B
@@ -101,8 +101,10 @@ def test_photoroom_cost_env_override(db, monkeypatch):
     monkeypatch.setenv(photoroom.MANAGED_KEY_ENV, "sk_pr_managed")
     monkeypatch.setenv(api_usage.PHOTOROOM_COST_ENV, "0.08")
     with service_context.use(_context(SELLER_A, SessionLocal)):
-        api_usage.record_photoroom(edit_label="Background removed")
-    assert db.scalars(select(ApiUsageEvent)).one().cost_usd == pytest.approx(0.08)
+        api_usage.record_photoroom(edit_label="Background removed", basic=True)
+        api_usage.record_photoroom(edit_label="Ghost mannequin", basic=False)
+    by_edit = {row.model_or_edit: row.cost_usd for row in db.scalars(select(ApiUsageEvent)).all()}
+    assert by_edit == {"Background removed": pytest.approx(0.016), "Ghost mannequin": pytest.approx(0.08)}
 
 
 def test_seller_photoroom_key_is_not_metered_as_anteroom_cost(db, monkeypatch):
@@ -110,38 +112,39 @@ def test_seller_photoroom_key_is_not_metered_as_anteroom_cost(db, monkeypatch):
 
     monkeypatch.delenv(photoroom.MANAGED_KEY_ENV, raising=False)
     with service_context.use(_context(SELLER_A, SessionLocal)):
-        api_usage.record_photoroom(edit_label="Background removed")
+        api_usage.record_photoroom(edit_label="Background removed", basic=True)
     assert db.scalars(select(ApiUsageEvent)).all() == []
 
 
-def _jpeg() -> bytes:
+def _png() -> bytes:
     from io import BytesIO
     from PIL import Image
 
     buffer = BytesIO()
-    Image.new("RGB", (40, 40), (10, 20, 30)).save(buffer, "JPEG")
+    Image.new("RGBA", (40, 40), (10, 20, 30, 255)).save(buffer, "PNG")
     return buffer.getvalue()
 
 
-def test_photoroom_edit_records_usage_only_on_managed_success(monkeypatch, db):
+@pytest.mark.parametrize(("keep", "cost"), [("", 0.02), ("shirt", 0.10)])
+def test_photoroom_edit_records_usage_only_on_managed_success(monkeypatch, db, keep, cost):
     import asyncio
     from anteroom.database import SessionLocal
 
     monkeypatch.setenv(photoroom.MANAGED_KEY_ENV, "sk_pr_managed")
-    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+    photo = _png()
 
     class Transport(httpx.AsyncBaseTransport):
         async def handle_async_request(self, request):
-            return httpx.Response(200, content=png)
+            return httpx.Response(200, content=photo)
 
     monkeypatch.setattr(photoroom, "_client", lambda timeout: httpx.AsyncClient(transport=Transport(), timeout=timeout))
     with service_context.use(_context(SELLER_A, SessionLocal)):
-        result = asyncio.run(photoroom.edit(_jpeg(), StudioOptions(remove_background=True)))
+        result = asyncio.run(photoroom.edit(photo, StudioOptions(remove_background=True, keep=keep)))
     assert result.startswith(b"\x89PNG")
     rows = db.scalars(select(ApiUsageEvent)).all()
     assert len(rows) == 1
     assert rows[0].provider == "photoroom"
-    assert rows[0].cost_usd == pytest.approx(0.10)
+    assert rows[0].cost_usd == pytest.approx(cost)
 
 
 def test_openrouter_provider_persists_reported_cost_when_managed(monkeypatch, db):
@@ -181,7 +184,7 @@ def test_operator_report_totals_per_seller(db, monkeypatch):
     monkeypatch.setenv(photoroom.MANAGED_KEY_ENV, "sk_pr_managed")
     with service_context.use(_context(SELLER_A, SessionLocal)):
         api_usage.record_openrouter(cost_usd=0.02, model="m", kind="chat")
-        api_usage.record_photoroom(edit_label="Virtual model")
+        api_usage.record_photoroom(edit_label="Virtual model", basic=False)
     with service_context.use(_context(SELLER_B, SessionLocal)):
         api_usage.record_openrouter(cost_usd=0.05, model="m", kind="chat")
 

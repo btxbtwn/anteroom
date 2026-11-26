@@ -640,7 +640,7 @@ def _eligible_candidates(
 
 def preview_status(db: Session, *, marketplace: str | None = None, limit: int = 25) -> dict[str, Any]:
     """Read rule state and advisory readiness without entering the relist runner."""
-    from anteroom.services.cloud_sessions import SUPPORTED_CLOUD_MARKETPLACES
+    from anteroom.services.cloud_sessions import CLOUD_WRITE_MARKETPLACES
 
     moment = _now()
     markets = (marketplace,) if marketplace else RELIST_MARKETPLACES
@@ -660,7 +660,7 @@ def preview_status(db: Session, *, marketplace: str | None = None, limit: int = 
         else:
             details, counts = [], {"within_cap": 0, "over_cap": 0, "retry_backoff": 0, "pending": 0}
         connection = "Signed-in Chrome with Anteroom Bridge"
-        if market in SUPPORTED_CLOUD_MARKETPLACES:
+        if market in CLOUD_WRITE_MARKETPLACES:
             connection = f"Active marketplace cloud session or {connection}"
         if market == "ebay":
             connection = "Connected eBay API account"

@@ -17,7 +17,9 @@ function worker(routes) {
     const route = Object.entries(routes).find(([part]) => String(url).includes(part));
     if (!route) return { ok: false, status: 404 };
     const [status, body] = route[1];
-    return { ok: status === 200, status, json: async () => body, text: async () => body };
+    const isJson = typeof body !== 'string';
+    return { ok: status === 200, status, json: async () => body, text: async () => isJson ? JSON.stringify(body) : body,
+      headers: new Headers({ 'content-type': isJson ? 'application/json' : 'text/html' }) };
   };
   return { c, calls };
 }
@@ -108,6 +110,15 @@ test('Depop reads the shop sold list, found from one of the seller\'s own listin
 test('Depop fails the check when no listing names the shop', async () => {
   const { c } = worker({});
   assert.equal((await read(c, 'depop', ['shop-gone-136d'])).ok, false);
+});
+
+test('an access block during a Depop sales check stops after one request', async () => {
+  const { c, calls } = worker({
+    '/products/by-slug/shop-blocked-tee/': [403, '<html>Sorry, not authorized. 403 Forbidden</html>'],
+  });
+  assert.deepEqual(await read(c, 'depop', ['shop-blocked-tee', 'shop-other-tee']),
+    { ok: false, error: 'Could not check sales.', error_code: 'challenge' });
+  assert.equal(calls.length, 1);
 });
 
 test('a removed listing is not a sale, and a check that cannot read the shop fails', async () => {

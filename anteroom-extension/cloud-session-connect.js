@@ -13,6 +13,9 @@
     document.getElementById('title').textContent = `Connect ${marketplaceName} in the cloud?`;
     document.getElementById('prompt').textContent = `Connect the ${marketplaceName} account signed in to this Chrome profile.`;
     document.getElementById('account').textContent = details.email;
+    document.getElementById('scope').textContent = details.marketplace === 'depop'
+      ? 'Anteroom encrypts your Depop cookies for sales checks, imports, and standalone delists. Keep Chrome connected for listing actions and offers. You can disconnect in Settings.'
+      : 'Anteroom encrypts your marketplace cookies so listing actions, sales checks, and enabled automations work while Chrome is closed. You can disconnect in Settings.';
     approve.disabled = false;
     deny.disabled = false;
   } catch {

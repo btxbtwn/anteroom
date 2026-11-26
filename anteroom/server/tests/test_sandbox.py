@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from anteroom import sandbox
 from anteroom.main import app
-from anteroom.providers.sandbox import LISTING, REPLY, SandboxProvider
+from anteroom.providers.sandbox import BURST_CHUNKS, BURST_REPLY, LISTING, REPLY, SandboxProvider
 from anteroom.services import listing_provider
 from anteroom.services.provider_deadlines import unwrap
 
@@ -154,6 +154,25 @@ def test_sandbox_slow_stream_applies_only_to_the_current_turn(monkeypatch):
     assert "The end." in "".join(streamed)
     messages.extend([
         {"role": "assistant", "content": "Sandbox is streaming"},
+        {"role": "user", "content": "And last week?"},
+    ])
+    assert asyncio.run(chunks()) == [REPLY]
+
+
+def test_sandbox_burst_stream_sends_a_few_large_chunks(monkeypatch):
+    monkeypatch.setattr("anteroom.providers.sandbox.BURST_SECONDS", 0)
+    provider = SandboxProvider()
+    messages = [{"role": "user", "content": "Tell me something long [sandbox:burst]"}]
+
+    async def chunks():
+        return [chunk async for chunk in provider.chat(messages)]
+
+    streamed = asyncio.run(chunks())
+    assert len(streamed) == BURST_CHUNKS
+    assert "".join(streamed) == BURST_REPLY
+    assert all(len(chunk) > 200 for chunk in streamed)
+    messages.extend([
+        {"role": "assistant", "content": "Sandbox sends this reply"},
         {"role": "user", "content": "And last week?"},
     ])
     assert asyncio.run(chunks()) == [REPLY]

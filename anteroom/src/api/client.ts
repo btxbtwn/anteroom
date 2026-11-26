@@ -44,6 +44,7 @@ import type {
   AIKeyProvider,
   KeyProviderId,
   ModelFavorite,
+  ManagedUsage,
   ProviderUsageLimits,
   PhotoProviderChoice,
   ListingDocument,
@@ -1492,6 +1493,8 @@ export const api = {
       const scheme = window.location.protocol === "https:" ? "wss" : "ws";
       return `${scheme}://${window.location.host}${BASE}/settings/claude/terminal?cols=${cols}&rows=${rows}`;
     },
+    managedUsage: (period = "30d") => request<ManagedUsage>(`/settings/managed-usage?period=${period}`),
+    managedUsageCsv: (period: string) => `${BASE}/settings/managed-usage.csv?period=${period}`,
     /** Each provider's subscription usage. `refresh` skips the server's short cache. */
     usageLimits: (refresh = false) =>
       request<{ ok: boolean; providers: ProviderUsageLimits[] }>(

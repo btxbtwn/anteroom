@@ -118,7 +118,9 @@ export function sessionNotification(
       return {
         key: `${id}:cloud-expired:${session.expires_at ?? "cookie"}`,
         title: `${name} cloud session expired`,
-        description: "Reconnect in Settings so cloud listing and sales checks can continue.",
+        description: id === "depop"
+          ? "Reconnect in Settings to resume Depop sales checks, imports, and standalone delists in Cloud."
+          : "Reconnect in Settings so cloud listing and sales checks can continue.",
       };
     }
     return {

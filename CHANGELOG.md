@@ -6,6 +6,39 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1281 — 2026-11-26
+
+- Settings → Usage now lets you pick the last 30 days or a calendar month, charts what you spent each day (with a table of the same numbers), lists which AI models and photo edits the money went on, and downloads every charge as a CSV.
+
+## 0.1.1280 — 2026-11-26
+
+- Stop Anteroom's own pre-release checks from failing at random on the test that covers finishing a relist or scheduled publish during an update.
+
+## 0.1.1279 — 2026-11-26
+
+- Chat replies now flow in at a steady pace with each new word fading in, instead of jumping forward a chunk at a time. With reduced motion on, text simply appears as it arrives.
+- On the iPhone, a reply being written no longer shows raw `**` or half-written links, and tables are drawn as tables instead of rows of `|` characters.
+- On a phone, the message box rests at one line and grows as you type, and replies are set in larger 16px text.
+- The Assistant's messages line up with its message box.
+- Copying a table from a reply now pastes into a spreadsheet as cells.
+
+## 0.1.1278 — 2026-11-26
+
+- Plain background removal now uses Photoroom’s lower-cost API, including when you choose a solid background color.
+
+## 0.1.1277 — 2026-11-26
+
+- See your account’s OpenRouter calls, Photoroom edits, and costs for the last 30 days in Settings → Usage on the web.
+
+## 0.1.1276 — 2026-11-26
+
+- Keep small buttons and inline text buttons easy to tap on phones by centering their 44-point touch target without enlarging dense desktop controls.
+
+## 0.1.1275 — 2026-11-26
+
+- Depop drafts, publishing, edits, relists, and offers use your signed-in Chrome. Depop Cloud still handles sales checks, imports, and standalone delists.
+- Depop Cloud keeps your saved sign-in when Depop returns an access block, so you can distinguish a blocked request from an expired session.
+
 ## 0.1.1274 — 2026-11-25
 
 - Connecting eBay or Etsy on the web no longer fails with "not started here" when Anteroom updates while you are signing in.

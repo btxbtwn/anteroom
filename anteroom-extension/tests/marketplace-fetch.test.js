@@ -81,6 +81,19 @@ test('a normal page that loads bot-check scripts is not a challenge', async () =
   assert.match(data, /ok/);
 });
 
+test('Depop HTML access blocks and JSON authentication failures have distinct outcomes', async () => {
+  for (const [answer, code] of [
+    [reply(403, '<html><body>Sorry, not authorized. 403 Forbidden</body></html>', { 'content-type': 'text/html' }), 'challenge'],
+    [reply(401, { message: 'Authentication credentials were not provided.' }), 'signed_out'],
+    [reply(403, { message: 'Sorry, not authorized' }), 'signed_out'],
+  ]) {
+    const { calls, run } = worker([answer]);
+    const error = await failure(run());
+    assert.equal(error.code, code);
+    assert.equal(calls.length, 1);
+  }
+});
+
 test('a 401 in the middle of an operation is a definite refusal with the marketplace\'s words', async () => {
   const { run } = worker([reply(401, { error: { message: 'Session expired for seller@example.com', token: 'x' } })]);
   const error = await failure(run({ method: 'PUT', body: '{}' }));
