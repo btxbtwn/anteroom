@@ -13,7 +13,9 @@ test("auto-relist recovers from a failed load and distinguishes a saved rule fro
       await route.fulfill({
         response,
         json: { rules: rules.map((rule: { marketplace: string }) =>
-          rule.marketplace === "mercari" ? { ...rule, enabled: true } : rule) },
+          rule.marketplace === "mercari"
+            ? { ...rule, enabled: true, paused_reason: "Mercari is temporarily unavailable. Anteroom leaves Mercari listings up." }
+            : rule) },
       });
     }
   });
