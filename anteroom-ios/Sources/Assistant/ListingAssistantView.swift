@@ -2,6 +2,7 @@ import PhotosUI
 import SwiftUI
 
 struct ListingAssistantView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var model: ListingAssistantModel
     @State private var action: AssistantAction?
     @State private var runID = UUID()
@@ -90,6 +91,12 @@ struct ListingAssistantView: View {
                 await model.load()
                 if autoGenerate && model.canStart && photoCount > 0 { start(.generate) }
                 autoGenerate = false
+                // Work that was running when the assistant opened is followed at once.
+                await model.resumeAfterReturn()
+            }
+            // Pick running work back up after locking the phone or leaving the app.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { Task { await model.resumeAfterReturn() } }
             }
             .sensoryFeedback(.success, trigger: model.runsFinished)
             .sensoryFeedback(.error, trigger: model.runsFailed)
