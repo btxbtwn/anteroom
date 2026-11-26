@@ -1019,6 +1019,27 @@ final class AnteroomAPI: Sendable {
         try await decode(request("POST", "api/home/attention/restore", json: AttentionRestoreInput(itemKey: key)))
     }
 
+    // MARK: Today
+
+    /// Today's activity in the phone's time zone, the seller's goals and Needs Attention.
+    func homeSummary() async throws -> HomeSummary {
+        try await decode(request("GET", "api/home", query: [Self.timeZoneQuery]))
+    }
+
+    func addGoal(_ goal: GoalInput) async throws -> GoalChangeResult {
+        try await decode(request("POST", "api/home/goals", query: [Self.timeZoneQuery], json: goal))
+    }
+
+    func updateGoal(_ id: String, _ change: GoalUpdate) async throws -> GoalChangeResult {
+        try await decode(request("PATCH", "api/home/goals/\(id)", query: [Self.timeZoneQuery], json: change))
+    }
+
+    func deleteGoal(_ id: String) async throws -> GoalChangeResult {
+        try await decode(request("DELETE", "api/home/goals/\(id)", query: [Self.timeZoneQuery]))
+    }
+
+    private static var timeZoneQuery: URLQueryItem { URLQueryItem(name: "timezone", value: TimeZone.current.identifier) }
+
     // MARK: Business assistant
 
     /// What the seller asked to be called (Settings → Assistant on the web); empty until they say.
@@ -1242,8 +1263,8 @@ final class AnteroomAPI: Sendable {
         return PreparedRequest(request: urlRequest, session: session)
     }
 
-    private func request(_ method: String, _ path: String, json body: some Encodable) async throws -> PreparedRequest {
-        var withBody = try await request(method, path)
+    private func request(_ method: String, _ path: String, query: [URLQueryItem] = [], json body: some Encodable) async throws -> PreparedRequest {
+        var withBody = try await request(method, path, query: query)
         withBody.request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         withBody.request.httpBody = try JSONEncoder().encode(body)
         return withBody

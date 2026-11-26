@@ -62,6 +62,10 @@ CONTRACT_OPERATIONS: tuple[tuple[str, str], ...] = (
     ("post", "/api/conversations/{conv_id}/photos/studio"),
     ("get", "/api/assistant/name"),
     ("put", "/api/assistant/name"),
+    ("get", "/api/home"),
+    ("post", "/api/home/goals"),
+    ("patch", "/api/home/goals/{goal_id}"),
+    ("delete", "/api/home/goals/{goal_id}"),
     ("get", "/api/home/attention"),
     ("post", "/api/home/attention/dismiss"),
     ("post", "/api/home/attention/resolve"),
@@ -114,6 +118,7 @@ class ErrorDetail(ContractModel):
 # either server answers, so a client handles both.
 Responses = dict[int | str, dict[str, Any]]
 NOT_FOUND: Responses = {404: {"model": ErrorDetail, "description": "The listing does not exist for this seller."}}
+GOAL_NOT_FOUND: Responses = {404: {"model": ErrorDetail, "description": "The goal does not exist for this seller."}}
 CONFLICT: Responses = {409: {"model": ErrorDetail, "description": "The listing changed elsewhere or is busy."}}
 REFUSED: Responses = {400: {"model": ErrorDetail, "description": "The change was refused, such as an empty title or a busy listing."}}
 
@@ -605,3 +610,81 @@ class AttentionRestoreResult(ContractModel):
     ok: bool
     restored: bool
     item_key: str
+
+
+GoalPeriod = Literal["weekly", "monthly", "quarterly", "yearly"]
+GoalMetric = Literal["profit", "sales", "listings", "sell_through_rate"]
+
+
+class HomeToday(ContractModel):
+    """Today's activity, counted in the seller's time zone."""
+
+    date: str
+    timezone: str
+    units_listed: int
+    drafts_created: int
+    units_sold: int
+    revenue: float
+    profit: float | None = None
+    """Null until a sale today has its cost recorded."""
+    profit_known: int
+    """How many of today's sales have their cost recorded."""
+    shares_sent: int
+    offers_sent: int
+    automation_actions: int
+
+
+class GoalProgress(ContractModel):
+    """One goal and how far the current window is toward it."""
+
+    id: str
+    period: GoalPeriod
+    metric: GoalMetric
+    label: str
+    custom_label: str | None = None
+    target: float
+    current: float
+    remaining: float
+    progress_percent: float
+    expected_percent: float
+    """Where the seller would be by now at an even pace."""
+    pace: Literal["achieved", "ahead", "on_track", "behind"]
+    window_start: str
+    window_end: str
+    days_elapsed: int
+    days_total: int
+    days_remaining: int
+    unit: Literal["currency", "percent", "count"]
+    note: str | None = None
+
+
+class HomeSummary(AttentionInbox):
+    """Today: the day's activity, goals and Needs Attention."""
+
+    today: HomeToday
+    goals: list[GoalProgress]
+
+
+class GoalInput(ContractModel):
+    model_config = ConfigDict(extra="forbid", use_attribute_docstrings=True)
+    period: GoalPeriod
+    metric: GoalMetric
+    target: float = Field(gt=0, le=100_000_000)
+    label: str | None = Field(default=None, max_length=80)
+
+
+class GoalUpdate(ContractModel):
+    """Only the fields sent change; a label sent as null clears it."""
+
+    model_config = ConfigDict(extra="forbid", use_attribute_docstrings=True)
+    period: GoalPeriod | None = None
+    metric: GoalMetric | None = None
+    target: float | None = Field(default=None, gt=0, le=100_000_000)
+    label: str | None = Field(default=None, max_length=80)
+
+
+class GoalChangeResult(ContractModel):
+    ok: bool
+    goal_id: str | None = None
+    home: HomeSummary | None = None
+    """Today after the change; missing when it could not be rebuilt, so the client reloads."""

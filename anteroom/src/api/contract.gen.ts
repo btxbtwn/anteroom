@@ -404,8 +404,82 @@ export interface FavoriteResult {
   favorite: boolean;
 }
 
+export interface GoalChangeResult {
+  ok: boolean;
+  goal_id?: string | null;
+  /** Today after the change; missing when it could not be rebuilt, so the client reloads. */
+  home?: HomeSummary | null;
+}
+
+export interface GoalInput {
+  period: "weekly" | "monthly" | "quarterly" | "yearly";
+  metric: "profit" | "sales" | "listings" | "sell_through_rate";
+  target: number;
+  label?: string | null;
+}
+
+/** One goal and how far the current window is toward it. */
+export interface GoalProgress {
+  id: string;
+  period: "weekly" | "monthly" | "quarterly" | "yearly";
+  metric: "profit" | "sales" | "listings" | "sell_through_rate";
+  label: string;
+  custom_label?: string | null;
+  target: number;
+  current: number;
+  remaining: number;
+  progress_percent: number;
+  /** Where the seller would be by now at an even pace. */
+  expected_percent: number;
+  pace: "achieved" | "ahead" | "on_track" | "behind";
+  window_start: string;
+  window_end: string;
+  days_elapsed: number;
+  days_total: number;
+  days_remaining: number;
+  unit: "currency" | "percent" | "count";
+  note?: string | null;
+}
+
+/** Only the fields sent change; a label sent as null clears it. */
+export interface GoalUpdate {
+  period?: "weekly" | "monthly" | "quarterly" | "yearly" | null;
+  metric?: "profit" | "sales" | "listings" | "sell_through_rate" | null;
+  target?: number | null;
+  label?: string | null;
+}
+
 export interface HTTPValidationError {
   detail?: ValidationError[];
+}
+
+/** Today: the day's activity, goals and Needs Attention. */
+export interface HomeSummary {
+  needs_attention: AttentionItem[];
+  /** Snoozed items, back after 7 days if they still apply. */
+  dismissed: AttentionItem[];
+  /** Resolved items. A duplicate pair stays resolved; anything else shows again when its state changes. */
+  resolved: AttentionItem[];
+  counts: AttentionCounts;
+  today: HomeToday;
+  goals: GoalProgress[];
+}
+
+/** Today's activity, counted in the seller's time zone. */
+export interface HomeToday {
+  date: string;
+  timezone: string;
+  units_listed: number;
+  drafts_created: number;
+  units_sold: number;
+  revenue: number;
+  /** Null until a sale today has its cost recorded. */
+  profit?: number | null;
+  /** How many of today's sales have their cost recorded. */
+  profit_known: number;
+  shares_sent: number;
+  offers_sent: number;
+  automation_actions: number;
 }
 
 /** The listing's current revision, its revision pointer and its validation. */

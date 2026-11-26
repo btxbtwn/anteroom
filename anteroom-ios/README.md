@@ -33,7 +33,11 @@ provider setup in the web app and chat attachments), see
 
 ## iPhone navigation
 
-Inventory and Settings are native tabs, each with its own navigation stack.
+Today, Inventory, Assistant, Marketplaces and More are native tabs, each with
+its own navigation stack. Today comes first, as a store app's Home does: its
+badge counts the active Needs attention alerts, and it shows those alerts,
+the day's summary and the seller's goals from the shared `/api/home` contract.
+With Today in the bar, Analytics, Automations and Settings live in More.
 New listing is a modal task, not a tab: Cancel writes nothing, Create runs
 once while the sheet is busy, and success opens the new draft after dismissal.
 Settings shows the signed-in account and installed version, with confirmation

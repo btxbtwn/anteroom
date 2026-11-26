@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// More → Needs attention (the web's Home "Needs attention" panel). Snooze,
+/// Today → Needs attention (the web's Today "Needs attention" panel). Snooze,
 /// Resolve and Restore only change which alerts Anteroom shows; nothing here
 /// touches a listing or a marketplace.
 struct NeedsAttentionView: View {
     let api: AnteroomAPI
+    @Environment(AttentionBadge.self) private var badge: AttentionBadge?
     @State private var tab: AttentionTab = .active
     @State private var inbox: AttentionInbox?
     @State private var error: String?
@@ -138,6 +139,7 @@ struct NeedsAttentionView: View {
             guard actions == started else { return }
             inbox = result
             error = nil
+            badge?.show(result.counts.active)
         } catch is CancellationError {
             // A newer load owns the result.
         } catch {
@@ -155,6 +157,7 @@ struct NeedsAttentionView: View {
         actions += 1
         move(&next)
         inbox = next
+        badge?.show(next.counts.active)
         actionError = nil
         do {
             try await save()

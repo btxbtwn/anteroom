@@ -2060,6 +2060,293 @@
         "title": "FavoriteResult",
         "type": "object"
       },
+      "GoalChangeResult": {
+        "properties": {
+          "goal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal Id"
+          },
+          "home": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HomeSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Today after the change; missing when it could not be rebuilt, so the client reloads."
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "GoalChangeResult",
+        "type": "object"
+      },
+      "GoalInput": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "metric": {
+            "enum": [
+              "profit",
+              "sales",
+              "listings",
+              "sell_through_rate"
+            ],
+            "title": "Metric",
+            "type": "string"
+          },
+          "period": {
+            "enum": [
+              "weekly",
+              "monthly",
+              "quarterly",
+              "yearly"
+            ],
+            "title": "Period",
+            "type": "string"
+          },
+          "target": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 100000000.0,
+            "title": "Target",
+            "type": "number"
+          }
+        },
+        "required": [
+          "period",
+          "metric",
+          "target"
+        ],
+        "title": "GoalInput",
+        "type": "object"
+      },
+      "GoalProgress": {
+        "description": "One goal and how far the current window is toward it.",
+        "properties": {
+          "current": {
+            "title": "Current",
+            "type": "number"
+          },
+          "custom_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custom Label"
+          },
+          "days_elapsed": {
+            "title": "Days Elapsed",
+            "type": "integer"
+          },
+          "days_remaining": {
+            "title": "Days Remaining",
+            "type": "integer"
+          },
+          "days_total": {
+            "title": "Days Total",
+            "type": "integer"
+          },
+          "expected_percent": {
+            "description": "Where the seller would be by now at an even pace.",
+            "title": "Expected Percent",
+            "type": "number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "metric": {
+            "enum": [
+              "profit",
+              "sales",
+              "listings",
+              "sell_through_rate"
+            ],
+            "title": "Metric",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "pace": {
+            "enum": [
+              "achieved",
+              "ahead",
+              "on_track",
+              "behind"
+            ],
+            "title": "Pace",
+            "type": "string"
+          },
+          "period": {
+            "enum": [
+              "weekly",
+              "monthly",
+              "quarterly",
+              "yearly"
+            ],
+            "title": "Period",
+            "type": "string"
+          },
+          "progress_percent": {
+            "title": "Progress Percent",
+            "type": "number"
+          },
+          "remaining": {
+            "title": "Remaining",
+            "type": "number"
+          },
+          "target": {
+            "title": "Target",
+            "type": "number"
+          },
+          "unit": {
+            "enum": [
+              "currency",
+              "percent",
+              "count"
+            ],
+            "title": "Unit",
+            "type": "string"
+          },
+          "window_end": {
+            "title": "Window End",
+            "type": "string"
+          },
+          "window_start": {
+            "title": "Window Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "period",
+          "metric",
+          "label",
+          "target",
+          "current",
+          "remaining",
+          "progress_percent",
+          "expected_percent",
+          "pace",
+          "window_start",
+          "window_end",
+          "days_elapsed",
+          "days_total",
+          "days_remaining",
+          "unit"
+        ],
+        "title": "GoalProgress",
+        "type": "object"
+      },
+      "GoalUpdate": {
+        "additionalProperties": false,
+        "description": "Only the fields sent change; a label sent as null clears it.",
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "metric": {
+            "anyOf": [
+              {
+                "enum": [
+                  "profit",
+                  "sales",
+                  "listings",
+                  "sell_through_rate"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "enum": [
+                  "weekly",
+                  "monthly",
+                  "quarterly",
+                  "yearly"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 100000000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "title": "GoalUpdate",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2071,6 +2358,129 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HomeSummary": {
+        "description": "Today: the day's activity, goals and Needs Attention.",
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/AttentionCounts"
+          },
+          "dismissed": {
+            "description": "Snoozed items, back after 7 days if they still apply.",
+            "items": {
+              "$ref": "#/components/schemas/AttentionItem"
+            },
+            "title": "Dismissed",
+            "type": "array"
+          },
+          "goals": {
+            "items": {
+              "$ref": "#/components/schemas/GoalProgress"
+            },
+            "title": "Goals",
+            "type": "array"
+          },
+          "needs_attention": {
+            "items": {
+              "$ref": "#/components/schemas/AttentionItem"
+            },
+            "title": "Needs Attention",
+            "type": "array"
+          },
+          "resolved": {
+            "description": "Resolved items. A duplicate pair stays resolved; anything else shows again when its state changes.",
+            "items": {
+              "$ref": "#/components/schemas/AttentionItem"
+            },
+            "title": "Resolved",
+            "type": "array"
+          },
+          "today": {
+            "$ref": "#/components/schemas/HomeToday"
+          }
+        },
+        "required": [
+          "needs_attention",
+          "dismissed",
+          "resolved",
+          "counts",
+          "today",
+          "goals"
+        ],
+        "title": "HomeSummary",
+        "type": "object"
+      },
+      "HomeToday": {
+        "description": "Today's activity, counted in the seller's time zone.",
+        "properties": {
+          "automation_actions": {
+            "title": "Automation Actions",
+            "type": "integer"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "drafts_created": {
+            "title": "Drafts Created",
+            "type": "integer"
+          },
+          "offers_sent": {
+            "title": "Offers Sent",
+            "type": "integer"
+          },
+          "profit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null until a sale today has its cost recorded.",
+            "title": "Profit"
+          },
+          "profit_known": {
+            "description": "How many of today's sales have their cost recorded.",
+            "title": "Profit Known",
+            "type": "integer"
+          },
+          "revenue": {
+            "title": "Revenue",
+            "type": "number"
+          },
+          "shares_sent": {
+            "title": "Shares Sent",
+            "type": "integer"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          },
+          "units_listed": {
+            "title": "Units Listed",
+            "type": "integer"
+          },
+          "units_sold": {
+            "title": "Units Sold",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "timezone",
+          "units_listed",
+          "drafts_created",
+          "units_sold",
+          "revenue",
+          "profit_known",
+          "shares_sent",
+          "offers_sent",
+          "automation_actions"
+        ],
+        "title": "HomeToday",
         "type": "object"
       },
       "ListingDocument": {
@@ -5204,6 +5614,46 @@
         "summary": "Photos"
       }
     },
+    "/api/home": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "timezone",
+            "required": false,
+            "schema": {
+              "default": "UTC",
+              "maxLength": 100,
+              "title": "Timezone",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Home Summary"
+      }
+    },
     "/api/home/attention": {
       "get": {
         "description": "Needs Attention alone, without Today and goals, for the iPhone app.",
@@ -5351,6 +5801,182 @@
           }
         },
         "summary": "Restore Attention"
+      }
+    },
+    "/api/home/goals": {
+      "post": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "timezone",
+            "required": false,
+            "schema": {
+              "default": "UTC",
+              "maxLength": 100,
+              "title": "Timezone",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoalInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalChangeResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upsert Goal"
+      }
+    },
+    "/api/home/goals/{goal_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "timezone",
+            "required": false,
+            "schema": {
+              "default": "UTC",
+              "maxLength": 100,
+              "title": "Timezone",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalChangeResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The goal does not exist for this seller."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Goal"
+      },
+      "patch": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "goal_id",
+            "required": true,
+            "schema": {
+              "title": "Goal Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "timezone",
+            "required": false,
+            "schema": {
+              "default": "UTC",
+              "maxLength": 100,
+              "title": "Timezone",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoalUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalChangeResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The goal does not exist for this seller."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Goal"
       }
     },
     "/api/listing-sheet": {

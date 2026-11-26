@@ -159,7 +159,7 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
   const [goalLabel, setGoalLabel] = useState("");
   const [goalFormError, setGoalFormError] = useState<string | null>(null);
 
-  const syncGoalsHome = async (next: HomeSummaryResponse | undefined) => {
+  const syncGoalsHome = async (next: HomeSummaryResponse | null | undefined) => {
     await queryClient.cancelQueries({ queryKey: queryDef.queryKey, exact: true });
     if (next) {
       const local = queryClient.getQueryData<HomeSummaryResponse>(queryDef.queryKey);

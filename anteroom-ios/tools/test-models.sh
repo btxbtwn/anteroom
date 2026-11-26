@@ -115,3 +115,7 @@ xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift So
 echo "Test Needs Attention snooze, resolve and restore"
 xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift Sources/Attention/AttentionModels.swift Tests/AttentionTests.swift -o "$RUNNER_TEMP/attention-tests"
 "$RUNNER_TEMP/attention-tests"
+
+echo "Test Today's summary, goals and badge"
+xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift Sources/Today/TodayModels.swift Tests/TodayTests.swift -o "$RUNNER_TEMP/today-tests"
+"$RUNNER_TEMP/today-tests"

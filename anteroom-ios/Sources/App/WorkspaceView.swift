@@ -96,6 +96,7 @@ struct WorkspaceView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var appearance: AppearanceModel
     @State private var bootstrap: WorkspaceRuntimeModel
+    @State private var attention: AttentionBadge
     @State private var loadAttempt = 0
     @State private var stalled = false
     @State private var signingOut = false
@@ -104,6 +105,7 @@ struct WorkspaceView: View {
         self.api = api
         _appearance = State(initialValue: AppearanceModel(api: api))
         _bootstrap = State(initialValue: WorkspaceRuntimeModel(api: api))
+        _attention = State(initialValue: AttentionBadge(api: api))
     }
 
     var body: some View {
@@ -118,6 +120,7 @@ struct WorkspaceView: View {
         .dataUnreachableBanner(session.reachability)
         .environment(appearance)
         .environment(session.changes)
+        .environment(attention)
         .preferredColorScheme(appearance.theme.colorScheme)
         // Ends with this workspace: on sign-out or when another account signs in.
         .task { await session.followChanges() }
@@ -138,8 +141,12 @@ struct WorkspaceView: View {
             if scenePhase == .active {
                 await appearance.refresh()
                 await bootstrap.recoverIfUnavailable()
+                await attention.refresh()
             }
         }
+        // A sale or a finished job elsewhere can raise an alert.
+        .onChange(of: session.changes.listings) { _, _ in Task { await attention.refresh() } }
+        .onChange(of: session.changes.jobs) { _, _ in Task { await attention.refresh() } }
     }
 
     private var startupView: some View {
@@ -186,8 +193,18 @@ struct WorkspaceView: View {
     }
 
     /// A tab bar on iPhone; on iPad the same tabs also open as a sidebar.
+    /// Today comes first, badged with the alerts that need attention, as a
+    /// store app's Home does; the bar holds five tabs, so Analytics then
+    /// moves into More and stays one tap away from Today's summary.
     private func tabs(views: [String], features: [String], selection: Binding<WorkspaceTab>) -> some View {
+        let today = views.contains("home")
         return TabView(selection: selection) {
+            if today {
+                Tab(value: WorkspaceTab.today) {
+                    TodayView(api: api)
+                } label: { Label("Today", systemImage: "sun.max.fill") }
+                .badge(TodayText.badge(attention.active))
+            }
             Tab(value: WorkspaceTab.inventory) {
                 InventoryView(api: api)
             } label: { Label("Inventory", systemImage: "tag.fill") }
@@ -205,14 +222,17 @@ struct WorkspaceView: View {
                     MarketplacesView(api: api)
                 } label: { Label("Marketplaces", systemImage: "storefront.fill") }
             }
-            Tab(value: WorkspaceTab.analytics) {
-                AnalyticsDestination(api: api)
-            } label: { Label("Analytics", systemImage: "chart.bar.fill") }
+            if !today {
+                Tab(value: WorkspaceTab.analytics) {
+                    NavigationStack { AnalyticsDestination(api: api) }
+                } label: { Label("Analytics", systemImage: "chart.bar.fill") }
+            }
             Tab(value: WorkspaceTab.more) {
                 MoreView(
                     api: api,
                     views: views,
                     features: features,
+                    showsAnalytics: today,
                     runtimeUnavailable: bootstrap.isUnavailable,
                     retryingRuntime: bootstrap.loading,
                     runtimeError: bootstrap.recoveryError,
@@ -227,7 +247,7 @@ struct WorkspaceView: View {
 }
 
 enum WorkspaceTab: Hashable {
-    case inventory, assistant, marketplaces, analytics, more
+    case today, inventory, assistant, marketplaces, analytics, more
 }
 
 extension AppearanceTheme {

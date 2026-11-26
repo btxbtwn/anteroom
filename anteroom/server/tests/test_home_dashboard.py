@@ -23,6 +23,7 @@ from anteroom.models.listing_promotion import ListingPromotion
 from anteroom.models.marketplace_listing import MarketplaceListing
 from anteroom.models.marketplace_sale import MarketplaceSale
 from anteroom.models.promotion_automation import PromotionAutomation
+from anteroom.routes.api_contract import GoalChangeResult, HomeSummary
 from anteroom.services import home_dashboard, marketplace_accounts, sales_ledger
 
 
@@ -207,6 +208,8 @@ def test_home_summary_today_kpis_and_goals_crud():
         assert created.json()["ok"] is True
 
     after_create = client.get("/api/home?timezone=UTC").json()
+    # The web and the iPhone read Today through the shared contract.
+    assert len(HomeSummary.model_validate(after_create).goals) == 4
     assert len(after_create["goals"]) == 4
     by_metric = {g["metric"]: g for g in after_create["goals"]}
     assert by_metric["profit"]["current"] == pytest.approx(50.0)
@@ -226,6 +229,7 @@ def test_home_summary_today_kpis_and_goals_crud():
         json={"target": 40, "label": "Stretch Profit"},
     )
     assert updated.status_code == 200
+    assert GoalChangeResult.model_validate(updated.json()).goal_id == goal_id
     updated_profit = next(g for g in updated.json()["home"]["goals"] if g["id"] == goal_id)
     assert updated_profit["label"] == "Stretch Profit"
     assert updated_profit["pace"] == "achieved"
