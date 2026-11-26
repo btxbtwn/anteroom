@@ -1,0 +1,1 @@
+- Stop Anteroom's own pre-release checks from failing at random on the test that covers finishing a relist or scheduled publish during an update.

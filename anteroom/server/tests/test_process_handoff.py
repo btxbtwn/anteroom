@@ -108,18 +108,28 @@ def test_losing_the_lease_stops_the_schedulers():
     assert events.count('stop') == 1
 
 
-def drain_with_work(*, finish_after, grace_s=5):
+def drain_with_work(*, finish_after, grace_s=5, renew_as_work_ends=False):
     """Drain ``lead`` while scheduled marketplace work runs; returns the ordered events.
 
     The work ends ``finish_after`` seconds into the drain (``None``: never), and
     the scheduler set's stop cancels it, like ``BackgroundLoop.stop``.
+
+    The job records its outcome while it is still inside ``marketplace_work``,
+    so ``lead`` can renew the lease once more between that record and the work
+    being marked idle. ``renew_as_work_ends`` holds the job there until that
+    renewal has happened, which makes the order certain instead of occasional.
     """
     events = []
     started = threading.Event()
     finish = threading.Event()
+    outcome_recorded = threading.Event()
+    renewed_after_outcome = threading.Event()
 
     def hold(_engine, _name='schedulers'):
+        late = outcome_recorded.is_set()
         events.append(('hold', process_handoff.draining()))
+        if late:
+            renewed_after_outcome.set()
         return True
 
     def start():
@@ -128,6 +138,9 @@ def drain_with_work(*, finish_after, grace_s=5):
                 started.set()
                 finish.wait(5)
                 events.append('job finished' if not cancelled.is_set() else 'job cancelled')
+                outcome_recorded.set()
+                if renew_as_work_ends and not cancelled.is_set():
+                    assert renewed_after_outcome.wait(2), 'the lease was not renewed while the work was still in flight'
 
         cancelled = threading.Event()
         thread = threading.Thread(target=job)
@@ -162,12 +175,29 @@ def drain_with_work(*, finish_after, grace_s=5):
     return events
 
 
-def test_a_running_relist_finishes_during_the_drain_while_the_lease_is_held():
-    events = drain_with_work(finish_after=0.2)
+def finished_then_stopped_then_released(events):
+    """The work ran to its end under a renewed lease; only then did the set stop and the lease go."""
     drained = events[events.index('drain'):]
-    assert ('hold', True) in drained, 'the stopping Machine keeps renewing the lease'
-    assert drained[-3:] == ['job finished', 'stop', 'release']
-    assert ('hold', True) not in drained[drained.index('job finished'):]
+    assert 'job cancelled' not in events, 'the drain cancelled work it should have let finish'
+    finished = drained.index('job finished')
+    assert ('hold', True) in drained[:finished], 'the stopping Machine keeps renewing the lease while the work runs'
+    # ``lead`` may renew once more as the work ends: the job records its outcome
+    # before ``marketplace_work`` marks it idle. Nothing else may come between
+    # the work finishing and the stop, and the release is always last.
+    after = drained[finished + 1:]
+    assert after[-2:] == ['stop', 'release']
+    assert all(event == ('hold', True) for event in after[:-2]), after
+    assert events.count('stop') == 1 and events.count('release') == 1
+    return after[:-2]
+
+
+def test_a_running_relist_finishes_during_the_drain_while_the_lease_is_held():
+    finished_then_stopped_then_released(drain_with_work(finish_after=0.2))
+
+
+def test_a_lease_renewal_as_the_relist_ends_still_stops_before_releasing():
+    late_renewals = finished_then_stopped_then_released(drain_with_work(finish_after=0.2, renew_as_work_ends=True))
+    assert late_renewals, 'this run is meant to renew the lease after the job recorded its outcome'
 
 
 def test_a_draining_machine_hands_its_devices_over_before_the_grace():
