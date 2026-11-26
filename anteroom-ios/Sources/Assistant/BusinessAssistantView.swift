@@ -178,7 +178,7 @@ struct BusinessAssistantView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 if !live.text.isEmpty {
                                     // Drawn as the saved answer will be, so it does not change look when saved.
-                                    MarkdownText(live.text)
+                                    StreamingAnswer(received: live.text)
                                         .tint(WorkspaceStyle.accent)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                 }
@@ -355,8 +355,43 @@ private struct AnswerView: View {
 
 }
 
+/// The answer being written. What has arrived is revealed at a steady pace
+/// however unevenly it came, and the block being written shows up to its last
+/// whole word with open markup closed (DESIGN.md, Streaming replies).
+private struct StreamingAnswer: View {
+    let received: String
+    /// Characters showing. What is there when the answer first appears shows at once,
+    /// so one picked back up part way through is not typed out again.
+    @State private var shown: Int
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(received: String) {
+        self.received = received
+        _shown = State(initialValue: received.count)
+    }
+
+    var body: some View {
+        let total = received.count
+        MarkdownText(StreamingText.display(String(received.prefix(min(shown, total)))))
+            .task(id: total) {
+                // A shorter text is an answer replayed from its first word.
+                if shown > total || reduceMotion { shown = total }
+                var last = ContinuousClock.now
+                while shown < total {
+                    try? await Task.sleep(for: .milliseconds(Int(RevealPace.stepMs)))
+                    if Task.isCancelled { return }
+                    let now = ContinuousClock.now
+                    let elapsed = now - last
+                    last = now
+                    let elapsedMs = Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1e15
+                    shown = RevealPace.step(shown: shown, total: total, elapsedMs: elapsedMs)
+                }
+            }
+    }
+}
+
 /// An answer's Markdown with its blocks kept apart: paragraphs, headings,
-/// bullet and numbered lists, quotes and code, each with bold and links inside.
+/// bullet and numbered lists, quotes, tables and code, each with bold and links inside.
 struct MarkdownText: View {
     let blocks: [MarkdownBlock]
 
@@ -395,6 +430,44 @@ struct MarkdownText: View {
             }
             .background(WorkspaceStyle.groupedBackground, in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(WorkspaceStyle.border, lineWidth: 1))
+        case .table(let header, let alignments, let rows):
+            table(header: header, alignments: alignments, rows: rows)
+        }
+    }
+
+    /// Rows and columns with hairline dividers, as on the web. A table wider than
+    /// the screen scrolls sideways instead of squeezing its figures.
+    private func table(header: [String], alignments: [MarkdownBlock.ColumnAlignment], rows: [[String]]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 0) {
+                GridRow {
+                    ForEach(Array(header.enumerated()), id: \.offset) { column, title in
+                        Text(Self.inline(title))
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(WorkspaceStyle.mutedText)
+                            .gridColumnAlignment(Self.horizontal(alignments[column]))
+                    }
+                }
+                .padding(.vertical, 8)
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    Divider().gridCellUnsizedAxes(.horizontal)
+                    GridRow {
+                        ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
+                            Text(Self.inline(cell)).font(.subheadline).monospacedDigit()
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private static func horizontal(_ alignment: MarkdownBlock.ColumnAlignment) -> HorizontalAlignment {
+        switch alignment {
+        case .leading: .leading
+        case .center: .center
+        case .trailing: .trailing
         }
     }
 
