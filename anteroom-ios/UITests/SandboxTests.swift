@@ -241,10 +241,8 @@ final class DestinationSandboxTests: XCTestCase {
         keep(app, "eBay connection")
         app.buttons["Close"].tap()
 
-        app.tabBars.buttons["More"].tap()
-        let settings = app.buttons["Settings"].firstMatch
-        XCTAssertTrue(settings.waitForExistence(timeout: 10))
-        settings.tap()
+        // More still shows Analytics from earlier; this goes back to its list first.
+        openMorePage("Settings", app: app)
 
         let listings = app.buttons["Listings"].firstMatch
         XCTAssertTrue(listings.waitForExistence(timeout: 10))
@@ -895,15 +893,19 @@ final class TodaySandboxTests: XCTestCase {
         // The badge counts the active alerts shown under Needs attention.
         let open = app.buttons["today-open-attention"]
         XCTAssertTrue(open.waitForExistence(timeout: 10))
-        let badge = today.value as? String ?? ""
         keep(app, "Today")
         open.tap()
         XCTAssertTrue(app.navigationBars["Needs attention"].waitForExistence(timeout: 15))
         let active = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Active'")).firstMatch
         XCTAssertTrue(active.waitForExistence(timeout: 15))
         let count = active.label.split(separator: " ").last.flatMap { Int($0) } ?? 0
-        XCTAssertEqual(badge.isEmpty ? 0 : Int(badge.split(separator: " ").first ?? "") ?? -1, count,
-                       "The Today badge is the active count")
+        // The badge follows the list it counts (it updates once the list loads).
+        let badge = NSPredicate { object, _ in
+            let value = (object as? XCUIElement)?.value as? String ?? ""
+            return (value.isEmpty ? 0 : Int(value.split(separator: " ").first ?? "") ?? -1) == count
+        }
+        expectation(for: badge, evaluatedWith: today)
+        waitForExpectations(timeout: 15)
         let attention = app.navigationBars["Needs attention"]
         for _ in 0..<3 where attention.exists {
             attention.buttons["BackButton"].tap()
