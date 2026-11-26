@@ -86,7 +86,9 @@ test("the listing's actions share one row, scheduling opens from them, and a sal
     await expect(page.getByRole("menuitem", { name: /Record a sale/ })).toHaveCount(0);
     await page.getByRole("menuitem", { name: "Mark as sold…" }).click();
     const sale = page.getByRole("form", { name: "Mark as sold" });
-    await expect(sale.getByRole("combobox", { name: "Where it sold" })).toBeVisible();
+    // Nothing is picked, so the sale is never credited to the wrong place by default.
+    await expect(sale.getByRole("combobox", { name: "Where it sold" })).toHaveText(/Choose…/);
+    await expect(sale.getByRole("button", { name: "Save sale" })).toBeDisabled();
     await sale.getByRole("button", { name: "Cancel" }).click();
     await expect(sale).toBeHidden();
 

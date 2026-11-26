@@ -392,7 +392,7 @@ export function MarketplacesLayout({
   const [reconnected, setReconnected] = useState<Partial<Record<Marketplace, ExtensionSessionConnect>>>({});
   const [linking, setLinking] = useState<{ marketplace: Marketplace; url: string } | null>(null);
   // Mark as sold opens a sale form; the number remounts it with a fresh request id.
-  const [selling, setSelling] = useState<{ marketplace: SaleMarketplace; key: number } | null>(null);
+  const [selling, setSelling] = useState<{ marketplace: SaleMarketplace | null; key: number } | null>(null);
 
   const etsyCreating = !listings.etsy?.listing_id && !drafts.etsy?.draft_url;
   const etsyDefaults = useQuery({ queryKey: ["etsy-listing-defaults"], queryFn: () => api.etsy.listingDefaults(),
@@ -526,7 +526,8 @@ export function MarketplacesLayout({
       void queryClient.invalidateQueries({ queryKey: ["analytics"] });
     },
   });
-  function startSale(marketplace: SaleMarketplace) {
+  /** A marketplace's own Mark as sold picks it; the listing's leaves Where it sold for the seller. */
+  function startSale(marketplace: SaleMarketplace | null) {
     recordSale.reset();
     setSelling((current) => ({ marketplace, key: (current?.key ?? 0) + 1 }));
   }
@@ -881,7 +882,7 @@ export function MarketplacesLayout({
         {phone && scheduling.available && <MenuItem onClick={scheduling.open}><CalendarClockIcon />{scheduling.label}</MenuItem>}
         {phone && (showListEverywhere || scheduling.available) && <MenuSeparator />}
         {/* One way to record a sale: the same form as a marketplace's Mark as sold, with "where" left to pick. */}
-        {!soldSomewhere && <MenuItem disabled={busy} onClick={() => startSale("other")}><ReceiptIcon />Mark as sold…</MenuItem>}
+        {!soldSomewhere && <MenuItem disabled={busy} onClick={() => startSale(null)}><ReceiptIcon />Mark as sold…</MenuItem>}
         {railMenuItems && !soldSomewhere && <MenuSeparator />}
         {railMenuItems}
         {showDelistEverywhere && <MenuSeparator />}
