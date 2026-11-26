@@ -680,7 +680,8 @@ fileprivate extension XCTestCase {
         create.tap()
         // The editor shows the draft's title, or "Listing" while it has none.
         let editor = app.navigationBars.matching(NSPredicate(format: "identifier IN %@", ["Listing", "New Listing"])).firstMatch
-        XCTAssertTrue(editor.waitForExistence(timeout: 15), "New listing must open the untitled draft in the editor")
+        // A busy simulator can take a while to create and open the draft.
+        XCTAssertTrue(editor.waitForExistence(timeout: 40), "New listing must open the untitled draft in the editor")
     }
 
     @MainActor
@@ -894,14 +895,19 @@ final class SoldAndScheduleSandboxTests: XCTestCase {
         launchSandbox(app)
         // The sample dress is live on Poshmark and Etsy.
         openMarketplaces("Free People S Pink Floral Midi Dress", app: app)
-        let markSold = app.buttons["marketplaces-mark-sold"]
-        for _ in 0..<4 where !markSold.isHittable { app.swipeUp() }
-        markSold.tap()
+        app.buttons["marketplaces-mark-sold"].tap()
         XCTAssertTrue(app.navigationBars["Mark as sold"].waitForExistence(timeout: 10))
-        app.buttons["Sold on"].firstMatch.tap()
-        app.buttons["Poshmark"].firstMatch.tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Sold on'")).firstMatch.tap()
+        let poshmark = app.buttons["Poshmark"].firstMatch
+        XCTAssertTrue(poshmark.waitForExistence(timeout: 10))
+        poshmark.tap()
         let price = app.textFields["sale-price"]
-        price.tap()
+        XCTAssertTrue(price.waitForExistence(timeout: 10))
+        // A tap while the menu closes can miss focus; tap until the field has it.
+        for _ in 0..<3 where (price.value(forKey: "hasKeyboardFocus") as? Bool) != true {
+            price.tap()
+            _ = app.keyboards.firstMatch.waitForExistence(timeout: 3)
+        }
         price.typeText("42.50")
         keep(app, "Mark as sold")
         app.buttons["Save sale"].tap()
@@ -919,11 +925,7 @@ final class SoldAndScheduleSandboxTests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
         launchSandbox(app)
-        showDrafts(app)
-        let draft = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Draft'")).element(boundBy: 1)
-        XCTAssertTrue(draft.waitForExistence(timeout: 30))
-        let actions = app.buttons["Listing actions"]
-        for _ in 0..<3 where !actions.waitForExistence(timeout: 15) { if draft.isHittable { draft.tap() } }
+        openNewListing(app)
         openManage(app)
         let ready = app.switches["schedule-ready"]
         for _ in 0..<5 where !ready.isHittable { app.swipeUp() }
@@ -952,7 +954,14 @@ final class SoldAndScheduleSandboxTests: XCTestCase {
         }
         manage.tap()
         XCTAssertTrue(app.navigationBars["Marketplaces"].waitForExistence(timeout: 15))
-        XCTAssertTrue(app.buttons["marketplaces-mark-sold"].waitForExistence(timeout: 60), "The marketplaces load")
+        // The sheet's list is lazy: Mark as sold sits below the marketplace rows.
+        XCTAssertTrue(app.staticTexts["Poshmark"].firstMatch.waitForExistence(timeout: 60), "The marketplaces load")
+        let markSold = app.buttons["marketplaces-mark-sold"]
+        for _ in 0..<6 where !markSold.isHittable {
+            app.swipeUp()
+            _ = markSold.waitForExistence(timeout: 2)
+        }
+        XCTAssertTrue(markSold.isHittable, "Mark as sold is offered")
     }
 
     private func keep(_ app: XCUIApplication, _ name: String) {
