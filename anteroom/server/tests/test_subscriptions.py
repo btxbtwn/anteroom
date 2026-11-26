@@ -434,3 +434,50 @@ def test_postgres_rls_isolates_seller_plans_and_blocks_self_upgrade(migration_en
     seller_a_row = next(row for row in report["sellers"] if row["user_id"] == SELLER_A)
     assert seller_a_row["plan_id"] == "pro"
     assert seller_a_row["credits_used"] == 5
+
+
+def test_account_import_rejects_subscription_and_credit_tables(db):
+    from fastapi import HTTPException
+
+    from anteroom.services import account_import
+
+    exposed = {table.name for table in account_import.imported_tables()}
+    assert "seller_plans" not in exposed
+    assert "plan_usage_events" not in exposed
+
+    for forbidden_table in ("seller_plans", "plan_usage_events"):
+        with pytest.raises(HTTPException) as exc_info:
+            account_import.import_rows(db, SELLER_A, forbidden_table, [])
+        assert exc_info.value.status_code == 422
+
+
+def test_photo_refund_stays_in_reserved_period_across_month_boundary(db):
+    from datetime import UTC, datetime
+
+    from anteroom.database import SessionLocal
+
+    nov_end = datetime(2026, 11, 30, 23, 59, 59, tzinfo=UTC)
+    dec_start = datetime(2026, 12, 1, 0, 0, 5, tzinfo=UTC)
+    with service_context.use(_ctx(SELLER_A, SessionLocal)):
+        cost, period = subscriptions.reserve_photo_credit(
+            db, "conv-boundary", "photo-1", StudioOptions(ghost_mannequin=True), now=nov_end,
+        )
+        assert cost == 5
+        assert period == "2026-11"
+        assert subscriptions.credits_used(db, SELLER_A, "2026-11") == 5
+
+        subscriptions.refund_photo_credit(
+            db, "conv-boundary", "photo-1", cost, period=period, now=dec_start,
+        )
+        assert subscriptions.credits_used(db, SELLER_A, "2026-11") == 0
+        # December must remain completely clean (no negative credit spillover).
+        dec_summary = subscriptions.seller_subscription_summary(db, SELLER_A, now=dec_start)
+        assert dec_summary["credits"]["used"] == 0
+        assert dec_summary["credits"]["breakdown"]["photo_refund"]["count"] == 0
+
+
+def test_hosted_enforcement_fails_closed_without_service_context(db, monkeypatch):
+    monkeypatch.setenv("ANTEROOM_HOSTED", "1")
+    with pytest.raises(RuntimeError):
+        subscriptions.charge_ai_listing(db, "conv-no-ctx")
+

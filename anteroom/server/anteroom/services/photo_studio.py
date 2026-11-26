@@ -126,13 +126,17 @@ async def _one(
 
     served, mime_type = await run_db(_read_photo, conv_id, photo_id, reviewed_version, scheduled_confirmed_at)
     data = await asyncio.to_thread(photo_store().read, served)
-    charged = await run_db(subscriptions.reserve_photo_credit, conv_id, photo_id, options)
+    charged, charged_period = await run_db(subscriptions.reserve_photo_credit, conv_id, photo_id, options)
     try:
         result = await photoroom.edit(data, options)
-    except BaseException:
+    except Exception:
+        # Only refund provider/network errors; client disconnect (CancelledError) after
+        # dispatching to Photoroom can still incur provider billing.
         if charged > 0:
             try:
-                await asyncio.shield(run_db(subscriptions.refund_photo_credit, conv_id, photo_id, charged))
+                await asyncio.shield(
+                    run_db(subscriptions.refund_photo_credit, conv_id, photo_id, charged, period=charged_period)
+                )
             except Exception:  # noqa: BLE001 - refund failure must not mask the primary error
                 log.warning("Could not refund AI Studio credits for photo %s", photo_id)
         raise
@@ -198,15 +202,21 @@ async def run(
     await run_db(subscriptions.check_photo_batch, len(photo_ids), options)
     slots = asyncio.Semaphore(photoroom.CONCURRENCY)
     blocked: PhotoroomError | None = None
+    plan_exhausted: subscriptions.PlanLimitError | None = None
 
     async def bounded(photo_id: str) -> Photo:
-        nonlocal blocked
+        nonlocal blocked, plan_exhausted
         async with slots:
+            if plan_exhausted is not None:
+                raise plan_exhausted
             if blocked is not None:
                 raise PhotoroomError("This photo was not sent. Check your Photoroom plan or API key.", 400)
             try:
                 return await _one(run_db, conv_id, photo_id, options,
                                   photo_versions[photo_id] if photo_versions is not None else None, scheduled_confirmed_at)
+            except subscriptions.PlanLimitError as exc:
+                plan_exhausted = exc
+                raise
             except PhotoroomError as exc:
                 if photo_versions is not None and exc.status == 400:
                     blocked = exc
@@ -221,4 +231,4 @@ async def run(
             failed.append(_failure(photo_id, outcome))
         else:
             saved.append(outcome)
-    return {"photos": saved, "errors": failed, "provider_blocked": blocked is not None}
+    return {"photos": saved, "errors": failed, "provider_blocked": blocked is not None or plan_exhausted is not None}

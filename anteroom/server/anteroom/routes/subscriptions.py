@@ -37,7 +37,7 @@ class AssignPlanRequest(BaseModel):
 @operator_router.get("/plans")
 def list_plans(
     request: Request,
-    period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    period: str | None = Query(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
 ):
     """List every assigned seller plan and monthly usage. Operator only."""
     _require_operator(request)

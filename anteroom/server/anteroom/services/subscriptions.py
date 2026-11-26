@@ -8,6 +8,8 @@ in ``seller_plans`` or matched by ``ANTEROOM_UNLIMITED_EMAILS``.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import os
@@ -22,6 +24,22 @@ from anteroom.models.ownership import LOCAL_USER_ID
 from anteroom.models.subscription import PlanUsageEvent, SellerPlan
 from anteroom.services.photoroom import StudioOptions
 from anteroom.services.service_context import current
+
+_EXEMPT_LISTED_ITEM: ContextVar[bool] = ContextVar("anteroom_exempt_listed_item", default=False)
+
+
+@contextmanager
+def exempt_listed_item_count():
+    """Exempt relists (take down + re-list of existing live items) from Free monthly item counting."""
+    token = _EXEMPT_LISTED_ITEM.set(True)
+    try:
+        yield
+    finally:
+        _EXEMPT_LISTED_ITEM.reset(token)
+
+
+def is_listed_item_exempt() -> bool:
+    return _EXEMPT_LISTED_ITEM.get()
 
 REASON_CREDIT_LIMIT = "plan_credit_limit"
 REASON_LISTING_LIMIT = "plan_listing_limit"
@@ -196,10 +214,7 @@ def _lock_seller_usage(db: Session, user_id: str) -> None:
 
 
 def _active_seller() -> tuple[str, str | None] | None:
-    try:
-        ctx = current()
-    except RuntimeError:
-        return None
+    ctx = current()
     if ctx is None:
         return None
     return ctx.seller_id, ctx.seller_email
@@ -338,11 +353,11 @@ def reserve_photo_credit(
     options: StudioOptions,
     *,
     now: datetime | None = None,
-) -> int:
+) -> tuple[int, str]:
     """Atomically reserve credits for one AI Studio photo call and commit before hitting Photoroom."""
     active = _active_seller()
     if active is None:
-        return 0
+        return 0, ""
     user_id, email = active
     _lock_seller_usage(db, user_id)
     plan, _ = resolve_plan(db, user_id, email)
@@ -368,7 +383,7 @@ def reserve_photo_credit(
         )
     )
     db.commit()
-    return cost
+    return cost, period
 
 
 def refund_photo_credit(
@@ -377,9 +392,10 @@ def refund_photo_credit(
     photo_id: str,
     credits: int,
     *,
+    period: str | None = None,
     now: datetime | None = None,
 ) -> None:
-    """Refund reserved photo credits when a Photoroom call fails before producing an edit."""
+    """Refund reserved photo credits into the period originally charged when Photoroom fails."""
     if credits <= 0:
         return
     active = _active_seller()
@@ -389,7 +405,7 @@ def refund_photo_credit(
     db.add(
         PlanUsageEvent(
             user_id=user_id,
-            period=current_period(now),
+            period=period or current_period(now),
             kind=KIND_PHOTO_REFUND,
             credits=-credits,
             conversation_id=conversation_id,

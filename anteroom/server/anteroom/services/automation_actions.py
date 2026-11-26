@@ -84,7 +84,10 @@ async def _relist(conv_id: str, marketplaces: list[str], revision_id: str | None
         if confirmed:
             return {**taken_down, "state": DOWN_STATE, "down": confirmed}
         return taken_down
-    return await _list_remaining(conv_id, marketplaces, revision_id)
+    from anteroom.services import subscriptions
+
+    with subscriptions.exempt_listed_item_count():
+        return await _list_remaining(conv_id, marketplaces, revision_id)
 
 
 def _is_sold(db: Session, conv_id: str) -> bool:

@@ -111,12 +111,14 @@ function PlanBreakdown({ data }: { data: SubscriptionSummary }) {
 
 export function PlanSettings() {
   const { account } = useWorkspaceRuntime();
-  const [interval, setInterval] = useState<"monthly" | "annual">("monthly");
+  const [selectedInterval, setSelectedInterval] = useState<"monthly" | "annual" | null>(null);
   const subscription = useQuery({
     queryKey: ["subscription-plan", account?.id],
     queryFn: api.settings.subscription,
   });
   const data = subscription.data;
+  const interval: "monthly" | "annual" =
+    selectedInterval ?? (data?.plan.billing_interval === "annual" ? "annual" : "monthly");
 
   const creditLimit = data?.credits.limit ?? null;
   const creditExhausted = creditLimit !== null && (data?.credits.used ?? 0) >= creditLimit;
@@ -254,7 +256,7 @@ export function PlanSettings() {
               value={[interval]}
               onValueChange={(values) => {
                 const next = values[0];
-                if (next === "monthly" || next === "annual") setInterval(next);
+                if (next === "monthly" || next === "annual") setSelectedInterval(next);
               }}
             >
               <Toggle value="monthly">Monthly</Toggle>

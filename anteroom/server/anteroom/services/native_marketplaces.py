@@ -449,7 +449,14 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str,
                  *, count_for_plan: bool = True) -> dict:
     """Check, ask Chrome or eBay, then open the job. Each database step runs on a worker thread
     with its own session, so no pooled connection is held while Chrome or eBay answers."""
-    enforced_plan_listing = kind == "list" and relist_rule_id is None and count_for_plan
+    from anteroom.services import subscriptions
+
+    enforced_plan_listing = (
+        kind == "list"
+        and relist_rule_id is None
+        and count_for_plan
+        and not subscriptions.is_listed_item_exempt()
+    )
     snapshot, photos, deleted_here = await in_worker_session(
         _check_start, conv_id, marketplace, body, kind, enforced_plan_listing,
     )
