@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1283 — 2026-11-26
+
+- Add hosted subscription tiers (Free, Lister, Starter, Pro, Business) with unified monthly Smart Credits for AI listing generation and AI Studio edits, unlimited manual and bulk cross-listing on all paid tiers, and a Plan & Smart Credits view in Settings → Usage.
+
 ## 0.1.1282 — 2026-11-26
 
 - Keep cloud pages and scheduled automations from stalling for 30 seconds to 15 minutes when a connection to the cloud database stops answering. Anteroom now drops that connection within seconds and opens a fresh one.

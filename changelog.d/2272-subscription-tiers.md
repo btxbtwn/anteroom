@@ -1,1 +1,0 @@
-- Add hosted subscription tiers (Free, Lister, Starter, Pro, Business) with unified monthly Smart Credits for AI listing generation and AI Studio edits, unlimited manual and bulk cross-listing on all paid tiers, and a Plan & Smart Credits view in Settings → Usage.
