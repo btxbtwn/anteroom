@@ -150,16 +150,18 @@ def drain_with_work(*, finish_after, grace_s=5, renew_as_work_ends=False, max_dr
         events.append('release')
         released_at.append(time.monotonic())
 
+    drain_watchdog_s = max_drain_s if max_drain_s is not None else grace_s
+
     def start():
         def job():
             with process_handoff.marketplace_work():
                 started.set()
-                finish.wait(5)
+                finish.wait(max(5, grace_s + 2))
                 events.append('job finished' if not cancelled.is_set() else 'job cancelled')
                 outcome_recorded.set()
                 if renew_as_work_ends and not cancelled.is_set():
                     # Checked on the test's own thread below: an assert here would only warn.
-                    waited_for_renewal.append(renewed_after_outcome.wait(2))
+                    waited_for_renewal.append(renewed_after_outcome.wait(drain_watchdog_s))
 
         cancelled = threading.Event()
         thread = threading.Thread(target=job)
@@ -179,7 +181,7 @@ def drain_with_work(*, finish_after, grace_s=5, renew_as_work_ends=False, max_dr
         assert await asyncio.to_thread(started.wait, 2)
         process_handoff.begin_draining()
         if finish_after is not None:
-            assert await asyncio.to_thread(renewed_during_drain.wait, 2), (
+            assert await asyncio.to_thread(renewed_during_drain.wait, drain_watchdog_s), (
                 f'the drain did not renew the lease while work was running: {events}'
             )
             if finish_after:
@@ -201,9 +203,12 @@ def drain_with_work(*, finish_after, grace_s=5, renew_as_work_ends=False, max_dr
     if max_drain_s is not None:
         assert drain_started and released_at, events
         elapsed = released_at[-1] - drain_started[0]
-        assert elapsed < max_drain_s, (
-            f'the drain kept waiting after the work had finished ({elapsed:.2f}s >= {max_drain_s}s)'
+        reason = (
+            'the drain kept waiting after the work had finished'
+            if finish_after is not None
+            else 'the drain did not stop within the grace period'
         )
+        assert elapsed < max_drain_s, f'{reason} ({elapsed:.2f}s >= {max_drain_s}s)'
     return events
 
 
@@ -261,9 +266,7 @@ def test_releasing_routes_keeps_the_scheduler_lease(storage, monkeypatch):  # no
 
 
 def test_the_drain_grace_is_bounded():
-    started = time.monotonic()
-    events = drain_with_work(finish_after=None, grace_s=0.2)
-    assert time.monotonic() - started < 2
+    events = drain_with_work(finish_after=None, grace_s=0.2, max_drain_s=2)
     assert events[-3:] == ['job cancelled', 'stop', 'release']
 
 
