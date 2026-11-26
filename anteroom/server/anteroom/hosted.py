@@ -83,6 +83,8 @@ def _skip_client_warning(scope, route, status: int, *, fly_replay: bool) -> bool
         return True
     if template == "/api/marketplaces/sessions" and status == 409:
         return True
+    if status == 402:
+        return True
     return False
 
 
@@ -339,7 +341,7 @@ class SellerSessionMiddleware:
             scope.setdefault("state", {})["seller"] = identity
             from anteroom.services.hosted_context import for_seller
             from anteroom.services.service_context import use
-            with use(for_seller(identity.user_id, context_token)):
+            with use(for_seller(identity.user_id, context_token, email=identity.email)):
                 await self.app(scope, receive, send)
             return
         await response(scope, receive, send)
@@ -699,6 +701,9 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(account_router)
     from anteroom.routes.operator_usage import router as operator_usage_router
     app.include_router(operator_usage_router)
+    from anteroom.routes.subscriptions import operator_router as operator_plans_router, router as subscriptions_router
+    app.include_router(subscriptions_router)
+    app.include_router(operator_plans_router)
     from anteroom.routes.listings import apply_price_drop, preview_price_drop, stream_price_drop_comps
     from anteroom.services.hosted_limits import limit_seller_submissions
     app.add_api_route('/api/conversations/{conv_id}/price-drop/preview', preview_price_drop, methods=['POST'])

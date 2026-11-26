@@ -122,9 +122,20 @@ async def _one(
     run_db: RunDb, conv_id: str, photo_id: str, options: StudioOptions,
     reviewed_version: str | None, scheduled_confirmed_at: str | None,
 ) -> Photo:
+    from anteroom.services import subscriptions
+
     served, mime_type = await run_db(_read_photo, conv_id, photo_id, reviewed_version, scheduled_confirmed_at)
     data = await asyncio.to_thread(photo_store().read, served)
-    result = await photoroom.edit(data, options)
+    charged = await run_db(subscriptions.reserve_photo_credit, conv_id, photo_id, options)
+    try:
+        result = await photoroom.edit(data, options)
+    except BaseException:
+        if charged > 0:
+            try:
+                await asyncio.shield(run_db(subscriptions.refund_photo_credit, conv_id, photo_id, charged))
+            except Exception:  # noqa: BLE001 - refund failure must not mask the primary error
+                log.warning("Could not refund AI Studio credits for photo %s", photo_id)
+        raise
     del data
     key = photo_store().edited_key(served)
 
@@ -172,6 +183,8 @@ async def run(
     photo_versions: dict[str, str] | None = None, scheduled_confirmed_at: str | None = None,
 ) -> dict:
     """Run AI Studio on each photo, a few at a time; returns saved ``Photo`` rows and per-photo failures."""
+    from anteroom.services import subscriptions
+
     if not photo_ids:
         raise ValueError("Choose at least one photo.")
     if len(photo_ids) > photoroom.MAX_BATCH:
@@ -182,6 +195,7 @@ async def run(
         raise ValueError("Review each selected photo before applying.")
     if not await asyncio.to_thread(photoroom.available):
         raise PhotoroomError("Add a Photoroom API key in Settings → Connections to use AI Studio.", 400)
+    await run_db(subscriptions.check_photo_batch, len(photo_ids), options)
     slots = asyncio.Semaphore(photoroom.CONCURRENCY)
     blocked: PhotoroomError | None = None
 
