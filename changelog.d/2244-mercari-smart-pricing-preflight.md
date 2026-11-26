@@ -1,0 +1,2 @@
+- Catch Mercari Smart Pricing minimums that meet or exceed the listing price before listing, and turn Smart Pricing off when an auto-relist price drop reaches its floor.
+- Retry Mercari offer-preview checks when Mercari returns a temporary error.

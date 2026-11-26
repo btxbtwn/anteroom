@@ -207,10 +207,67 @@ def mercari_requirements(snapshot: dict, context: Context) -> list[dict]:
             found.append(gap("mercari_specifics.package.pounds", "Mercari needs a package weight for its prepaid label."))
         if label_answer(snapshot).source == "none":
             found.append(gap(LABEL_PATH, "Mercari needs a prepaid shipping label."))
+    if smart_gap := _mercari_smart_pricing_gap(snapshot, specifics):
+        found.append(smart_gap)
     # Chrome checks the selected leaf and size against Mercari's own master
     # catalog before uploading. Vendoo's mirrored size table is not consulted.
     del context
     return found
+
+
+def _mercari_smart_pricing_amounts(snapshot: dict, specifics: dict) -> tuple[int, int | None] | None:
+    """Whole-dollar ``(price, minimum)`` when Mercari Smart Pricing is on, else None.
+
+    Mercari receives both values rounded to whole dollars (``Math.round``).
+    """
+    smart = specifics.get("smartPricing")
+    if not isinstance(smart, dict) or smart.get("enabled") is not True:
+        return None
+    from anteroom.services.seller_overrides import price_for
+
+    raw_price = price_for(snapshot, "mercari")
+    price_amount = _money(raw_price) if raw_price is not None else None
+    price_dollars = _whole_dollars(price_amount) if price_amount is not None and price_amount > 0 else 0
+    min_amount = _money(smart.get("minimumPrice"))
+    min_dollars = _whole_dollars(min_amount) if min_amount is not None else None
+    return price_dollars, min_dollars
+
+
+def mercari_smart_pricing_meets_price(snapshot: dict) -> bool:
+    """True when Mercari Smart Pricing is on and the listing price reaches or crosses its floor."""
+    amounts = _mercari_smart_pricing_amounts(snapshot, _dict(snapshot.get("mercari_specifics")))
+    if amounts is None:
+        return False
+    price_dollars, min_dollars = amounts
+    if price_dollars <= 0:
+        return False
+    return price_dollars == 1 or (min_dollars is not None and min_dollars >= price_dollars)
+
+
+def _mercari_smart_pricing_gap(snapshot: dict, specifics: dict) -> dict | None:
+    """Mercari refuses drafts when Smart Pricing is on and its minimum meets or exceeds price."""
+    amounts = _mercari_smart_pricing_amounts(snapshot, specifics)
+    if amounts is None:
+        return None
+    price_dollars, min_dollars = amounts
+    if price_dollars == 1:
+        return gap(
+            "mercari_specifics.smartPricing.minimumPrice",
+            "Mercari Smart Pricing needs a listing price of $2 or more. Raise the price or turn Smart Pricing off.",
+        )
+    if min_dollars is None or min_dollars < 1:
+        return gap(
+            "mercari_specifics.smartPricing.minimumPrice",
+            "Mercari Smart Pricing needs a minimum price of $1 or more, or turn Smart Pricing off.",
+        )
+    if price_dollars >= 2 and min_dollars >= price_dollars:
+        highest = price_dollars - 1
+        return gap(
+            "mercari_specifics.smartPricing.minimumPrice",
+            f"Mercari Smart Pricing minimum (${min_dollars}) must be below the listing price (${price_dollars}). "
+            f"Lower the minimum price to ${highest} or less, or turn Smart Pricing off.",
+        )
+    return None
 
 
 def _mercari_ships_from(snapshot: dict, specifics: dict, form: dict) -> str:

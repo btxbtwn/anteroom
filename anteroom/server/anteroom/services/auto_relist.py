@@ -32,7 +32,10 @@ from anteroom.models.marketplace_listing import LIVE_STATES, MarketplaceListing
 from anteroom.models.marketplace_sale import PAID_STATUSES, MarketplaceSale
 from anteroom.services import listing_mode, listing_persistence
 from anteroom.services.automation_age import load_listed_index, resolve_listed_at
-from anteroom.services.chrome_listing import poshmark_fractional_price_error
+from anteroom.services.chrome_listing import (
+    mercari_smart_pricing_meets_price,
+    poshmark_fractional_price_error,
+)
 from anteroom.services.marketplace_delist import listings_for
 from anteroom.services.marketplace_identity import listing_id as extract_listing_id
 from anteroom.services.seller_overrides import (
@@ -716,11 +719,26 @@ def _preview_candidates(db: Session, rule: MarketplaceRelistRule, remaining: int
     return details, counts
 
 
+def _disable_mercari_smart_pricing_at_floor(updated: dict) -> None:
+    """Turn Mercari Smart Pricing off when a relist drop reaches or crosses its floor.
+
+    The saved ``minimumPrice`` stays untouched so we never lower the seller's floor
+    behind their back; disabling Smart Pricing keeps the relist draft valid on Mercari.
+    """
+    if not mercari_smart_pricing_meets_price(updated):
+        return
+    specifics = updated.get("mercari_specifics")
+    if isinstance(specifics, dict) and isinstance(specifics.get("smartPricing"), dict):
+        specifics["smartPricing"]["enabled"] = False
+
+
 def _snapshot_with_relist_price(data: dict, marketplace: str, price: float) -> dict:
     updated = copy.deepcopy(data)
     path = CANONICAL_PRICE[marketplace]
     set_path(updated, path, round(price, 2))
     _write_locks(updated, locked_paths(updated) | {path})
+    if marketplace == "mercari":
+        _disable_mercari_smart_pricing_at_floor(updated)
     return updated
 
 
@@ -731,6 +749,7 @@ def _general_with_relist_price(data: dict, marketplace: str, price: float, live_
     not listed on keep following General, so a later cross-list sends the new price.
     """
     others = {market: price_for(data, market) for market in live_elsewhere if market in CANONICAL_PRICE}
+    mercari_before = price_for(data, "mercari")
     updated = _snapshot_with_relist_price(data, marketplace, price)
     updated["price"] = round(price, 2)
     held = set()
@@ -740,6 +759,8 @@ def _general_with_relist_price(data: dict, marketplace: str, price: float, live_
             held.add(CANONICAL_PRICE[market])
     if held:
         _write_locks(updated, locked_paths(updated) | held)
+    if marketplace != "mercari" and "mercari" not in live_elsewhere and price_for(updated, "mercari") != mercari_before:
+        _disable_mercari_smart_pricing_at_floor(updated)
     return updated
 
 
