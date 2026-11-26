@@ -15,6 +15,15 @@ struct LayoutReviewApp: App {
                         sample("Vintage cotton crewneck sweatshirt with embroidered detail", status: "sold", price: 36, icon: "tshirt.fill", color: .green)
                     }
                     Section {
+                        NavigationLink("Camera tray (sample shots)") {
+                            MultiShotCamera(reviewing: [("tshirt.fill", UIColor.systemBlue), ("bag.fill", .brown), ("tag.fill", .systemGreen), ("ruler.fill", .systemOrange)].map { name, color in
+                                UIGraphicsImageRenderer(size: CGSize(width: 120, height: 120)).image { context in
+                                    UIColor.darkGray.setFill(); context.fill(CGRect(x: 0, y: 0, width: 120, height: 120))
+                                    UIImage(systemName: name)?.withTintColor(color, renderingMode: .alwaysOriginal).draw(in: CGRect(x: 25, y: 25, width: 70, height: 70))
+                                }
+                            }, limit: 6)
+                            .toolbar(.hidden, for: .navigationBar)
+                        }
                         Text("Sample listings · layout review only").font(.footnote).foregroundStyle(.secondary)
                     }
                 }
