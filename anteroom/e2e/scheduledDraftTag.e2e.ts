@@ -41,7 +41,11 @@ test("draft rows show the scheduled publish time in local time", async ({ page, 
 
     await page.getByRole("button", { name: "Inventory table" }).click();
     await page.getByRole("group", { name: "Listing status" }).getByRole("button", { name: /^Draft\b/ }).click();
-    const tableRow = page.getByRole("rowheader").filter({ hasText: title });
+    const tableRow = (
+      phone
+        ? page.getByRole("list", { name: "Inventory" }).getByRole("listitem")
+        : page.getByRole("rowheader")
+    ).filter({ hasText: title });
     await expect(tableRow.getByText("Scheduled", { exact: true })).toBeVisible();
     await expect(tableRow.locator("time")).toHaveText(`${date} ${time}`);
     if (phone) await page.getByRole("button", { name: "Inventory", exact: true }).click();

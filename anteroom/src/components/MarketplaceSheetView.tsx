@@ -37,7 +37,7 @@ import { Popover, PopoverPopup } from "./ui/popover";
 import { Skeleton } from "./ui/skeleton";
 import { Spinner } from "./ui/spinner";
 import { useInventorySheet } from "./useInventorySheet";
-import { EmptyRow, Panel } from "./WorkspacePage";
+import { EmptyRow, PageError, Panel } from "./WorkspacePage";
 
 const DESKTOP_ROW_HEIGHT = 56;
 const PHONE_ROW_HEIGHT = 72;
@@ -61,6 +61,42 @@ interface ConfirmListTarget {
   anchor: HTMLElement;
 }
 
+export function InventoryLoadError({
+  error,
+  retrying = false,
+  onRetry,
+}: {
+  error?: string | null;
+  retrying?: boolean;
+  onRetry: () => void;
+}) {
+  const reason = error?.trim();
+  const message = reason
+    ? /^could not load listings/i.test(reason)
+      ? reason
+      : `Could not load listings: ${reason}`
+    : "Could not load listings. Check your connection and try again.";
+  return (
+    <div className="p-4">
+      <PageError
+        message={message}
+        action={
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="min-h-9 pointer-coarse:min-h-11"
+            disabled={retrying}
+            onClick={onRetry}
+          >
+            {retrying ? "Retrying…" : "Retry"}
+          </Button>
+        }
+      />
+    </div>
+  );
+}
+
 export function MarketplaceSheetView({
   marketplace,
   rows,
@@ -69,6 +105,9 @@ export function MarketplaceSheetView({
   emptyLabel,
   loading,
   loadFailed,
+  loadError,
+  retrying = false,
+  onRetry,
   nameBySku,
   onOpenListing,
 }: {
@@ -79,10 +118,14 @@ export function MarketplaceSheetView({
   emptyLabel: string;
   loading: boolean;
   loadFailed: boolean;
+  loadError?: string | null;
+  retrying?: boolean;
+  onRetry?: () => void;
   nameBySku: boolean;
   onOpenListing: (id: string, tab?: string) => void;
 }) {
   const queryClient = useQueryClient();
+  const handleRetry = onRetry ?? (() => { void queryClient.refetchQueries({ queryKey: ["conversations"] }); });
   const runtime = useWorkspaceRuntime();
   const isPhone = usePhoneLayout();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -185,7 +228,7 @@ export function MarketplaceSheetView({
   return (
     <div ref={containerRef} className="flex min-h-0 flex-1 flex-col gap-3">
       {/* Contextual action bar: selection bar on desktop when items are checked, or phone Select toggle */}
-      {narrow ? (
+      {narrow && !(loading && loadFailed) ? (
         <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
           <span className="tabular-nums">
             {loading ? "Loading…" : `${rows.length} ${rows.length === 1 ? "item" : "items"}`}
@@ -222,7 +265,7 @@ export function MarketplaceSheetView({
             )
           ) : null}
         </div>
-      ) : activeSelectedIds.length > 0 ? (
+      ) : !narrow && activeSelectedIds.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/60 bg-card/40 px-3 py-2 text-xs">
           <span className="font-medium text-foreground tabular-nums">
             {activeSelectedIds.length} selected
@@ -239,16 +282,16 @@ export function MarketplaceSheetView({
       ) : null}
 
       <Panel divided={false} className="flex min-h-0 flex-1 flex-col bg-background">
-        {narrow ? (
+        {loading && loadFailed ? (
+          <InventoryLoadError error={loadError} retrying={retrying} onRetry={handleRetry} />
+        ) : narrow ? (
           <div
             ref={scrollRef}
             className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
             role="list"
             aria-label={`${marketLabel} inventory`}
           >
-            {loading && loadFailed ? (
-              <EmptyRow>Could not load listings. Retrying…</EmptyRow>
-            ) : loading ? (
+            {loading ? (
               <PhoneScanSkeleton />
             ) : rows.length === 0 ? (
               <EmptyRow>{!allCount ? "No listings yet" : needle ? "No matching listings" : emptyLabel}</EmptyRow>
@@ -400,9 +443,7 @@ export function MarketplaceSheetView({
                 </div>
               </div>
 
-              {loading && loadFailed ? (
-                <EmptyRow>Could not load listings. Retrying…</EmptyRow>
-              ) : loading ? (
+              {loading ? (
                 <DesktopSheetSkeleton gridStyle={gridStyle} columnCount={columns.length} />
               ) : rows.length === 0 ? (
                 <EmptyRow>{!allCount ? "No listings yet" : needle ? "No matching listings" : emptyLabel}</EmptyRow>

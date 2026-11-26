@@ -8,7 +8,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { CircleAlertIcon } from "lucide-react";
 
 import { cn } from "../lib/utils";
-import { Alert, AlertDescription } from "./ui/alert";
+import { Alert, AlertAction, AlertDescription } from "./ui/alert";
 import { Skeleton } from "./ui/skeleton";
 
 /**
@@ -165,11 +165,12 @@ export function ListRow({
   );
 }
 
-export function PageError({ message }: { message: string }) {
+export function PageError({ message, action }: { message: string; action?: ReactNode }) {
   return (
     <Alert variant="error">
       <CircleAlertIcon />
       <AlertDescription>{message}</AlertDescription>
+      {action ? <AlertAction>{action}</AlertAction> : null}
     </Alert>
   );
 }
