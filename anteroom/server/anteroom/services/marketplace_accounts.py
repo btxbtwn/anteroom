@@ -26,7 +26,7 @@ from sqlalchemy import CursorResult, delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from anteroom.database import SessionLocal, in_worker_session
+from anteroom.database import SessionLocal, claim_in_worker_session, in_worker_session
 from anteroom.models.marketplace_sign_in import MarketplaceSignIn
 from anteroom.models.ownership import LOCAL_USER_ID
 from anteroom.services import relay_client
@@ -228,7 +228,12 @@ async def finish_sign_in(marketplace: str, state: str, claim: str) -> dict:
     """
     _check(marketplace)
     name = NAMES[marketplace]
-    if not await in_worker_session(_consume_sign_in, marketplace, state):
+    async def give_back(taken: bool) -> None:
+        if taken:
+            await in_worker_session(_release_sign_in, marketplace, state)
+
+    # A finish cancelled while the take is committing gives the sign-in back too.
+    if not await claim_in_worker_session(_consume_sign_in, give_back, marketplace, state):
         raise SignInNotFound(f"This {name} sign-in was not started here, or it already ended. Start again from Connections.")
     try:
         resp = await relay_request("GET", "/studio/oauth/result", params={"state": state, "claim": claim})

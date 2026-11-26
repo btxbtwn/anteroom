@@ -1,0 +1,1 @@
+- If finishing an eBay or Etsy sign-in is interrupted, you can open the same approval link again instead of starting over from Connections.

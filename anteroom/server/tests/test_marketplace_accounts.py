@@ -386,6 +386,30 @@ def test_a_finish_cancelled_while_waiting_on_the_relay_can_be_retried(sign_in, m
     assert asyncio.run(accounts.finish_sign_in("etsy", "state-1", "claim"))["label"] == "fixture_closet"
 
 
+def test_a_finish_cancelled_while_taking_the_sign_in_can_be_retried(sign_in, monkeypatch):
+    """The take commits on its worker thread even when the finish is cancelled meanwhile (#2246)."""
+    relay, _ = sign_in
+    consume = accounts._consume_sign_in
+
+    def slow_consume(db, marketplace, state):
+        time.sleep(0.3)
+        return consume(db, marketplace, state)
+
+    async def cancelled_finish():
+        task = asyncio.create_task(accounts.finish_sign_in("etsy", "state-1", "claim"))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(accounts.start_sign_in("etsy"))
+    monkeypatch.setattr(accounts, "_consume_sign_in", slow_consume)
+    asyncio.run(cancelled_finish())
+    assert accounts.status()["accounts"]["etsy"]["pending"]
+    monkeypatch.setattr(accounts, "_consume_sign_in", consume)
+    assert asyncio.run(accounts.finish_sign_in("etsy", "state-1", "claim"))["label"] == "fixture_closet"
+
+
 def test_a_refused_claim_ends_the_sign_in_with_its_reason(sign_in, monkeypatch):
     async def refused(method, path, params=None, **kwargs):
         if path.endswith("/start"):
