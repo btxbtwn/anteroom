@@ -71,11 +71,15 @@ def save_photo(db, draft_id, key, data, width, height, marketplace=None):
                   width=width, height=height, display_order=0 if highest is None else highest + 1,
                   marketplace=marketplace)
     db.add(photo)
-    db.commit()
+    db.flush()
     # The photo as the photo list shows it (stored values, so the same
-    # created_at), so a client adds it without reading the list again.
+    # created_at), so a client adds it without reading the list again. Built
+    # before the commit: nothing may touch the database after the row is
+    # committed, or a failed read would make the caller delete saved bytes.
     db.refresh(photo)
-    return photo_response(photo)
+    response = photo_response(photo)
+    db.commit()
+    return response
 
 
 @router.post('', response_model=contract.ListingPhoto, status_code=201)
