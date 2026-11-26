@@ -37,6 +37,40 @@ async function openPage(page: Page, name: string, phone: boolean) {
   if (phone) await closePhoneSidebar(page);
 }
 
+/** A seller's usage as the server reports it: 30 days with three days of spend, or October with one. */
+function managedUsage(period: string) {
+  const service = { count: 0, usd: 0, input_tokens: 0, output_tokens: 0, items: [] };
+  const item = (label: string, count: number, usd: number, tokens = 0) =>
+    ({ label, count, usd, input_tokens: Math.round(tokens * 0.8), output_tokens: Math.round(tokens * 0.2) });
+  const days = (first: string, spent: Record<string, [number, number]>) => {
+    const start = Date.parse(`${first}T00:00:00Z`);
+    const length = period === "30d" ? 30 : 31;
+    return Array.from({ length }, (_, index) => {
+      const date = new Date(start + index * 86_400_000).toISOString().slice(0, 10);
+      const [openrouter, photoroom] = spent[date] ?? [0, 0];
+      return { date, openrouter, photoroom };
+    });
+  };
+  const months = ["2026-11", "2026-10"];
+  if (period === "2026-10") {
+    return {
+      period: { id: period, start: "2026-10-01T00:00:00+00:00", end: "2026-11-01T00:00:00+00:00" }, months,
+      total_usd: 0.1, openrouter: service,
+      photoroom: { ...service, count: 1, usd: 0.1, items: [item("Background removed", 1, 0.1)] },
+      days: days("2026-10-01", { "2026-10-30": [0, 0.1] }),
+    };
+  }
+  return {
+    period: { id: period, start: "2026-10-28T00:00:00+00:00", end: "2026-11-27T00:00:00+00:00" }, months,
+    total_usd: 0.5595,
+    openrouter: { count: 14, usd: 0.2595, input_tokens: 49_120, output_tokens: 12_280,
+      items: [item("google/gemini-2.5-flash", 11, 0.255, 58_400), item("openai/gpt-5-mini", 3, 0.0045, 3_000)] },
+    photoroom: { ...service, count: 3, usd: 0.3,
+      items: [item("Background removed, shadow", 2, 0.2), item("Ghost mannequin", 1, 0.1)] },
+    days: days("2026-10-28", { "2026-10-30": [0, 0.1], "2026-11-20": [0.11, 0.1], "2026-11-26": [0.1495, 0.1] }),
+  };
+}
+
 for (const scheme of ["light", "dark"] as const) {
   test.describe(`${scheme} appearance`, () => {
     test.use({ colorScheme: scheme });
@@ -67,27 +101,55 @@ for (const scheme of ["light", "dark"] as const) {
       await shot("settings-general");
       await openSettings(page, "Usage", phone);
       const usage = page.locator("#managed-usage");
+      const downloadCsv = page.getByRole("button", { name: "Download CSV" });
       await expect(usage.getByText("alice@sandbox.test")).toBeVisible();
-      await expect(usage.getByText("$0.00", { exact: true })).toHaveCount(3);
-      await expect(usage.getByText("0 AI calls")).toBeVisible();
-      await expect(usage.getByText("0 photo edits")).toBeVisible();
+      await expect(usage.getByText("$0.00", { exact: true })).toHaveCount(1);
+      await expect(usage.getByText("No metered usage in this period.")).toBeVisible();
+      await expect(downloadCsv).toBeDisabled();
       await shot("settings-usage-empty");
       // The offline sandbox never spends provider credits. Exercise a refresh
       // with distinct costs, including the fractional cents OpenRouter reports.
-      const usagePath = "**/api/settings/managed-usage";
-      await page.route(usagePath, route => route.fulfill({ json: {
-        openrouter: { count: 12, usd: 0.0245 }, photoroom: { count: 3, usd: 0.30 },
-      } }));
-      await usage.getByRole("button", { name: "Refresh" }).click();
+      const usagePath = /\/api\/settings\/managed-usage(\.csv)?\?period=/;
+      await page.route(usagePath, route => {
+        const url = new URL(route.request().url());
+        const period = url.searchParams.get("period") ?? "30d";
+        if (url.pathname.endsWith(".csv")) {
+          return route.fulfill({ contentType: "text/csv", body: `time_utc,service,item,input_tokens,output_tokens,cost_usd\n${period}\n` });
+        }
+        return route.fulfill({ json: managedUsage(period) });
+      });
+      await page.getByRole("button", { name: "Refresh usage" }).click();
       const rows = usage.locator("[data-slot=settings-row]");
-      await expect(rows.filter({ hasText: "Total metered usage" })).toContainText("$0.3245");
+      const total = rows.filter({ hasText: "Total metered usage" });
+      await expect(total.getByText("$0.56", { exact: true })).toBeVisible();
+      await expect(total).toContainText("Oct 28 – Nov 26, 2026");
+      await expect(total).toContainText("Highest day: Nov 20, $0.21");
+      await expect(total.getByRole("img", { name: /^Cost per day, Oct 28 to Nov 26/ })).toBeVisible();
       const ai = rows.filter({ hasText: "OpenRouter" });
-      await expect(ai.getByText("12 AI calls")).toBeVisible();
-      await expect(ai.getByText("$0.0245")).toBeVisible();
+      await expect(ai.getByText("14 AI calls · 61.4K tokens")).toBeVisible();
+      await expect(ai.getByText("$0.26", { exact: true })).toBeVisible();
+      await expect(ai.getByRole("listitem").filter({ hasText: "google/gemini-2.5-flash" })).toContainText("$0.25");
+      await expect(ai.getByRole("listitem").filter({ hasText: "openai/gpt-5-mini" })).toContainText("$0.0045");
       const edits = rows.filter({ hasText: "Photoroom" });
       await expect(edits.getByText("3 photo edits")).toBeVisible();
-      await expect(edits.getByText("$0.30")).toBeVisible();
+      await expect(edits.getByText("$0.30", { exact: true })).toBeVisible();
+      await expect(usage.getByText("Days and months are in UTC.")).toBeVisible();
       await shot("settings-usage");
+      // The same numbers as a table, for anyone who can't read the bars.
+      await total.getByRole("button", { name: "Table", exact: true }).click();
+      await expect(total.getByRole("row", { name: "Nov 20 $0.11 $0.10 $0.21" })).toBeVisible();
+      await expect(total.getByRole("row")).toHaveCount(4);
+      await shot("settings-usage-table");
+      // A calendar month covers that month only, and its file is named for it.
+      await page.getByRole("combobox", { name: "Usage period" }).click();
+      await expect(page.getByRole("option")).toHaveText(["Last 30 days", "November 2026", "October 2026"]);
+      await page.getByRole("option", { name: "October 2026" }).click();
+      await expect(total).toContainText("Oct 1 – 31, 2026");
+      await expect(total.getByText("$0.10", { exact: true })).toBeVisible();
+      await expect(rows.filter({ hasText: "OpenRouter" }).getByText("0 AI calls")).toBeVisible();
+      const download = page.waitForEvent("download");
+      await downloadCsv.click();
+      expect((await download).suggestedFilename()).toBe("anteroom-usage-2026-10.csv");
       await page.unroute(usagePath);
       await openSettings(page, "Experimental", phone);
       const vendoo = page.getByRole("switch", { name: "Use Vendoo", exact: true });
