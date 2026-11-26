@@ -90,4 +90,53 @@ describe("ShippingPresetsSection removal", () => {
       host.remove();
     }
   });
+
+  it("shows an error toast when Undo fails to restore a deleted shipping preset", async () => {
+    const emptyPayload: ShippingPresets = { ok: true, presets: [], fields: {} };
+    vi.spyOn(api.settings, "deleteShippingPreset").mockResolvedValue(emptyPayload);
+    vi.spyOn(api.settings, "createShippingPreset").mockRejectedValue(new Error("Could not save preset"));
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } },
+    });
+    client.setQueryData(["settings-shipping-presets"], { ok: true, presets: [samplePreset], fields: {} });
+
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => {
+        root.render(
+          <QueryClientProvider client={client}>
+            <ToastProvider>
+              <ShippingPresetsSection />
+            </ToastProvider>
+          </QueryClientProvider>,
+        );
+      });
+
+      await act(async () => {
+        host.querySelector<HTMLButtonElement>('[aria-label="Delete Poly mailer"]')!.click();
+      });
+      await vi.waitFor(() => {
+        expect(host.textContent).not.toContain("Poly mailer");
+      });
+
+      const undoButton = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+        (button) => button.textContent?.trim() === "Undo",
+      );
+      await act(async () => {
+        undoButton!.click();
+      });
+
+      await vi.waitFor(() => {
+        expect(document.body.textContent).toContain("Could not restore shipping preset");
+        expect(document.body.textContent).toContain("Could not save preset");
+      });
+    } finally {
+      await act(async () => root.unmount());
+      client.clear();
+      host.remove();
+    }
+  });
 });

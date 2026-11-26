@@ -23,43 +23,47 @@ function mountToasts() {
 }
 
 afterEach(() => {
-  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
 describe("showUndoToast", () => {
-  it("renders a done · Undo toast and runs onUndo without committing when Undo is clicked", async () => {
+  it("renders a done · Undo toast with the default timeout and runs onUndo once when clicked", async () => {
     const view = mountToasts();
+    const addSpy = vi.spyOn(toastManager, "add");
     const onUndo = vi.fn();
-    const onCommit = vi.fn();
     try {
       await act(async () => {
-        showUndoToast({ title: "Photo removed", onUndo, onCommit });
+        showUndoToast({ title: "Removed preset", onUndo });
       });
+      expect(addSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Removed preset",
+          timeout: UNDO_TOAST_TIMEOUT_MS,
+        }),
+      );
       const undoButton = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
         (button) => button.textContent?.trim() === "Undo",
       );
-      expect(document.body.textContent).toContain("Photo removed");
+      expect(document.body.textContent).toContain("Removed preset");
       expect(undoButton).toBeDefined();
 
       await act(async () => {
         undoButton!.click();
+        undoButton!.click();
       });
 
       expect(onUndo).toHaveBeenCalledTimes(1);
-      expect(onCommit).not.toHaveBeenCalled();
     } finally {
       view.unmount();
     }
   });
 
-  it("commits once when the corner dismiss button is clicked", async () => {
+  it("dismisses without running onUndo when the corner close button is clicked", async () => {
     const view = mountToasts();
     const onUndo = vi.fn();
-    const onCommit = vi.fn();
     try {
       await act(async () => {
-        showUndoToast({ title: "Memory removed", onUndo, onCommit });
+        showUndoToast({ title: "Removed preset", onUndo });
       });
       const closeButton = document.querySelector<HTMLButtonElement>('[aria-label="Dismiss notification"]');
       expect(closeButton).not.toBeNull();
@@ -68,41 +72,10 @@ describe("showUndoToast", () => {
         closeButton!.click();
       });
 
-      expect(onCommit).toHaveBeenCalledTimes(1);
       expect(onUndo).not.toHaveBeenCalled();
     } finally {
       view.unmount();
     }
-  });
-
-  it("commits via flush() and ignores subsequent close events", async () => {
-    const view = mountToasts();
-    const onUndo = vi.fn();
-    const onCommit = vi.fn();
-    try {
-      let handle: ReturnType<typeof showUndoToast>;
-      await act(async () => {
-        handle = showUndoToast({ title: "Photo removed", onUndo, onCommit });
-      });
-      await act(async () => {
-        handle!.flush();
-        handle!.flush();
-      });
-      expect(onCommit).toHaveBeenCalledTimes(1);
-      expect(onUndo).not.toHaveBeenCalled();
-    } finally {
-      view.unmount();
-    }
-  });
-
-  it("commits after timeout when no ToastProvider is mounted", () => {
-    vi.useFakeTimers();
-    const onUndo = vi.fn();
-    const onCommit = vi.fn();
-    showUndoToast({ title: "Memory removed", onUndo, onCommit });
-    expect(onCommit).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(UNDO_TOAST_TIMEOUT_MS);
-    expect(onCommit).toHaveBeenCalledTimes(1);
   });
 
   it("reports a failed async undo with an error toast", async () => {

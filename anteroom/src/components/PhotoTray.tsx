@@ -3,11 +3,9 @@ import React, { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { refreshInventory } from "../api/inventoryRefresh";
-import { trackPendingPhotoDelete } from "../api/pendingPhotoDeletes";
 import { groupImageFilesByFolder, moveItem, type PhotoFolderGroup } from "../photoDrop";
 import type { ListingPhoto } from "../api/types";
 import { toastManager } from "./ui/toast";
-import { showUndoToast, type UndoToastHandle } from "./ui/toastHelpers";
 import { BulkUploadDialog } from "./BulkUploadDialog";
 import { InspectorSection } from "./ListingFormControls";
 import { PhotoEditorDialog, usePhotoStudioPending } from "./PhotoEditorDialog";
@@ -44,88 +42,22 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
   const [editing, setEditing] = useState<{ id: string; tab: "crop" | "studio" } | null>(null);
   const editingId = editing?.id ?? null;
   const [pendingBulkGroups, setPendingBulkGroups] = useState<PhotoFolderGroup[] | null>(null);
-  const [pendingRemoveIds, setPendingRemoveIds] = useState<Set<string>>(() => new Set());
-  const pendingToastsRef = useRef<Map<string, UndoToastHandle>>(new Map());
-  const mountedRef = useRef(true);
-  const convIdRef = useRef(convId);
 
   const { data: photos } = useQuery({
     queryKey: ["photos", convId],
     queryFn: ({ signal }) => api.conversations.photos(convId, undefined, { signal }),
   });
 
-  const commitDelete = async (targetConvId: string, photoId: string) => {
-    try {
-      await api.conversations.deletePhoto(targetConvId, photoId);
-      queryClient.setQueryData<ListingPhoto[]>(["photos", targetConvId], (current) =>
-        current?.filter((photo) => photo.id !== photoId),
-      );
-      queryClient.invalidateQueries({ queryKey: ["photos", targetConvId] });
+  const deleteMutation = useMutation({
+    mutationFn: (photoId: string) => api.conversations.deletePhoto(convId, photoId),
+    onMutate: () => setUploadError(null),
+    onError: (err: Error) => setUploadError(err.message || "Could not remove the photo. Try again."),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["photos", convId] });
       // The sidebar thumbnail comes from the conversation list's cover photo.
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      if (mountedRef.current && convIdRef.current === targetConvId) {
-        setPendingRemoveIds((prev) => {
-          if (!prev.has(photoId)) return prev;
-          const next = new Set(prev);
-          next.delete(photoId);
-          return next;
-        });
-      }
-    } catch (err) {
-      const message = err instanceof Error && err.message ? err.message : "Could not remove the photo. Try again.";
-      if (mountedRef.current && convIdRef.current === targetConvId) {
-        setPendingRemoveIds((prev) => {
-          if (!prev.has(photoId)) return prev;
-          const next = new Set(prev);
-          next.delete(photoId);
-          return next;
-        });
-        setUploadError(message);
-      } else {
-        toastManager.add({ type: "error", title: "Could not remove photo", description: message });
-      }
-    }
-  };
-
-  const flushPendingDeletes = () => {
-    const handles = [...pendingToastsRef.current.values()];
-    pendingToastsRef.current.clear();
-    for (const handle of handles) handle.flush();
-  };
-
-  const scheduleRemove = (photoId: string) => {
-    const targetConvId = convId;
-    setUploadError(null);
-    setPendingRemoveIds((prev) => new Set(prev).add(photoId));
-    // Listing actions wait for this removal (see api/pendingPhotoDeletes), so
-    // they never read a photo the seller removed.
-    let committed: Promise<void> | null = null;
-    let untrack = () => {};
-    const handle = showUndoToast({
-      title: "Photo removed",
-      onUndo: () => {
-        untrack();
-        pendingToastsRef.current.delete(photoId);
-        if (!mountedRef.current || convIdRef.current !== targetConvId) return;
-        setPendingRemoveIds((prev) => {
-          if (!prev.has(photoId)) return prev;
-          const next = new Set(prev);
-          next.delete(photoId);
-          return next;
-        });
-      },
-      onCommit: () => {
-        pendingToastsRef.current.delete(photoId);
-        committed ??= commitDelete(targetConvId, photoId).finally(() => untrack());
-        return committed;
-      },
-    });
-    untrack = trackPendingPhotoDelete(targetConvId, () => {
-      handle.flush();
-      return committed ?? Promise.resolve();
-    });
-    pendingToastsRef.current.set(photoId, handle);
-  };
+    },
+  });
 
   // A rotation or edit keeps the photo's ID and serves a new file under a new URL.
   const replacePhoto = (changed: ListingPhoto) => {
@@ -174,52 +106,35 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
     },
   });
 
-  const visiblePhotos = photos?.filter((photo) => !pendingRemoveIds.has(photo.id));
-  const previewIndex = visiblePhotos?.findIndex((p) => p.id === previewId) ?? -1;
-  const editingIndex = visiblePhotos?.findIndex((p) => p.id === editingId) ?? -1;
-  const editingPhoto = visiblePhotos && editingIndex >= 0 ? visiblePhotos[editingIndex] : null;
-  const previewPhoto = visiblePhotos && previewIndex >= 0 ? visiblePhotos[previewIndex] : null;
+  const previewIndex = photos?.findIndex((p) => p.id === previewId) ?? -1;
+  const editingIndex = photos?.findIndex((p) => p.id === editingId) ?? -1;
+  const editingPhoto = photos && editingIndex >= 0 ? photos[editingIndex] : null;
+  const previewPhoto = photos && previewIndex >= 0 ? photos[previewIndex] : null;
 
   useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    convIdRef.current = convId;
-    setPendingRemoveIds(new Set());
     setPreviewId(null);
     setEditing(null);
-    const onPageHide = () => flushPendingDeletes();
-    window.addEventListener("pagehide", onPageHide);
-    return () => {
-      window.removeEventListener("pagehide", onPageHide);
-      flushPendingDeletes();
-    };
   }, [convId]);
 
   useEffect(() => {
-    if (previewId && visiblePhotos && !visiblePhotos.some((p) => p.id === previewId)) {
+    if (previewId && photos && !photos.some((p) => p.id === previewId)) {
       setPreviewId(null);
     }
-  }, [visiblePhotos, previewId]);
+  }, [photos, previewId]);
 
   // A hidden listing tab stays mounted. Its photo tiles must not: each one
   // would keep a full-size decoded bitmap.
   const sessionActive = useListingSessionActive();
   const canAdd = useCanAddPhotos(convId);
 
-  const canReorder = (visiblePhotos?.length || 0) > 1;
+  const canReorder = (photos?.length || 0) > 1;
   // A phone cannot drop files.
   const touchScreen = typeof window !== "undefined" && Boolean(window.matchMedia?.("(hover: none)").matches);
 
   const movePhoto = (from: number, to: number) => {
-    if (!visiblePhotos) return;
-    const next = moveItem(visiblePhotos, from, to);
-    if (next === visiblePhotos) return;
-    flushPendingDeletes();
+    if (!photos) return;
+    const next = moveItem(photos, from, to);
+    if (next === photos) return;
     setUploadError(null);
     reorderMutation.mutate(next.map((photo) => photo.id));
   };
@@ -293,7 +208,7 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
       data-photo-tray=""
       title="Photos"
       meta={(() => {
-        const count = visiblePhotos?.length || 0;
+        const count = photos?.length || 0;
         if (count === 0) return touchScreen || !canAdd ? undefined : "Drop photos anywhere";
         return `${count} ${count === 1 ? "photo" : "photos"}`;
       })()}
@@ -329,10 +244,10 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
     >
       {!canAdd && <p className="text-xs text-muted-foreground">{DRAFT_ONLY_PHOTOS}</p>}
       {uploadError && <div className="text-destructive-foreground text-xs">{uploadError}</div>}
-      {visiblePhotos && visiblePhotos.length > 0 && (
+      {photos && photos.length > 0 && (
         <PhotoStrip className="gap-2">
-          <SortablePhotos ids={visiblePhotos.map((p) => p.id)} onMove={movePhoto}>
-            {visiblePhotos.map((p, i) => (
+          <SortablePhotos ids={photos.map((p) => p.id)} onMove={movePhoto}>
+            {photos.map((p, i) => (
               <SortablePhoto key={p.id} id={p.id} disabled={!canReorder}>
                 {(dragging) => (
                   <PhotoThumb
@@ -345,7 +260,7 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
                     onOpen={() => setPreviewId(p.id)}
                     onRotate={canEditPhotos ? () => adjustPhoto(p.id, 90) : undefined}
                     rotating={rotatingId === p.id}
-                    onRemove={studioPending ? undefined : () => scheduleRemove(p.id)}
+                    onRemove={studioPending ? undefined : () => deleteMutation.mutate(p.id)}
                     controlsInViewerOnTouch
                   />
                 )}
@@ -354,9 +269,9 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
           </SortablePhotos>
         </PhotoStrip>
       )}
-      {previewPhoto && visiblePhotos ? (
+      {previewPhoto && photos ? (
         <PhotoLightbox
-          urls={visiblePhotos.map((photo) => photo.url)}
+          urls={photos.map((photo) => photo.url)}
           index={previewIndex}
           error={uploadError}
           rotating={adjustPhotoMutation.isPending}
@@ -370,11 +285,11 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
             setPreviewId(null);
           } : undefined}
           onRevert={canEditPhotos && previewPhoto.edits ? () => adjustPhoto(previewPhoto.id, null) : undefined}
-          onStep={(next) => setPreviewId(visiblePhotos[next].id)}
+          onStep={(next) => setPreviewId(photos[next].id)}
           onMove={(delta) => movePhoto(previewIndex, previewIndex + delta)}
           onRemove={studioPending ? undefined : () => {
-            const rest = visiblePhotos.filter((photo) => photo.id !== previewPhoto.id);
-            scheduleRemove(previewPhoto.id);
+            const rest = photos.filter((photo) => photo.id !== previewPhoto.id);
+            deleteMutation.mutate(previewPhoto.id);
             setPreviewId(rest.length ? rest[Math.min(previewIndex, rest.length - 1)].id : null);
           }}
           onClose={() => setPreviewId(null)}
@@ -386,7 +301,7 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
           convId={convId}
           photo={editingPhoto}
           index={editingIndex}
-          photos={visiblePhotos ?? undefined}
+          photos={photos ?? undefined}
           initialTab={editing?.tab}
           onSaved={replacePhoto}
           onClose={(background) => {

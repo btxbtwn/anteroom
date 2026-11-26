@@ -5,12 +5,18 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api/client";
 import { ASSISTANT_MEMORY_KEY, ASSISTANT_NAME_KEY, ASSISTANT_NOTE_KEY } from "../../api/assistant";
-import { ToastProvider } from "../ui/toast";
+import {
+  completeConfirmDialogClose,
+  readConfirmDialogState,
+  registerConfirmDialogHost,
+  respondToConfirmDialog,
+} from "../../ui/confirmDialog";
 import { AssistantSettings } from "./AssistantSettings";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 afterEach(() => {
+  completeConfirmDialogClose();
   vi.restoreAllMocks();
 });
 
@@ -22,15 +28,14 @@ function mountAssistant(memories: Array<{ id: string; text: string; created_at: 
   client.setQueryData(ASSISTANT_NOTE_KEY, { note: "" });
   client.setQueryData(ASSISTANT_MEMORY_KEY, { memories });
 
+  const unregister = registerConfirmDialogHost();
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
   act(() => {
     root.render(
       <QueryClientProvider client={client}>
-        <ToastProvider>
-          <AssistantSettings />
-        </ToastProvider>
+        <AssistantSettings />
       </QueryClientProvider>,
     );
   });
@@ -39,6 +44,7 @@ function mountAssistant(memories: Array<{ id: string; text: string; created_at: 
     client,
     unmount: async () => {
       await act(async () => root.unmount());
+      unregister();
       client.clear();
       host.remove();
     },
@@ -46,13 +52,12 @@ function mountAssistant(memories: Array<{ id: string; text: string; created_at: 
 }
 
 describe("AssistantSettings memory removal", () => {
-  it("hides a removed memory immediately and restores it when Undo is clicked without calling forget", async () => {
+  it("asks to confirm before forgetting a memory and leaves it intact when cancelled", async () => {
     const forget = vi.spyOn(api.assistant, "forget").mockResolvedValue({ memories: [] });
     const view = mountAssistant([
       { id: "mem-1", text: "Ships from Austin", created_at: "2026-11-20T00:00:00Z", updated_at: "2026-11-20T00:00:00Z" },
     ]);
     try {
-      expect(view.host.textContent).toContain("Ships from Austin");
       const removeButton = [...view.host.querySelectorAll<HTMLButtonElement>("button")].find(
         (button) => button.textContent?.trim() === "Remove",
       );
@@ -60,25 +65,29 @@ describe("AssistantSettings memory removal", () => {
         removeButton!.click();
       });
 
-      expect(view.host.textContent).not.toContain("Ships from Austin");
       expect(forget).not.toHaveBeenCalled();
+      const dialog = readConfirmDialogState();
+      expect(dialog.status).toBe("confirming");
+      if (dialog.status === "confirming") {
+        expect(dialog.message).toContain("Forget this memory?");
+        expect(dialog.message).toContain("Ships from Austin");
+        expect(dialog.confirmLabel).toBe("Remove");
+        expect(dialog.variant).toBe("destructive");
+      }
 
-      const undoButton = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
-        (button) => button.textContent?.trim() === "Undo",
-      );
-      expect(undoButton).toBeDefined();
       await act(async () => {
-        undoButton!.click();
+        respondToConfirmDialog(false);
+        completeConfirmDialogClose();
       });
 
-      expect(view.host.textContent).toContain("Ships from Austin");
       expect(forget).not.toHaveBeenCalled();
+      expect(view.host.textContent).toContain("Ships from Austin");
     } finally {
       await view.unmount();
     }
   });
 
-  it("commits api.assistant.forget when the Undo toast is dismissed", async () => {
+  it("forgets immediately on the server once confirmed", async () => {
     const forget = vi.spyOn(api.assistant, "forget").mockResolvedValue({ memories: [] });
     const view = mountAssistant([
       { id: "mem-1", text: "Ships from Austin", created_at: "2026-11-20T00:00:00Z", updated_at: "2026-11-20T00:00:00Z" },
@@ -92,13 +101,16 @@ describe("AssistantSettings memory removal", () => {
       });
       expect(forget).not.toHaveBeenCalled();
 
-      const dismissButton = document.querySelector<HTMLButtonElement>('[aria-label="Dismiss notification"]');
       await act(async () => {
-        dismissButton!.click();
+        respondToConfirmDialog(true);
+        completeConfirmDialogClose();
+        await Promise.resolve();
+        await Promise.resolve();
       });
 
       await vi.waitFor(() => {
         expect(forget).toHaveBeenCalledWith("mem-1");
+        expect(view.host.textContent).not.toContain("Ships from Austin");
       });
     } finally {
       await view.unmount();

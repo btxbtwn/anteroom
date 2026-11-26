@@ -1,12 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { ASSISTANT_MEMORY_KEY, ASSISTANT_NAME_KEY, ASSISTANT_NOTE_KEY } from "../../api/assistant";
+import { confirmDialog } from "../../ui/confirmDialog";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
-import { toastManager } from "../ui/toast";
-import { showUndoToast, type UndoToastHandle } from "../ui/toastHelpers";
 import { SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
 
 const NOTE_MAX = 4000;
@@ -120,78 +119,11 @@ function BusinessNoteSection() {
 function MemorySection() {
   const queryClient = useQueryClient();
   const remembered = useQuery({ queryKey: ASSISTANT_MEMORY_KEY, queryFn: api.assistant.memory });
-  const [pendingRemoveIds, setPendingRemoveIds] = useState<Set<string>>(() => new Set());
-  const [removeError, setRemoveError] = useState<string | null>(null);
-  const pendingToastsRef = useRef<Map<string, UndoToastHandle>>(new Map());
-  const mountedRef = useRef(true);
-
-  const commitForget = async (id: string) => {
-    try {
-      const result = await api.assistant.forget(id);
-      queryClient.setQueryData(ASSISTANT_MEMORY_KEY, result);
-      if (mountedRef.current) {
-        setPendingRemoveIds((prev) => {
-          if (!prev.has(id)) return prev;
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Could not remove that.";
-      if (mountedRef.current) {
-        setPendingRemoveIds((prev) => {
-          if (!prev.has(id)) return prev;
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
-        setRemoveError(message);
-      } else {
-        toastManager.add({ type: "error", title: "Could not remove memory", description: message });
-      }
-    }
-  };
-
-  useEffect(() => {
-    mountedRef.current = true;
-    const flushAll = () => {
-      const handles = [...pendingToastsRef.current.values()];
-      pendingToastsRef.current.clear();
-      for (const handle of handles) handle.flush();
-    };
-    window.addEventListener("pagehide", flushAll);
-    return () => {
-      mountedRef.current = false;
-      window.removeEventListener("pagehide", flushAll);
-      flushAll();
-    };
-  }, []);
-
-  const scheduleForget = (id: string) => {
-    setRemoveError(null);
-    setPendingRemoveIds((prev) => new Set(prev).add(id));
-    const handle = showUndoToast({
-      title: "Memory removed",
-      onUndo: () => {
-        pendingToastsRef.current.delete(id);
-        if (!mountedRef.current) return;
-        setPendingRemoveIds((prev) => {
-          if (!prev.has(id)) return prev;
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
-      },
-      onCommit: () => {
-        pendingToastsRef.current.delete(id);
-        void commitForget(id);
-      },
-    });
-    pendingToastsRef.current.set(id, handle);
-  };
-
-  const memories = (remembered.data?.memories ?? []).filter((fact) => !pendingRemoveIds.has(fact.id));
+  const forget = useMutation({
+    mutationFn: (id: string) => api.assistant.forget(id),
+    onSuccess: (result) => queryClient.setQueryData(ASSISTANT_MEMORY_KEY, result),
+  });
+  const memories = remembered.data?.memories ?? [];
 
   return (
     <SettingsSection title="What it remembers">
@@ -216,16 +148,23 @@ function MemorySection() {
               type="button"
               size="xs"
               variant="ghost-muted"
-              onClick={() => scheduleForget(fact.id)}
+              disabled={forget.isPending}
+              onClick={async () => {
+                const confirmed = await confirmDialog(
+                  `Forget this memory?\nThe assistant will stop keeping “${fact.text}” in mind for future chats.`,
+                  { variant: "destructive", confirmLabel: "Remove" },
+                );
+                if (confirmed) forget.mutate(fact.id);
+              }}
             >
               Remove
             </Button>
           }
         />
       ))}
-      {removeError ? (
+      {forget.isError ? (
         <SettingsRow
-          title={<SettingsNote tone="error">{removeError}</SettingsNote>}
+          title={<SettingsNote tone="error">{(forget.error as Error).message || "Could not remove that."}</SettingsNote>}
         />
       ) : null}
     </SettingsSection>
