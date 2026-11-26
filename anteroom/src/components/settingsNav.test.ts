@@ -44,6 +44,12 @@ describe("searchSettings", () => {
     expect(isSettingsSectionId("billing")).toBe(false);
   });
 
+  it("finds the post-sale settings in Connections", () => {
+    for (const query of ["delist", "auto-adjust quantity"]) {
+      expect(searchSettings(query)).toContainEqual(expect.objectContaining({ section: "connections", targetId: "after-sale" }));
+    }
+  });
+
   it("finds saved seller templates in Listings", () => {
     expect(searchSettings("saved templates")).toContainEqual(expect.objectContaining({id:"listing-templates",section:"listings",targetId:"listing-templates"}));
   });

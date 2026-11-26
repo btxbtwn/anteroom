@@ -20,6 +20,10 @@ import { SettingsPageContainer } from "./settings/SettingsLayout";
 function scrollToSettingsTarget(targetId: string) {
   const target = document.getElementById(targetId);
   if (!target) return false;
+  // A row behind a closed disclosure (Settings → Connections → Advanced) opens it first.
+  for (let details = target.closest("details"); details; details = details.parentElement?.closest("details") ?? null) {
+    details.open = true;
+  }
   const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   target.scrollIntoView({
     behavior: prefersReducedMotion ? "auto" : "smooth",

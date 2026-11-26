@@ -267,8 +267,15 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     searchTerms: ["extension", "connect chrome", "browser"],
   },
   {
+    id: "after-sale",
+    title: "After a sale",
+    section: "connections",
+    targetId: "after-sale",
+    searchTerms: ["sold", "sale", "delist", "delist other", "auto-adjust quantity", "quantity", "stock", "sale detection"],
+  },
+  {
     id: "extension-folder",
-    title: "Listing extension folder",
+    title: "Extension folder",
     section: "connections",
     targetId: "extension-folder",
     searchTerms: ["load unpacked", "chrome extensions", "developer mode"],

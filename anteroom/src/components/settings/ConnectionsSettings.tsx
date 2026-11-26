@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { BUSY_POLL_MS, EXTENSION_STATUS_POLL_MS, IDLE_POLL_MS, pollMs } from "../../api/polling";
 import { extensionConnection } from "../ExtensionStatus";
 import { StatusDot } from "../StatusDot";
-import { CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
+import { CheckIcon, ChevronRightIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
 import { CHROME_WEB_STORE_URL } from "../../api/chromeBridge";
 import { api } from "../../api/client";
 import type { MarketplaceCloudResult, MarketplaceCloudSessions, MarketplaceCloudStatus } from "../../api/contract.gen";
@@ -21,9 +21,10 @@ import { Button, buttonVariants } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
-import { SettingsCode, SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
+import { SettingsCode, SettingsGroup, SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
 import { SaleDetectionTracker } from "./SaleDetectionTracker";
 import { useWorkspaceRuntime } from "../../app/runtime";
+import { confirmDialog } from "../../ui/confirmDialog";
 
 function ExtensionConnectionRow() {
   const { data } = useQuery({
@@ -128,8 +129,16 @@ export function DirectConnectionRow({
   const busy = connect.isPending || cancel.isPending || disconnect.isPending;
   const error = (connect.error || disconnect.error)?.message || account?.error || null;
 
+  const confirmDisconnect = async () => {
+    const ok = await confirmDialog(
+      `Disconnect ${marketplace.name}?\nAnteroom stops checking ${marketplace.name} for sales and can’t list, update or delist there until you connect again. Listings already live on ${marketplace.name} stay up.`,
+      { variant: "destructive", confirmLabel: "Disconnect" },
+    );
+    if (ok) disconnect.mutate();
+  };
+
   const control = account?.connected ? (
-    <Button size="xs" variant="outline" disabled={busy} onClick={() => disconnect.mutate()}>
+    <Button size="xs" variant="outline" disabled={busy} onClick={() => void confirmDisconnect()}>
       {disconnect.isPending ? <Spinner /> : null}
       Disconnect
     </Button>
@@ -498,7 +507,10 @@ function CloudSignIn({
         {session?.cloud_connected || session?.state === "expired" ? (
           <Button size="xs" variant="ghost" className="pointer-coarse:h-11"
             disabled={busy} aria-label={`Disconnect ${name} from Cloud`}
-            onClick={() => { signIn.reset(); verify.reset(); disconnect.mutate(); }}>
+            onClick={() => void confirmDialog(
+              `Disconnect ${name} from Cloud?\nListing actions, sales checks and automations for ${name} will need Chrome open with Anteroom Bridge again. Listings already live on ${name} stay up.`,
+              { variant: "destructive", confirmLabel: "Disconnect" },
+            ).then((ok) => { if (ok) { signIn.reset(); verify.reset(); disconnect.mutate(); } })}>
             {disconnect.isPending ? <Spinner /> : null}
             Disconnect
           </Button>
@@ -572,6 +584,15 @@ function HostedChromeSessions({ salesSwitch, checks }: {
   );
 }
 
+const AUTODELIST_CONFIRM = "Delist sold items automatically?\nWhen an item sells, Anteroom takes it down from the other marketplaces it’s still live on, without asking each time — never the marketplace where it sold. You can turn this off anytime.";
+const AUTO_ADJUST_CONFIRM = "Adjust quantities automatically?\nWhen you sell one of several, Anteroom lowers the quantity on the other marketplaces it’s live on, without asking each time — never the marketplace where it sold. On Mercari, which allows one per listing, it lists the next one as a new listing. You can turn this off anytime.";
+
+/** Turning on a setting that acts without asking per sale asks first; turning it off doesn't. */
+async function turnOn(checked: boolean, question: string, save: (checked: boolean) => void) {
+  if (checked && !(await confirmDialog(question, { confirmLabel: "Turn on" }))) return;
+  save(checked);
+}
+
 function MarketplaceSection() {
   const queryClient = useQueryClient();
   // Chrome sign-ins and sale checks use the seller's connected browser on the web.
@@ -638,7 +659,7 @@ function MarketplaceSection() {
       id="sale-autodelist"
       inlineControl
       title="Delist the other marketplaces"
-      description="When something sells, take it off the other marketplaces it’s still listed on; a delist that doesn’t go through is tried again for two weeks after the sale, and the sidebar alerts you while a sold item is still listed."
+      description="When an item sells, Anteroom takes it down from the other marketplaces it’s still listed on, and alerts you if one doesn’t come down."
       control={
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
           {saveAutodelist.isPending ? (
@@ -655,7 +676,7 @@ function MarketplaceSection() {
               checked={detection.data.autodelist === true}
               disabled={saveAutodelist.isPending}
               aria-label="Delist the other marketplaces when something sells"
-              onCheckedChange={(checked) => saveAutodelist.mutate(checked)}
+              onCheckedChange={(checked) => void turnOn(checked, AUTODELIST_CONFIRM, saveAutodelist.mutate)}
             />
           )}
         </span>
@@ -670,7 +691,7 @@ function MarketplaceSection() {
       id="sale-auto-adjust-quantity"
       inlineControl
       title="Auto-adjust quantity"
-      description="When a multi-quantity item sells with stock remaining, decrement quantities on other live marketplaces without delisting them. On Mercari (quantity capped at 1), automatically relist a fresh single-quantity listing and update tracking."
+      description="When you sell one of several, Anteroom lowers the quantity on the other marketplaces instead of taking the listing down."
       control={
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
           {saveAutoAdjust.isPending ? (
@@ -687,7 +708,7 @@ function MarketplaceSection() {
               checked={detection.data.auto_adjust_quantity === true}
               disabled={saveAutoAdjust.isPending}
               aria-label="Auto-adjust quantity across marketplaces when stock remains"
-              onCheckedChange={(checked) => saveAutoAdjust.mutate(checked)}
+              onCheckedChange={(checked) => void turnOn(checked, AUTO_ADJUST_CONFIRM, saveAutoAdjust.mutate)}
             />
           )}
         </span>
@@ -705,17 +726,17 @@ function MarketplaceSection() {
               salesSwitch={sessionWorkflows ? salesSwitch(marketplace.id, marketplace.name) : undefined} checkError={detection.data?.checks?.[marketplace.id]} />
           ))}
           <HostedChromeSessions salesSwitch={sessionWorkflows ? salesSwitch : undefined} checks={detection.data?.checks} />
-          {sessionWorkflows ? (
-            <>
-              <SettingsRow id="sale-detection" title="Sale detection"
-                description="Anteroom checks for sales through each marketplace’s active connection. Saved sales stay if orders can’t be read. With Delist the other marketplaces enabled, Anteroom can remove sold items from other marketplaces.">
-                {saveDetection.error ? <SettingsNote tone="error">{saveDetection.error.message}</SettingsNote> : null}
-              </SettingsRow>
-              {autodelistRow}
-              {autoAdjustRow}
-            </>
-          ) : null}
         </SettingsSection>
+        {sessionWorkflows ? (
+          <SettingsSection id="after-sale" title="After a sale">
+            <SettingsRow id="sale-detection" title="Sale detection"
+              description="Anteroom checks each marketplace with Detect sales on and tells you when something sells; nothing comes down unless you turn that on below.">
+              {saveDetection.error ? <SettingsNote tone="error">{saveDetection.error.message}</SettingsNote> : null}
+            </SettingsRow>
+            {autodelistRow}
+            {autoAdjustRow}
+          </SettingsSection>
+        ) : null}
         {sessionWorkflows ? <SaleDetectionTracker /> : null}
       </>
     );
@@ -746,12 +767,14 @@ function MarketplaceSection() {
         ))}
         <SettingsRow
           title="Where the sign-in lives"
-          description="These sign-ins live in Chrome and the extension, never in Anteroom, which asks you to sign in again when one expires."
+          description="Poshmark, Mercari and Depop sign-ins stay in Chrome, and Anteroom asks you to sign in again when one expires."
         />
+      </SettingsSection>
+      <SettingsSection id="after-sale" title="After a sale">
         <SettingsRow
           id="sale-detection"
           title="Sale detection"
-          description="Detect sales checks a few times an hour (Poshmark by comparing your Poshmark closet) and tells you when a listed item sells; nothing comes down unless Delist the other marketplaces is on."
+          description="Anteroom checks each marketplace with Detect sales on a few times an hour and tells you when something sells; nothing comes down unless you turn that on below."
           status={
             listening.length || (relay && !relay.connected && Object.values(accounts ?? {}).some((account) => account.connected)) ? (
               <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -784,7 +807,7 @@ export function ConnectionsSettings() {
         <ExtensionConnectionRow />
         <SettingsRow
           title="Chrome"
-          description="Optional for creating drafts and eBay or Etsy. Install Anteroom Bridge from the Chrome Web Store and connect desktop Chrome for Poshmark, Mercari and Depop actions."
+          description="Needed only for Poshmark, Mercari and Depop: install Anteroom Bridge, then connect Chrome."
           control={
             <span className="flex flex-wrap items-center justify-end gap-2">
               <Button
@@ -799,17 +822,23 @@ export function ConnectionsSettings() {
             </span>
           }
         />
-        <SettingsRow
-          id="extension-folder"
-          title="Listing extension folder (Developer mode)"
-          description="Only needed if loading unpacked instead of the Chrome Web Store: in chrome://extensions, turn on Developer mode, click Load unpacked, press ⌘⇧G, paste this path and choose Open."
-        >
-          <ExtensionLoadPath compact hideHint />
-        </SettingsRow>
       </SettingsSection>
-      <SettingsSection id="remote-access" title="Remote access">
-        <TailscaleHttpsRow />
-      </SettingsSection>
+      <details id="advanced" className="group space-y-2.5">
+        <summary className="flex min-h-7 pointer-coarse:min-h-11 cursor-pointer list-none items-center gap-2 rounded-md px-3 text-sm text-foreground/70 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4 [&::-webkit-details-marker]:hidden">
+          <ChevronRightIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
+          Advanced
+        </summary>
+        <SettingsGroup>
+          <SettingsRow
+            id="extension-folder"
+            title="Extension folder"
+            description="Only if you load the extension yourself instead of from the Chrome Web Store: choose Load unpacked in chrome://extensions and pick this folder."
+          >
+            <ExtensionLoadPath compact hideHint />
+          </SettingsRow>
+          <TailscaleHttpsRow />
+        </SettingsGroup>
+      </details>
     </>
   );
 }
@@ -887,7 +916,7 @@ function TailscaleHttpsRow() {
     <SettingsRow
       id="tailscale-https"
       title="Tailscale HTTPS"
-      description="Reach this Mac’s Anteroom from your phone over your private tailnet; Funnel stays off."
+      description="Open this Mac’s Anteroom on your phone through Tailscale; only your own devices can reach it."
       control={control}
     >
       {isError ? (

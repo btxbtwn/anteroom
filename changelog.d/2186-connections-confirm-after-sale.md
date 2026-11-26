@@ -1,0 +1,3 @@
+- Turning on Delist the other marketplaces or Auto-adjust quantity now asks first and says what will happen; turning them off doesn't ask.
+- Disconnecting a marketplace account now asks first and says what stops working.
+- Settings → Connections groups sale detection and the post-sale settings under After a sale, uses plainer descriptions, and keeps the extension folder and Tailscale under Advanced.
