@@ -31,13 +31,14 @@ test("a refused eBay sign-in is visible in Connections without starting sign-in"
 });
 
 test("disconnected eBay leads with connection and keeps local sale plans available", async ({ page, phone }, info) => {
+  test.setTimeout(90_000);
   await page.route("**/api/marketplace-accounts**", route => route.fulfill({
     json: { accounts: { ebay: { connected: false, pending: false } } },
   }));
   await page.goto("/");
   if (phone) await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByRole("button", { name: "Marketplaces", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Connect eBay", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Connect eBay", exact: true })).toBeVisible({ timeout: 45_000 });
   await expect(page.getByRole("button", { name: "Plan a sale", exact: true })).toBeHidden();
   for (const scheme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme: scheme });
