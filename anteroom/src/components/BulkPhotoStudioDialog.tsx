@@ -183,7 +183,7 @@ function BulkPhotoStudioDialog({ batchId, busyPhotos, listings, onDone }: {
             });
             if (answer.provider_blocked) pause = "Photoroom stopped accepting edits. Check your plan or API key.";
           } catch (error) {
-            const refused = error instanceof ApiRequestError && error.status === 400;
+            const refused = error instanceof ApiRequestError && (error.status === 400 || error.status === 402);
             const detail = refused ? error.message : "Couldn't confirm the edit. Check the draft before trying again.";
             for (const photo of photos) outcome.set(photo.id, {
               state: refused ? "failed" : "skipped", detail, needsReview: !refused,
