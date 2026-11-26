@@ -330,7 +330,7 @@ def forget_catalog_state(owner):
         _CATALOG_STATES.pop(owner, None)
 
 
-def for_seller(user_id, token=None, *, task_lease=None):
+def for_seller(user_id, token=None, *, task_lease=None, email: str | None = None):
     from anteroom import database
     owner = str(uuid.UUID(user_id))
     def sessions():
@@ -343,4 +343,5 @@ def for_seller(user_id, token=None, *, task_lease=None):
     from anteroom.services.hosted_provider import provider_for
     return ServiceContext(owner, sessions, HostedSettingsStore(sessions, owner),
                           VaultSecretStore(sessions, owner), HostedPhotoStore(owner, token),
-                          catalog=catalog_state(owner), provider_factory=provider_for)
+                          catalog=catalog_state(owner), provider_factory=provider_for,
+                          seller_email=email)

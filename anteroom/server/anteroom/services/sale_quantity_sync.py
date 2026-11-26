@@ -545,7 +545,9 @@ async def _default_mercari_relister(
                 return {"ok": False, "error": "The Mercari sale or remaining stock could not be verified."}
             if require_setting and await _quantity_opted_out():
                 return _quantity_skipped()
-            res = await list_now(conv_id, "mercari", ListRequest(revision_id=revision_id, confirm=True))
+            res = await list_now(
+                conv_id, "mercari", ListRequest(revision_id=revision_id, confirm=True), count_for_plan=False,
+            )
             dispatched_job_id = res.get("job_id")
             if event_id and dispatched_job_id:
                 def _save_job(eid=event_id, jid=str(dispatched_job_id)):

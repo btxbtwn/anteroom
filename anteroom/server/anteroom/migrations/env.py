@@ -14,10 +14,11 @@ import time
 
 from alembic import context
 from sqlalchemy import Connection, Engine, create_engine, event, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.pool import NullPool
 
-from anteroom.database import Base, database_url, load_models
+from anteroom.database import Base, POSTGRES_NETWORK_DEADLINES, database_url, load_models
 
 load_models()
 target_metadata = Base.metadata
@@ -122,7 +123,9 @@ def run_migrations_online() -> None:
 
     # Close the database session during retry backoff, including when the URL
     # uses the hosted session pooler.
-    engine = create_engine(_url(), poolclass=NullPool)
+    url = _url()
+    connect_args = POSTGRES_NETWORK_DEADLINES if make_url(url).get_backend_name() == "postgresql" else {}
+    engine = create_engine(url, poolclass=NullPool, connect_args=connect_args)
     try:
         _migrate_on_engine(engine)
     finally:
