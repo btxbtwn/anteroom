@@ -30,7 +30,7 @@ async function deletePoshmark(id, deadline, region) {
   return { ok: true, state: 'deleted' };
 }
 
-async function deleteMercari(id, deadline) {
+async function deleteMercari(id, deadline, verifyReplacement) {
   mercariSession = null;
   const session = await mercariCurrentSession(deadline);
   let item;
@@ -48,11 +48,12 @@ async function deleteMercari(id, deadline) {
   if (item.status !== 'on_sale') {
     throw marketplaceError(`This Mercari listing is not on sale${item.status ? ` (${item.status})` : ''}. It was not deleted.`);
   }
+  if (verifyReplacement) await verifyReplacement();
   // Mercari's own Delete button: updateItemStatus to "cancel". Its reply
   // carries the new status; an item already removed reports the same.
   const data = await mercariRequest({ operationName: 'UpdateItemStatusMutation', variables: { input: { id, status: 'cancel' } },
     extensions: { persistedQuery: { version: 1, sha256Hash: '55bd4e7d2bc2936638e1451da3231e484993635d7603431d1a2978e3d59656f8' } } },
-  { deadline, operationName: 'UpdateItemStatusMutation' });
+  { deadline, operationName: 'UpdateItemStatusMutation', resend: !verifyReplacement });
   // cancel / admin_cancel is the item status once it is gone. A delete that
   // just succeeded answers status OK instead of repeating the item status.
   const status = String(data.updateItemStatus?.status || '');
@@ -114,7 +115,7 @@ async function runMarketplaceDelete(payload) {
       // API needed to recreate it. Check drafts before touching the live item.
       await depopAction('session', { deadline: Math.min(deadline, Date.now() + 10000) });
     }
-    return await entry[1](String(payload.listing_id), deadline, payload.seller_region);
+    return await entry[1](String(payload.listing_id), deadline, payload.marketplace === 'poshmark' ? payload.seller_region : undefined);
   } catch (error) {
     // Every delete reads the listing first, so repeating one is safe.
     return marketplaceFailure(error.code === 'uncertain' ? Object.assign(error, { code: 'network' }) : error, true);

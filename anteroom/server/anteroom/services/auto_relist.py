@@ -132,6 +132,7 @@ def _default_rule_view(marketplace: str, relisted_today: int = 0) -> dict[str, A
         "relisted_today": relisted_today,
         "remaining_today": max(DEFAULT_DAILY_CAP - relisted_today, 0),
         "last_run_at": None,
+        "paused_reason": None,
     }
 
 
@@ -152,6 +153,7 @@ def rule_view(db: Session, row: MarketplaceRelistRule, moment: datetime | None =
         "relisted_today": done,
         "remaining_today": max(int(row.daily_cap) - done, 0),
         "last_run_at": _iso(row.last_run_at),
+        "paused_reason": None,
     }
 
 
@@ -875,7 +877,9 @@ def _reconcile_pending_relists(
                 changed = True
                 continue
             row.status = "down_needs_relist"
-            if ml is not None and ml.error:
+            if row.marketplace == "mercari":
+                row.reason = _mercari_recovery_reason(ml.error if ml is not None else None)
+            elif ml is not None and ml.error:
                 row.reason = str(ml.error)[:500]
             changed = True
             continue
@@ -1050,6 +1054,11 @@ def _record_log(
         "status": status,
         "reason": reason,
     }
+
+
+def _mercari_recovery_reason(error: str | None) -> str:
+    return ("The original Mercari listing was removed. Check your live listings first. If the replacement is absent, "
+            "open the saved Mercari draft, review its photos and publish it manually. " + (error or ""))[:500].rstrip()
 
 
 def _rule_enabled(db: Session, rule_id: str) -> bool:
@@ -1430,6 +1439,8 @@ async def run_auto_relist(
                 status = "relist_pending"
             else:
                 status = "down_needs_relist"
+                if market == "mercari":
+                    error_msg = _mercari_recovery_reason(error_msg)
             outcomes.append(await in_worker_session(_record_log_payload, {
                 "attempt_id": attempt_id, "conv_id": conv_id,
                 "marketplace": market,

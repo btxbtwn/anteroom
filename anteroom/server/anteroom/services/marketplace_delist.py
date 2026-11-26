@@ -559,7 +559,11 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
             if name == "poshmark" and urlsplit(entry["url"]).hostname in {"poshmark.ca", "www.poshmark.ca"}:
                 payload["seller_region"] = "CA"
             try:
-                if name == "ebay":
+                if replacement:
+                    result = await browser_bridge.request(job, "marketplace.execute", {
+                        **payload, **replacement, "action": "delete_for_relist", "operation_id": f"{job_id}-d",
+                    }, timeout=90)
+                elif name == "ebay":
                     result = await _delete_ebay(entry["listing_id"], ebay_record)
                 elif name == "etsy":
                     result = await _delete_etsy(entry["listing_id"])
@@ -578,7 +582,7 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
                     )
                 else:
                     result = await browser_bridge.request(job, "marketplace.delete", payload, timeout=90)
-                gone = _mercari_gone(name, result)
+                gone = not replacement and _mercari_gone(name, result)
                 if result.get("ok") is True and result.get("state") == "deleted" or gone:
                     # Already absent is a reconciliation of the listing, never evidence of a sale.
                     # Who removed it is not known: only that the marketplace no longer has it.
@@ -588,7 +592,7 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
                     } if already else base
                     if replacement:
                         await in_worker_session(_deleted_with_replacement, conv_id, receipt, {
-                            "state": "draft", "draft_url": replacement, "revision_id": expected_revision_id,
+                            "state": "draft", "draft_url": replacement["draft_url"], "revision_id": expected_revision_id,
                             "job_id": job_id, "action": "save_draft",
                         })
                     else:

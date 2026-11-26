@@ -578,6 +578,7 @@ def _open_job(db: Session, conv_id: str, marketplace: str, body: ListRequest, ki
             repo = JobRepo(db)
             if (busy := blocking_job(repo, marketplace)) is not None:
                 raise NativeMarketplaceError(409, _busy_message(busy, marketplace), reason=BUSY)
+            snapshot.pop("_mercari_replacement", None)
             if steps == ["publish"]:
                 previous_job_id = record.get("job_id")
                 previous_job = repo.get(previous_job_id) if previous_job_id else None
@@ -592,6 +593,12 @@ def _open_job(db: Session, conv_id: str, marketplace: str, body: ListRequest, ki
                 )
                 if previous_versions != current_versions or pricing_changed:
                     steps = ["save_draft", "publish"]
+                if marketplace == "mercari" and relist_rule_id:
+                    receipt = previous_snapshot.get("_mercari_replacement") or {}
+                    if (not previous_job or previous_job.approved_revision_id != body.revision_id
+                            or not receipt.get("photo_ids") or receipt.get("draft_url") != record.get("draft_url")):
+                        raise NativeMarketplaceError(409, "Mercari replacement photo verification is missing. Review the saved draft.")
+                    snapshot["_mercari_replacement"] = receipt
             if marketplace == "mercari" and relist_rule_id and steps != ["publish"]:
                 raise NativeMarketplaceError(409, "The verified Mercari replacement changed. Review its draft before listing.")
             job = repo.create(conv_id, body.revision_id, snapshot, status="dispatched",
@@ -764,7 +771,7 @@ async def save_draft(conv_id: str, marketplace: Marketplace, revision_id: str, *
                         requested_by=requested_by)
 
 
-async def prepare_mercari_relist(conv_id: str, revision_id: str, job_id: str) -> str:
+async def prepare_mercari_relist(conv_id: str, revision_id: str, job_id: str) -> dict:
     """Use the delist job's photo approval without overwriting the still-live Mercari record."""
     from anteroom.services import approved_photos
     from anteroom.services.native_contract import KEY as FORM_CONTRACTS
@@ -781,7 +788,7 @@ async def prepare_mercari_relist(conv_id: str, revision_id: str, job_id: str) ->
             job = JobRepo(db).get(job_id)
             if job is None or job.approved_revision_id != revision_id:
                 raise NativeMarketplaceError(409, "The approved Mercari revision changed.")
-            pinned = {key: value for key, value in snapshot.items() if key != FORM_CONTRACTS}
+            pinned = {key: value for key, value in snapshot.items() if key not in {FORM_CONTRACTS, "_mercari_replacement"}}
             job.listing_snapshot = {**pinned, "delist": ["mercari"], approved_photos.KEY: manifest}
             db.commit()
         except Exception:
@@ -796,19 +803,30 @@ async def prepare_mercari_relist(conv_id: str, revision_id: str, job_id: str) ->
         raise NativeMarketplaceError(409, "Chrome did not confirm the Mercari replacement draft.",
                                      reason="chrome_unavailable") from exc
     link = draft_url("mercari", result["draft_url"]) if result.get("draft_url") else None
-    ready = result.get("ok") is True and result.get("state") == "draft"
+    ids = result.get("photo_ids")
+    verified = (isinstance(ids, list) and bool(ids) and len(ids) == len(photos)
+                and all(isinstance(val, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,120}", val) for val in ids)
+                and len(set(ids)) == len(ids))
+    saved = result.get("ok") is True and result.get("state") == "draft"
+    ready = saved and verified
     if link:
-        # Keep the receipt even when the rule is turned off or the process
-        # stops between verifying the draft and recording the delete.
-        await _joined_worker_session(lambda db: JobRepo(db).add_event(
-            job_id, "native_result", "native_mercari_prepare_relist", {"draft_url": link, "ready": ready}))
+        def record_draft(db: Session) -> None:
+            repo = JobRepo(db)
+            job = repo.get(job_id)
+            if job is None:
+                raise NativeMarketplaceError(409, "The Mercari relist job is missing.")
+            if ready:
+                job.listing_snapshot = {**(job.listing_snapshot or {}), "_mercari_replacement": {"draft_url": link, "photo_ids": ids}}
+            repo.add_event(job_id, "native_result", "native_mercari_prepare_relist", {"draft_url": link, "ready": ready})
+
+        await _joined_worker_session(record_draft)
     if not ready or not link:
         message = result.get("error") or "Mercari did not confirm the replacement draft."
-        if message == "Unsupported marketplace action.":
-            raise NativeMarketplaceError(409, "Update Anteroom Bridge in Chrome to prepare Mercari relists.",
+        if message == "Unsupported marketplace action." or (saved and not verified):
+            raise NativeMarketplaceError(409, "Update Anteroom Bridge in Chrome. It must verify the saved Mercari draft photos before relisting.",
                                          reason="chrome_unavailable")
         raise NativeMarketplaceError(409, str(message), reason=result.get("error_code"))
-    return link
+    return {"draft_url": link, "expected_photo_ids": ids, "listing": payload["listing"], "revision_id": revision_id}
 
 
 def mercari_replacement_is_current(db: Session, conv_id: str, job_id: str) -> bool:
@@ -900,7 +918,7 @@ def _for_chrome(snapshot: dict, marketplace: str) -> dict:
     listing = {
         key: value
         for key, value in snapshot.items()
-        if key not in {KEY, SNAPSHOT_RULES, PRICE_FOLLOWERS, "_seller_region"}
+        if key not in {KEY, SNAPSHOT_RULES, PRICE_FOLLOWERS, "_seller_region", "_mercari_replacement"}
     }
     if SNAPSHOT_RULES in snapshot and (price := price_for(snapshot, marketplace)) is not None:
         # The Bridge reads the legacy payload fields. Use the same frozen
@@ -919,6 +937,10 @@ def _execute_payload(marketplace: str, step: str, record: dict, snapshot: dict, 
     extra: dict = {}
     if marketplace == "depop" and warning:
         extra["photo_warning"] = warning
+    if marketplace == "mercari" and step == "publish" and (receipt := snapshot.get("_mercari_replacement")):
+        if receipt["draft_url"] != record.get("draft_url"):
+            raise NativeMarketplaceError(409, "The verified Mercari draft link changed. Review the saved draft.")
+        extra.update(action="publish_relist", expected_photo_ids=receipt["photo_ids"])
     return {
         "marketplace": marketplace, "action": step, "confirm": step in {"publish", "list", "update"},
         "operation_id": record["operation_id"], "draft_url": record.get("draft_url"), "listing_id": record.get("listing_id"),

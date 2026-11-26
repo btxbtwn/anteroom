@@ -139,7 +139,7 @@ const NATIVE_UPDATE_LISTING = {
 
 const NATIVE_ACTIONS = {
   poshmark: ['list', 'update', 'save_draft'],
-  mercari: ['save_draft', 'prepare_relist', 'publish', 'update'],
+  mercari: ['save_draft', 'prepare_relist', 'delete_for_relist', 'publish_relist', 'publish', 'update'],
   depop: ['save_draft', 'publish', 'update'],
 };
 
@@ -153,7 +153,7 @@ async function runNativeMarketplace(msg) {
     const [name, pattern] = NATIVE_UPDATE_LISTING[p.marketplace];
     if (p.confirm !== true || !pattern.test(String(p.listing_id || ''))) return nativeRefusal(`Confirm updating the live ${name} listing.`);
   }
-  if (p.action === 'publish' && (p.confirm !== true || !nativeDraftUrl(p.marketplace, p.draft_url))) {
+  if (['publish', 'publish_relist'].includes(p.action) && (p.confirm !== true || !nativeDraftUrl(p.marketplace, p.draft_url))) {
     return nativeRefusal('Confirm publishing an existing native draft.');
   }
   if (p.draft_url && !nativeDraftUrl(p.marketplace, p.draft_url)) return nativeRefusal('Invalid native draft link.');
@@ -247,6 +247,7 @@ async function handleNativeMarketplaceMessage(msg, reply = result => sendBrowser
         const recovered = await recoverNativeMarketplace({ ...stored.context, ...msg.payload.context,
           draft_url: msg.payload.context?.draft_url || stored.receipt_url || stored.context.draft_url,
           expected_photo_count: stored.expected_photo_count ?? msg.payload.context?.expected_photo_count,
+          expected_photo_ids: stored.expected_photo_ids,
           publish_job_id: stored.publish_job_id, shop_before: stored.shop_before });
         if (recovered) {
           const latest = (await chrome.storage.local.get(key))[key];
@@ -280,7 +281,7 @@ async function handleNativeMarketplaceMessage(msg, reply = result => sendBrowser
     return;
   }
   const marketplace = msg.payload.marketplace;
-  const operation = claimNativeOperation(marketplace, operationId);
+  const operation = claimNativeOperation(msg.payload.action === 'delete_for_relist' ? '*' : marketplace, operationId);
   if (!operation) {
     reply(nativeRefusal(nativeOperations.has('*')
       ? 'Another automation job is running.' : `Another ${marketplaceLabel(marketplace)} action is running.`));

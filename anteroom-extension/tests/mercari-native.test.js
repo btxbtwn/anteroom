@@ -77,7 +77,7 @@ function rejectingWorker() {
 test('preparing an auto-relist requires a matching READY draft and never publishes it', async () => {
   for (const ready of [false, true]) {
     const { c, opsOf, setDraft } = worker();
-    setDraft({ ...KEPT, name: listing.title, description: listing.description, price: 2500,
+    setDraft({ ...KEPT, itemId: 'm9AbC123', name: listing.title, description: listing.description, price: 2500,
       photos: [{ id: 'i1' }, { id: 'i2' }], draftItemStatus: ready ? 'DRAFT_ITEM_STATUS_READY' : 'action_required' });
     const command = { ...message({ action: 'prepare_relist', operation_id: 'abcd1234' }), type: 'marketplace.execute' };
     const replies = [];
@@ -86,7 +86,10 @@ test('preparing an auto-relist requires a matching READY draft and never publish
     assert.equal(replies.length, 2);
     assert.equal(replies[0].ok, ready);
     assert.deepEqual(replies[1], replies[0]);
-    if (ready) assert.equal(replies[0].draft_url, 'https://www.mercari.com/sell/draft/m9AbC123/');
+    if (ready) {
+      assert.equal(replies[0].draft_url, 'https://www.mercari.com/sell/draft/m9AbC123/');
+      assert.deepEqual(Array.from(replies[0].photo_ids), ['i1', 'i2']);
+    }
     assert.deepEqual(opsOf(), ['uploadDraftItemImageMutation', 'uploadDraftItemImageMutation', 'addDraftItemMutation', 'draftItemQuery']);
   }
 });
@@ -272,6 +275,45 @@ test('Mercari receives a missing package weight and returns its own rejection', 
 
 const DRAFT_URL = 'https://www.mercari.com/sell/draft/m9AbC123/';
 const publish = extra => message({ action: 'publish', confirm: true, draft_url: DRAFT_URL, ...extra });
+
+test('Mercari replacement photo drift stops each live mutation at its own read-back', async () => {
+  for (const action of ['delete_for_relist', 'publish_relist']) {
+    for (const photos of [[{ id: 'i1' }], [{ id: 'i1' }, { id: 'other' }], [{ id: 'i2' }, { id: 'i1' }], [{}, {}]]) {
+      const { c, setDraft, opsOf } = worker();
+      c.readMercariItem = async () => ({ status: 'on_sale', seller: { id: 7 } });
+      setDraft({ ...KEPT, itemId: 'm9AbC123', name: listing.title, description: listing.description, price: 2500,
+        photos, draftItemStatus: 'DRAFT_ITEM_STATUS_READY' });
+      const result = await c.runNativeMarketplace(publish({ action, listing_id: 'm123456789',
+        expected_photo_ids: ['i1', 'i2'] }));
+      assert.equal(result.ok, false);
+      assert.match(result.error, /photos/i);
+      assert.deepEqual(opsOf(), ['draftItemQuery']);
+    }
+  }
+});
+
+test('a confirmed Mercari delete is followed by a fresh photo check before publishing', async () => {
+  for (const drift of [false, true]) {
+    const { c, setDraft, opsOf } = worker({ http: op => {
+      if (op === 'UpdateItemStatusMutation') return reply(200, { data: { updateItemStatus: { status: 'OK' } } });
+      if (op === 'listDraftItemMutation') return reply(200, { data: { listDraftItem: 'm987654321' } });
+    } });
+    c.readMercariItem = async () => ({ status: 'on_sale', seller: { id: 7 } });
+    const draft = { ...KEPT, itemId: 'm9AbC123', name: listing.title, description: listing.description, price: 2500,
+      photos: [{ id: 'i1' }, { id: 'i2' }], draftItemStatus: 'DRAFT_ITEM_STATUS_READY' };
+    setDraft(draft);
+    const prepared = await c.runNativeMarketplace(message({ action: 'prepare_relist' }));
+    assert.equal(prepared.ok, true);
+    const command = { confirm: true, draft_url: prepared.draft_url, expected_photo_ids: prepared.photo_ids };
+    const deleted = await c.runNativeMarketplace(message({ ...command, action: 'delete_for_relist', listing_id: 'm123456789' }));
+    assert.equal(deleted.state, 'deleted');
+    if (drift) setDraft({ ...draft, photos: [{ id: 'i1' }, { id: 'replacement' }] });
+    const result = await c.runNativeMarketplace(message({ ...command, action: 'publish_relist' }));
+    assert.equal(result.ok, !drift);
+    assert.deepEqual(opsOf().slice(3), ['draftItemQuery', 'draftItemQuery', 'UpdateItemStatusMutation', 'draftItemQuery',
+      ...(drift ? [] : ['listDraftItemMutation'])]);
+  }
+});
 
 test('a READY Mercari draft is listed with one request, the way its drafts page does, with no tab', async () => {
   const { c, requests, journal, opsOf } = worker({ respond: op => ({
