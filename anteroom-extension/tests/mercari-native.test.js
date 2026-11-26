@@ -324,6 +324,20 @@ test('a confirmed Mercari delete is followed by a fresh photo check before publi
   }
 });
 
+test('a status-only cancellation receipt cannot authorize Mercari relist publication', async () => {
+  for (const status of ['cancel', 'admin_cancel']) {
+    const { c, setDraft, opsOf } = worker({ http: op => op === 'UpdateItemStatusMutation'
+      ? reply(200, { data: { updateItemStatus: { status } } }) : undefined });
+    c.readMercariItem = async () => ({ status: 'on_sale', seller: { id: 7 } });
+    setDraft({ ...KEPT, itemId: 'm9AbC123', name: listing.title, description: listing.description, price: 2500,
+      photos: [{ id: 'i1' }, { id: 'i2' }], draftItemStatus: 'DRAFT_ITEM_STATUS_READY' });
+    const result = await c.runNativeMarketplace(publish({ action: 'delete_for_relist', listing_id: 'm123456789',
+      expected_photo_ids: ['i1', 'i2'] }));
+    assert.equal(result.already, true);
+    assert.deepEqual(opsOf(), ['draftItemQuery', 'UpdateItemStatusMutation']);
+  }
+});
+
 test('a READY Mercari draft is listed with one request, the way its drafts page does, with no tab', async () => {
   const { c, requests, journal, opsOf } = worker({ respond: op => ({
     draftItemQuery: { draftItem: { name: 'Test jacket', description: 'Private draft', price: 2500, ...KEPT,

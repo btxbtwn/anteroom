@@ -60,6 +60,8 @@ async function deleteMercari(id, deadline, verifyReplacement) {
   if (!['cancel', 'admin_cancel'].includes(status) && status.toUpperCase() !== 'OK') {
     throw marketplaceError('Mercari did not confirm the delete.', { marketplace_message: status ? `status ${status}` : '' });
   }
+  // A status-only reply proves absence, but only OK confirms our own removal.
+  if (verifyReplacement && status.toUpperCase() !== 'OK') return { ok: true, state: 'deleted', already: true };
   return { ok: true, state: 'deleted' };
 }
 
