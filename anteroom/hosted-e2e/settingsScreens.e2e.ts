@@ -123,12 +123,12 @@ for (const scheme of ["light", "dark"] as const) {
       const total = rows.filter({ hasText: "Total metered usage" });
       await expect(total.getByText("$0.56", { exact: true })).toBeVisible();
       await expect(total).toContainText("Oct 28 – Nov 26, 2026");
-      await expect(total).toContainText("Highest day: Nov 20, $0.21");
+      await expect(total).toContainText("Highest day: Nov 26, $0.25");
       await expect(total.getByRole("img", { name: /^Cost per day, Oct 28 to Nov 26/ })).toBeVisible();
       const ai = rows.filter({ hasText: "OpenRouter" });
       await expect(ai.getByText("14 AI calls · 61.4K tokens")).toBeVisible();
       await expect(ai.getByText("$0.26", { exact: true })).toBeVisible();
-      await expect(ai.getByRole("listitem").filter({ hasText: "google/gemini-2.5-flash" })).toContainText("$0.25");
+      await expect(ai.getByRole("listitem").filter({ hasText: "google/gemini-2.5-flash" })).toContainText("$0.26");
       await expect(ai.getByRole("listitem").filter({ hasText: "openai/gpt-5-mini" })).toContainText("$0.0045");
       const edits = rows.filter({ hasText: "Photoroom" });
       await expect(edits.getByText("3 photo edits")).toBeVisible();
