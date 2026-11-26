@@ -103,4 +103,11 @@ describe("local sales records", () => {
     expect(salesLedgerParams(filters)).not.toContain("page=");
     expect(salesLedgerParams(filters, 2)).toContain("page=2");
   });
+  it("sizes desktop sales filters to share one row while keeping the phone Filters button", () => {
+    const html = renderToStaticMarkup(<SalesLedger onOpenListing={vi.fn()} />);
+    expect(html).toContain('aria-controls="sales-filters"');
+    expect(html).toContain("sm:flex-1");
+    expect(html).not.toContain("sm:w-56 sm:flex-none");
+    expect(html).not.toContain("sm:w-44");
+  });
 });

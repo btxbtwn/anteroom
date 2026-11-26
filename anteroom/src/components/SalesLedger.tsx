@@ -109,28 +109,28 @@ export function SalesLedger({ onOpenListing }: { onOpenListing: (id: string) => 
           if (!value) return;
           setPeriod(value); setPage(1);
           if (value !== "custom") { setEnd(today); setStart(value === "all" ? "1970-01-01" : new Date(Date.parse(today) - (Number(value) - 1) * 86400000).toISOString().slice(0, 10)); }
-        }}><SelectTrigger aria-label="Sales period" className="w-36 sm:w-40"><SelectValue>{PERIOD_LABELS[period]}</SelectValue></SelectTrigger><SelectPopup>
+        }}><SelectTrigger aria-label="Sales period" className="w-36 shrink-0 sm:w-auto sm:min-w-0"><SelectValue>{PERIOD_LABELS[period]}</SelectValue></SelectTrigger><SelectPopup>
           {Object.entries(PERIOD_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
         </SelectPopup></Select>
         <Button size="sm" variant="outline" className="sm:hidden" aria-expanded={filtersOpen} aria-controls="sales-filters" onClick={() => setFiltersOpen(!filtersOpen)}>
           <ListFilterIcon aria-hidden />Filters{filterCount ? ` (${filterCount})` : ""}
         </Button>
-        <div id="sales-filters" className={cn(filtersOpen ? "grid" : "hidden", "order-last w-full grid-cols-2 gap-2 sm:order-none sm:flex sm:w-auto sm:flex-1 sm:flex-wrap sm:items-center")}>
-          <Input type="search" aria-label="Search sales" placeholder="Search item title or order number" className="col-span-2 min-w-0 sm:w-56 sm:flex-none" value={search} onChange={event => { setSearch(event.target.value); setPage(1); }} />
+        <div id="sales-filters" className={cn(filtersOpen ? "grid" : "hidden", "order-last w-full grid-cols-2 gap-2 sm:order-none sm:flex sm:min-w-0 sm:flex-1 sm:flex-wrap sm:items-center")}>
+          <Input type="search" aria-label="Search sales" placeholder="Search item title or order number" className="col-span-2 min-w-0 sm:w-auto sm:min-w-36 sm:flex-1" value={search} onChange={event => { setSearch(event.target.value); setPage(1); }} />
           <Select value={marketplace} onValueChange={(value) => { if (value) setMarketplace(value); setPage(1); }}>
-            <SelectTrigger aria-label="Sales marketplace" className="w-full sm:w-44"><SelectValue>{marketplace === "all" ? "All marketplaces" : marketplaceName(marketplace)}</SelectValue></SelectTrigger>
+            <SelectTrigger aria-label="Sales marketplace" className="w-full sm:w-auto sm:min-w-0 sm:shrink-0"><SelectValue>{marketplace === "all" ? "All marketplaces" : marketplaceName(marketplace)}</SelectValue></SelectTrigger>
             <SelectPopup><SelectItem value="all">All marketplaces</SelectItem>{MARKETS.map((market) => <SelectItem key={market} value={market}>{marketplaceName(market)}</SelectItem>)}</SelectPopup>
           </Select>
           <Select value={attention} onValueChange={value => { if (value) setAttention(value); setPage(1); }}>
-            <SelectTrigger aria-label="Sales completeness" className="w-full sm:w-44"><SelectValue>{({ all: "All records", missing: "Missing sale data", review: "Needs review", loss: "Losses" } as Record<string, string>)[attention]}</SelectValue></SelectTrigger><SelectPopup>
+            <SelectTrigger aria-label="Sales completeness" className="w-full sm:w-auto sm:min-w-0 sm:shrink-0"><SelectValue>{({ all: "All records", missing: "Missing sale data", review: "Needs review", loss: "Losses" } as Record<string, string>)[attention]}</SelectValue></SelectTrigger><SelectPopup>
               <SelectItem value="all">All records</SelectItem><SelectItem value="missing">Missing sale data</SelectItem><SelectItem value="review">Needs review</SelectItem><SelectItem value="loss">Losses</SelectItem>
             </SelectPopup></Select>
           <Select value={sort} onValueChange={value => { if (value) setSort(value); setPage(1); }}>
-            <SelectTrigger aria-label="Sort sales" className="w-full sm:w-40"><SelectValue>{({ newest: "Newest first", oldest: "Oldest first", title: "Item title" } as Record<string, string>)[sort]}</SelectValue></SelectTrigger><SelectPopup><SelectItem value="newest">Newest first</SelectItem><SelectItem value="oldest">Oldest first</SelectItem><SelectItem value="title">Item title</SelectItem></SelectPopup>
+            <SelectTrigger aria-label="Sort sales" className="w-full sm:w-auto sm:min-w-0 sm:shrink-0"><SelectValue>{({ newest: "Newest first", oldest: "Oldest first", title: "Item title" } as Record<string, string>)[sort]}</SelectValue></SelectTrigger><SelectPopup><SelectItem value="newest">Newest first</SelectItem><SelectItem value="oldest">Oldest first</SelectItem><SelectItem value="title">Item title</SelectItem></SelectPopup>
           </Select>
-          {filtered ? <Button size="sm" variant="ghost" className="col-span-2 justify-self-end" onClick={clearFilters}>Clear filters</Button> : null}
+          {filtered ? <Button size="sm" variant="ghost" className="col-span-2 justify-self-end sm:shrink-0" onClick={clearFilters}>Clear filters</Button> : null}
         </div>
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex shrink-0 items-center gap-1">
           <Button size="icon-sm" variant="ghost" aria-label="Refresh sales" title="Refresh sales" disabled={!valid || refreshing}
             onClick={() => { void query.refetch(); void overview.refetch(); }}>
             <RefreshCwIcon aria-hidden className={cn(refreshing && "animate-spin")} />

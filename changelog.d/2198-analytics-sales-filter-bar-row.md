@@ -1,0 +1,1 @@
+- Kept the **Analytics → Sales records** filter bar on a single row at 1280px and wider desktop viewports while keeping the phone **Filters** toggle.
