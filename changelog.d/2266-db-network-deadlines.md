@@ -1,0 +1,1 @@
+- Keep cloud pages and scheduled automations from stalling for 30 seconds to 15 minutes when a connection to the cloud database stops answering. Anteroom now drops that connection within seconds and opens a fresh one.
