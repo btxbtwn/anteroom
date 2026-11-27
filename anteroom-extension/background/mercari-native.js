@@ -619,7 +619,7 @@ async function mercariRequest(body, { multipart = null, deadline, operationName 
     }
     const sessionRefused = failure.code === 'signed_out';
     const unreachable = retry && failure.code === 'network' && failure.marketplace_message === 'Unable to contact API';
-    const missed = !queryMissed && failure.code === 'schema_drift' && /PersistedQueryNotFound/.test(failure.marketplace_message || '');
+    const missed = !queryMissed && failure.code === 'schema_drift' && /PersistedQueryNotFound|PERSISTED_QUERY_NOT_FOUND/i.test(failure.marketplace_message || '');
     if (!resend || attempt >= 2 || !(sessionRefused || unreachable || missed) || Date.now() + MERCARI_SESSION_RETRY_MS + 1000 >= deadline) throw failure;
     marketplaceLog('mercari', operationName, { retry: attempt + 1, error_code: failure.code });
     await marketplaceSleep(MERCARI_SESSION_RETRY_MS);
