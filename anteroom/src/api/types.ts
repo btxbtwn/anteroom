@@ -348,6 +348,7 @@ export interface SubscriptionSummary {
   };
   period: string;
   resets_at: string;
+  limits_enforced: boolean;
   credits: {
     used: number;
     limit: number | null;

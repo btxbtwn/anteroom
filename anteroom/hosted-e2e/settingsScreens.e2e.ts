@@ -102,6 +102,7 @@ for (const scheme of ["light", "dark"] as const) {
       await openSettings(page, "Usage", phone);
       const plan = page.locator("#subscription-plan");
       await expect(plan.getByText("Free", { exact: true }).first()).toBeVisible();
+      await expect(plan.getByText(/Usage is tracked for preview\./)).toBeVisible();
       await expect(plan.getByText(/\/ 50/)).toBeVisible();
       await expect(plan.getByText(/\/ 10/)).toBeVisible();
       const tiers = page.locator("#subscription-tiers");

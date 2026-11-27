@@ -1,9 +1,15 @@
-"""Hosted subscription tiers, Smart Credit weights, and per-seller allowance enforcement.
+"""Hosted subscription tiers, Smart Credit weights, and per-seller usage metering.
 
 Desktop execution (where ``service_context.current()`` is ``None``) uses the
 seller's own provider keys and is never metered or limited by subscription
 tiers. Hosted accounts default to the Free tier unless assigned another plan
 in ``seller_plans`` or matched by ``ANTEROOM_UNLIMITED_EMAILS``.
+
+Monthly cap enforcement stays OFF by default (``PLAN_LIMITS_ENFORCED = False``)
+across hosted web, iPhone/API, MCP, and background processing until an
+explicitly approved future release ships with a working upgrade path. Tiers,
+assignments, usage metering, and photo-credit refunds remain active while
+enforcement is off.
 """
 
 from __future__ import annotations
@@ -26,6 +32,15 @@ from anteroom.services.photoroom import StudioOptions
 from anteroom.services.service_context import current
 
 _EXEMPT_LISTED_ITEM: ContextVar[bool] = ContextVar("anteroom_exempt_listed_item", default=False)
+
+# Cap enforcement stays off until an explicitly approved release adds a working
+# self-serve upgrade path (see deploy/fly/README.md for activation prerequisites).
+PLAN_LIMITS_ENFORCED: bool = False
+
+
+def limits_enforced() -> bool:
+    """Return whether hosted Smart Credit and Free listed-item caps block requests."""
+    return PLAN_LIMITS_ENFORCED
 
 
 @contextmanager
@@ -286,10 +301,10 @@ def charge_ai_listing(
     reference_id: str | None = None,
     now: datetime | None = None,
 ) -> int:
-    """Enforce and record Smart Credits for an AI listing generation in the caller's transaction.
+    """Record (and enforce when active) Smart Credits for an AI listing generation in the caller's transaction.
 
-    Returns the credits charged (``0`` on desktop or Unlimited accounts). Does not
-    commit; the caller commits atomically alongside enqueuing the draft task.
+    Returns the credits charged (``0`` on desktop). Does not commit; the caller
+    commits atomically alongside enqueuing the draft task.
     """
     active = _active_seller()
     if active is None:
@@ -298,7 +313,7 @@ def charge_ai_listing(
     _lock_seller_usage(db, user_id)
     plan, _ = resolve_plan(db, user_id, email)
     period = current_period(now)
-    if plan.monthly_credits is not None:
+    if limits_enforced() and plan.monthly_credits is not None:
         used = credits_used(db, user_id, period)
         remaining = max(0, plan.monthly_credits - used)
         if used + AI_LISTING_CREDITS > plan.monthly_credits:
@@ -327,9 +342,9 @@ def check_photo_batch(
     *,
     now: datetime | None = None,
 ) -> None:
-    """Pre-flight check that the seller can afford ``count`` AI Studio photos."""
+    """Pre-flight check that the seller can afford ``count`` AI Studio photos when enforcement is active."""
     active = _active_seller()
-    if active is None or count <= 0:
+    if active is None or count <= 0 or not limits_enforced():
         return
     user_id, email = active
     plan, _ = resolve_plan(db, user_id, email)
@@ -354,7 +369,7 @@ def reserve_photo_credit(
     *,
     now: datetime | None = None,
 ) -> tuple[int, str]:
-    """Atomically reserve credits for one AI Studio photo call and commit before hitting Photoroom."""
+    """Atomically meter (and enforce when active) credits for one AI Studio photo call before hitting Photoroom."""
     active = _active_seller()
     if active is None:
         return 0, ""
@@ -363,7 +378,7 @@ def reserve_photo_credit(
     plan, _ = resolve_plan(db, user_id, email)
     kind, cost = photo_credit_cost(options)
     period = current_period(now)
-    if plan.monthly_credits is not None:
+    if limits_enforced() and plan.monthly_credits is not None:
         used = credits_used(db, user_id, period)
         remaining = max(0, plan.monthly_credits - used)
         if used + cost > plan.monthly_credits:
@@ -436,9 +451,9 @@ def check_listed_item_allowance(
     *,
     now: datetime | None = None,
 ) -> None:
-    """Unlocked pre-check before Chrome preview / photo capture for Free-tier item cap."""
+    """Unlocked pre-check before Chrome preview / photo capture for Free-tier item cap when active."""
     active = _active_seller()
-    if active is None:
+    if active is None or not limits_enforced():
         return
     user_id, email = active
     plan, _ = resolve_plan(db, user_id, email)
@@ -458,7 +473,7 @@ def require_and_record_listed_item(
     marketplace: str,
     now: datetime | None = None,
 ) -> None:
-    """Atomically enforce the Free-tier monthly distinct-item cap and record the item in the caller's tx."""
+    """Atomically meter (and enforce when active) the Free-tier monthly distinct-item cap in the caller's tx."""
     active = _active_seller()
     if active is None:
         return
@@ -468,7 +483,7 @@ def require_and_record_listed_item(
     period = current_period(now)
     if _item_already_counted(db, user_id, period, conversation_id):
         return
-    if plan.monthly_listed_items is not None:
+    if limits_enforced() and plan.monthly_listed_items is not None:
         if listed_items_used(db, user_id, period) >= plan.monthly_listed_items:
             raise PlanLimitError(_listing_limit_message(plan), reason=REASON_LISTING_LIMIT)
     db.add(
@@ -530,6 +545,7 @@ def seller_subscription_summary(
         },
         "period": period,
         "resets_at": next_reset_iso(instant),
+        "limits_enforced": limits_enforced(),
         "credits": {
             "used": used_credits,
             "limit": plan.monthly_credits,
@@ -728,6 +744,7 @@ def list_seller_plans(
             })
         return {
             "period": target_period,
+            "limits_enforced": limits_enforced(),
             "unlimited_emails": sorted(unlimited_emails()),
             "sellers": sellers,
             "plans": [item.to_public_dict() for item in PUBLIC_PLANS],
@@ -765,6 +782,7 @@ def list_seller_plans(
             })
         return {
             "period": target_period,
+            "limits_enforced": limits_enforced(),
             "unlimited_emails": sorted(unlimited_emails()),
             "sellers": sellers,
             "plans": [item.to_public_dict() for item in PUBLIC_PLANS],

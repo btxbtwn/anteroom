@@ -92,12 +92,15 @@ Use `--content docs` for specs/skills prose, `--content config` for JSON/YAML/TO
   product quotas, global single-job gates or fixed batch-generation limits.
   A long model, photo or network task must not block navigation, typing,
   editing another draft, submitting more work or another seller's work.
-  **Exception (approved 2026-11-26):** Hosted subscription plans enforce
-  per-account monthly Smart Credit allowances for AI listing generation and
-  AI Studio photo edits, plus a Free-tier monthly cap on distinct first-time
-  listed items (`services/subscriptions.py`). Plan checks are scoped to one
-  seller, never block other sellers, and leave manual editing, updates,
-  delisting, and paid-plan cross-listing unrestricted.
+  **Exception (approved 2026-11-26):** Hosted subscription plans meter
+  per-account monthly Smart Credit usage for AI listing generation and
+  AI Studio photo edits, plus a Free-tier monthly count of distinct first-time
+  listed items (`services/subscriptions.py`). Monthly cap enforcement stays off
+  by default (`PLAN_LIMITS_ENFORCED = False`) until an explicitly approved
+  future release ships with a working upgrade path (see `deploy/fly/README.md`).
+  When enabled, plan checks are scoped to one seller, never block other
+  sellers, and leave manual editing, updates, delisting, and paid-plan
+  cross-listing unrestricted.
 - Keep operations scoped to their draft, account and task. Preserve atomic
   saves, stale-edit protection, cancellation, row security and explicit
   marketplace confirmation. Provider and physical resource limits must be
