@@ -358,6 +358,29 @@ list remembers.
 | Saturday | Concurrency and speed: several sellers generating several drafts at once while navigating and typing. Record p50/p95 input and navigation latency and errors against the targets in `docs/responsiveness.md`. Run the hosted load test (`anteroom/README.md`, **Hosted load test**) with the sandbox log redirected to a file, then search that log for `QueuePool`, `Traceback` and `TaskStopped`. "Etsy isn't connected" tracebacks are expected there; lease-ended lines are expected only after the harness starts cancelling (`generate/cancel` in the log) | `e2e/concurrentGeneration.e2e.ts`, `scripts/hosted-load-test.py`, `docs/responsiveness.md` |
 | Sunday | Safety sweep: every publish, delist, update, set-price push, bulk marketplace and automation-approval route without `confirm` and without named marketplaces must be refused. Saving a marketplace draft takes no `confirm` by design (`services/native_marketplaces.py`, `save_draft`): check instead that it names one draft-capable marketplace and can never publish. The sandbox answers 403 before any route checks `confirm`, so the confirm gate is proven by the pytest suite and by reading the code, not by sandbox calls; search for any code path where automation, retries, queues or bulk actions could reach them. Seller isolation: Alice and Bob never see each other's drafts or photos. Live updates and stale-edit protection between web and iPhone on the same draft | `routes/native_marketplaces.py`, `routes/marketplace_listings.py`, `routes/listing_commands.py` (set-price push), `cli/catalog.py` and `cli/execute.py` (the CLI's confirm gate), `docs/seller-isolation.md` |
 
+### Friday: a database from the previous release
+
+The installed app can only run through `smoke-packaged-sandbox.py`, which
+deletes its data folder, so build the old database from source instead
+(2026-11-27):
+
+1. Pick the last release commit before the newest Alembic revision
+   (`git log --first-parent -- anteroom/server/anteroom/migrations/versions`),
+   then export it to a scratch folder: `git archive <sha> anteroom/server anteroom/data skills | tar -x -C <old>`.
+   Without `anteroom/data/category-trees-seed.json.gz`, seeding fails with a 500.
+2. Run its server with `ANTEROOM_SANDBOX=1`, a spare `ANTEROOM_PORT`, a temp
+   `ANTEROOM_DATA_DIR`, and `PYTHONPATH=<old>/anteroom/server`. Then seed it with
+   `python -m anteroom.sandbox_seed http://127.0.0.1:<port>`, setting the **same
+   `ANTEROOM_DATA_DIR`** on the seed command. The seed module also writes to the
+   database directly. Without that variable it falls back to the code's own
+   `anteroom/data/`, which in a real checkout is the seller's folder.
+3. Stop it. Copy the database with `sqlite3 <db> "VACUUM INTO '<new-dir>/anteroom.db'"`,
+   then start `main` on `<new-dir>`. Check the listings are still served, the revision
+   is the new head, and a `pre-migration` snapshot is in `backups/`.
+4. Start the old server on the migrated copy: it must exit, saying the revision
+   is unknown. Restore the snapshot with `ANTEROOM_DATA_DIR=<new-dir> ANTEROOM_PORT=<port> ./scripts/restore-db.sh <snapshot> --yes`.
+   It must write a `pre-restore` snapshot first and bring back the old revision.
+
 ## Feature checks
 
 Checks for specific features that CI does not cover yet. Each line says what
