@@ -55,6 +55,7 @@ struct GeneralListingFields: View {
         }
         SellerMeasurementFields(inputs: $form.sellerInputs)
         ListingInspectorSection("Shipping") {
+            NumberField("Package Weight (lb)", text: $form.weightLb, placeholder: "Pounds").fieldAnchor("weight_lb")
             NumberField("Package Weight (oz)", text: $form.weightOz, placeholder: "Ounces").fieldAnchor("weight_oz")
             TextRow("Package Dimensions (LxWxH in)", text: $form.fields.packageDimensionsIn, placeholder: "L × W × H").fieldAnchor("package_dimensions_in")
             TextRow("Inventory location", text: $form.fields.zipCode, placeholder: "ZIP code").fieldAnchor("zipCode")
@@ -174,7 +175,7 @@ struct ListingInspectorSection<Content: View>: View {
 enum FieldAnchor {
     /// The General form's listing paths.
     static let general: Set<String> = ["title", "description", "price", "cost", "category_path", "brand", "department",
-                                       "condition", "size", "primaryColor", "secondaryColor", "weight_oz",
+                                       "condition", "size", "primaryColor", "secondaryColor", "weight_lb", "weight_oz",
                                        "package_dimensions_in", "zipCode", "quantity", "sku"]
 
     static func id(_ path: String) -> String { "field:\(path)" }

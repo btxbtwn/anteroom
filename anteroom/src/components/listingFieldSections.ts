@@ -152,7 +152,7 @@ const GENERAL_SECTIONS: { id: string; title: string; keys: string[] }[] = [
   { id: "pricing", title: "Pricing", keys: ["price"] },
   { id: "description", title: "Description", keys: ["description"] },
   { id: "appearance", title: "Color & department", keys: ["primaryColor", "secondaryColor", "department"] },
-  { id: "shipping", title: "Shipping", keys: ["weight_oz", "package_dimensions_in", "zipCode"] },
+  { id: "shipping", title: "Shipping", keys: ["weight_lb", "weight_oz", "package_dimensions_in", "zipCode"] },
   { id: "other", title: "More details", keys: ["cost", "sku", "quantity"] },
 ];
 

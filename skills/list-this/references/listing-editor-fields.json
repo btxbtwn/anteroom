@@ -58,6 +58,11 @@
       "label": "Department"
     },
     {
+      "key": "weight_lb",
+      "label": "Package Weight (lb)",
+      "type": "number"
+    },
+    {
       "key": "weight_oz",
       "label": "Package Weight (oz)",
       "type": "number"
@@ -134,6 +139,11 @@
     }
   ],
   "package": [
+    {
+      "key": "weight_lb",
+      "label": "Package Weight (lb)",
+      "type": "number"
+    },
     {
       "key": "weight_oz",
       "label": "Package Weight (oz)",

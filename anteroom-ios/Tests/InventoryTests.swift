@@ -270,6 +270,14 @@ struct InventoryTests {
         let encoded = try JSONEncoder().encode(saved)
         let reread = try JSONDecoder().decode([String: JSONValue].self, from: encoded)
         precondition(reread == saved)
+        // The package weight is pounds plus ounces: 1 lb 2 oz must not read as 2 oz (#2304).
+        let packed = GeneralFields(listing: try JSONDecoder().decode([String: JSONValue].self,
+                                                                    from: Data(#"{"weight_lb":1,"weight_oz":2}"#.utf8)))
+        precondition(packed.weightLb == 1 && packed.weightOz == 2)
+        var heavier = packed
+        heavier.weightLb = 2
+        let repacked = heavier.applied(to: [:], changedFrom: packed)
+        precondition(repacked["weight_lb"] == .double(2) && repacked["weight_oz"] == nil)
 
         // Job events reload the inventory only while a row is generating or working on a marketplace.
         precondition(InventoryQuery.hasWorkInProgress(rows), "Green hat is in progress")

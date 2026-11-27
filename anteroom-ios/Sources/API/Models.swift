@@ -120,6 +120,7 @@ struct GeneralFields: Equatable, Sendable, Codable {
     var zipCode = ""
     var categoryPath = ""
     var department = ""
+    var weightLb: Double?
     var weightOz: Double?
     var packageDimensionsIn = ""
 
@@ -130,7 +131,7 @@ struct GeneralFields: Equatable, Sendable, Codable {
         ("package_dimensions_in", \.packageDimensionsIn),
     ] }
     private static var numberKeys: [(String, WritableKeyPath<GeneralFields, Double?>)] { [
-        ("price", \.price), ("cost", \.cost), ("weight_oz", \.weightOz),
+        ("price", \.price), ("cost", \.cost), ("weight_lb", \.weightLb), ("weight_oz", \.weightOz),
     ] }
 
     init() {}

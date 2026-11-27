@@ -13,6 +13,7 @@ final class ListingEditorModel {
         var price = ""
         var cost = ""
         var quantity = ""
+        var weightLb = ""
         var weightOz = ""
         var labels = ""
     }
@@ -369,12 +370,14 @@ final class ListingEditorModel {
                 form.price = reloaded.price
                 form.cost = reloaded.cost
                 form.quantity = reloaded.quantity
+                form.weightLb = reloaded.weightLb
                 form.weightOz = reloaded.weightOz
                 form.labels = reloaded.labels
                 saved.fields = reloaded.fields
                 saved.price = reloaded.price
                 saved.cost = reloaded.cost
                 saved.quantity = reloaded.quantity
+                saved.weightLb = reloaded.weightLb
                 saved.weightOz = reloaded.weightOz
                 saved.labels = reloaded.labels
             } catch let error as APIError where error.isConflict {
@@ -516,6 +519,7 @@ final class ListingEditorModel {
         form.price = GeneralFields.text(fields.price)
         form.cost = GeneralFields.text(fields.cost)
         form.quantity = fields.quantity.map { String($0) } ?? ""
+        form.weightLb = GeneralFields.text(fields.weightLb)
         form.weightOz = GeneralFields.text(fields.weightOz)
         form.labels = fields.labels.joined(separator: ", ")
         return form
@@ -525,7 +529,8 @@ final class ListingEditorModel {
         var fields = form.fields
         fields.price = try Self.number(form.price, name: "Price")
         fields.cost = try Self.number(form.cost, name: "Cost")
-        fields.weightOz = try Self.number(form.weightOz, name: "Weight")
+        fields.weightLb = try Self.number(form.weightLb, name: "Weight (lb)")
+        fields.weightOz = try Self.number(form.weightOz, name: "Weight (oz)")
         let quantity = form.quantity.trimmingCharacters(in: .whitespaces)
         if quantity.isEmpty {
             fields.quantity = nil
@@ -542,6 +547,7 @@ final class ListingEditorModel {
         // as "12.5" does not count as an edit.
         if form.price == saved.price { fields.price = saved.fields.price }
         if form.cost == saved.cost { fields.cost = saved.fields.cost }
+        if form.weightLb == saved.weightLb { fields.weightLb = saved.fields.weightLb }
         if form.weightOz == saved.weightOz { fields.weightOz = saved.fields.weightOz }
         if form.labels == saved.labels { fields.labels = saved.fields.labels }
         return fields

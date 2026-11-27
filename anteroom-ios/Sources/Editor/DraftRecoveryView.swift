@@ -71,7 +71,7 @@ struct DraftRecoveryView: View {
             ("Condition", fields.condition), ("Primary color", fields.primaryColor),
             ("Secondary color", fields.secondaryColor), ("Size", fields.size), ("SKU", fields.sku),
             ("Labels", form.labels), ("ZIP code", fields.zipCode), ("Category", fields.categoryPath),
-            ("Department", fields.department), ("Weight (oz)", form.weightOz),
+            ("Department", fields.department), ("Weight (lb)", form.weightLb), ("Weight (oz)", form.weightOz),
             ("Package dimensions", fields.packageDimensionsIn), ("Tag size", notes.size),
             ("Item details SKU", notes.sku), ("Seller notes", notes.sellerNotes),
             ("Known flaws", notes.knownFlaws), ("Description measurements", notes.descriptionMeasurements),

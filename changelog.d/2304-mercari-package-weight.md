@@ -1,0 +1,1 @@
+- Show a package's pounds next to its ounces in Item Details on the web and iPhone, so a 1 lb 2 oz package no longer reads as 2 oz and matches the Mercari package.
