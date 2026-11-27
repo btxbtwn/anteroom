@@ -228,16 +228,7 @@ async def finish_sign_in(marketplace: str, state: str, claim: str) -> dict:
     """
     _check(marketplace)
     name = NAMES[marketplace]
-    consume = asyncio.ensure_future(in_worker_session(_consume_sign_in, marketplace, state))
-    try:
-        taken = await asyncio.shield(consume)
-    except asyncio.CancelledError:
-        # Cancelled while the database step was still taking it: let that step
-        # finish, then give the sign-in back so the seller can retry the same link.
-        if await asyncio.shield(consume):
-            await asyncio.shield(in_worker_session(_release_sign_in, marketplace, state))
-        raise
-    if not taken:
+    if not await in_worker_session(_consume_sign_in, marketplace, state):
         raise SignInNotFound(f"This {name} sign-in was not started here, or it already ended. Start again from Connections.")
     try:
         resp = await relay_request("GET", "/studio/oauth/result", params={"state": state, "claim": claim})
