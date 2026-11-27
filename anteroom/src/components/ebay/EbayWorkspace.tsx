@@ -68,10 +68,15 @@ export function EbayWorkspace({ onOpenListing }: { onOpenListing: (id: string) =
       </div>
     </WorkspaceTabs> : <div className="ebay-data-panel space-y-4">
       <h2>{connection.isPending ? "Checking your connection…" : "Connect your eBay account"}</h2>
-      <p className="text-muted-foreground">Pick the tools to authorize on eBay; you confirm every account change.</p>
+      {!connection.isPending ? <p className="text-muted-foreground">Connect to see your eBay orders, earnings and buyer messages, and manage listings. You review changes before sending them to eBay.</p> : null}
       {!connection.isPending ? <Button onClick={() => setPermissionsOpen(true)}>Connect eBay</Button> : null}
     </div>}
-    {!account?.connected ? <SaleCalendar marketplace="ebay" onOpenListing={onOpenListing} /> : null}
+    {!account?.connected && !connection.isPending ? (
+      <details>
+        <summary className="min-h-11 cursor-pointer py-3 text-sm text-muted-foreground">Sale calendar</summary>
+        <SaleCalendar marketplace="ebay" onOpenListing={onOpenListing} secondary />
+      </details>
+    ) : null}
     <Dialog open={permissionsOpen} onOpenChange={setPermissionsOpen}>
       <DialogPopup className="ebay-action-dialog sm:max-w-xl">
         <DialogHeader><DialogTitle>eBay connection</DialogTitle><DialogDescription>Choose the tools you want to authorize. You can grant groups separately if eBay restricts a feature.</DialogDescription></DialogHeader>

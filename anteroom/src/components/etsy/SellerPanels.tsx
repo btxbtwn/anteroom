@@ -10,7 +10,7 @@ import { EmptyRow, ListRow, PageError, PageNote, PageSection, Panel } from "../W
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { Spinner } from "../ui/spinner";
+import { Skeleton } from "../ui/skeleton";
 import { InventoryImport } from "../InventoryImport";
 import { WorkspaceTabs } from "../ebay/WorkspaceTabs";
 
@@ -38,8 +38,17 @@ function useOrders(scope: string, period: OrderPeriod, status: EtsyOrderStatus, 
     enabled: period.valid, retry: false, staleTime: 30000 });
 }
 
-function Loading({ label }: { label: string }) {
-  return <div role="status" className="flex items-center gap-2 py-6 text-sm text-muted-foreground"><Spinner />{label}</div>;
+function Loading({ label, rows = 3 }: { label: string; rows?: number }) {
+  return <div role="status" className="divide-y divide-border/50">
+    <span className="sr-only">{label}</span>
+    {Array.from({ length: rows }, (_, index) => <div key={index} aria-hidden="true" className="flex items-center justify-between gap-4 py-3">
+      <div className="min-w-0 flex-1 space-y-2">
+        <Skeleton className="h-4 w-40 max-w-full" />
+        <Skeleton className="h-3 w-24 max-w-full" />
+      </div>
+      <Skeleton className="h-4 w-16" />
+    </div>)}
+  </div>;
 }
 
 export function EtsyDashboard({ shop, shopError, scope, period, onOpenOrders }: {
@@ -66,7 +75,7 @@ export function EtsyDashboard({ shop, shopError, scope, period, onOpenOrders }: 
       </PageSection>
       <PageSection title="Your shop">
         {shopError ? <PageError message={shopError.message} /> : null}
-        {!shop && !shopError ? <Loading label="Loading Etsy shop…" /> : null}
+        {!shop && !shopError ? <Loading label="Loading Etsy shop…" rows={1} /> : null}
         {shop ? <Panel divided={false} className="flex flex-col gap-4 p-4">
           <div><h3 className="font-semibold">{shop.name}</h3><p className="mt-1 text-sm text-muted-foreground">{shop.title}</p></div>
           <Badge variant={shop.onVacation ? "warning" : "success"} className="self-start">{shop.onVacation ? "Vacation mode" : "Shop open"}</Badge>

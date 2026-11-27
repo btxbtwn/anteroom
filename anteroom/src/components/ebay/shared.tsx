@@ -7,6 +7,7 @@ import { PageError } from "../WorkspacePage";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
+import { Skeleton } from "../ui/skeleton";
 import { Spinner } from "../ui/spinner";
 import { ActionForm } from "./ActionForm";
 
@@ -35,18 +36,54 @@ export function RowCards({ rows, onSelect, selected }: { rows: EbayRow[]; onSele
   </article>)}</div> : <div className="ebay-empty"><InboxIcon aria-hidden="true" /><p>No items to show here yet.</p></div>;
 }
 
-export function RemoteList({ section, params = {}, onSelect, selected }: { section: string; params?: Record<string, string | number>; onSelect?: (row: EbayRow) => void; selected?: string }) {
+const SECTION_LABELS = {
+  "inventory": "listings",
+  "offers": "listing offers",
+  "research": "research results",
+  "finances": "earnings",
+  "payouts": "payouts",
+  "traffic": "listing performance",
+  "inbox": "inbox",
+  "messages": "messages",
+  "feedback": "feedback",
+  "orders": "orders",
+  "order": "order details",
+  "disputes": "payment disputes",
+  "dispute": "dispute details",
+  "activity": "activity",
+  "promotions": "promotions",
+  "promotion-reports": "promotion results",
+  "campaigns": "ad campaigns",
+  "ad-reports": "advertising reports",
+  "ad-report": "report details",
+  "emails": "store emails",
+} as const;
+
+export function EbayRowsLoading({ label, compact = false }: { label: string; compact?: boolean }) {
+  return <div className={compact ? "space-y-2" : "ebay-records"} role="status">
+    <span className="sr-only">{label}</span>
+    {[0, 1, 2].map((row) => <div key={row} aria-hidden="true"
+      className={compact ? "flex items-center gap-2 p-2" : "ebay-record space-y-2"}>
+      {compact ? <Skeleton className="size-4" /> : null}
+      <Skeleton className="h-4 w-40 max-w-full" />
+      {!compact ? <Skeleton className="h-3 w-24" /> : null}
+    </div>)}
+  </div>;
+}
+
+export function RemoteList({ section, params = {}, onSelect, selected }: { section: keyof typeof SECTION_LABELS; params?: Record<string, string | number>; onSelect?: (row: EbayRow) => void; selected?: string }) {
   const [offset, setOffset] = useState(0);
   const result = useQuery({ queryKey: ["ebay", section, params, offset], queryFn: () => api.ebay.read(section, { ...params, offset }), retry: false, staleTime: 30000 });
   const count = result.data?.total;
+  const label = SECTION_LABELS[section];
   const size = section === "finances" ? 10 : 25;
   return <div className="min-w-0">
-    <div className="ebay-list-toolbar"><span>{count != null ? `${count} ${count === 1 ? "result" : "results"}` : result.isPending ? "Loading…" : `${result.data?.rows.length || 0} shown`}</span>
-      <Button size="sm" variant="ghost" disabled={result.isFetching} onClick={() => void result.refetch()} aria-label={`Refresh ${section}`}>
+    <div className="ebay-list-toolbar"><span>{count != null ? `${count} ${count === 1 ? "result" : "results"}` : result.isPending ? null : `${result.data?.rows.length || 0} shown`}</span>
+      <Button size="sm" variant="ghost" disabled={result.isFetching} onClick={() => void result.refetch()} aria-label={`Refresh ${label}`}>
         {result.isFetching ? <Spinner /> : <RefreshCwIcon />}Refresh
       </Button></div>
     {result.error ? <PageError message={result.error.message} /> : null}
-    {result.isPending ? <div className="ebay-empty" role="status"><Spinner /><p>Loading your eBay data…</p></div> : null}
+    {result.isPending ? <EbayRowsLoading label={`Loading ${label}`} /> : null}
     {result.data ? <RowCards rows={result.data.rows} onSelect={onSelect} selected={selected} /> : null}
     {offset > 0 || result.data?.nextOffset != null ? <div className="ebay-pagination">
       <span>Page {Math.floor(offset / size) + 1}</span><div>
@@ -71,7 +108,7 @@ export function ListingPicker({ selected, onChange, advertisingAccount }: {
   return <fieldset className="ebay-selection"><legend>{advertising ? "Active eBay listings" : "Select listings"}</legend>
     <p className="ebay-selection-meta" aria-live="polite">{selected.length} selected{advertising ? "" : " · up to 50 listings per discount"}</p>
     {query.error ? <PageError message={query.error.message} /> : null}
-    {advertising && query.isPending ? <p className="text-sm">Loading active eBay listings…</p> : null}
+    {advertising && query.isPending ? <EbayRowsLoading label="Loading active eBay listings" compact /> : null}
     <Input nativeInput aria-label="Filter listings" type="search" placeholder="Find a listing…" value={search} onChange={(event) => setSearch(event.target.value)} />
     {advertising ? <div className="flex flex-wrap gap-2">
       <Button type="button" variant="outline" disabled={!items?.length || active.isFetching}
