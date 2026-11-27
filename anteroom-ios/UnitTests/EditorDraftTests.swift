@@ -71,6 +71,16 @@ final class EditorDraftTests: XCTestCase {
         XCTAssertEqual(restored.form.fields.title, "Unsaved title")
         XCTAssertEqual(restored.form.sellerInputs.sku, "Unsaved SKU")
         XCTAssertEqual(restored.form.sellerInputs.size, "0")
+        XCTAssertEqual(restored.form.weightLb, "", "Kept before Weight (lb) existed: pounds open empty")
+    }
+
+    func testKeptPoundsSurviveTheRoundTrip() throws {
+        var form = ListingEditorModel.Form()
+        form.fields.title = "Boots"
+        form.weightLb = "2"
+        form.weightOz = "6"
+        let roundTrip = try JSONDecoder().decode(ListingEditorModel.Form.self, from: JSONEncoder().encode(form))
+        XCTAssertEqual(roundTrip, form)
     }
 
     func testNotesSaveBaselineRestoresLaterUnsavedListingEdits() {

@@ -16,6 +16,26 @@ final class ListingEditorModel {
         var weightLb = ""
         var weightOz = ""
         var labels = ""
+
+        enum CodingKeys: String, CodingKey {
+            case sellerInputs, fields, price, cost, quantity, weightLb, weightOz, labels
+        }
+
+        init() {}
+
+        /// Unsaved edits kept on the phone before Weight (lb) was added have no
+        /// `weightLb`; they still open, with pounds empty.
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            sellerInputs = try values.decode(SellerInputs.self, forKey: .sellerInputs)
+            fields = try values.decode(GeneralFields.self, forKey: .fields)
+            price = try values.decode(String.self, forKey: .price)
+            cost = try values.decode(String.self, forKey: .cost)
+            quantity = try values.decode(String.self, forKey: .quantity)
+            weightLb = try values.decodeIfPresent(String.self, forKey: .weightLb) ?? ""
+            weightOz = try values.decode(String.self, forKey: .weightOz)
+            labels = try values.decode(String.self, forKey: .labels)
+        }
     }
 
     let api: AnteroomAPI
