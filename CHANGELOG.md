@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1287 — 2026-11-27
+
+- The phone accessibility check now tests the sale calendar’s tap targets after the navigation drawer closes.
+
 ## 0.1.1286 — 2026-11-27
 
 - Hosted updates are less likely to be held up by a test of AI agent form reads that ran out of time on busy build machines.

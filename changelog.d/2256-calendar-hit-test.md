@@ -1,1 +1,0 @@
-- The phone accessibility check now tests the sale calendar’s tap targets after the navigation drawer closes.
