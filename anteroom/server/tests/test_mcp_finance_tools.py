@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -190,7 +191,7 @@ def test_search_orders_filters_pages_and_leaves_out_buyer_details():
     assert err and "status" in bad_status["error"]
 
 
-def test_get_profit_and_loss_matches_the_profit_and_loss_screen():
+def test_get_profit_and_loss_matches_the_profit_and_loss_screen(monkeypatch):
     client = TestClient(app)
     with SessionLocal() as db:
         _item(db, "conv-lamp", "Brass Lamp", status="sold")
@@ -213,8 +214,14 @@ def test_get_profit_and_loss_matches_the_profit_and_loss_screen():
     lines = {line["label"]: line for line in report["currencies"][0]["lines"]}
     assert lines["Net Profit"]["amount"] == f"{lines['Net Profit']['amount_cents'] / 100:.2f}"
 
+    def fixed_now(tz):
+        assert tz is UTC
+        return datetime(2026, 11, 2, 0, 5, tzinfo=UTC)
+
+    monkeypatch.setattr(mcp_finance_tools, "datetime", SimpleNamespace(now=fixed_now))
     default, err = _call(client, "get_profit_and_loss", {})
-    assert not err and default["start"] == TODAY.replace(day=1).isoformat() and default["end"] == TODAY.isoformat()
+    assert not err, default
+    assert (default["start"], default["end"]) == ("2026-11-01", "2026-11-02")
     backwards, err = _call(client, "get_profit_and_loss", {"start": TODAY.isoformat(), "end": (TODAY - timedelta(days=1)).isoformat()})
     assert err and "on or after" in backwards["error"]
 

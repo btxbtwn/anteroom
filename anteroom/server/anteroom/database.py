@@ -19,6 +19,25 @@ from anteroom.database_pool import DiagnosticQueuePool
 # the seller saw the prompt die with "database is locked". Wait instead.
 BUSY_TIMEOUT_SEC = 30
 
+# Every Postgres connection crosses the network to Supabase. A connection that
+# stops delivering packets otherwise holds its thread until Postgres ends the
+# idle transaction (30 s), the connect gives up (about 2 min) or the kernel
+# abandons the socket after its retransmissions (about 15 min), and production
+# saw all three (#2266). With these, libpq fails such a connection within
+# seconds and the pool replaces it. Keepalives also probe idle pooled
+# connections, so a dead one is noticed before a request takes it.
+POSTGRES_NETWORK_DEADLINES = {
+    "connect_timeout": 10,
+    "keepalives": 1,
+    "keepalives_idle": 10,
+    "keepalives_interval": 5,
+    "keepalives_count": 3,
+    # Milliseconds sent data may go unacknowledged. Shorter than the seller
+    # transaction's 30 s idle limit, so the client learns of a stalled
+    # connection before Postgres ends the transaction behind it.
+    "tcp_user_timeout": 20_000,
+}
+
 
 def database_url(raw: str = DATABASE_URL) -> str:
     """The configured URL, with Postgres pointed at the psycopg 3 driver.
@@ -56,7 +75,8 @@ def make_engine(url: str):
     # prepared statements stay off on port 6543. Other processes, including
     # tests and the desktop app, do not hold a pool.
     if os.environ.get("ANTEROOM_HOSTED") == "1":
-        connect_args = {"prepare_threshold": None} if make_url(url).port == 6543 else {}
+        connect_args = {**POSTGRES_NETWORK_DEADLINES,
+                        **({"prepare_threshold": None} if make_url(url).port == 6543 else {})}
         # Two sellers generating while Mac/Chrome poll and the UI refreshes need
         # more than 5 checkouts. Stay well under Supabase's remaining headroom
         # (max_connections 60 with ~40 already busy elsewhere); do not size this
@@ -74,7 +94,8 @@ def make_engine(url: str):
         )
         observe_sql(hosted_engine)
         return hosted_engine
-    return create_engine(url, poolclass=NullPool, connect_args={"prepare_threshold": None},
+    return create_engine(url, poolclass=NullPool,
+                         connect_args={**POSTGRES_NETWORK_DEADLINES, "prepare_threshold": None},
                          echo=False, hide_parameters=True)
 
 
@@ -266,6 +287,7 @@ def load_models() -> None:
     )
     from anteroom.models.generation_timing import GenerationTiming  # noqa: F401
     from anteroom.models.api_usage import ApiUsageEvent  # noqa: F401
+    from anteroom.models.subscription import PlanUsageEvent, SellerPlan  # noqa: F401
     from anteroom.models.cloud_session import (  # noqa: F401
         CloudMarketplaceSession,
         CloudOperationJournal,

@@ -34,6 +34,31 @@ struct MarkdownBlocksTests {
         ], "\(blocks)")
         precondition(MarkdownBlock.parse("One line\nsame paragraph") == [.paragraph("One line\nsame paragraph")])
         precondition(MarkdownBlock.parse("```\nunclosed") == [.code("unclosed")])
+
+        // The assistant is told to compare things in a table; it is drawn as one, not as rows of pipes.
+        let table = MarkdownBlock.parse("""
+        Last week by marketplace:
+
+        | Marketplace | Orders | Revenue |
+        |:--|:-:|--:|
+        | eBay | 8 | $371.20 |
+        | Poshmark \\| Depop | 4 |
+        Up from $488.
+        """)
+        precondition(table == [
+            .paragraph("Last week by marketplace:"),
+            .table(header: ["Marketplace", "Orders", "Revenue"],
+                   alignments: [.leading, .center, .trailing],
+                   rows: [["eBay", "8", "$371.20"], ["Poshmark | Depop", "4", ""]]),
+            .paragraph("Up from $488."),
+        ], "\(table)")
+        // Without outer pipes, as some models write it.
+        precondition(MarkdownBlock.parse("Brand | Sold\n--- | ---\nLevi's | 3") == [
+            .table(header: ["Brand", "Sold"], alignments: [.leading, .leading], rows: [["Levi's", "3"]]),
+        ])
+        // A line with a pipe and no divider row under it is still a sentence.
+        precondition(MarkdownBlock.parse("Size M | L are both listed.") == [.paragraph("Size M | L are both listed.")])
+        precondition(MarkdownBlock.parse("| Marketplace | Orders |") == [.paragraph("| Marketplace | Orders |")])
         print("Markdown block tests passed")
     }
 }
