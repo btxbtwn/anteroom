@@ -30,6 +30,7 @@ SKIPPED_TABLES = frozenset({
     'mcp_access_tokens', 'mcp_oauth_connections', 'mcp_feedback', 'mcp_photo_uploads',
     'listing_videos', 'photo_fingerprints',
     'plaid_connections', 'plaid_transactions',
+    'seller_plans', 'plan_usage_events',
 })
 MAX_ROWS = 500
 

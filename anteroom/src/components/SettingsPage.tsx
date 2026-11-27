@@ -14,7 +14,9 @@ import { GeneralSettings } from "./settings/GeneralSettings";
 import { HelpSettings } from "./settings/HelpSettings";
 import { ListingsSettings } from "./settings/ListingsSettings";
 import { LogsSettings } from "./settings/LogsSettings";
+import { PlanSettings } from "./settings/PlanSettings";
 import { ProvidersSettings } from "./settings/ProvidersSettings";
+import { UsageSettings } from "./settings/UsageSettings";
 import { SettingsPageContainer } from "./settings/SettingsLayout";
 
 function scrollToSettingsTarget(targetId: string) {
@@ -61,6 +63,12 @@ export function SettingsPage({
   return (
     <SettingsPageContainer className={section === "providers" ? "@container/providers" : undefined}>
       {section === "general" ? <GeneralSettings onOpenSetupGuide={onOpenSetupGuide} /> : null}
+      {section === "usage" ? (
+        <>
+          <PlanSettings />
+          <UsageSettings />
+        </>
+      ) : null}
       {section === "listings" ? <ListingsSettings onOpenListing={onOpenListing} /> : null}
       {section === "assistant" ? <AssistantSettings /> : null}
       {section === "providers" ? <ProvidersSettings /> : null}

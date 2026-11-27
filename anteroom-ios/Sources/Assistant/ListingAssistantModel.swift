@@ -115,6 +115,27 @@ final class ListingAssistantModel {
         await refreshSchedule()
     }
 
+    /// Back in the foreground (or on opening while work runs): pick running
+    /// work back up by itself, as the business assistant does. It only
+    /// observes the work with `resume`; it never submits it again. Offline,
+    /// Reconnect stays offered.
+    func resumeAfterReturn() async {
+        guard ready, generationAvailable, needsReconnect, !isWorking, !isLoading else { return }
+        guard let activity = try? await api.activity(listingID) else { return }
+        serverBusy = activity.busy
+        if activity.busy {
+            await run(.reconnect)
+            return
+        }
+        // Nothing is running any more: the saved draft is current.
+        if let transcript = try? await api.messages(listingID) {
+            messages = transcript.filter { $0.role == "user" || $0.role == "assistant" }
+        }
+        needsReconnect = false
+        progress = "Work finished. Review the saved draft."
+        await refreshSchedule()
+    }
+
     func stop() async {
         runsStopped += 1
         do {
