@@ -73,6 +73,17 @@ class FieldFillRulesTest(unittest.TestCase):
         self.assertNotIn("### TITLE Formula", rules)
         self.assertNotIn("Required Outer Shell Material", field_fill_rules(None, "depop_specifics.size Women > Skirts"))
 
+    def test_collar_style_is_read_from_the_collar_not_the_shirt_type(self):
+        # #2311: point-collar and snap shirts got Collar Style "Button-Down"
+        # because they are "button-down shirts" in the casual sense.
+        from anteroom.services.catalog_index import field_fill_rules, relevant_skill_rules
+
+        query = "ebay_specifics.Collar Style Men > Shirts > Casual Button-Down Shirts"
+        for rules in (field_fill_rules(None, query, ebay=True), relevant_skill_rules(None, "western snap shirt")):
+            self.assertIn("Collar Style: read it from the collar in the photos", rules)
+            self.assertIn("never from the shirt type or title", rules)
+            self.assertIn("buttons fasten the collar points", rules)
+
 
 class FillableRowsTest(unittest.TestCase):
     def test_category_pass_uses_leaves_and_respects_saved_and_locked_choices(self):
