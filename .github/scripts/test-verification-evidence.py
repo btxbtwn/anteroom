@@ -17,14 +17,48 @@ from test_wait_for_tested_code import (  # unittest collects the deploy-gate con
 
 ROOT = Path(__file__).resolve().parents[2]
 TARGET, BASE = 'a' * 40, 'b' * 40
-MANIFEST = {'target': TARGET, 'tree': 'c' * 40, 'run_id': '42', 'attempt': '2'}
+MANIFEST = {
+    'target': TARGET,
+    'tree': 'c' * 40,
+    'ci_blob': 'e' * 40,
+    'run_id': '42',
+    'attempt': '2',
+    'browser_regression_blob': evidence.BROWSER_REGRESSION_BLOB,
+}
 
 
 def inventories():
     ids = [evidence.digest(evidence.REGRESSION), evidence.digest('other-test')]
-    return [{**MANIFEST, 'database': database, 'group': group,
+    return [{**{k: MANIFEST[k] for k in ('target', 'tree', 'run_id', 'attempt')}, 'database': database, 'group': group,
              'expected': ids, 'selected': [ids[group-1]], 'passed': [ids[group-1]], 'skipped': []}
             for database in ('sqlite', 'postgres') for group in (1, 2)]
+
+
+def browser_inventory():
+    reg_id = evidence.digest('pw-chat-streaming')
+    rows = [
+        {'id': evidence.digest('d-1'), 'project': 'desktop', 'file': evidence.digest('f-1'), 'expected': 'passed'},
+        {'id': evidence.digest('p-1'), 'project': 'phone', 'file': evidence.digest('f-1'), 'expected': 'passed'},
+        {'id': reg_id, 'project': 'phone-webkit', 'file': evidence.digest('f-1'), 'expected': 'passed'},
+    ]
+    return {
+        'schema': 1,
+        'target': MANIFEST['target'],
+        'tree': MANIFEST['tree'],
+        'ci_blob': MANIFEST['ci_blob'],
+        'run_id': MANIFEST['run_id'],
+        'attempt': MANIFEST['attempt'],
+        'regression_file': evidence.BROWSER_REGRESSION_FILE,
+        'regression_file_blob': evidence.BROWSER_REGRESSION_BLOB,
+        'regression_key_sha256': evidence.digest(evidence.BROWSER_REGRESSION_KEY),
+        'regression_case_id': reg_id,
+        'full': rows,
+        'cases': [
+            {**rows[0], 'shard': 1, 'attempts': [{'status': 'passed', 'duration': 10, 'retry': 0}]},
+            {**rows[1], 'shard': 1, 'expected': 'skipped', 'attempts': [{'status': 'skipped', 'duration': 0, 'retry': 0}]},
+            {**rows[2], 'shard': 2, 'attempts': [{'status': 'passed', 'duration': 25, 'retry': 0}]},
+        ],
+    }
 
 
 def jobs():
@@ -48,7 +82,7 @@ class VerificationEvidence(unittest.TestCase):
                 evidence.validate_inventory(value, MANIFEST)
 
     def test_wrong_commit_tree_run_or_attempt_fails(self):
-        for key in MANIFEST:
+        for key in ('target', 'tree', 'run_id', 'attempt'):
             value = inventories()
             value[0][key] = 'wrong'
             with self.subTest(key=key), self.assertRaises(ValueError):
@@ -92,6 +126,56 @@ class VerificationEvidence(unittest.TestCase):
             value[0].update(passed=passed, skipped=skipped)
             with self.assertRaises(ValueError):
                 evidence.validate_inventory(value, MANIFEST)
+
+    def test_browser_inventory_requires_three_projects_and_passing_phone_webkit_regression(self):
+        result = evidence.validate_browser_inventory(browser_inventory(), MANIFEST)
+        self.assertTrue(result['regression']['passed'])
+        self.assertEqual(result['regression']['attempts'], 1)
+        self.assertEqual(result['regression']['project'], 'phone-webkit')
+        self.assertEqual(result['regression']['shard'], 2)
+        self.assertEqual(result['projects']['phone']['skipped'], 1)
+        self.assertEqual(result['projects']['phone-webkit']['passed'], 1)
+
+    def test_browser_inventory_rejects_skip_retry_wrong_provenance_altered_blob_and_parity_breaks(self):
+        # Retried pass (failed retry=0 then passed retry=1) must fail closed.
+        retried = browser_inventory()
+        retried['cases'][2]['attempts'] = [
+            {'status': 'failed', 'duration': 10, 'retry': 0},
+            {'status': 'passed', 'duration': 15, 'retry': 1},
+        ]
+        with self.assertRaisesRegex(ValueError, 'first attempt'):
+            evidence.validate_browser_inventory(retried, MANIFEST)
+
+        # Skipped phone-webkit chatStreaming regression must fail closed.
+        skipped = browser_inventory()
+        skipped['cases'][2]['expected'] = 'skipped'
+        skipped['cases'][2]['attempts'] = [{'status': 'skipped', 'duration': 0, 'retry': 0}]
+        with self.assertRaisesRegex(ValueError, 'first attempt'):
+            evidence.validate_browser_inventory(skipped, MANIFEST)
+
+        # Wrong target/tree/ci_blob/run_id/attempt or altered test file blob must fail closed.
+        for key in ('target', 'tree', 'ci_blob', 'run_id', 'attempt', 'regression_file_blob', 'regression_key_sha256'):
+            bad = browser_inventory()
+            bad[key] = 'f' * len(str(bad[key]))
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                evidence.validate_browser_inventory(bad, MANIFEST)
+
+        # Missing case or wrong project for regression case must fail closed.
+        missing = browser_inventory()
+        missing['cases'].pop()
+        with self.assertRaises(ValueError):
+            evidence.validate_browser_inventory(missing, MANIFEST)
+
+        wrong_project = browser_inventory()
+        wrong_project['regression_case_id'] = wrong_project['cases'][0]['id']
+        with self.assertRaisesRegex(ValueError, 'first attempt'):
+            evidence.validate_browser_inventory(wrong_project, MANIFEST)
+
+        # Bool duration or non-int shard must fail closed.
+        bool_dur = browser_inventory()
+        bool_dur['cases'][0]['attempts'][0]['duration'] = True
+        with self.assertRaises(ValueError):
+            evidence.validate_browser_inventory(bool_dur, MANIFEST)
 
     def test_job_success_requires_all_expanded_jobs(self):
         self.assertEqual(len(evidence.validate_jobs(jobs())), len(evidence.CHECKS))
@@ -145,6 +229,11 @@ class VerificationEvidence(unittest.TestCase):
             return '\n'.join((TARGET, BASE))
         if args[0] == 'merge-base':
             return ''
+        if args in (
+            ('rev-parse', f'HEAD:{evidence.BROWSER_REGRESSION_FILE}'),
+            ('rev-parse', f'{evidence.HISTORICAL}:{evidence.BROWSER_REGRESSION_FILE}'),
+        ):
+            return evidence.BROWSER_REGRESSION_BLOB
         if args[:2] == ('diff', '--name-only'):
             return 'anteroom-ios/Sources/Foo.swift\0server/migrations/versions/new.py\0'
         if args[:2] == ('rev-list', '--first-parent'):
@@ -157,10 +246,23 @@ class VerificationEvidence(unittest.TestCase):
     def test_preparation_pins_source_and_discloses_unverified_live_and_native(self):
         with patch.object(evidence, 'git', self.fake_git):
             result = evidence.prepare(TARGET, BASE)
+        self.assertEqual(result['schema'], 2)
+        self.assertEqual(result['browser_regression_blob'], evidence.BROWSER_REGRESSION_BLOB)
         self.assertFalse(result['deployment_authorized'])
         self.assertFalse(result['production_base_is_live_verified'])
         self.assertEqual(result['native_changes'], ['anteroom-ios/Sources/Foo.swift'])
         self.assertTrue(result['migration_changes'])
+
+    @patch.dict(os.environ, {'GITHUB_SHA': TARGET, 'GITHUB_REPOSITORY': 'owner/repo',
+                            'GITHUB_RUN_ID': '42', 'GITHUB_RUN_ATTEMPT': '2',
+                            'GITHUB_EVENT_NAME': 'workflow_dispatch'})
+    def test_preparation_rejects_modified_browser_regression_test(self):
+        def modified_git(*args):
+            if args == ('rev-parse', f'HEAD:{evidence.BROWSER_REGRESSION_FILE}'):
+                return 'f' * 40
+            return self.fake_git(*args)
+        with patch.object(evidence, 'git', modified_git), self.assertRaisesRegex(ValueError, 'remain unchanged'):
+            evidence.prepare(TARGET, BASE)
 
     @patch.dict(os.environ, {'GITHUB_SHA': TARGET, 'GITHUB_REPOSITORY': 'owner/repo',
                             'GITHUB_RUN_ID': '42', 'GITHUB_RUN_ATTEMPT': '2',
@@ -253,15 +355,19 @@ class VerificationEvidence(unittest.TestCase):
         self.assertEqual(text.count('ref: ${{ github.sha }}'), 2)
         self.assertIn('needs: [prepare, checks]', text)
         self.assertIn('actions: read', text)
+        self.assertIn('name: verification-browser-${{ github.run_id }}-${{ github.run_attempt }}', text)
+        self.assertIn('--browser browser-evidence/verification-browser.json', text)
         ci = (ROOT / '.github/workflows/ci.yml').read_text()
         self.assertIn('  workflow_call:', ci)
         self.assertIn('default: false', ci)
         self.assertIn('if [ "$FULL_VERIFICATION" = "true" ]; then base=""; fi', ci)
         self.assertEqual(ci.count('VERIFICATION_DATABASE:'), 2)
-        for job in ('studio-backend', 'studio-backend-postgres'):
+        for job in ('studio-browser', 'studio-backend', 'studio-backend-postgres'):
             block = ci.split('  ' + job + ':\n', 1)[1].split('    strategy:', 1)[0]
             self.assertNotIn('runner.temp', block)
-        self.assertEqual(ci.count('if: success() && inputs.full_verification'), 2)
+        self.assertEqual(ci.count('if: success() && inputs.full_verification'), 3)
+        self.assertIn('VERIFICATION_BROWSER_INVENTORY_PATH:', ci)
+        self.assertIn('name: verification-browser-${{ github.run_id }}-${{ github.run_attempt }}', ci)
         self.assertIn('python3 .github/scripts/test-verification-evidence.py', ci)
         self.assertIn('python ../.github/scripts/test-verification-inventory.py', ci)
 

@@ -26,7 +26,8 @@ class RecoveryEvidenceTests(unittest.TestCase):
             historical_failure=verification.HISTORICAL,
             correcting_merge=verification.CORRECTED,
             workflow_blob='d'*40, ci_blob='e'*40, run_id=42, attempt=1,
-            receipt_artifact_id=100, receipt_digest='sha256:'+'0'*64)
+            receipt_artifact_id=100, receipt_digest='sha256:'+'0'*64,
+            browser_regression_blob=verification.BROWSER_REGRESSION_BLOB)
         self.run = {'id': 42, 'workflow_id': 20, 'head_sha': self.pin.target,
                     'head_branch': 'main', 'repository': {'id': 10, 'full_name': 'example/project'},
                     'head_repository': {'id': 10}, 'run_attempt': 1,
@@ -37,14 +38,18 @@ class RecoveryEvidenceTests(unittest.TestCase):
             ('rev-parse', self.pin.target+'^{tree}'): self.pin.tree,
             ('rev-parse', self.pin.target+':'+verification.WORKFLOW): self.pin.workflow_blob,
             ('rev-parse', self.pin.target+':.github/workflows/ci.yml'): self.pin.ci_blob,
+            ('rev-parse', self.pin.target+':'+verification.BROWSER_REGRESSION_FILE): self.pin.browser_regression_blob,
+            ('rev-parse', self.pin.historical_failure+':'+verification.BROWSER_REGRESSION_FILE): self.pin.browser_regression_blob,
             ('rev-list', '--first-parent', '--reverse', self.pin.production_base+'..'+self.pin.target): '\n'.join([verification.HISTORICAL, verification.CORRECTED, self.pin.target]),
             ('diff', '--name-only', '--no-renames', '-z', self.pin.production_base+'..'+self.pin.target): 'anteroom-ios/example.swift\0server/migrations/new.py\0',
         }
         self.source = {
-            'schema': 1, 'repository': self.pin.repository, 'target': self.pin.target,
+            'schema': 2, 'repository': self.pin.repository, 'target': self.pin.target,
             'tree': self.pin.tree, 'production_base': self.pin.production_base,
             'production_base_is_live_verified': False, 'historical_failure': verification.HISTORICAL,
             'correcting_merge': verification.CORRECTED,
+            'browser_regression_file': verification.BROWSER_REGRESSION_FILE,
+            'browser_regression_blob': verification.BROWSER_REGRESSION_BLOB,
             'span': [verification.HISTORICAL, verification.CORRECTED, self.pin.target],
             'native_changes': ['anteroom-ios/example.swift'],
             'migration_changes': ['server/migrations/new.py'], 'workflow': verification.WORKFLOW,
@@ -58,8 +63,29 @@ class RecoveryEvidenceTests(unittest.TestCase):
                              'database': db, 'group': group, 'expected': ids,
                              'selected': [ids[group-1]], 'passed': [ids[group-1]], 'skipped': []}
                             for db in ['sqlite', 'postgres'] for group in [1, 2]]
+        reg_case_id = verification.digest('pw-chat-streaming')
+        full_browser = [
+            {'id': verification.digest('desktop-case'), 'project': 'desktop', 'file': verification.digest('chat'), 'expected': 'passed'},
+            {'id': verification.digest('phone-case'), 'project': 'phone', 'file': verification.digest('chat'), 'expected': 'passed'},
+            {'id': reg_case_id, 'project': 'phone-webkit', 'file': verification.digest('chat'), 'expected': 'passed'},
+        ]
+        self.browser_inventory = {
+            'schema': 1, 'target': self.pin.target, 'tree': self.pin.tree,
+            'ci_blob': self.pin.ci_blob, 'run_id': '42', 'attempt': '1',
+            'regression_file': verification.BROWSER_REGRESSION_FILE,
+            'regression_file_blob': verification.BROWSER_REGRESSION_BLOB,
+            'regression_key_sha256': verification.digest(verification.BROWSER_REGRESSION_KEY),
+            'regression_case_id': reg_case_id,
+            'full': full_browser,
+            'cases': [
+                {**full_browser[0], 'shard': 1, 'attempts': [{'status': 'passed', 'duration': 10, 'retry': 0}]},
+                {**full_browser[1], 'shard': 1, 'attempts': [{'status': 'passed', 'duration': 11, 'retry': 0}]},
+                {**full_browser[2], 'shard': 2, 'attempts': [{'status': 'passed', 'duration': 15, 'retry': 0}]},
+            ],
+        }
         self.receipt = {**self.source, 'jobs': verification.validate_jobs(self.jobs),
                         'backend_inventory': verification.validate_inventory(self.inventories, self.source),
+                        'browser_inventory': verification.validate_browser_inventory(self.browser_inventory, self.source),
                         'scope': 'all Linux CI components; native validation remains separate',
                         'native_validation': 'not performed; separate native impact assessment and pinned receipts required'}
         self.artifacts = []
@@ -69,6 +95,7 @@ class RecoveryEvidenceTests(unittest.TestCase):
         for i, p in enumerate(self.inventories, 102):
             self.add_artifact(i, f"verification-inventory-{p['database']}-{p['group']}-42-1",
                               f"inventory-{p['database']}-{p['group']}.json", p)
+        self.add_artifact(106, 'verification-browser-42-1', 'verification-browser.json', self.browser_inventory)
         self.pin = replace(self.pin, receipt_digest=self.artifacts[0]['digest'])
         self.calls = []
 
@@ -113,18 +140,24 @@ class RecoveryEvidenceTests(unittest.TestCase):
         self.assertFalse(result['deployment_authorized'])
         self.assertEqual(result['target'], self.pin.target)
         self.assertEqual(result['backend_inventory']['postgres']['passed'], 2)
+        self.assertTrue(result['browser_inventory']['regression']['passed'])
         self.assertEqual(result['live_reconciliation'], 'not performed')
         self.assertEqual(result['native_changes'], ['anteroom-ios/example.swift'])
         self.assertTrue(all(p.startswith('actions/runs/42') for p in self.calls))
 
     def test_expected_source_uses_pin_pair_not_module_constants(self):
-        # Archived receipts keep the pair that produced them, even after the
-        # module-level HISTORICAL/CORRECTED constants move to a newer recovery.
+        # Archived schema-1 receipts keep the pair that produced them, even after
+        # the module-level HISTORICAL/CORRECTED constants move to a newer recovery.
         archived_hist = '1' * 40
         archived_corr = '2' * 40
         self.assertNotEqual(archived_hist, verification.HISTORICAL)
         self.assertNotEqual(archived_corr, verification.CORRECTED)
-        pin = replace(self.pin, historical_failure=archived_hist, correcting_merge=archived_corr)
+        pin = replace(
+            self.pin,
+            historical_failure=archived_hist,
+            correcting_merge=archived_corr,
+            browser_regression_blob=None,
+        )
         self.git_values = {
             **self.git_values,
             ('rev-list', '--first-parent', 'origin/main'): '\n'.join(
@@ -135,8 +168,68 @@ class RecoveryEvidenceTests(unittest.TestCase):
             ),
         }
         source = recovery.expected_source(pin, self.git)
+        self.assertEqual(source['schema'], 1)
         self.assertEqual(source['historical_failure'], archived_hist)
         self.assertEqual(source['correcting_merge'], archived_corr)
+        self.assertNotIn('browser_regression_blob', source)
+
+        # Full end-to-end verify() accepts archived 6-artifact schema-1 receipts
+        # and rejects an unexpected verification-browser-* artifact.
+        receipt_s1 = {
+            **source,
+            'jobs': self.receipt['jobs'],
+            'backend_inventory': self.receipt['backend_inventory'],
+            'scope': self.receipt['scope'],
+            'native_validation': self.receipt['native_validation'],
+        }
+        self.artifacts = self.artifacts[:6]
+        self.rewrite(0, 'verification-receipt.json', receipt_s1)
+        self.rewrite(1, 'verification-source.json', source)
+        pin = replace(pin, receipt_digest=self.artifacts[0]['digest'])
+        report = recovery.verify(pin, self.fetch, self.downloads.__getitem__, self.git)
+        self.assertEqual(report['target'], pin.target)
+        self.assertFalse(report['deployment_authorized'])
+        self.assertNotIn('browser_inventory', report)
+        self.add_artifact(106, 'verification-browser-42-1', 'verification-browser.json', self.browser_inventory)
+        with self.assertRaises(ValueError):
+            recovery.verify(pin, self.fetch, self.downloads.__getitem__, self.git)
+
+    def test_browser_regression_skip_retry_altered_file_or_tampered_browser_summary_reject(self):
+        # Retried phone-webkit chatStreaming pass fails closed.
+        retried = copy.deepcopy(self.browser_inventory)
+        retried['cases'][2]['attempts'] = [
+            {'status': 'failed', 'duration': 10, 'retry': 0},
+            {'status': 'passed', 'duration': 15, 'retry': 1},
+        ]
+        self.rewrite(6, 'verification-browser.json', retried)
+        with self.assertRaisesRegex(ValueError, 'first attempt'):
+            self.check()
+        self.rewrite(6, 'verification-browser.json', self.browser_inventory)
+
+        # Skipped phone-webkit chatStreaming case fails closed.
+        skipped = copy.deepcopy(self.browser_inventory)
+        skipped['cases'][2]['expected'] = 'skipped'
+        skipped['cases'][2]['attempts'] = [{'status': 'skipped', 'duration': 0, 'retry': 0}]
+        self.rewrite(6, 'verification-browser.json', skipped)
+        with self.assertRaisesRegex(ValueError, 'first attempt'):
+            self.check()
+        self.rewrite(6, 'verification-browser.json', self.browser_inventory)
+
+        # Altered browser test file at target or historical failure fails closed.
+        for key in (
+            ('rev-parse', self.pin.target+':'+verification.BROWSER_REGRESSION_FILE),
+            ('rev-parse', self.pin.historical_failure+':'+verification.BROWSER_REGRESSION_FILE),
+        ):
+            old = self.git_values[key]
+            self.git_values[key] = 'f' * 40
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                self.check()
+            self.git_values[key] = old
+
+        # Tampered browser_inventory in receipt fails closed.
+        self.rewrite(0, 'verification-receipt.json', {**self.receipt, 'browser_inventory': {}})
+        with self.assertRaises(ValueError):
+            self.check()
 
     def test_all_run_provenance_bindings_are_required(self):
         for key, bad in [('id', 43), ('workflow_id', 21), ('head_sha', 'f'*40),
