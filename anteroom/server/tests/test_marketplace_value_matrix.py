@@ -205,7 +205,10 @@ def test_etsy_narrow_branches_still_match_when_asked_for():
     leaves = list(etsy_leaves())
     for general, branch in (("Men > Men's Clothing > Sleepwear & Robes", "Pajamas & Robes"),
                             ("Women > Women's Clothing > Swimwear", "Swimwear"),
-                            ("Women > Women's Clothing > Intimates & Sleep > Panties", "Lingerie")):
+                            ("Women > Women's Clothing > Intimates & Sleep > Panties", "Lingerie"),
+                            # Bridal garters keep Etsy's exact wedding match.
+                            ("Specialty > Wedding & Formal Occasion > Bridal Accessories > Garters",
+                             "Weddings > Clothing > Lingerie & Garters > Wedding Garters")):
         hit = pick_etsy_leaf(leaves, f"{APPAREL} > {general}")
         assert hit and branch in hit["path"], (general, hit)
 

@@ -73,7 +73,7 @@ _NICHE = {"pet", "dog", "cat", "wedding", "bridal", "bride"}
 _NARROW = {
     "pajama": {"pajama", "sleep", "sleepwear", "nightgown", "robe"},
     "swimwear": {"swimwear", "swim", "swimsuit", "bikini"},
-    "lingerie": {"lingerie", "intimate", "bra", "pantie", "panty"},
+    "lingerie": {"lingerie", "intimate", "bra", "pantie", "panty", "garter"},
     "costume": {"costume"},
 }
 # General roots that hold clothing. A category from any other root never lands in
