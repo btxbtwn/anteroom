@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1288 — 2026-11-27
+
+- Keep streaming chat replies pacing smoothly from the first chunk, even when frames paint slowly.
+
 ## 0.1.1287 — 2026-11-27
 
 - The phone accessibility check now tests the sale calendar’s tap targets after the navigation drawer closes.
