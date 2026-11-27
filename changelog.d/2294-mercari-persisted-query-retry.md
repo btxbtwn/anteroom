@@ -1,0 +1,1 @@
+- Mercari saves no longer fail with "Mercari changed its listing form" when Mercari briefly misses a request; Anteroom sends it once more.
