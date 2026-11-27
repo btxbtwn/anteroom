@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1285 — 2026-11-27
+
+- Keep hosted Smart Credit and Free monthly listing caps in preview (non-enforced) mode while continuing to track usage until self-serve plan upgrades are available, with updated Settings → Usage copy.
+
 ## 0.1.1284 — 2026-11-27
 
 - A backend test that checks an AI agent's marketplace form no longer fails depending on which hosted Chrome test ran before it.
