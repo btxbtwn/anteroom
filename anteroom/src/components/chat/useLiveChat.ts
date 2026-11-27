@@ -7,6 +7,8 @@ function snapshot(convId: string) {
     streaming: live.streaming,
     generating: live.generating,
     streamText: live.streamDisplayText,
+    /** Everything received so far, before it is cut to whole words for display. */
+    streamReceived: live.streamText,
     streamTrace: live.streamTrace,
     streamAgents: live.streamAgents,
     foldedTurns: live.foldedTurns,

@@ -33,6 +33,7 @@ from collections.abc import Iterator
 import psycopg
 from sqlalchemy.engine import URL, make_url
 
+from anteroom.database import POSTGRES_NETWORK_DEADLINES
 from anteroom.services.background_tasks import EVENT_INTERVAL
 
 log = logging.getLogger(__name__)
@@ -43,7 +44,6 @@ CHANNEL = 'anteroom_task_events'
 # idle stream's keepalives. Postgres does not drop notices to a connected
 # listener, and a reconnect wakes every stream, so this is rarely what wakes one.
 FALLBACK_S = 10.0
-CONNECT_TIMEOUT_S = 10
 # Backoff between attempts after the listening connection fails.
 RETRY_S, RETRY_MAX_S = 1.0, 30.0
 # How long one wait for notices lasts before the thread checks whether to stop.
@@ -159,8 +159,16 @@ class TaskSignals:
             self.reconnects += 1
 
     def _listen(self) -> None:
-        with psycopg.connect(self.url, autocommit=True, connect_timeout=CONNECT_TIMEOUT_S,
-                             keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=3) as connection:
+        with psycopg.connect(
+            self.url,
+            autocommit=True,
+            connect_timeout=POSTGRES_NETWORK_DEADLINES['connect_timeout'],
+            keepalives=POSTGRES_NETWORK_DEADLINES['keepalives'],
+            keepalives_idle=POSTGRES_NETWORK_DEADLINES['keepalives_idle'],
+            keepalives_interval=POSTGRES_NETWORK_DEADLINES['keepalives_interval'],
+            keepalives_count=POSTGRES_NETWORK_DEADLINES['keepalives_count'],
+            tcp_user_timeout=POSTGRES_NETWORK_DEADLINES['tcp_user_timeout'],
+        ) as connection:
             connection.execute(f'LISTEN {CHANNEL}')
             self.backend_pid = connection.info.backend_pid
             self.connected = True

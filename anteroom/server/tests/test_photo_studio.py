@@ -102,7 +102,7 @@ def test_studio_options_enforce_valid_combinations():
 
 def test_studio_options_become_photoroom_form_fields():
     assert StudioOptions(remove_background=True, background="#F5F5DC").form() == {
-        "removeBackground": "true", "background.color": "F5F5DC", "export.format": "png", "outputSize": "originalImage"}
+        "size": "full", "crop": "false", "format": "png", "channels": "rgba"}
     ghost = StudioOptions(ghost_mannequin=True, shadow=True).form()
     assert ghost["ghostMannequin.mode"] == "ai.auto" and ghost["shadow.mode"] == "ai.soft"
     assert ghost["background.color"] == "FFFFFF" and "outputSize" not in ghost
@@ -152,16 +152,24 @@ def test_edit_sends_the_photo_and_options_with_the_sellers_key(monkeypatch):
 
     write_slot(photoroom.KEY_ACCOUNT, KEY)
     monkeypatch.delenv("ANTEROOM_SANDBOX", raising=False)
-    seen = _mock_photoroom(monkeypatch, lambda _request: httpx.Response(200, content=_png("white"),
+    cutout = Image.new("RGBA", (400, 300))
+    cutout.paste("red", (10, 20, 60, 120))
+    encoded = BytesIO()
+    cutout.save(encoded, "PNG")
+    seen = _mock_photoroom(monkeypatch, lambda _request: httpx.Response(200, content=encoded.getvalue(),
                                                                          headers={"content-type": "image/png"}))
     result = asyncio.run(photoroom.edit(_photo(), StudioOptions(remove_background=True, background="#112233")))
-    assert result.startswith(b"\x89PNG")
+    with Image.open(BytesIO(result)) as framed:
+        assert framed.size == (400, 300)
+        assert framed.getpixel((124, 0)) == (17, 34, 51)
+        assert framed.getpixel((125, 0)) == framed.getpixel((274, 299)) == (255, 0, 0)
+        assert framed.getpixel((275, 299)) == (17, 34, 51)
     request = seen[0]
-    assert request.url == httpx.URL(photoroom.ENDPOINT)
+    assert str(request.url) == "https://sdk.photoroom.com/v1/segment"
     assert request.headers["x-api-key"] == KEY
     body = request.content
-    assert b'name="background.color"\r\n\r\n112233' in body
-    assert b'name="imageFile"; filename="photo.jpg"' in body
+    assert b'name="channels"\r\n\r\nrgba' in body
+    assert b'name="image_file"; filename="photo.jpg"' in body
     assert b"Content-Type: image/jpeg" in body
 
     # Transparent PNG input preserves alpha by uploading as PNG.
@@ -170,8 +178,37 @@ def test_edit_sends_the_photo_and_options_with_the_sellers_key(monkeypatch):
     img.putpixel((0, 0), (10, 20, 30, 255))
     img.save(alpha, "PNG")
     asyncio.run(photoroom.edit(alpha.getvalue(), StudioOptions(remove_background=True)))
-    assert b'name="imageFile"; filename="photo.png"' in seen[1].content
+    assert b'name="image_file"; filename="photo.png"' in seen[1].content
     assert b"Content-Type: image/png" in seen[1].content
+
+
+@pytest.mark.parametrize("options", [
+    StudioOptions(shadow=True), StudioOptions(ghost_mannequin=True), StudioOptions(flat_lay=True),
+    StudioOptions(remove_background=True, keep="shirt"), StudioOptions(remove_background=True, exclude="stand"),
+    StudioOptions(virtual_model=VirtualModel()),
+])
+def test_advanced_edits_use_plus(monkeypatch, options):
+    monkeypatch.setenv(photoroom.MANAGED_KEY_ENV, "managed-key")
+    monkeypatch.delenv("ANTEROOM_SANDBOX", raising=False)
+    seen = _mock_photoroom(monkeypatch, lambda _: httpx.Response(200, content=_png("white")))
+    asyncio.run(photoroom.edit(_photo(), options))
+    request, = seen
+    assert str(request.url) == "https://image-api.photoroom.com/v2/edit"
+    assert b'name="imageFile"; filename="photo.jpg"' in request.content
+
+
+def test_empty_or_unreadable_basic_cutout_raises_photoroom_error(monkeypatch):
+    monkeypatch.setenv(photoroom.MANAGED_KEY_ENV, "managed-key")
+    monkeypatch.delenv("ANTEROOM_SANDBOX", raising=False)
+    empty = BytesIO()
+    Image.new("RGBA", (32, 32), (0, 0, 0, 0)).save(empty, "PNG")
+    _mock_photoroom(monkeypatch, lambda _: httpx.Response(200, content=empty.getvalue()))
+    with pytest.raises(PhotoroomError, match="empty cutout"):
+        asyncio.run(photoroom.edit(_photo(), StudioOptions(remove_background=True)))
+
+    _mock_photoroom(monkeypatch, lambda _: httpx.Response(200, content=b"\x89PNG\r\n\x1a\ncorrupt"))
+    with pytest.raises(PhotoroomError, match="unreadable cutout"):
+        asyncio.run(photoroom.edit(_photo(), StudioOptions(remove_background=True)))
 
 
 def test_palette_png_keeps_transparent_pixels():
@@ -206,6 +243,7 @@ def test_managed_key_takes_over_and_ignores_seller_key(monkeypatch):
     (401, {"detail": "bad"}, "refused the API key"),
     (402, {"error": {"detail": "no credits"}}, "no credits left"),
     (429, {}, "Photoroom is busy"),
+    (400, {"detail": "Please provide an image."}, "Please provide an image."),
     (400, {"error": {"message": "Image too small"}}, "Image too small"),
     (500, {"error": {"message": "boom"}}, "boom"),
 ])

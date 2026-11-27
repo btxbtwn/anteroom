@@ -123,13 +123,17 @@ Generation and chat use the existing seller-authenticated workspace contracts:
 `GET /api/runtime`, `/api/status`, conversation messages/activity, streaming
 `POST /generate` and `/messages`, explicit `/stop`, and `resume=true` to observe
 existing work without submitting it again. The server saves generated revisions;
-the native editor reloads on return from the assistant. Unsaved local edits must
-be saved first. Disconnecting never cancels or automatically retries work.
+the native editor reloads on return from the assistant. Opening the assistant,
+history, templates or marketplaces with unsaved edits saves them first, with
+the same stale-edit check as Save; a conflict shows the usual recovery and
+opens nothing. Disconnecting never cancels or automatically retries work.
 
-The first functional port adds native generation, a saved text transcript,
-progress, stop, and explicit reconnect. Provider setup currently remains in the
-web app. Chat attachments, live token rendering, and automatic foreground
-reconnection remain to be ported. Generation requires server deployment with
+The port has native generation, a saved text transcript, image attachments,
+progress and stop. Work still running when the assistant opens, or when the
+app returns to the foreground after a lock or a dropped connection, is picked
+back up by itself with `resume=true` (observed, never submitted again), as the
+business assistant does; Reconnect stays for when the phone is offline. Live
+token rendering remains to be ported. Generation requires server deployment with
 the background worker and a configured provider; compilation does not verify
 those production settings.
 
@@ -139,7 +143,7 @@ implementation, hosted backend availability and device verification.
 
 Listing history uses the existing shared revisions API: browse saved versions,
 preview General details and restore the full server snapshot with the current
-revision ID as a conflict guard. Unsaved edits must be saved first. Restore
+revision ID as a conflict guard. Opening history saves unsaved edits first. Restore
 creates a new revision; it does not restore photos/private notes or publish.
 
 Swift stream framing tests run in `./tools/test-models.sh` (invoked by Xcode

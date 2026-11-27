@@ -144,7 +144,7 @@ async def check_cloud_sellers(
     from anteroom.services import cloud_sessions
 
     owners_by_seller: dict[str, list[str]] = {}
-    for marketplace in sorted(cloud_sessions.SUPPORTED_CLOUD_MARKETPLACES):
+    for marketplace in sorted(cloud_sessions.CLOUD_WRITE_MARKETPLACES):
         owners = await asyncio.to_thread(cloud_sessions.active_owners, engine, marketplace)
         for seller in owners:
             owners_by_seller.setdefault(seller, []).append(marketplace)

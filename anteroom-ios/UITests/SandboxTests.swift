@@ -950,3 +950,37 @@ final class CameraSandboxTests: XCTestCase {
         add(attachment)
     }
 }
+
+/// Opening history (like the assistant and marketplaces) with unsaved edits
+/// saves them first instead of asking the seller to.
+@MainActor
+final class EditorAutosaveSandboxTests: XCTestCase {
+    func testOpeningHistorySavesUnsavedEditsFirst() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        launchSandbox(app)
+        openNewListing(app)
+        let name = "Autosaved draft \(UUID().uuidString.prefix(8))"
+        enterListingTitle(name, app: app)
+        let bar = app.navigationBars[name]
+        XCTAssertTrue(bar.waitForExistence(timeout: 15))
+        XCTAssertTrue(bar.buttons["Save"].isEnabled, "The title is not saved yet")
+        let actions = app.buttons["Listing actions"]
+        XCTAssertTrue(actions.isEnabled, "Listing actions stay available with unsaved edits")
+        let history = app.buttons["Listing history"]
+        for _ in 0..<3 where !history.exists {
+            actions.tap()
+            _ = history.waitForExistence(timeout: 5)
+        }
+        history.tap()
+        XCTAssertTrue(app.navigationBars["Listing history"].waitForExistence(timeout: 30), "History opens after saving")
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "History opened after saving"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        app.buttons["Done"].firstMatch.tap()
+        expectation(for: NSPredicate(format: "enabled == false"), evaluatedWith: app.navigationBars[name].buttons["Save"])
+        waitForExpectations(timeout: 30)
+    }
+}

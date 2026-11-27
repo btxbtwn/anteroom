@@ -507,7 +507,7 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
     from anteroom.services.sale_delist_followup import _enabled
 
     names, known, job_id, cloud_names = await in_worker_session(
-        _open_delist, conv_id, marketplaces, confirm, expected, sale_id, requested_by
+        _open_delist, conv_id, marketplaces, confirm, expected, sale_id, requested_by, relist_rule_id
     )
     job = SimpleNamespace(id=job_id)
     failed = False
@@ -621,7 +621,7 @@ def _mercari_gone(name: str, result: dict) -> bool:
 
 def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bool,
                  expected: dict[str, str] | None = None, sale_id: str | None = None,
-                 requested_by: str | None = None) -> tuple[list[str], dict, str, set[str]]:
+                 requested_by: str | None = None, relist_rule_id: str | None = None) -> tuple[list[str], dict, str, set[str]]:
     from anteroom.services.extension_connection import current_extension
 
     from anteroom.services import cloud_sessions, listing_mode
@@ -646,7 +646,9 @@ def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
         sold_at = _require_followup_sale(db, conv_id, sale_id, names) if sale_id is not None else None
         cloud_names = {
             name for name in names
-            if name in BROWSER_MARKETPLACES and cloud_sessions.has_active_session(name, db)
+            if name in BROWSER_MARKETPLACES
+            and not (name == "depop" and relist_rule_id is not None)
+            and cloud_sessions.has_active_session(name, db)
         }
         chrome_needed = (BROWSER_MARKETPLACES & set(names)) - cloud_names
         if chrome_needed and not current_extension().connected:
