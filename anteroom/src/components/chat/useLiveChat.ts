@@ -22,14 +22,15 @@ function snapshot(convId: string) {
 
 /** This listing's live stream, mirrored into state so the panel re-renders as it moves. */
 export function useLiveChat(convId: string) {
-  const [state, setState] = useState(() => snapshot(convId));
+  const [state, setState] = useState(() => ({ convId, data: snapshot(convId) }));
 
   useEffect(() => {
     const sync = () => setState((current) => {
       const next = snapshot(convId);
       // Bail out when nothing the panel reads changed.
-      const same = (Object.keys(next) as (keyof typeof next)[]).every((key) => Object.is(next[key], current[key]));
-      return same ? current : next;
+      const same = current.convId === convId
+        && (Object.keys(next) as (keyof typeof next)[]).every((key) => Object.is(next[key], current.data[key]));
+      return same ? current : { convId, data: next };
     });
     sync();
     getLive(convId).listeners.add(sync);
@@ -38,5 +39,5 @@ export function useLiveChat(convId: string) {
     };
   }, [convId]);
 
-  return state;
+  return state.convId === convId ? state.data : snapshot(convId);
 }

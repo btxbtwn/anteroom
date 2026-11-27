@@ -1,0 +1,1 @@
+- Keep streaming chat replies pacing smoothly from the first chunk, even when frames paint slowly.

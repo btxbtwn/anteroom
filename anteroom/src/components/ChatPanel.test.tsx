@@ -11,18 +11,29 @@ import * as composerImages from "./chat/composerImages";
 import { chatQueue, enqueueChatMessage, newQueuedChatMessage, removeChatMessage } from "./chat/chatQueueStore";
 import { getLive, patchLive, resetChatLive } from "./chat/liveChatStore";
 
-const { uploadPhotos, handleGenerate, sendMessage } = vi.hoisted(() => ({
+import type { ConversationActivity, Message } from "../api/types";
+
+const { uploadPhotos, handleGenerate, sendMessage, serverState } = vi.hoisted(() => ({
   uploadPhotos: vi.fn(),
   handleGenerate: vi.fn(),
   sendMessage: vi.fn(),
+  serverState: {
+    messages: [] as Message[],
+    activity: undefined as ConversationActivity | undefined,
+  },
 }));
 
 vi.mock("../api/client", () => ({ api: { conversations: { uploadListingPhoto: uploadPhotos } } }));
+vi.mock("./ChatMarkdown", () => ({
+  CHAT_PROSE_CLASS: "",
+  ChatMarkdown: ({ text }: { text: string }) => <div data-chat-markdown>{text}</div>,
+}));
 vi.mock("./chat/useChatServerState", () => ({
   useChatServerState: (_convId: string, busy: boolean) => ({
     photos: uploadPhotos.mock.calls.length ? [{ id: "photo-1" }] : [],
-    messages: [],
-    busy,
+    messages: serverState.messages,
+    activity: serverState.activity,
+    busy: busy || Boolean(serverState.activity?.busy),
   }),
 }));
 vi.mock("./chat/useChatStream", () => ({
@@ -59,8 +70,11 @@ describe("listing photo uploads from chat", () => {
   beforeEach(() => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     vi.resetAllMocks();
+    serverState.messages = [];
+    serverState.activity = undefined;
     resetComposerDrafts();
     resetChatLive("listing-a");
+    resetChatLive("listing-b");
     sendMessage.mockResolvedValue(true);
     container = document.createElement("div");
     document.body.append(container);
@@ -251,6 +265,155 @@ describe("listing photo uploads from chat", () => {
     }
     await finishInspector();
     expect(handleGenerate).toHaveBeenCalledTimes(copySaved ? 0 : 1);
+  });
+
+  function installFrames(reducedMotion = false) {
+    let now = 1000;
+    let nextId = 1;
+    const frames = new Map<number, FrameRequestCallback>();
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: reducedMotion && query.includes("prefers-reduced-motion"),
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }) as unknown as MediaQueryList);
+    vi.stubGlobal("performance", { ...performance, now: () => now });
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      const id = nextId++;
+      frames.set(id, cb);
+      return id;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+      frames.delete(id);
+    });
+    return {
+      step(ms: number) {
+        now += ms;
+        const queued = [...frames.entries()];
+        frames.clear();
+        for (const [, cb] of queued) cb(now);
+      },
+      pending: () => frames.size,
+    };
+  }
+
+  function assistantRows() {
+    return [...container.querySelectorAll<HTMLElement>('[data-message-role="assistant"]')];
+  }
+
+  function assistantMarkdown() {
+    return assistantRows().map((row) => row.querySelector("[data-chat-markdown]")?.textContent ?? "");
+  }
+
+  it("hides the streaming row when idle, server-busy only, pre-chunk, resetting, failed, or JSON-only", async () => {
+    installFrames();
+    await renderChat();
+    expect(assistantRows()).toHaveLength(0);
+
+    serverState.activity = { busy: true, writing: false, items: ["Checking eBay"], message_count: 0, last_message_id: null };
+    await renderChat();
+    expect(assistantRows()).toHaveLength(0);
+
+    serverState.activity = undefined;
+    await act(async () => patchLive("listing-a", { streaming: true, streamText: "", streamDisplayText: "" }));
+    expect(assistantRows()).toHaveLength(0);
+
+    const hiddenJson = '```json\n{"title": "Wool Coat", "price": 120}';
+    await act(async () => patchLive("listing-a", { streaming: true, streamText: hiddenJson, streamDisplayText: hiddenJson }));
+    expect(assistantRows()).toHaveLength(0);
+
+    await act(async () => patchLive("listing-a", { streaming: true, resetting: true, streamText: "", streamDisplayText: "" }));
+    expect(assistantRows()).toHaveLength(0);
+
+    await act(async () => patchLive("listing-a", { streaming: false, resetting: false, streamText: "Error: timed out", streamDisplayText: "Error: timed out" }));
+    expect(assistantRows()).toHaveLength(0);
+  });
+
+  it("paces the first chunk from zero, clears on cancel, flushes on completion, and avoids duplicate bubbles once saved", async () => {
+    const frames = installFrames();
+    const reply = "I checked your recent jacket sales across every marketplace and found a steady rise in wool outerwear demand over the past month, with vintage chore coats selling fastest between ninety and one hundred forty dollars.";
+
+    await renderChat();
+    await act(async () => patchLive("listing-a", { streaming: true, streamText: "", streamDisplayText: "" }));
+    expect(assistantRows()).toHaveLength(0);
+
+    // Chunk 1 arrives while the streaming row is already mounted at 0: it paces rather than dumping all at once.
+    await act(async () => patchLive("listing-a", { streaming: true, streamText: reply, streamDisplayText: reply }));
+    expect(assistantRows()).toHaveLength(0);
+    await act(async () => frames.step(50));
+    expect(assistantRows()).toHaveLength(1);
+    const firstFrame = assistantMarkdown()[0];
+    expect(firstFrame.length).toBeGreaterThan(0);
+    expect(firstFrame.length).toBeLessThan(reply.length);
+
+    // Cancel clears the bubble immediately.
+    await act(async () => patchLive("listing-a", { streaming: false, streamText: "", streamDisplayText: "" }));
+    expect(assistantRows()).toHaveLength(0);
+
+    // Second turn: finish stream before server messages refetch, then flush to exact prose and hand off cleanly.
+    await act(async () => patchLive("listing-a", { streaming: true, streamText: "", streamDisplayText: "" }));
+    await act(async () => patchLive("listing-a", { streaming: true, streamText: reply, streamDisplayText: reply }));
+    await act(async () => frames.step(50));
+    expect(assistantMarkdown()[0].length).toBeLessThan(reply.length);
+
+    await act(async () => patchLive("listing-a", { streaming: false, streamText: reply, streamDisplayText: reply }));
+    for (let i = 0; i < 60 && frames.pending() > 0; i++) {
+      await act(async () => frames.step(50));
+    }
+    expect(assistantMarkdown()).toEqual([reply]);
+    expect(assistantRows()[0].getAttribute("aria-busy")).toBe("true");
+
+    // Once the saved assistant message arrives from the server, only one row remains (no duplicate bubble).
+    serverState.messages = [{
+      id: "m-1",
+      conversation_id: "listing-a",
+      role: "assistant",
+      text: reply,
+      provider: "sandbox",
+      model: "sandbox",
+      created_at: "2026-11-27T12:00:00Z",
+    }];
+    await renderChat();
+    expect(assistantRows()).toHaveLength(1);
+    expect(assistantRows()[0].getAttribute("aria-busy")).toBeNull();
+    expect(assistantMarkdown()).toEqual([reply]);
+  });
+
+  it("reveals the first chunk immediately under reduced motion", async () => {
+    const frames = installFrames(true);
+    const reply = "Reduced motion shows the whole first chunk right away with no pacing frames.";
+
+    await renderChat();
+    await act(async () => patchLive("listing-a", { streaming: true, streamText: "", streamDisplayText: "" }));
+    expect(assistantRows()).toHaveLength(0);
+
+    await act(async () => patchLive("listing-a", { streaming: false, streamText: reply, streamDisplayText: reply }));
+    expect(frames.pending()).toBe(0);
+    expect(assistantMarkdown()).toEqual([reply]);
+  });
+
+  it("resets streaming row state when switching convId in place into an already-streaming listing", async () => {
+    installFrames();
+    const alreadyArrived = "Already streamed words for the second listing should appear immediately when switching panes.";
+    patchLive("listing-a", { streaming: true, streamText: "", streamDisplayText: "" });
+    patchLive("listing-b", { streaming: true, streamText: alreadyArrived, streamDisplayText: alreadyArrived });
+
+    // Render without keying ChatPanel itself (matches ListingPanes) so StreamingAssistantRow's own key={convId} is exercised.
+    await act(async () => root.render(
+      <QueryClientProvider client={queryClient}>
+        <ChatPanel convId="listing-a" />
+      </QueryClientProvider>,
+    ));
+    expect(assistantRows()).toHaveLength(0);
+
+    await act(async () => root.render(
+      <QueryClientProvider client={queryClient}>
+        <ChatPanel convId="listing-b" />
+      </QueryClientProvider>,
+    ));
+    expect(assistantRows()).toHaveLength(1);
+    // Streaming display holds back only the trailing unfinished word until complete, not the earlier words.
+    expect(assistantMarkdown()[0]).toContain("Already streamed words for the second listing");
   });
 
 });

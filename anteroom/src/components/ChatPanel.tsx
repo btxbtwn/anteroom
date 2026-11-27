@@ -561,8 +561,8 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
           />
         ) : null}
 
-        {showStreamBubble && streamVisible ? (
-          <StreamingAssistantRow received={streamReceived} complete={!streaming && !generating} display={assistantDisplayText} />
+        {(showStreamBubble || (localLive && !resetting)) && !streamAlreadyPersisted ? (
+          <StreamingAssistantRow key={convId} received={streamReceived} complete={!streaming && !generating} display={assistantDisplayText} />
         ) : null}
 
         <QueuedMessages
