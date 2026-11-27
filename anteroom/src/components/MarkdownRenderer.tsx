@@ -11,6 +11,7 @@ import {
   createIncrementalMarkdownPlugin,
   shouldParseIncrementally,
 } from "./markdownIncremental";
+import { rehypeStreamWords } from "./streamWords";
 
 interface Props {
   text: string;
@@ -24,6 +25,8 @@ type MarkdownProps<Tag extends keyof React.JSX.IntrinsicElements> =
 
 const BASE_PLUGINS = [remarkGfm];
 const BASE_PLUGINS_WITH_BREAKS = [remarkGfm, remarkBreaks];
+/** While a reply streams, each word of the block being written fades in as it is added. */
+const STREAMING_REHYPE_PLUGINS = [rehypeStreamWords];
 
 // react-markdown drops unknown protocols; citation links have to survive it.
 function markdownUrlTransform(href: string): string | null | undefined {
@@ -77,10 +80,15 @@ function MarkdownRenderer({ text, lineBreaks = false, isStreaming = false, class
   return (
     <div
       className={cn("chat-markdown w-full min-w-0 [overflow-wrap:anywhere] [word-break:break-word]", className)}
-      // Gates the fade-in for blocks that arrive while the response streams.
+      // Gates the fade-in for words and blocks that arrive while the response streams.
       data-streaming={isStreaming ? "" : undefined}
     >
-      <ReactMarkdown remarkPlugins={remarkPlugins} urlTransform={markdownUrlTransform} components={COMPONENTS}>
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={isStreaming ? STREAMING_REHYPE_PLUGINS : undefined}
+        urlTransform={markdownUrlTransform}
+        components={COMPONENTS}
+      >
         {text}
       </ReactMarkdown>
     </div>

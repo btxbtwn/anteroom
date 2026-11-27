@@ -171,17 +171,17 @@ struct ListingEditorView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu("Listing actions", systemImage: "ellipsis.circle") {
-                    Button("Listing assistant", systemImage: "sparkles") { assistant = AssistantOpening() }
-                    Button("Listing history", systemImage: "clock.arrow.circlepath") { showingHistory = true }
-                    Button("Listing templates", systemImage: "rectangle.stack") { showingTemplates = true }
+                    Button("Listing assistant", systemImage: "sparkles") { afterSaving { assistant = AssistantOpening() } }
+                    Button("Listing history", systemImage: "clock.arrow.circlepath") { afterSaving { showingHistory = true } }
+                    Button("Listing templates", systemImage: "rectangle.stack") { afterSaving { showingTemplates = true } }
                     Divider()
-                    Button("List everywhere…", systemImage: "paperplane") { showingListEverywhere = true }
+                    Button("List everywhere…", systemImage: "paperplane") { afterSaving { showingListEverywhere = true } }
                         .disabled(!model.choices.contains(where: \.selectable))
-                    Button("Manage marketplaces", systemImage: "storefront") { showingMarketplaces = true }
+                    Button("Manage marketplaces", systemImage: "storefront") { afterSaving { showingMarketplaces = true } }
                 }
                 .frame(minWidth: 44, minHeight: 44)
-                .disabled(model.hasChanges || model.isLoading || model.isSaving || model.loadError != nil)
-                .accessibilityHint("Save changes first to open the assistant, listing history or marketplaces")
+                .disabled(model.isLoading || model.isSaving || model.loadError != nil)
+                .accessibilityHint(model.hasChanges ? "Saves your changes, then opens what you choose" : "")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 if model.isSaving {
@@ -347,17 +347,17 @@ struct ListingEditorView: View {
     private var generateButton: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
-                if model.hasCopy { confirmGenerate = true } else { startGenerating() }
+                afterSaving { if model.hasCopy { confirmGenerate = true } else { startGenerating() } }
             } label: {
                 Label("Generate listing", systemImage: "sparkles")
                     .fontWeight(.semibold)
                     .frame(maxWidth: .infinity, minHeight: 44)
             }
             .workspaceProminentButton()
-            .disabled(model.hasChanges || photosUploading)
+            .disabled(photosUploading || model.isSaving)
             .accessibilityIdentifier("generate-listing")
             Text(photosUploading ? "Wait for your photos to finish uploading."
-                 : model.hasChanges ? "Save your changes first, then generate."
+                 : model.hasChanges ? "Saves your changes, then writes the title, description and item details from your photos."
                  : "Writes the title, description and item details from your photos. You review them before anything is listed.")
                 .font(.footnote).foregroundStyle(WorkspaceStyle.mutedText)
         }
@@ -394,6 +394,24 @@ struct ListingEditorView: View {
 
     private var saveErrorShown: Binding<Bool> {
         Binding(get: { model.saveError != nil }, set: { if !$0 { model.saveError = nil } })
+    }
+
+    /// The assistant, history and marketplaces work on the saved listing, so
+    /// unsaved edits are saved first, with the same stale-edit check as Save.
+    /// A refused or conflicting save shows its alert and opens nothing.
+    private func afterSaving(_ open: @escaping () -> Void) {
+        guard model.hasChanges else { return open() }
+        hideKeyboard()
+        Task {
+            guard !model.isSaving else { return }
+            if await model.save() {
+                saves += 1
+                onSaved()
+                open()
+            } else {
+                saveFailures += 1
+            }
+        }
     }
 
     private func save() {

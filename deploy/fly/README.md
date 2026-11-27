@@ -377,8 +377,9 @@ Edits are billed to the Photoroom account behind the managed key.
 
 When managed OpenRouter and/or Photoroom keys are set, each successful call is
 recorded against the seller who made it. OpenRouter costs come from the
-provider's `usage.cost`; Photoroom uses a flat rate card
-(`ANTEROOM_PHOTOROOM_COST_USD`, default `0.10` per successful edit).
+provider's `usage.cost`. Photoroom uses `ANTEROOM_PHOTOROOM_COST_USD` for a Plus
+edit (default $0.10). A plain solid-background cutout uses the Basic endpoint
+and costs one fifth of that rate (default $0.02).
 
 Set `ANTEROOM_OPERATOR_USER_ID` to your Supabase user id, then export:
 
@@ -397,4 +398,31 @@ Or via the CLI against a signed-in operator session:
 
 ```sh
 anteroom api request GET /api/operator/usage --query format=csv
+```
+
+### Subscription tiers & Smart Credits
+
+Hosted accounts default to the **Free** tier (10 distinct items listed/month, 50 Smart Credits/month) unless assigned a paid or internal tier in `seller_plans` or matched by `ANTEROOM_UNLIMITED_EMAILS` (comma-separated emails; defaults to the two approved owner accounts). Local desktop accounts are never metered or limited.
+
+**Enforcement status:** Tier visibility, operator plan assignments (`seller_plans`), and monthly usage/refund metering (`plan_usage_events`) are active, while **cap enforcement is OFF by default** (`PLAN_LIMITS_ENFORCED = False` in `anteroom/server/anteroom/services/subscriptions.py`) across hosted web, iPhone/API, MCP, and background processing. No seller is blocked with HTTP `402` while enforcement is off, and there is no live environment flag to flip caps on without a release.
+
+**Activation prerequisites** before a future release sets `PLAN_LIMITS_ENFORCED = True`:
+
+1. **Working upgrade path:** Ship self-serve checkout/billing (or an explicitly approved upgrade flow) reachable directly from **Settings → Usage**, and ensure iPhone/API `402` guidance points sellers to a real path rather than a missing screen.
+2. **Rollout approval & existing-account assignments:** Get explicit owner approval on rollout timing and assign any comped/paid plans for existing hosted beta accounts before enabling enforcement.
+3. **Verified operator & owner rows:** Confirm `ANTEROOM_OPERATOR_USER_ID` is set on Fly and `GET /api/operator/plans` shows `plan_id = "unlimited"` rows in `seller_plans` for both approved owner UUIDs (so non-JWT paths such as MCP personal access tokens and background workers stay unlimited even if the migration's `auth.users` seed was skipped).
+4. **Dedicated release PR:** Flip `PLAN_LIMITS_ENFORCED = True` only in that approved release PR with updated Settings copy and end-to-end upgrade verification.
+
+Operators (`ANTEROOM_OPERATOR_USER_ID`) can inspect and assign plans:
+
+```sh
+# List assigned plans and current-month usage (includes limits_enforced status)
+curl -sS -H "Authorization: Bearer <operator-access-token>" \
+  "https://api.myanteroom.com/api/operator/plans"
+
+# Assign a seller to a tier (free, lister, starter, pro, business, unlimited)
+curl -sS -X PUT -H "Authorization: Bearer <operator-access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"plan_id":"pro","billing_interval":"monthly","note":"Beta subscriber"}' \
+  "https://api.myanteroom.com/api/operator/plans/<seller-user-id>"
 ```

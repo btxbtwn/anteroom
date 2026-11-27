@@ -20,8 +20,7 @@ import { ChatMessage } from "./chat/ChatMessage";
 import { ChatTranscript } from "./chat/ChatTranscript";
 import { FoldedTurnRow, LiveWork } from "./chat/LiveWork";
 import { QueuedMessages } from "./chat/QueuedMessages";
-import { AssistantMessageRow } from "./chat/TimelineRows";
-import { WorkingRow } from "./chat/TimelineRows";
+import { StreamingAssistantRow, WorkingRow } from "./chat/TimelineRows";
 import { getLive } from "./chat/liveChatStore";
 import { useChatQueue } from "./chat/useChatQueue";
 import { useChatScroll } from "./chat/useChatScroll";
@@ -67,6 +66,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     streaming,
     generating,
     streamText,
+    streamReceived,
     streamTrace,
     streamAgents,
     foldedTurns,
@@ -562,9 +562,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
         ) : null}
 
         {showStreamBubble && streamVisible ? (
-          <div className="pb-4">
-            <AssistantMessageRow text={streamVisible} streaming />
-          </div>
+          <StreamingAssistantRow received={streamReceived} complete={!streaming && !generating} display={assistantDisplayText} />
         ) : null}
 
         <QueuedMessages
