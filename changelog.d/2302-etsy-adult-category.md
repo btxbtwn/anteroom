@@ -1,0 +1,1 @@
+- Etsy categories for men's and women's clothing now stay under Men's or Women's Clothing: button-downs no longer land in Kids', sweatshirts in Baby, pants in Pajamas or tops in Swimwear.
