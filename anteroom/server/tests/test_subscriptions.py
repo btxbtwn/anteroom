@@ -106,9 +106,56 @@ def test_photo_credit_weights_match_cutout_vs_studio():
         assert subscriptions.photo_credit_cost(advanced) == (subscriptions.KIND_PHOTO_STUDIO, 5)
 
 
-def test_ai_listing_generation_charges_and_enforces_free_tier(db):
+def test_default_limits_off_meters_past_free_ai_and_mcp_thresholds_without_blocking(db):
+    from fastapi import HTTPException
+
+    from anteroom.database import SessionLocal
+    from anteroom.services import mcp_generation_tools
+
+    assert subscriptions.PLAN_LIMITS_ENFORCED is False
+    assert subscriptions.limits_enforced() is False
+
+    with service_context.use(_ctx(SELLER_A, SessionLocal)):
+        # Non-owner Free seller exceeds the 50-credit threshold (11 AI listings = 55 credits).
+        for idx in range(11):
+            conv = Conversation(id=f"conv-free-{idx}", user_id=SELLER_A, title=f"Item {idx}")
+            db.add(conv)
+            db.commit()
+            task = background_tasks.enqueue(db, conv.id, "generate", {"text": ""})
+            assert task.kind == "generate"
+
+        assert subscriptions.credits_used(db, SELLER_A, subscriptions.current_period()) == 55
+
+        # Existing non-subscription protections stay enforced (active task -> 409; missing conv -> 404).
+        with pytest.raises(HTTPException) as conflict_exc:
+            background_tasks.enqueue(db, "conv-free-10", "generate", {"text": ""})
+        assert conflict_exc.value.status_code == 409
+        with pytest.raises(HTTPException) as missing_exc:
+            background_tasks.enqueue(db, "conv-does-not-exist", "generate", {"text": ""})
+        assert missing_exc.value.status_code == 404
+
+        # MCP generate_listings entry point also succeeds past 50 credits and still meters 5 credits.
+        mcp_conv = Conversation(id="conv-mcp-over", user_id=SELLER_A, title="MCP Item")
+        mcp_photo = Photo(
+            id="mcp-p1",
+            user_id=SELLER_A,
+            conversation_id=mcp_conv.id,
+            original_filename="1.jpg",
+            stored_filename="mcp-p1.jpg",
+            mime_type="image/jpeg",
+            size_bytes=100,
+            display_order=0,
+        )
+        db.add_all([mcp_conv, mcp_photo])
+        db.commit()
+        mcp_generation_tools._queue(db, mcp_conv.id)
+        assert subscriptions.credits_used(db, SELLER_A, subscriptions.current_period()) == 60
+
+
+def test_ai_listing_generation_charges_and_enforces_free_tier_when_enabled(db, monkeypatch):
     from anteroom.database import SessionLocal
 
+    monkeypatch.setattr(subscriptions, "PLAN_LIMITS_ENFORCED", True)
     with service_context.use(_ctx(SELLER_A, SessionLocal)):
         # Free tier gets 50 credits = 10 AI listing generations (5 credits each).
         for idx in range(10):
@@ -135,9 +182,120 @@ def test_ai_listing_generation_charges_and_enforces_free_tier(db):
         assert chat_task.kind == "chat"
 
 
-def test_photo_studio_charges_cutouts_and_refunds_on_failure(db, monkeypatch, tmp_path):
+def test_photo_studio_meters_and_refunds_past_free_threshold_when_limits_off(db, monkeypatch, tmp_path):
     from anteroom.database import SessionLocal
 
+    conv = Conversation(id="conv-photo-off", user_id=SELLER_A, title="Coat")
+    p1 = Photo(
+        id="p1",
+        user_id=SELLER_A,
+        conversation_id=conv.id,
+        original_filename="1.jpg",
+        stored_filename="p1.jpg",
+        mime_type="image/jpeg",
+        size_bytes=100,
+        display_order=0,
+    )
+    p2 = Photo(
+        id="p2",
+        user_id=SELLER_A,
+        conversation_id=conv.id,
+        original_filename="2.jpg",
+        stored_filename="p2.jpg",
+        mime_type="image/jpeg",
+        size_bytes=100,
+        display_order=1,
+    )
+    db.add_all([conv, p1, p2])
+    # Pre-seed 50 spent credits (at the Free threshold).
+    db.add(
+        PlanUsageEvent(
+            user_id=SELLER_A,
+            period=subscriptions.current_period(),
+            kind=subscriptions.KIND_AI_LISTING,
+            credits=50,
+            conversation_id=conv.id,
+        )
+    )
+    db.commit()
+
+    jpeg = _jpeg_bytes()
+    (tmp_path / "p1.jpg").write_bytes(jpeg)
+    (tmp_path / "p2.jpg").write_bytes(jpeg)
+
+    class FakePhotos:
+        def read(self, key: str) -> bytes:
+            return (tmp_path / key).read_bytes()
+
+        def local_path(self, key: str):
+            path = tmp_path / key
+            if not path.exists():
+                raise FileNotFoundError(key)
+            return path
+
+        def edited_key(self, source: str) -> str:
+            return f"edited-{source}"
+
+        def put(self, key: str, data: bytes) -> None:
+            (tmp_path / key).write_bytes(data)
+
+        def delete(self, key: str) -> None:
+            (tmp_path / key).unlink(missing_ok=True)
+
+    ctx = service_context.ServiceContext(
+        seller_id=SELLER_A,
+        session_factory=SessionLocal,
+        settings=SimpleNamespace(),
+        secrets=SimpleNamespace(),
+        photos=FakePhotos(),
+        seller_email="seller@example.com",
+    )
+
+    monkeypatch.setattr(photoroom, "available", lambda: True)
+    png_buf = BytesIO()
+    Image.new("RGBA", (32, 32), (255, 255, 255, 255)).save(png_buf, "PNG")
+    png_bytes = png_buf.getvalue()
+
+    async def run_db(fn, *args):
+        with SessionLocal() as session:
+            return fn(session, *args)
+
+    # First photo succeeds (5 credits), second photo fails on Photoroom and is refunded (-5 credits).
+    call_count = 0
+
+    async def fail_second(_data, _options):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            raise PhotoroomError("Photoroom timeout", 502)
+        return png_bytes
+
+    monkeypatch.setattr(photoroom, "edit", fail_second)
+    with service_context.use(ctx):
+        outcome = asyncio.run(
+            photo_studio.run(run_db, conv.id, ["p1", "p2"], StudioOptions(ghost_mannequin=True))
+        )
+        # Other photo_studio protections remain active (e.g. duplicate photo ids still rejected).
+        with pytest.raises(ValueError, match="Choose each photo once"):
+            asyncio.run(photo_studio.run(run_db, conv.id, ["p1", "p1"], StudioOptions(remove_background=True)))
+
+    assert len(outcome["photos"]) == 1
+    assert len(outcome["errors"]) == 1
+    assert outcome["provider_blocked"] is False
+    # 50 prior + 5 succeeded + 5 failed - 5 refunded = 55 net credits metered.
+    assert subscriptions.credits_used(db, SELLER_A, subscriptions.current_period()) == 55
+    summary = subscriptions.seller_subscription_summary(db, SELLER_A, email="seller@example.com")
+    assert summary["limits_enforced"] is False
+    assert summary["credits"]["used"] == 55
+    assert summary["credits"]["remaining"] == 0
+    assert summary["credits"]["breakdown"]["photo_studio"] == {"count": 2, "credits": 10}
+    assert summary["credits"]["breakdown"]["photo_refund"] == {"count": 1, "credits": -5}
+
+
+def test_photo_studio_charges_cutouts_and_refunds_on_failure_when_enabled(db, monkeypatch, tmp_path):
+    from anteroom.database import SessionLocal
+
+    monkeypatch.setattr(subscriptions, "PLAN_LIMITS_ENFORCED", True)
     conv = Conversation(id="conv-photo", user_id=SELLER_A, title="Jacket")
     p1 = Photo(
         id="p1",
@@ -252,9 +410,28 @@ def test_photo_studio_charges_cutouts_and_refunds_on_failure(db, monkeypatch, tm
     assert not called_after_exhaust
 
 
-def test_free_tier_monthly_listed_item_cap_allows_cross_listing_and_lister_is_unlimited(db):
+def test_default_limits_off_meters_past_free_listed_item_threshold(db):
     from anteroom.database import SessionLocal
 
+    with service_context.use(_ctx(SELLER_A, SessionLocal)):
+        for idx in range(12):
+            subscriptions.check_listed_item_allowance(db, f"item-{idx}")
+            subscriptions.require_and_record_listed_item(db, f"item-{idx}", marketplace="ebay")
+        db.commit()
+        assert subscriptions.listed_items_used(db, SELLER_A, subscriptions.current_period()) == 12
+
+        # Cross-listing an already-counted item still deduplicates to 12 distinct items.
+        subscriptions.require_and_record_listed_item(db, "item-0", marketplace="poshmark")
+        subscriptions.require_and_record_listed_item(db, "item-11", marketplace="mercari")
+        db.commit()
+        assert subscriptions.listed_items_used(db, SELLER_A, subscriptions.current_period()) == 12
+        assert subscriptions.credits_used(db, SELLER_A, subscriptions.current_period()) == 0
+
+
+def test_free_tier_monthly_listed_item_cap_allows_cross_listing_and_lister_is_unlimited_when_enabled(db, monkeypatch):
+    from anteroom.database import SessionLocal
+
+    monkeypatch.setattr(subscriptions, "PLAN_LIMITS_ENFORCED", True)
     with service_context.use(_ctx(SELLER_A, SessionLocal)):
         # List 10 distinct items on eBay; cross-list item 0 to Poshmark & Mercari (counts once!).
         for idx in range(10):
@@ -285,6 +462,7 @@ def test_free_tier_monthly_listed_item_cap_allows_cross_listing_and_lister_is_un
 def test_only_approved_unlimited_emails_bypass_limits_and_env_overrides(db, monkeypatch):
     from anteroom.database import SessionLocal
 
+    monkeypatch.setattr(subscriptions, "PLAN_LIMITS_ENFORCED", True)
     for owner_email in ("cristianarielcanizares@gmail.com", "XYZCANIZAREZ@GMAIL.COM"):
         with service_context.use(_ctx(SELLER_A, SessionLocal, email=owner_email)):
             plan, _ = subscriptions.resolve_plan(db, SELLER_A)
@@ -307,6 +485,11 @@ def test_only_approved_unlimited_emails_bypass_limits_and_env_overrides(db, monk
         assert subscriptions.resolve_plan(db, SELLER_A)[0].id == "free"
     with service_context.use(_ctx(SELLER_B, SessionLocal, email="vip@shop.test")):
         assert subscriptions.resolve_plan(db, SELLER_B)[0].id == "unlimited"
+
+    # Assigned unlimited row in seller_plans keeps MCP-token/background contexts (email=None) unlimited.
+    subscriptions.set_seller_plan(SELLER_A, "unlimited", db=db)
+    with service_context.use(_ctx(SELLER_A, SessionLocal, email=None)):
+        assert subscriptions.resolve_plan(db, SELLER_A)[0].id == "unlimited"
 
 
 def test_desktop_execution_without_service_context_is_never_limited(db):
@@ -341,11 +524,12 @@ def test_seller_and_operator_http_routes(db, monkeypatch):
 
     client = TestClient(app)
 
-    # 1. Seller sees Free tier summary by default.
+    # 1. Seller sees Free tier summary with limits_enforced=False by default.
     resp = client.get("/api/settings/subscription")
     assert resp.status_code == 200
     body = resp.json()
     assert body["plan"]["id"] == "free"
+    assert body["limits_enforced"] is False
     assert body["credits"]["limit"] == 50
     assert body["listed_items"]["limit"] == 10
     assert [p["id"] for p in body["plans"]] == ["free", "lister", "starter", "pro", "business"]
@@ -370,6 +554,7 @@ def test_seller_and_operator_http_routes(db, monkeypatch):
 
     listed = client.get("/api/operator/plans")
     assert listed.status_code == 200
+    assert listed.json()["limits_enforced"] is False
     rows = listed.json()["sellers"]
     assert len(rows) == 1
     assert rows[0]["user_id"] == SELLER_A
@@ -383,6 +568,14 @@ def test_seller_and_operator_http_routes(db, monkeypatch):
     assert updated.json()["plan"]["billing_interval"] == "annual"
     assert updated.json()["credits"]["limit"] == 1200
     assert updated.json()["listed_items"]["limit"] is None
+
+    # 5. Approved owner email sees Unlimited / Unmetered summary on /api/settings/subscription.
+    active_seller["seller"] = SellerIdentity(user_id=SELLER_B, email="cristianarielcanizares@gmail.com")
+    owner_resp = client.get("/api/settings/subscription")
+    assert owner_resp.status_code == 200
+    assert owner_resp.json()["plan"]["id"] == "unlimited"
+    assert owner_resp.json()["plan"]["unlimited"] is True
+    assert owner_resp.json()["limits_enforced"] is False
 
 
 def test_postgres_rls_isolates_seller_plans_and_blocks_self_upgrade(migration_engine, monkeypatch):  # noqa: F811
@@ -431,6 +624,7 @@ def test_postgres_rls_isolates_seller_plans_and_blocks_self_upgrade(migration_en
 
     # Operator listing function returns Seller A's plan + usage across RLS.
     report = subscriptions.list_seller_plans(period="2026-11")
+    assert report["limits_enforced"] is False
     seller_a_row = next(row for row in report["sellers"] if row["user_id"] == SELLER_A)
     assert seller_a_row["plan_id"] == "pro"
     assert seller_a_row["credits_used"] == 5
@@ -480,4 +674,160 @@ def test_hosted_enforcement_fails_closed_without_service_context(db, monkeypatch
     monkeypatch.setenv("ANTEROOM_HOSTED", "1")
     with pytest.raises(RuntimeError):
         subscriptions.charge_ai_listing(db, "conv-no-ctx")
+    with pytest.raises(RuntimeError):
+        subscriptions.check_photo_batch(db, 1, StudioOptions(remove_background=True))
+    with pytest.raises(RuntimeError):
+        subscriptions.reserve_photo_credit(db, "conv-no-ctx", "p1", StudioOptions(remove_background=True))
+    with pytest.raises(RuntimeError):
+        subscriptions.check_listed_item_allowance(db, "conv-no-ctx")
+    with pytest.raises(RuntimeError):
+        subscriptions.require_and_record_listed_item(db, "conv-no-ctx", marketplace="ebay")
+
+
+def test_native_marketplace_check_start_preserves_confirm_and_allows_past_free_threshold(db, monkeypatch):
+    from anteroom.database import SessionLocal
+    from anteroom.services import listing_mode, native_marketplaces
+
+    conv = Conversation(id="conv-11th", user_id=SELLER_A, title="11th item")
+    db.add(conv)
+    for idx in range(10):
+        db.add(
+            PlanUsageEvent(
+                user_id=SELLER_A,
+                period=subscriptions.current_period(),
+                kind=subscriptions.KIND_LISTED_ITEM,
+                credits=0,
+                conversation_id=f"item-{idx}",
+                reference_id="ebay",
+            )
+        )
+    db.commit()
+
+    monkeypatch.setattr(listing_mode, "require", lambda _mode, _db: None)
+    preflight_called = False
+
+    def fake_preflight(_db, _conv_id, _marketplace, _body):
+        nonlocal preflight_called
+        preflight_called = True
+        return {"title": "11th item"}, []
+
+    monkeypatch.setattr(native_marketplaces, "_preflight", fake_preflight)
+
+    with service_context.use(_ctx(SELLER_A, SessionLocal)):
+        # Explicit seller confirm protection is never bypassed even while plan caps are off.
+        with pytest.raises(native_marketplaces.NativeMarketplaceError) as unconfirmed:
+            native_marketplaces._check_start(
+                db, conv.id, "ebay", native_marketplaces.ListRequest(revision_id="rev-1", confirm=False), "list", True,
+            )
+        assert unconfirmed.value.status_code == 400
+        assert not preflight_called
+
+        # With confirm=True and enforcement off by default, the 11th distinct item proceeds past the cap check.
+        snapshot, _photos, _deleted = native_marketplaces._check_start(
+            db, conv.id, "ebay", native_marketplaces.ListRequest(revision_id="rev-1", confirm=True), "list", True,
+        )
+        assert preflight_called
+        assert snapshot["title"] == "11th item"
+
+        # With enforcement enabled, the same 11th distinct item raises 402 plan_listing_limit.
+        monkeypatch.setattr(subscriptions, "PLAN_LIMITS_ENFORCED", True)
+        with pytest.raises(native_marketplaces.NativeMarketplaceError) as capped:
+            native_marketplaces._check_start(
+                db, conv.id, "ebay", native_marketplaces.ListRequest(revision_id="rev-1", confirm=True), "list", True,
+            )
+        assert capped.value.status_code == 402
+        assert capped.value.reason == subscriptions.REASON_LISTING_LIMIT
+
+
+def test_photo_studio_http_route_meters_past_threshold_while_limits_off(db, monkeypatch, tmp_path):
+    from anteroom.database import SessionLocal
+    from anteroom.routes import photos as photo_routes
+
+    conv = Conversation(id="conv-http-studio", user_id=SELLER_A, title="Sneakers")
+    photo = Photo(
+        id="http-p1",
+        user_id=SELLER_A,
+        conversation_id=conv.id,
+        original_filename="1.jpg",
+        stored_filename="http-p1.jpg",
+        mime_type="image/jpeg",
+        size_bytes=100,
+        display_order=0,
+    )
+    db.add_all([conv, photo])
+    db.add(
+        PlanUsageEvent(
+            user_id=SELLER_A,
+            period=subscriptions.current_period(),
+            kind=subscriptions.KIND_AI_LISTING,
+            credits=50,
+            conversation_id=conv.id,
+        )
+    )
+    db.commit()
+    (tmp_path / "http-p1.jpg").write_bytes(_jpeg_bytes())
+
+    class FakePhotos:
+        def read(self, key: str) -> bytes:
+            return (tmp_path / key).read_bytes()
+
+        def local_path(self, key: str):
+            path = tmp_path / key
+            if not path.exists():
+                raise FileNotFoundError(key)
+            return path
+
+        def edited_key(self, source: str) -> str:
+            return f"edited-{source}"
+
+        def put(self, key: str, data: bytes) -> None:
+            (tmp_path / key).write_bytes(data)
+
+        def delete(self, key: str) -> None:
+            (tmp_path / key).unlink(missing_ok=True)
+
+    ctx = service_context.ServiceContext(
+        seller_id=SELLER_A,
+        session_factory=SessionLocal,
+        settings=SimpleNamespace(),
+        secrets=SimpleNamespace(),
+        photos=FakePhotos(),
+        seller_email="seller@example.com",
+    )
+
+    monkeypatch.setattr(photoroom, "available", lambda: True)
+    png_buf = BytesIO()
+    Image.new("RGBA", (32, 32), (255, 255, 255, 255)).save(png_buf, "PNG")
+    png_bytes = png_buf.getvalue()
+
+    async def fake_edit(_data, _options):
+        return png_bytes
+
+    monkeypatch.setattr(photoroom, "edit", fake_edit)
+
+    async def fake_in_session(_request, work, *args):
+        with SessionLocal() as session:
+            return work(session, *args)
+
+    monkeypatch.setattr(photo_routes, "_in_session", fake_in_session)
+
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def attach_context(request: Request, call_next):
+        with service_context.use(ctx):
+            return await call_next(request)
+
+    app.include_router(photo_routes.edit_router)
+    client = TestClient(app)
+
+    resp = client.post(
+        f"/api/conversations/{conv.id}/photos/studio",
+        json={"photo_ids": [photo.id], "options": {"remove_background": True}},
+    )
+    assert resp.status_code == 200
+    assert len(resp.json()["photos"]) == 1
+    assert resp.json()["errors"] == []
+    assert subscriptions.credits_used(db, SELLER_A, subscriptions.current_period()) == 51
+
 

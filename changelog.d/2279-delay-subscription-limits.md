@@ -1,0 +1,1 @@
+- Keep hosted Smart Credit and Free monthly listing caps in preview (non-enforced) mode while continuing to track usage until self-serve plan upgrades are available, with updated Settings → Usage copy.
