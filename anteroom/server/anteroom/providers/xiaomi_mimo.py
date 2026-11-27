@@ -13,7 +13,7 @@ from typing import NamedTuple
 import httpx
 from PIL import Image, ImageOps
 
-from anteroom.providers.photo_analysis import PHOTO_ANALYSIS_SYSTEM
+from anteroom.providers.photo_analysis import PHOTO_ANALYSIS_SYSTEM, photo_analysis_content
 
 MIMO_BASE_URL = "https://api.xiaomimimo.com/v1"
 MIMO_TOKEN_PLAN_BASE_URL = "https://token-plan-cn.xiaomimimo.com/v1"
@@ -289,12 +289,7 @@ class MiMoProvider:
             if listing_rules:
                 messages[0]["content"] += f"\n\nAdditional rules:\n{listing_rules}"
 
-            content_parts: list[dict] = [{"type": "text", "text": "Analyze these product photos:"}]
-            for url in await encode_images(photo_paths, max_side):
-                content_parts.append({
-                    "type": "image_url",
-                    "image_url": {"url": url},
-                })
+            content_parts = photo_analysis_content(await encode_images(photo_paths, max_side))
 
             messages.append({"role": "user", "content": content_parts})
 

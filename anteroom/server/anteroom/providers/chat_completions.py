@@ -20,7 +20,7 @@ import httpx
 from jsonschema import Draft202012Validator
 
 from anteroom.providers import http_retry
-from anteroom.providers.photo_analysis import PHOTO_ANALYSIS_SYSTEM, PHOTO_EVIDENCE_SCHEMA
+from anteroom.providers.photo_analysis import PHOTO_ANALYSIS_SYSTEM, PHOTO_EVIDENCE_SCHEMA, photo_analysis_content
 from anteroom.providers.xiaomi_mimo import (
     VISION_MAX_SIDE,
     StreamChunk,
@@ -226,9 +226,7 @@ class ChatCompletionsProvider:
             system += f"\n\nUser notes: {notes}"
         if listing_rules:
             system += f"\n\nAdditional rules:\n{listing_rules}"
-        parts: list[dict] = [{"type": "text", "text": "Analyze these product photos:"}]
-        for url in await encode_images(photo_paths, max_side):
-            parts.append({"type": "image_url", "image_url": {"url": url}})
+        parts = photo_analysis_content(await encode_images(photo_paths, max_side))
         messages = [{"role": "system", "content": system}, {"role": "user", "content": parts}]
         try:
             content = await self._complete(messages, self.vision_model)

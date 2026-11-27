@@ -16,7 +16,7 @@ import httpx
 from anteroom.providers import http_retry
 from anteroom.providers.chat_completions import parse_evidence
 from anteroom.providers.claude_agent import _image_block
-from anteroom.providers.photo_analysis import PHOTO_ANALYSIS_SYSTEM
+from anteroom.providers.photo_analysis import PHOTO_ANALYSIS_SYSTEM, photo_analysis_content
 from anteroom.providers.xiaomi_mimo import VISION_MAX_SIDE, StreamChunk, encode_images
 from anteroom.services import live_trace
 from anteroom.services.ai_key_catalog import key_provider
@@ -241,9 +241,7 @@ class AnthropicAPIProvider:
             system += f"\n\nUser notes: {notes}"
         if listing_rules:
             system += f"\n\nAdditional rules:\n{listing_rules}"
-        parts: list[dict] = [{"type": "text", "text": "Analyze these product photos:"}]
-        for url in await encode_images(photo_paths, max_side):
-            parts.append({"type": "image_url", "image_url": {"url": url}})
+        parts = photo_analysis_content(await encode_images(photo_paths, max_side))
         messages = [{"role": "system", "content": system}, {"role": "user", "content": parts}]
         try:
             return parse_evidence(await self._complete(messages, self.vision_model))

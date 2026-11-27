@@ -129,6 +129,58 @@ def restamp_reading(db, message_id: str, notes: str | None) -> None:
     db.execute(update(Message).where(Message.id == message_id).values(notes_fingerprint=notes_fingerprint(notes)))
 
 
+FLAWS_HEADING = (
+    "- flaws seen in the photos (disclose every one in the description's Flaws block, "
+    "one per line, keeping its location and count):"
+)
+
+
+def _photo_numbers(value: Any) -> str:
+    numbers = [str(item).strip() for item in (value if isinstance(value, list) else [value]) if str(item or "").strip()]
+    if not numbers:
+        return ""
+    return f"photo{'s' if len(numbers) > 1 else ''} {', '.join(numbers)}"
+
+
+def _flaw_line(flaw: Any) -> str:
+    """One flaw as the listing writer reads it: what, how many, where, and which photos show it."""
+    if not isinstance(flaw, dict):
+        return " ".join(str(flaw or "").split())
+    description = " ".join(str(flaw.get("description") or "").split())
+    if not description:
+        return ""
+    count = str(flaw.get("count") or "").strip()
+    if count.isdigit() and int(count) > 1 and not description.startswith(count):
+        description = f"{count} × {description}"
+    location = " ".join(str(flaw.get("location") or "").split())
+    photos = _photo_numbers(flaw.get("photos"))
+    return description + (f" — {location}" if location else "") + (f" ({photos})" if photos else "")
+
+
+def _flaw_lines(condition: Any) -> list[str]:
+    """Every flaw on its own line, so none is merged into another or lost in a comma list."""
+    if not isinstance(condition, dict):
+        return []
+    review = [entry for entry in condition.get("photoReview") or [] if isinstance(entry, dict)]
+    flaws = [line for line in map(_flaw_line, condition.get("visibleFlaws") or []) if line]
+    if not flaws:
+        # The per-photo pass saw damage the summary dropped: the pass is the evidence.
+        for entry in review:
+            photos = _photo_numbers(entry.get("photo"))
+            for flaw in entry.get("flaws") or []:
+                text = " ".join(str(flaw or "").split())
+                if text:
+                    flaws.append(text + (f" ({photos})" if photos else ""))
+    lines = [FLAWS_HEADING, *(f"  - {flaw}" for flaw in flaws)] if flaws else []
+    checked = [
+        f"{entry.get('photo')} {' '.join(str(entry.get('view') or '').split())}".strip()
+        for entry in review if str(entry.get("photo") or "").strip()
+    ]
+    if checked:
+        lines.append(f"- photos checked for flaws: {'; '.join(checked)}")
+    return lines
+
+
 def format_photo_analysis(evidence: dict) -> str:
     evidence = normalize_evidence(evidence)
     parts = ["Photo analysis:"]
@@ -155,10 +207,7 @@ def format_photo_analysis(evidence: dict) -> str:
                 detail.append(f"model confidence (not verified): {fd['confidence']}")
             if detail:
                 parts.append(f"Evidence for {field_key}: {'; '.join(detail)}")
-    condition = evidence.get("condition")
-    flaws = condition.get("visibleFlaws", []) if isinstance(condition, dict) else []
-    if flaws:
-        parts.append(f"- flaws: {', '.join(str(f) for f in flaws if f)}")
+    parts.extend(_flaw_lines(evidence.get("condition")))
     for measurement in evidence.get("measurements") or []:
         if isinstance(measurement, dict):
             label = str(measurement.get("label") or "").strip()

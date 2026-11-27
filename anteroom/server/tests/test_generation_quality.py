@@ -195,6 +195,13 @@ def labelled_outputs(cases):
             listing["title"] = "Casual Blue T-Shirt Regular Fit"
         if case["id"] == "seller_flaw_measurement":
             listing["description"] = "Casual blue cotton tee with a classic fit.\n\nFlaws:\n- Small hole on left cuff\nSee photos for details.\n\nMeasurements: Pit to pit: 20 inches"
+        if case["id"] == "photo_flaws_everywhere":
+            listing["title"] = "Wrangler XL Casual Button-Down Shirt Beige Regular"
+            listing["description"] = (
+                "Casual beige cotton button-down with a relaxed fit.\n\nFlaws:\n"
+                "- Brown spot on the upper back, left shoulder\n- Small spot on the back below the neck tag\n"
+                "- Cracking seam tape inside the neck\n- 3 small blue ink marks near the lower front placket\n"
+                "See photos for details.\n\nMeasurements: See photos for measurements.")
         outputs[case["id"]] = listing
     return outputs
 
@@ -207,11 +214,15 @@ def test_evaluation_corpus_detects_fabrication_ignored_clears_and_missing_cases(
     outputs["unreadable_tags"]["brand"] = "Invented Brand"
     outputs["deliberate_clear"]["depop_specifics"]["style"] = ["Vintage"]
     outputs.pop("seller_flaw_measurement")
+    # Shrinking several ink marks to one spot, as in the 2026-11-27 audit, fails the case.
+    outputs["photo_flaws_everywhere"]["description"] = outputs["photo_flaws_everywhere"]["description"].replace(
+        "3 small blue ink marks", "One faint spot")
     report = evaluate_outputs(cases, outputs)
     assert not report["passed"]
     assert report["metrics"]["unsupported_facts_omitted"]["rate"] < 1
     assert report["metrics"]["fact_accuracy"]["rate"] < 1
     assert report["metrics"]["output_present"]["rate"] < 1
+    assert report["metrics"]["photo_flaws_disclosed"] == {"passed": 3, "total": 4, "rate": 0.75}
 
 
 
