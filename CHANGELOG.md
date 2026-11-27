@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1284 — 2026-11-27
+
+- A backend test that checks an AI agent's marketplace form no longer fails depending on which hosted Chrome test ran before it.
+
 ## 0.1.1283 — 2026-11-26
 
 - Add hosted subscription tiers (Free, Lister, Starter, Pro, Business) with unified monthly Smart Credits for AI listing generation and AI Studio edits, unlimited manual and bulk cross-listing on all paid tiers, and a Plan & Smart Credits view in Settings → Usage.
