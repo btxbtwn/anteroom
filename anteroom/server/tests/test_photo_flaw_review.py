@@ -82,8 +82,40 @@ def test_evidence_contract_requires_the_per_photo_review_and_located_flaws():
     without_review = evidence()
     del without_review["condition"]["photoReview"]
     assert parse_evidence(json.dumps(without_review)).get("error")
-    unlocated = evidence(flaws=[{"description": "stain", "count": 1, "photos": [1]}])
-    assert parse_evidence(json.dumps(unlocated)).get("error")
+    undescribed = evidence(flaws=[{"location": "left cuff", "count": 1, "photos": [1]}])
+    assert parse_evidence(json.dumps(undescribed)).get("error")
+
+
+def test_a_flaw_without_a_place_or_count_still_reaches_the_analysis():
+    # Models send null for a place or count they cannot tell; that is not a broken reading.
+    vague = evidence(
+        flaws=[{"description": "possible faint stain", "location": None, "count": None, "photos": None},
+               {"description": "stain", "count": 1, "photos": [1]}],
+        review=[{"photo": 1, "view": None, "flaws": [{"description": "stain", "location": "chest"}]},
+                {"photo": 2, "flaws": None}],
+    )
+    parsed = parse_evidence(json.dumps(vague))
+    assert "error" not in parsed
+    text = format_photo_analysis(parsed["evidence"])
+    assert "  - possible faint stain" in text.splitlines()
+    assert "  - stain (photo 1)" in text.splitlines()
+
+
+def test_review_only_flaws_survive_a_partial_summary():
+    review = [{"photo": 1, "view": "front", "flaws": ["brown stain"]},
+              {"photo": 2, "view": "back", "flaws": ["small hole at back hem"]}]
+    flaws = [{"description": "brown stain", "location": "front left chest", "count": 1, "photos": [1]}]
+    lines = format_photo_analysis(evidence(flaws=flaws, review=review)).splitlines()
+    flaw_lines = [line for line in lines if line.startswith("  - ")]
+    assert flaw_lines == ["  - brown stain — front left chest (photo 1)", "  - small hole at back hem (photo 2)"]
+
+
+def test_a_count_in_words_is_kept():
+    flaws = [{"description": "blue ink marks", "count": "several", "location": "placket", "photos": [1]},
+             {"description": "several small pulls", "count": "several", "location": "sleeve", "photos": [2]}]
+    text = format_photo_analysis(evidence(flaws=flaws, review=[]))
+    assert "  - blue ink marks (count: several) — placket (photo 1)" in text
+    assert "  - several small pulls — sleeve (photo 2)" in text
 
 
 def test_analysis_lists_each_flaw_on_its_own_line_with_place_count_and_photo():

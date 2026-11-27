@@ -67,16 +67,19 @@ PHOTO_EVIDENCE_SCHEMA = {
         } for name in ("brand", "size", "color", "material", "style", "graphic", "category", "department")},
         "condition": {"type": "object", "required": ["value", "photoReview", "visibleFlaws"], "properties": {
             "value": {"type": ["string", "null"]},
+            # Only what a flaw cannot do without is required. Models send null for a
+            # place or count they cannot tell (the prompt asks for faint marks too),
+            # and the formatter reads whatever else arrives.
             "photoReview": {"type": "array", "items": {
-                "type": "object", "required": ["photo", "view", "flaws"],
-                "properties": {"photo": {"type": ["integer", "string"]}, "view": {"type": "string"},
-                               "flaws": {"type": "array", "items": {"type": "string"}}},
+                "type": "object", "required": ["photo"],
+                "properties": {"photo": {"type": ["integer", "string"]}, "view": {"type": ["string", "null"]},
+                               "flaws": {"type": ["array", "null"], "items": {"type": ["string", "object"]}}},
             }},
             "visibleFlaws": {"type": "array", "items": {
-                "type": "object", "required": ["description", "location", "count", "photos"],
-                "properties": {"description": {"type": "string"}, "location": {"type": "string"},
-                               "count": {"type": ["integer", "string"]},
-                               "photos": {"type": "array", "items": {"type": ["integer", "string"]}}},
+                "type": "object", "required": ["description"],
+                "properties": {"description": {"type": "string"}, "location": {"type": ["string", "null"]},
+                               "count": {"type": ["integer", "string", "null"]},
+                               "photos": {"type": ["array", "null"], "items": {"type": ["integer", "string"]}}},
             }},
         }},
         "measurements": {"type": "array", "items": {

@@ -149,12 +149,20 @@ def _flaw_line(flaw: Any) -> str:
     description = " ".join(str(flaw.get("description") or "").split())
     if not description:
         return ""
-    count = str(flaw.get("count") or "").strip()
-    if count.isdigit() and int(count) > 1 and not description.startswith(count):
-        description = f"{count} × {description}"
+    count = " ".join(str(flaw.get("count") if flaw.get("count") is not None else "").split())
+    if count.isdigit():
+        if int(count) > 1 and not description.startswith(count):
+            description = f"{count} × {description}"
+    elif count and count.lower() not in ("one", "a", "an", "single") and count.lower() not in description.lower():
+        # A count in words ("several", "three") is the quantity too.
+        description = f"{description} (count: {count})"
     location = " ".join(str(flaw.get("location") or "").split())
     photos = _photo_numbers(flaw.get("photos"))
     return description + (f" — {location}" if location else "") + (f" ({photos})" if photos else "")
+
+
+def _flaw_key(text: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", text.lower()).split())
 
 
 def _flaw_lines(condition: Any) -> list[str]:
@@ -162,15 +170,22 @@ def _flaw_lines(condition: Any) -> list[str]:
     if not isinstance(condition, dict):
         return []
     review = [entry for entry in condition.get("photoReview") or [] if isinstance(entry, dict)]
-    flaws = [line for line in map(_flaw_line, condition.get("visibleFlaws") or []) if line]
-    if not flaws:
-        # The per-photo pass saw damage the summary dropped: the pass is the evidence.
-        for entry in review:
-            photos = _photo_numbers(entry.get("photo"))
-            for flaw in entry.get("flaws") or []:
-                text = " ".join(str(flaw or "").split())
-                if text:
-                    flaws.append(text + (f" ({photos})" if photos else ""))
+    summary = [flaw for flaw in condition.get("visibleFlaws") or [] if _flaw_line(flaw)]
+    flaws = [_flaw_line(flaw) for flaw in summary]
+    # The per-photo pass is evidence too: a flaw it saw that the summary dropped
+    # still reaches the listing writer, which never sees the photos.
+    known = [key for key in (_flaw_key(str(flaw.get("description") if isinstance(flaw, dict) else flaw))
+                             for flaw in summary) if key]
+    for entry in review:
+        photos = _photo_numbers(entry.get("photo"))
+        for flaw in entry.get("flaws") or []:
+            text = _flaw_line(flaw)
+            key = _flaw_key(str(flaw.get("description") if isinstance(flaw, dict) else flaw))
+            if not text or any(key in seen or seen in key for seen in known):
+                continue
+            known.append(key)
+            flaws.append(text if isinstance(flaw, dict) and flaw.get("photos") else
+                         text + (f" ({photos})" if photos else ""))
     lines = [FLAWS_HEADING, *(f"  - {flaw}" for flaw in flaws)] if flaws else []
     checked = [
         f"{entry.get('photo')} {' '.join(str(entry.get('view') or '').split())}".strip()
