@@ -845,4 +845,86 @@ describe("AssistantPage concurrency and background failure recovery", () => {
       container.remove();
     }
   });
+
+  it("hides the assistant row until prose arrives and paces the first chunk from zero", async () => {
+    let now = 1000;
+    let nextId = 1;
+    const frames = new Map<number, FrameRequestCallback>();
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }) as unknown as MediaQueryList);
+    vi.stubGlobal("performance", { ...performance, now: () => now });
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      const id = nextId++;
+      frames.set(id, cb);
+      return id;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+      frames.delete(id);
+    });
+    const step = (ms: number) => {
+      now += ms;
+      const queued = [...frames.entries()];
+      frames.clear();
+      for (const [, cb] of queued) cb(now);
+    };
+
+    const askDeferred = deferred<{ error?: string }>();
+    mocks.ask.mockReturnValueOnce(askDeferred.promise);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const chunk1 = "I checked your last thirty days of listings and found steady demand across outerwear, denim, and vintage workwear pieces with quick sell-through when priced near recent comps.";
+    const assistantRows = () => [...container.querySelectorAll<HTMLElement>('[data-message-role="assistant"]')];
+
+    try {
+      await act(async () => {
+        root.render(<AssistantPage threadId="pace-thread" onOpenProviders={vi.fn()} onOpenListing={vi.fn()} />);
+      });
+      expect(assistantRows()).toHaveLength(0);
+
+      await act(async () => {
+        setComposerDraftText("assistant:pace-thread", "How are sales?");
+      });
+      await act(async () => {
+        container.querySelector<HTMLButtonElement>('[data-testid="send-button"]')!.click();
+        await flushMicrotasks();
+      });
+
+      const handlers = mocks.ask.mock.calls[0][1] as { onEvent: (type: string, detail: string) => void };
+      // Before any text arrives (even after status events), no assistant row appears in the DOM.
+      await act(async () => handlers.onEvent("status", "Checking sales"));
+      expect(assistantRows()).toHaveLength(0);
+
+      // First large chunk arrives: paces from zero instead of dumping the full chunk on mount.
+      await act(async () => {
+        handlers.onEvent("message", chunk1);
+        await new Promise((resolve) => setTimeout(resolve, 60));
+      });
+      expect(assistantRows()).toHaveLength(0);
+      await act(async () => step(50));
+      expect(assistantRows()).toHaveLength(1);
+      const firstFrameText = assistantRows()[0].querySelector("p")?.textContent ?? "";
+      expect(firstFrameText.length).toBeGreaterThan(0);
+      expect(firstFrameText.length).toBeLessThan(chunk1.length);
+
+      // Stream ends: remaining frames flush the exact final text without dropping words.
+      await act(async () => {
+        askDeferred.resolve({});
+        await flushMicrotasks();
+      });
+      for (let i = 0; i < 60 && frames.size > 0; i++) {
+        await act(async () => step(50));
+      }
+      // Once the settled turn finishes (no saved rows in mock), live state clears cleanly.
+      expect(assistantRows()).toHaveLength(0);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      vi.unstubAllGlobals();
+    }
+  });
 });

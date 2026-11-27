@@ -33,11 +33,11 @@ function formatResetDate(iso: string): string {
   }).format(parsed);
 }
 
-function UsageMeter({ used, limit }: { used: number; limit: number }) {
+function UsageMeter({ used, limit, enforced }: { used: number; limit: number; enforced: boolean }) {
   const ratio = limit > 0 ? Math.min(1, used / limit) : 1;
   const pct = Math.round(ratio * 100);
-  const exhausted = limit > 0 && used >= limit;
-  const nearLimit = !exhausted && ratio >= 0.8;
+  const exhausted = enforced && limit > 0 && used >= limit;
+  const nearLimit = enforced && !exhausted && ratio >= 0.8;
 
   return (
     <div
@@ -120,9 +120,11 @@ export function PlanSettings() {
   const interval: "monthly" | "annual" =
     selectedInterval ?? (data?.plan.billing_interval === "annual" ? "annual" : "monthly");
 
+  const limitsEnforced = data?.limits_enforced ?? false;
   const creditLimit = data?.credits.limit ?? null;
   const creditExhausted = creditLimit !== null && (data?.credits.used ?? 0) >= creditLimit;
-  const creditNearLimit = !creditExhausted && creditLimit !== null && creditLimit > 0 && (data?.credits.used ?? 0) / creditLimit >= 0.8;
+  const creditNearLimit =
+    limitsEnforced && !creditExhausted && creditLimit !== null && creditLimit > 0 && (data?.credits.used ?? 0) / creditLimit >= 0.8;
 
   const itemLimit = data?.listed_items.limit ?? null;
   const itemExhausted = itemLimit !== null && (data?.listed_items.used ?? 0) >= itemLimit;
@@ -175,7 +177,14 @@ export function PlanSettings() {
                         : `${formatPriceCents(data.plan.monthly_price_cents)}/mo`}
                 </strong>
               }
-            />
+            >
+              {!data.plan.unlimited && !limitsEnforced && (
+                <SettingsNote>
+                  Usage is tracked for preview. Monthly Smart Credit and listing caps aren’t enforced yet, so your
+                  listings and AI tools keep working until self-serve upgrades are available.
+                </SettingsNote>
+              )}
+            </SettingsRow>
 
             <SettingsRow
               title="Smart Credits"
@@ -185,7 +194,7 @@ export function PlanSettings() {
                 <span
                   className={cn(
                     "text-sm font-medium tabular-nums",
-                    creditExhausted
+                    limitsEnforced && creditExhausted
                       ? "text-destructive-foreground"
                       : creditNearLimit
                         ? "text-warning-foreground"
@@ -198,11 +207,20 @@ export function PlanSettings() {
                 </span>
               }
             >
-              {creditLimit !== null && <UsageMeter used={data.credits.used} limit={creditLimit} />}
+              {creditLimit !== null && (
+                <UsageMeter used={data.credits.used} limit={creditLimit} enforced={limitsEnforced} />
+              )}
               <PlanBreakdown data={data} />
-              {creditExhausted && (
+              {creditExhausted && limitsEnforced && (
                 <SettingsNote tone="error">
                   Monthly Smart Credits are used up. Manual listing, editing, updates, and delisting still work.
+                </SettingsNote>
+              )}
+              {creditExhausted && !limitsEnforced && (
+                <SettingsNote>
+                  You’ve passed this plan’s {creditLimit.toLocaleString()}-credit monthly allowance (
+                  {data.credits.used.toLocaleString()} used). Caps aren’t enforced yet, so AI drafting and AI Studio
+                  continue working.
                 </SettingsNote>
               )}
             </SettingsRow>
@@ -219,7 +237,7 @@ export function PlanSettings() {
                 <span
                   className={cn(
                     "text-sm font-medium tabular-nums",
-                    itemExhausted ? "text-destructive-foreground" : "text-foreground",
+                    limitsEnforced && itemExhausted ? "text-destructive-foreground" : "text-foreground",
                   )}
                 >
                   {itemLimit === null
@@ -228,11 +246,19 @@ export function PlanSettings() {
                 </span>
               }
             >
-              {itemLimit !== null && <UsageMeter used={data.listed_items.used} limit={itemLimit} />}
-              {itemExhausted && (
+              {itemLimit !== null && (
+                <UsageMeter used={data.listed_items.used} limit={itemLimit} enforced={limitsEnforced} />
+              )}
+              {itemExhausted && limitsEnforced && (
                 <SettingsNote tone="error">
                   You’ve reached this month’s {itemLimit}-item Free limit. Upgrade to Lister ($14.99/mo) for unlimited
                   manual and bulk cross-listing.
+                </SettingsNote>
+              )}
+              {itemExhausted && !limitsEnforced && (
+                <SettingsNote>
+                  You’ve passed the {itemLimit}-item Free monthly threshold ({data.listed_items.used.toLocaleString()}{" "}
+                  listed). Listing caps aren’t enforced yet, so manual, bulk, and cross-listing continue working.
                 </SettingsNote>
               )}
             </SettingsRow>
@@ -293,6 +319,9 @@ export function PlanSettings() {
           <p className="px-3 py-3 text-xs text-muted-foreground sm:px-4">
             Every paid plan includes all 5 marketplaces, bulk cross-listing, auto-delist, auto-relist, MCP, and
             analytics. Unused Smart Credits reset on the 1st of each UTC month.
+            {!limitsEnforced
+              ? " Self-serve plan upgrades aren’t open yet; plan limits stay off until upgrades are available."
+              : ""}
           </p>
         </SettingsSection>
       )}

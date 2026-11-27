@@ -61,7 +61,7 @@ function renderWithSummary(summary: SubscriptionSummary): string {
   }
 }
 
-it("shows Smart Credits, Free item cap, credit rates, and available tiers", () => {
+it("shows Smart Credits, Free item cap, preview non-enforced note, credit rates, and available tiers", () => {
   const html = renderWithSummary({
     plan: {
       id: "free",
@@ -76,6 +76,7 @@ it("shows Smart Credits, Free item cap, credit rates, and available tiers", () =
     },
     period: "2026-11",
     resets_at: "2026-12-01T00:00:00Z",
+    limits_enforced: false,
     credits: {
       used: 12,
       limit: 50,
@@ -93,6 +94,7 @@ it("shows Smart Credits, Free item cap, credit rates, and available tiers", () =
   });
 
   expect(html).toContain("Plan &amp; Smart Credits");
+  expect(html).toContain("Usage is tracked for preview.");
   expect(html).toContain("12 / 50");
   expect(html).toContain("3 / 10");
   expect(html).toContain("2 AI listings (10 cr)");
@@ -101,9 +103,10 @@ it("shows Smart Credits, Free item cap, credit rates, and available tiers", () =
   expect(html).toContain("$14.99/mo");
   expect(html).toContain("$49.99/mo");
   expect(html).toContain("Current");
+  expect(html).toContain("Self-serve plan upgrades aren’t open yet; plan limits stay off until upgrades are available.");
 });
 
-it("explains when Smart Credits and Free item limits are exhausted while keeping manual work clear", () => {
+it("shows truthful non-blocking copy past thresholds while enforcement is off", () => {
   const html = renderWithSummary({
     plan: {
       id: "free",
@@ -118,6 +121,48 @@ it("explains when Smart Credits and Free item limits are exhausted while keeping
     },
     period: "2026-11",
     resets_at: "2026-12-01T00:00:00Z",
+    limits_enforced: false,
+    credits: {
+      used: 65,
+      limit: 50,
+      remaining: 0,
+      breakdown: {
+        ai_listing: { count: 13, credits: 65 },
+        photo_cutout: { count: 0, credits: 0 },
+        photo_studio: { count: 0, credits: 0 },
+        photo_refund: { count: 0, credits: 0 },
+      },
+    },
+    listed_items: { used: 14, limit: 10, remaining: 0 },
+    credit_weights: { ai_listing: 5, photo_cutout: 1, photo_studio: 5, manual_listing: 0 },
+    plans: PUBLIC_PLANS,
+  });
+
+  expect(html).toContain("65 / 50");
+  expect(html).toContain("14 / 10");
+  expect(html).toContain("Caps aren’t enforced yet, so AI drafting and AI Studio continue working.");
+  expect(html).toContain("Listing caps aren’t enforced yet, so manual, bulk, and cross-listing continue working.");
+  expect(html).not.toContain("Monthly Smart Credits are used up.");
+  expect(html).not.toContain("Upgrade to Lister ($14.99/mo)");
+  expect(html).not.toContain("bg-destructive");
+});
+
+it("explains when Smart Credits and Free item limits are exhausted once enforcement is active", () => {
+  const html = renderWithSummary({
+    plan: {
+      id: "free",
+      name: "Free",
+      tagline: "Try Anteroom with real listings",
+      monthly_price_cents: 0,
+      annual_price_cents: 0,
+      monthly_credits: 50,
+      monthly_listed_items: 10,
+      billing_interval: "monthly",
+      unlimited: false,
+    },
+    period: "2026-11",
+    resets_at: "2026-12-01T00:00:00Z",
+    limits_enforced: true,
     credits: {
       used: 50,
       limit: 50,
@@ -136,9 +181,10 @@ it("explains when Smart Credits and Free item limits are exhausted while keeping
 
   expect(html).toContain("Monthly Smart Credits are used up.");
   expect(html).toContain("10-item Free limit");
+  expect(html).not.toContain("Usage is tracked for preview.");
 });
 
-it("renders Unmetered status for internal Unlimited accounts", () => {
+it("renders Unmetered status for internal Unlimited accounts without cap preview notice", () => {
   const html = renderWithSummary({
     plan: {
       id: "unlimited",
@@ -153,6 +199,7 @@ it("renders Unmetered status for internal Unlimited accounts", () => {
     },
     period: "2026-11",
     resets_at: "2026-12-01T00:00:00Z",
+    limits_enforced: false,
     credits: {
       used: 240,
       limit: null,
@@ -172,4 +219,5 @@ it("renders Unmetered status for internal Unlimited accounts", () => {
   expect(html).toContain("Unmetered");
   expect(html).toContain("240 used · Unlimited");
   expect(html).toContain("42 · Unlimited");
+  expect(html).not.toContain("Usage is tracked for preview.");
 });

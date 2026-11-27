@@ -214,6 +214,33 @@ test('a changed Mercari form is reported as needing an update', async () => {
   assert.equal(result.safe_to_retry, true);
 });
 
+test('a single PersistedQueryNotFound from Mercari is sent once more and the draft is saved and read back', async () => {
+  const missed = new Set();
+  const once = op => (missed.has(op) ? null : (missed.add(op), reply(200, { errors: [{ message: 'PersistedQueryNotFound' }] })));
+  const { c, opsOf, initializes } = worker({ http: op => (op === 'addDraftItemMutation' || op === 'draftItemQuery' ? once(op) : null) });
+  const result = await c.runMercariNative(message());
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), { ok: true, state: 'draft', draft_url: 'https://www.mercari.com/sell/draft/m9AbC123/' });
+  assert.deepEqual(opsOf(), ['uploadDraftItemImageMutation', 'uploadDraftItemImageMutation',
+    'addDraftItemMutation', 'addDraftItemMutation', 'draftItemQuery', 'draftItemQuery']);
+  assert.equal(initializes.length, 1);
+});
+
+test('a PersistedQueryNotFound that repeats is sent only once more', async () => {
+  const { c, opsOf } = worker({ http: op => (op === 'addDraftItemMutation'
+    ? reply(200, { errors: [{ message: 'PersistedQueryNotFound' }] }) : null) });
+  const result = await c.runMercariNative(message());
+  assert.equal(result.error_code, 'schema_drift');
+  assert.equal(result.safe_to_retry, true);
+  assert.equal(opsOf().filter(op => op === 'addDraftItemMutation').length, 2);
+});
+
+test('a send-exactly-once Mercari request is not sent again after PersistedQueryNotFound', async () => {
+  const { c, opsOf } = worker({ respond: () => ({ errors: [{ message: 'PersistedQueryNotFound' }] }) });
+  await assert.rejects(c.mercariRequest(c.mercariOperation('listDraftItemMutation', { input: { draftItemId: 'm9AbC123' } }),
+    { deadline: Date.now() + 30000, resend: false }), error => error.code === 'schema_drift');
+  assert.deepEqual(opsOf(), ['listDraftItemMutation']);
+});
+
 test('Mercari prices are whole dollars, sent in cents', () => {
   const c = loadWorker();
   assert.equal(c.mercariPriceCents(24.6), 2500);

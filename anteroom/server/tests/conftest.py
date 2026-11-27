@@ -197,6 +197,17 @@ def _no_category_fills():
 
 
 @pytest.fixture(autouse=True)
+def _fresh_browser_relays():
+    """Each test starts with no hosted Chrome relays: a relay's wake-up Event belongs to the
+    event loop of the test that waited on it, and another test's loop can't wait on it."""
+    from anteroom.services import hosted_browser_relay
+
+    hosted_browser_relay._relays.clear()
+    yield
+    hosted_browser_relay._relays.clear()
+
+
+@pytest.fixture(autouse=True)
 def _fresh_business_context():
     """Each test reads its own shop, never the assistant's copy from the test before."""
     from anteroom.services.business_context import invalidate_business_context
