@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1289 — 2026-11-27
+
+- Mercari saves no longer fail with "Mercari changed its listing form" when Mercari briefly misses a request; Anteroom sends it once more.
+
 ## 0.1.1288 — 2026-11-27
 
 - Keep streaming chat replies pacing smoothly from the first chunk, even when frames paint slowly.
