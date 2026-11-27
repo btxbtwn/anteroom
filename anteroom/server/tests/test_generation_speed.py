@@ -60,6 +60,28 @@ class ListingPromptOrderTest(unittest.TestCase):
         self.assertIn("- etsy: Holiday", section)
         self.assertNotIn("Pattern", section)
 
+    def test_placeholder_title_is_not_shown_as_a_saved_title(self):
+        # Category analysis seeds "Draft listing" so the draft has a title to start from. A model
+        # that reads it as the seller's saved title keeps it instead of writing one.
+        from anteroom.services.generation_schema import seed_general_fields
+
+        listing_persistence.save_revision(
+            self.db, self.conv.id, seed_general_fields({"category_path": "Clothing > Tops"}), source="category_analysis",
+        )
+        content = chat_prompts.listing_generation_messages("R", "", "", self.db, self.conv.id)[0]["content"]
+        saved = content[content.index("Saved listing JSON"):].splitlines()[0]
+        self.assertNotIn("Draft listing", saved)
+        self.assertNotIn('"title"', saved)
+        self.assertIn("Always write a new title", content)
+
+    def test_real_title_is_still_shown_in_the_saved_listing(self):
+        listing_persistence.save_revision(
+            self.db, self.conv.id, {"category_path": "Clothing > Tops", "title": "Zara M Boho Blouse White"},
+            source="user_form",
+        )
+        content = chat_prompts.listing_generation_messages("R", "", "", self.db, self.conv.id)[0]["content"]
+        self.assertIn("Zara M Boho Blouse White", content[content.index("Saved listing JSON"):])
+
     def test_prompt_requires_general_color_options(self):
         rules = chat_prompts.load_skill_rules("navy tee", self.db)
         self.assertIn("MUST be an exact general color value", rules)

@@ -1,0 +1,1 @@
+- Listing generation now always writes a new title instead of sometimes leaving the starting "Draft listing" title.

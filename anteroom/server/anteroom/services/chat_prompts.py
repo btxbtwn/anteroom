@@ -56,7 +56,12 @@ def current_listing_prompt(db: Session, conv_id: str, *, include_native_forms: b
     revisions = ListingRepo(db).get_revisions(conv_id)
     if not revisions or not isinstance(revisions[0].listing_json, dict):
         return ""
+    from anteroom.services.generation_schema import PLACEHOLDER_TITLE
+
     listing = {key: value for key, value in revisions[0].listing_json.items() if key != "_native_forms"}
+    # The starting title is not the seller's: shown as a saved title, the model keeps it.
+    if str(listing.get("title") or "").strip() == PLACEHOLDER_TITLE:
+        del listing["title"]
     contracts = revisions[0].listing_json.get("_native_forms")
     from anteroom.services.native_contract import prompt
 
@@ -260,6 +265,7 @@ LISTING_INSTRUCTIONS = (
     "Use each native form's supplied paths, choices, types and limits. "
     "Preserve verified category selections and server-owned metadata. "
     "Unsupported fields remain blockers; do not invent facts or interview the seller. "
+    "Always write a new title that follows the title formula; never leave it out or reuse a saved one. "
     "Anteroom supplies saved package dimensions and inventory location. "
     "Generation saves a local draft only. Never publish or send without seller approval. "
     "For this application, return the JSON contract below, including for digital items.\n\n"
