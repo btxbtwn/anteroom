@@ -123,8 +123,10 @@ def test_form_refresh_timeout_is_local_to_its_tool_result(monkeypatch):
     draft = _new_draft(client, {
         "direct_category_ids": {"mercari": "275"}, "mercari_specifics": {"package": {"pounds": 1, "fitsShoebox": "yes"}},
     })
-    monkeypatch.setattr(mcp, "_MCP_RPC_TIMEOUT_SECONDS", 0.5)
-    monkeypatch.setattr(mcp, "_MCP_REPLY_MARGIN_SECONDS", 0.2)
+    # The form read gets 0.5 s (request minus margin). The request itself gets 10 s, so the
+    # tool's database step on a busy runner cannot reach the outer 504 first (#2283).
+    monkeypatch.setattr(mcp, "_MCP_RPC_TIMEOUT_SECONDS", 10.0)
+    monkeypatch.setattr(mcp, "_MCP_REPLY_MARGIN_SECONDS", 9.5)
     form, error = _call_tool(client, "get_marketplace_form", _refresh_args(draft, "mercari"))
     assert not error and form["available"] is False and form["reason"] == "timeout", form
     assert "Mercari" in form["message"]
@@ -325,8 +327,10 @@ def test_reload_marketplace_form_timeout_saves_nothing(monkeypatch, _reload_draf
         "direct_category_ids": {"mercari": "275"},
         "mercari_specifics": {"package": {"pounds": 1, "ounces": 0, "fitsShoebox": "yes"}},
     })
-    monkeypatch.setattr(mcp, "_MCP_RPC_TIMEOUT_SECONDS", 0.5)
-    monkeypatch.setattr(mcp, "_MCP_REPLY_MARGIN_SECONDS", 0.2)
+    # The form read gets 0.5 s (request minus margin). The request itself gets 10 s, so the
+    # tool's database step on a busy runner cannot reach the outer 504 first (#2283).
+    monkeypatch.setattr(mcp, "_MCP_RPC_TIMEOUT_SECONDS", 10.0)
+    monkeypatch.setattr(mcp, "_MCP_REPLY_MARGIN_SECONDS", 9.5)
     result, error = _call_tool(client, "reload_marketplace_form", {
         "conversation_id": draft["conversation_id"], "marketplace": "mercari", "expected_revision_id": draft["revision_id"],
     })
