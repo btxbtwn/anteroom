@@ -14,11 +14,22 @@ struct EditorDraft: Codable, Equatable {
     var baselineForm: ListingEditorModel.Form? = nil
     /// Which kept snapshot this current-work stash came from, if explicitly chosen.
     var recoveredCopySavedAt: Date? = nil
+    /// Kept before Weight (lb) existed, so the seller never edited pounds in it.
+    /// Recorded so the flag survives when the copy is written again for recovery.
+    var formLacksWeightLb = false
+
+    enum CodingKeys: String, CodingKey {
+        case listingID, revisionID, baselineInputs, form, pending, savedAt, baselineForm, recoveredCopySavedAt, formLacksWeightLb
+    }
+
+    private enum FormKeys: String, CodingKey { case weightLb }
 
     /// Also used after the seller explicitly chooses a conflicting kept copy.
     func recoveredForm(onto current: ListingEditorModel.Form) -> ListingEditorModel.Form {
         var recovered = form
         recovered.sellerInputs = form.sellerInputs.restoringNotesBaseline(from: current.sellerInputs)
+        // Pounds the kept copy never had stay as saved, so Save does not clear them.
+        if formLacksWeightLb { recovered.weightLb = current.weightLb }
         return recovered
     }
 
@@ -28,9 +39,27 @@ struct EditorDraft: Codable, Equatable {
         if current == nil {
             guard var baseline = baselineForm, let currentForm else { return false }
             baseline.sellerInputs = currentForm.sellerInputs
+            if formLacksWeightLb { baseline.weightLb = currentForm.weightLb }
             return baseline == currentForm
         }
         return true
+    }
+}
+
+extension EditorDraft {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        listingID = try values.decode(String.self, forKey: .listingID)
+        revisionID = try values.decodeIfPresent(String.self, forKey: .revisionID)
+        baselineInputs = try values.decode(SellerInputs.self, forKey: .baselineInputs)
+        form = try values.decode(ListingEditorModel.Form.self, forKey: .form)
+        pending = try values.decode([String: JSONValue].self, forKey: .pending)
+        savedAt = try values.decode(Date.self, forKey: .savedAt)
+        baselineForm = try values.decodeIfPresent(ListingEditorModel.Form.self, forKey: .baselineForm)
+        recoveredCopySavedAt = try values.decodeIfPresent(Date.self, forKey: .recoveredCopySavedAt)
+        let keptForm = try values.nestedContainer(keyedBy: FormKeys.self, forKey: .form)
+        formLacksWeightLb = try values.decodeIfPresent(Bool.self, forKey: .formLacksWeightLb)
+            ?? !keptForm.contains(.weightLb)
     }
 }
 

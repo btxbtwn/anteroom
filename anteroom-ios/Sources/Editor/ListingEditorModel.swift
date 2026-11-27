@@ -24,7 +24,7 @@ final class ListingEditorModel {
         init() {}
 
         /// Unsaved edits kept on the phone before Weight (lb) was added have no
-        /// `weightLb`; they still open, with pounds empty.
+        /// `weightLb`; they still open, and `EditorDraft` restores them with the saved pounds.
         init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
             sellerInputs = try values.decode(SellerInputs.self, forKey: .sellerInputs)

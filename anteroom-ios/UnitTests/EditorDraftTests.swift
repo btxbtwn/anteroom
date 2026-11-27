@@ -71,7 +71,26 @@ final class EditorDraftTests: XCTestCase {
         XCTAssertEqual(restored.form.fields.title, "Unsaved title")
         XCTAssertEqual(restored.form.sellerInputs.sku, "Unsaved SKU")
         XCTAssertEqual(restored.form.sellerInputs.size, "0")
-        XCTAssertEqual(restored.form.weightLb, "", "Kept before Weight (lb) existed: pounds open empty")
+        XCTAssertTrue(restored.formLacksWeightLb)
+        var current = ListingEditorModel.Form()
+        current.weightLb = "1"
+        XCTAssertEqual(restored.recoveredForm(onto: current).weightLb, "1",
+                       "Kept before Weight (lb) existed: the saved pounds stay, so Save does not clear them")
+        let rewritten = try JSONDecoder().decode(EditorDraft.self, from: JSONEncoder().encode(restored))
+        XCTAssertEqual(rewritten, restored, "Written again for recovery, it still keeps the saved pounds")
+        XCTAssertEqual(rewritten.recoveredForm(onto: current).weightLb, "1")
+    }
+
+    func testKeptPoundsEditsStillRestore() throws {
+        var kept = ListingEditorModel.Form()
+        kept.weightLb = ""
+        let draft = EditorDraft(listingID: "pounds", revisionID: "r1", baselineInputs: SellerInputs(),
+                                form: kept, pending: [:], savedAt: .now)
+        let decoded = try JSONDecoder().decode(EditorDraft.self, from: JSONEncoder().encode(draft))
+        XCTAssertFalse(decoded.formLacksWeightLb)
+        var current = ListingEditorModel.Form()
+        current.weightLb = "1"
+        XCTAssertEqual(decoded.recoveredForm(onto: current).weightLb, "", "Pounds the seller cleared stay cleared")
     }
 
     func testKeptPoundsSurviveTheRoundTrip() throws {
