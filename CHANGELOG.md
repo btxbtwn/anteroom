@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1286 — 2026-11-27
+
+- Hosted updates are less likely to be held up by a test of AI agent form reads that ran out of time on busy build machines.
+
 ## 0.1.1285 — 2026-11-27
 
 - Keep hosted Smart Credit and Free monthly listing caps in preview (non-enforced) mode while continuing to track usage until self-serve plan upgrades are available, with updated Settings → Usage copy.
