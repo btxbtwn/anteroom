@@ -48,6 +48,10 @@ class EvidencePin:
     attempt: int
     receipt_artifact_id: int
     receipt_digest: str
+    # Optional on archived schema 1 pins (e.g. 44662061597 / 45456408146).
+    # Required for schema 2 browser-regression recovery pins so untrusted
+    # receipts can never downgrade away from sandbox browser evidence.
+    browser_regression_blob: str | None = None
 
     def __post_init__(self):
         if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*', self.repository):
@@ -60,6 +64,8 @@ class EvidencePin:
             'workflow_blob', 'ci_blob',
         ):
             evidence.require_sha(getattr(self, name))
+        if self.browser_regression_blob is not None:
+            evidence.require_sha(self.browser_regression_blob)
         if not DIGEST.fullmatch(self.receipt_digest):
             raise ValueError('An explicit SHA-256 receipt archive digest is required.')
 
@@ -84,16 +90,24 @@ def expected_source(pin, git):
     span = git('rev-list', '--first-parent', '--reverse', pin.production_base+'..'+pin.target).splitlines()
     files = [p for p in git('diff', '--name-only', '--no-renames', '-z',
                             pin.production_base+'..'+pin.target).split('\0') if p]
-    return {'schema': 1, 'repository': pin.repository, 'target': pin.target, 'tree': pin.tree,
-            'production_base': pin.production_base, 'production_base_is_live_verified': False,
-            'historical_failure': pin.historical_failure, 'correcting_merge': pin.correcting_merge,
-            'span': span,
-            'native_changes': [p for p in files if p.startswith(('anteroom-ios/', 'contracts/'))
-                               or p == 'anteroom/server/anteroom/desktop.py'],
-            'migration_changes': [p for p in files if '/migrations/' in p],
-            'workflow': evidence.WORKFLOW, 'workflow_blob': pin.workflow_blob, 'ci_blob': pin.ci_blob,
-            'run_id': str(pin.run_id), 'attempt': str(pin.attempt), 'event': 'workflow_dispatch',
-            'deployment_authorized': False}
+    source = {'schema': 1, 'repository': pin.repository, 'target': pin.target, 'tree': pin.tree,
+              'production_base': pin.production_base, 'production_base_is_live_verified': False,
+              'historical_failure': pin.historical_failure, 'correcting_merge': pin.correcting_merge,
+              'span': span,
+              'native_changes': [p for p in files if p.startswith(('anteroom-ios/', 'contracts/'))
+                                 or p == 'anteroom/server/anteroom/desktop.py'],
+              'migration_changes': [p for p in files if '/migrations/' in p],
+              'workflow': evidence.WORKFLOW, 'workflow_blob': pin.workflow_blob, 'ci_blob': pin.ci_blob,
+              'run_id': str(pin.run_id), 'attempt': str(pin.attempt), 'event': 'workflow_dispatch',
+              'deployment_authorized': False}
+    if pin.browser_regression_blob is not None:
+        if (git('rev-parse', pin.target+':'+evidence.BROWSER_REGRESSION_FILE) != pin.browser_regression_blob
+                or git('rev-parse', pin.historical_failure+':'+evidence.BROWSER_REGRESSION_FILE) != pin.browser_regression_blob):
+            raise ValueError('Pinned browser regression test file does not match Git at target and historical failure.')
+        source['schema'] = 2
+        source['browser_regression_file'] = evidence.BROWSER_REGRESSION_FILE
+        source['browser_regression_blob'] = pin.browser_regression_blob
+    return source
 
 
 def validate_run(run, pin):
@@ -194,10 +208,12 @@ def verify(pin, fetch, download, git):
     for db in ('sqlite', 'postgres'):
         for group in (1, 2):
             names[f'verification-inventory-{db}-{group}-{suffix}'] = f'inventory-{db}-{group}.json'
+    if pin.browser_regression_blob is not None:
+        names[f'verification-browser-{suffix}'] = 'verification-browser.json'
     selected = [a for a in all_artifacts(fetch, pin.run_id) if a.get('name', '').startswith(
-        ('verification-receipt-', 'verification-source-', 'verification-inventory-'))]
+        ('verification-receipt-', 'verification-source-', 'verification-inventory-', 'verification-browser-'))]
     if len(selected) != len(names) or {a.get('name') for a in selected} != set(names):
-        raise ValueError('Exactly one receipt/source and all four exact-attempt inventory artifacts are required.')
+        raise ValueError('Exactly one receipt/source and all required exact-attempt inventory artifacts are required.')
     receipt_meta = next(a for a in selected if a['name'] == f'verification-receipt-{suffix}')
     if receipt_meta['id'] != pin.receipt_artifact_id or receipt_meta.get('digest') != pin.receipt_digest:
         raise ValueError('Unique pinned receipt artifact ID/digest mismatch.')
@@ -206,6 +222,11 @@ def verify(pin, fetch, download, git):
         raise ValueError('Source artifact does not match independently reconstructed target/base Git objects.')
     inventories = [payloads[name] for name in names if name.startswith('verification-inventory-')]
     summary = evidence.validate_inventory(inventories, source)
+    browser_summary = (
+        evidence.validate_browser_inventory(payloads[f'verification-browser-{suffix}'], source)
+        if pin.browser_regression_blob is not None
+        else None
+    )
     receipt = dict(payloads[f'verification-receipt-{suffix}'])
     reported_jobs = receipt.pop('jobs', [])
     if (not isinstance(reported_jobs, list)
@@ -214,14 +235,19 @@ def verify(pin, fetch, download, git):
     expected = {**source, 'backend_inventory': summary,
                 'scope': 'all Linux CI components; native validation remains separate',
                 'native_validation': 'not performed; separate native impact assessment and pinned receipts required'}
+    if browser_summary is not None:
+        expected['browser_inventory'] = browser_summary
     if canonical(receipt) != canonical(expected):
         raise ValueError('Receipt target/base, inventories or verification scope mismatch.')
     # A newer attempt started while archives were downloaded must invalidate this check.
     validate_run(fetch(f'actions/runs/{pin.run_id}'), pin)
-    return {**asdict(pin), 'backend_inventory': summary,
-            'native_changes': source['native_changes'], 'migration_changes': source['migration_changes'],
-            'deployment_authorized': False, 'runtime_authority': 'disabled',
-            'native_validation': 'not performed', 'live_reconciliation': 'not performed'}
+    report = {**asdict(pin), 'backend_inventory': summary,
+              'native_changes': source['native_changes'], 'migration_changes': source['migration_changes'],
+              'deployment_authorized': False, 'runtime_authority': 'disabled',
+              'native_validation': 'not performed', 'live_reconciliation': 'not performed'}
+    if browser_summary is not None:
+        report['browser_inventory'] = browser_summary
+    return report
 
 
 def read_command(command, limit=MAX_ARCHIVE):
@@ -255,7 +281,8 @@ def read_command(command, limit=MAX_ARCHIVE):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for field in EvidencePin.__dataclass_fields__:
-        parser.add_argument('--'+field.replace('_', '-'), required=True,
+        optional = field == 'browser_regression_blob'
+        parser.add_argument('--'+field.replace('_', '-'), required=not optional, default=None,
                             type=int if field.endswith('_id') or field == 'attempt' else str)
     pin = EvidencePin(**vars(parser.parse_args()))
     def fetch(path):

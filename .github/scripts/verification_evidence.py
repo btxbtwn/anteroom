@@ -4,22 +4,32 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
 import subprocess
 
 SHA = re.compile(r'[0-9a-f]{40}')
+HEX64 = re.compile(r'[0-9a-f]{64}')
 # Active pair for new Descendant verification (`prepare`) and Deploy hosted
 # eligibility. Archived receipts keep their own pair on EvidencePin
 # (historical_failure / correcting_merge); do not reuse these constants when
-# inspecting an older pin such as bbb4c8fc / d19adbff or b28ba4b3 / fa824f9a.
-# 99c3b700 (#2032) left two Alembic heads (with #2030); afc3c2db (#2045) joined
-# them. Collateral red pushes 08b97e99 and fb7d5c07 are listed in
-# wait-for-tested-code.HISTORICAL_RECOVERY_FAILURES.
-HISTORICAL = '99c3b7003d1d79cfc20cea283bebde7e54572081'
-CORRECTED = 'afc3c2dbde647b59203c0b761c8c0dfb2b697264'
+# inspecting older pins such as 99c3b700 / afc3c2db, d19adbff / 6d72c5e3, or
+# fa824f9a / 5cc7fea1.
+# cc22db3f (#2257) failed Studio browser tests (sandbox) on phone-webkit
+# e2e/chatStreaming.e2e.ts:158; 9c5df2f6 (#2291) fixed WebKit streaming pacing
+# without changing the e2e test assertion.
+HISTORICAL = 'cc22db3fae820d52c3e1b61af209e19221fa9502'
+CORRECTED = '9c5df2f6d655f46313ba7218036deca1a75bf0c4'
 REGRESSION = 'server/tests/test_hosted_assistant.py::test_shop_snapshot_survives_calculation_longer_than_the_idle_transaction_deadline'
+BROWSER_REGRESSION_PROJECT = 'phone-webkit'
+BROWSER_REGRESSION_FILE = 'anteroom/e2e/chatStreaming.e2e.ts'
+BROWSER_REGRESSION_TITLE = 'a reply delivered in large chunks is revealed word by word'
+BROWSER_REGRESSION_KEY = f'{BROWSER_REGRESSION_PROJECT}\0{BROWSER_REGRESSION_FILE}\0{BROWSER_REGRESSION_TITLE}'
+BROWSER_REGRESSION_BLOB = '0f040c3572c8c5a9c1e024c70be72dc11fcbc5f9'
+BROWSER_PROJECTS = ('desktop', 'phone', 'phone-webkit')
+BROWSER_OUTCOMES = ('passed', 'failed', 'skipped', 'timedOut')
 WORKFLOW = '.github/workflows/verify-corrected-descendant.yml'
 # Names are the real expanded reusable CI jobs, not merely its aggregate result.
 CHECKS = {'Changed components', 'Repo checks', 'Changelog', 'Studio frontend',
@@ -55,11 +65,17 @@ def prepare(target: str, production: str) -> dict:
         raise ValueError('Production base must precede target on main first-parent history.')
     for ancestor in (HISTORICAL, CORRECTED):
         git('merge-base', '--is-ancestor', ancestor, target)
+    browser_blob = require_sha(git('rev-parse', f'HEAD:{BROWSER_REGRESSION_FILE}'))
+    historical_browser_blob = require_sha(git('rev-parse', f'{HISTORICAL}:{BROWSER_REGRESSION_FILE}'))
+    if browser_blob != BROWSER_REGRESSION_BLOB or historical_browser_blob != BROWSER_REGRESSION_BLOB:
+        raise ValueError('Browser regression test file must remain unchanged from the historical failure.')
     files = [p for p in git('diff', '--name-only', '--no-renames', '-z', f'{production}..{target}').split('\0') if p]
-    return {'schema': 1, 'repository': os.environ['GITHUB_REPOSITORY'], 'target': target,
+    return {'schema': 2, 'repository': os.environ['GITHUB_REPOSITORY'], 'target': target,
             'tree': git('rev-parse', 'HEAD^{tree}'), 'production_base': production,
             'production_base_is_live_verified': False,
             'historical_failure': HISTORICAL, 'correcting_merge': CORRECTED,
+            'browser_regression_file': BROWSER_REGRESSION_FILE,
+            'browser_regression_blob': browser_blob,
             'span': git('rev-list', '--first-parent', '--reverse', f'{production}..{target}').splitlines(),
             'native_changes': [p for p in files if p.startswith(('anteroom-ios/', 'contracts/'))
                                or p == 'anteroom/server/anteroom/desktop.py'],
@@ -121,7 +137,7 @@ def validate_inventory(payloads: list[dict], manifest: dict) -> dict:
             for key in ('expected', 'selected', 'passed', 'skipped'):
                 values = p.get(key)
                 if not isinstance(values, list) or len(set(values)) != len(values) or any(
-                    not isinstance(v, str) or re.fullmatch('[0-9a-f]{64}', v) is None for v in values
+                    not isinstance(v, str) or HEX64.fullmatch(v) is None for v in values
                 ):
                     raise ValueError('Malformed or duplicate inventory identifiers.')
             selected, passed, skipped = (set(p[k]) for k in ('selected', 'passed', 'skipped'))
@@ -137,6 +153,114 @@ def validate_inventory(payloads: list[dict], manifest: dict) -> dict:
         summary[database] = {'collected': len(expected), 'passed': len(passed),
                              'skipped': len(expected - passed), 'inventory_sha256': digest('\n'.join(sorted(expected)))}
     return summary
+
+
+def validate_browser_inventory(payload: dict, manifest: dict) -> dict:
+    if not isinstance(payload, dict) or type(payload.get('schema')) is not int or payload['schema'] != 1:
+        raise ValueError('Invalid sandbox browser inventory schema.')
+    if any(payload.get(k) != manifest[k] for k in ('target', 'tree', 'ci_blob', 'run_id', 'attempt')):
+        raise ValueError('Sandbox browser inventory target/tree/ci_blob/run/attempt mismatch.')
+    if (payload.get('regression_file') != BROWSER_REGRESSION_FILE
+            or payload.get('regression_file_blob') != manifest.get('browser_regression_blob')
+            or payload.get('regression_file_blob') != BROWSER_REGRESSION_BLOB
+            or payload.get('regression_key_sha256') != digest(BROWSER_REGRESSION_KEY)):
+        raise ValueError('Sandbox browser regression binding mismatch.')
+    regression_case_id = payload.get('regression_case_id')
+    if not isinstance(regression_case_id, str) or HEX64.fullmatch(regression_case_id) is None:
+        raise ValueError('Invalid sandbox browser regression case identifier.')
+    full = payload.get('full')
+    cases = payload.get('cases')
+    if not isinstance(full, list) or not full or not isinstance(cases, list) or not cases:
+        raise ValueError('Sandbox browser full and executed inventories must be non-empty lists.')
+
+    full_map: dict[str, dict] = {}
+    for row in full:
+        if not isinstance(row, dict):
+            raise ValueError('Malformed sandbox browser collection entry.')
+        cid, file_id, project, expected = row.get('id'), row.get('file'), row.get('project'), row.get('expected')
+        if (not isinstance(cid, str) or HEX64.fullmatch(cid) is None
+                or not isinstance(file_id, str) or HEX64.fullmatch(file_id) is None
+                or project not in BROWSER_PROJECTS or expected not in ('passed', 'failed', 'skipped')
+                or cid in full_map):
+            raise ValueError('Invalid or duplicate sandbox browser collection entry.')
+        full_map[cid] = {'project': project, 'file': file_id, 'expected': expected}
+
+    cases_map: dict[str, dict] = {}
+    for row in cases:
+        if not isinstance(row, dict):
+            raise ValueError('Malformed sandbox browser executed entry.')
+        cid, file_id, project = row.get('id'), row.get('file'), row.get('project')
+        shard, expected, attempts = row.get('shard'), row.get('expected'), row.get('attempts')
+        if (not isinstance(cid, str) or HEX64.fullmatch(cid) is None
+                or not isinstance(file_id, str) or HEX64.fullmatch(file_id) is None
+                or project not in BROWSER_PROJECTS or type(shard) is not int or shard not in (1, 2)
+                or expected not in ('passed', 'failed', 'skipped')
+                or not isinstance(attempts, list) or not attempts or cid in cases_map):
+            raise ValueError('Invalid or duplicate sandbox browser executed entry.')
+        for idx, att in enumerate(attempts):
+            if not isinstance(att, dict):
+                raise ValueError('Malformed sandbox browser attempt entry.')
+            status, duration, retry = att.get('status'), att.get('duration'), att.get('retry')
+            if (status not in BROWSER_OUTCOMES
+                    or isinstance(duration, bool) or not isinstance(duration, (int, float))
+                    or not math.isfinite(duration) or duration < 0
+                    or type(retry) is not int or retry != idx):
+                raise ValueError('Invalid sandbox browser attempt record.')
+        if attempts[-1]['status'] != expected:
+            raise ValueError('Sandbox browser executed case terminal outcome does not match expected status.')
+        cases_map[cid] = {'project': project, 'file': file_id, 'shard': shard,
+                          'expected': expected, 'attempts': attempts}
+
+    if (any(not any(v['project'] == p for v in full_map.values()) for p in BROWSER_PROJECTS)
+            or set(full_map) != set(cases_map)):
+        raise ValueError('Sandbox browser shard union does not match full collection.')
+    for cid, executed in cases_map.items():
+        original = full_map[cid]
+        if (original['project'] != executed['project']
+                or original['file'] != executed['file']
+                or (original['expected'] != 'passed' and original['expected'] != executed['expected'])):
+            raise ValueError('Sandbox browser executed case differs from collected metadata.')
+
+    if regression_case_id not in cases_map:
+        raise ValueError(
+            'The historical phone-webkit chatStreaming regression must pass on first attempt without skip or retry.'
+        )
+    reg_full = full_map[regression_case_id]
+    reg_exec = cases_map[regression_case_id]
+    if (reg_full['project'] != BROWSER_REGRESSION_PROJECT
+            or reg_full['expected'] != 'passed'
+            or reg_exec['project'] != BROWSER_REGRESSION_PROJECT
+            or reg_exec['expected'] != 'passed'
+            or len(reg_exec['attempts']) != 1
+            or reg_exec['attempts'][0]['status'] != 'passed'
+            or reg_exec['attempts'][0]['retry'] != 0):
+        raise ValueError(
+            'The historical phone-webkit chatStreaming regression must pass on first attempt without skip or retry.'
+        )
+
+    projects_summary = {}
+    for project in BROWSER_PROJECTS:
+        rows = [c for c in cases_map.values() if c['project'] == project]
+        projects_summary[project] = {
+            'collected': len(rows),
+            'shard_counts': [sum(1 for c in rows if c['shard'] == s) for s in (1, 2)],
+            'passed': sum(1 for c in rows if c['expected'] == 'passed'),
+            'skipped': sum(1 for c in rows if c['expected'] == 'skipped'),
+            'expected_failures': sum(1 for c in rows if c['expected'] == 'failed'),
+            'retried': sum(1 for c in rows if len(c['attempts']) > 1),
+        }
+    return {
+        'projects': projects_summary,
+        'regression': {
+            'project': BROWSER_REGRESSION_PROJECT,
+            'file': BROWSER_REGRESSION_FILE,
+            'file_blob': manifest['browser_regression_blob'],
+            'key_sha256': digest(BROWSER_REGRESSION_KEY),
+            'shard': reg_exec['shard'],
+            'attempts': len(reg_exec['attempts']),
+            'passed': True,
+        },
+    }
 
 
 def validate_run(run: dict, manifest: dict) -> None:
@@ -155,6 +279,7 @@ def main() -> None:
     receipt = sub.add_parser('receipt')
     receipt.add_argument('--evidence', type=Path, required=True)
     receipt.add_argument('--inventories', type=Path, required=True)
+    receipt.add_argument('--browser', type=Path, required=True)
     args = parser.parse_args()
     if args.command == 'prepare':
         result = prepare(args.target, args.production_base)
@@ -171,6 +296,8 @@ def main() -> None:
         result['jobs'] = validate_jobs(all_jobs(fetch, result['run_id'], result['attempt']))
         payloads = [json.loads(p.read_text()) for p in sorted(args.inventories.glob('*.json'))]
         result['backend_inventory'] = validate_inventory(payloads, result)
+        browser_payload = json.loads(args.browser.read_text())
+        result['browser_inventory'] = validate_browser_inventory(browser_payload, result)
         result['scope'] = 'all Linux CI components; native validation remains separate'
         result['native_validation'] = 'not performed; separate native impact assessment and pinned receipts required'
         result['deployment_authorized'] = False

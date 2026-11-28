@@ -288,6 +288,8 @@ jobs:
       - name: Desktop and phone layouts (sandbox)
         if: matrix.suite.name == 'sandbox'
         timeout-minutes: 40
+        env:
+          VERIFICATION_BROWSER_INVENTORY_PATH: ${{ inputs.full_verification && format('{0}/verification-browser.json', runner.temp) || '' }}
         run: bash scripts/check-browser-shards.sh "$RUNNER_TEMP/sandbox-browser"
       - name: Desktop and phone layouts (hosted)
         if: matrix.suite.name == 'hosted'
@@ -301,6 +303,14 @@ jobs:
           path: ${{ runner.temp }}/sandbox-browser/evidence/profile.json
           if-no-files-found: error
           retention-days: 7
+      - name: Retain complete sandbox browser verification evidence
+        if: success() && inputs.full_verification && matrix.suite.name == 'sandbox'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verification-browser-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/verification-browser.json
+          if-no-files-found: error
+          retention-days: 30
       - name: Keep marketplace-session desktop and phone screenshots
         if: always() && matrix.suite.name == 'hosted'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -91,33 +91,43 @@ automatic branch-update workflow stays disabled.
 
 ## Corrected-descendant verification (evidence only)
 
-`verify-corrected-descendant.yml` is a new, manual **Descendant verification**
+`verify-corrected-descendant.yml` is a manual **Descendant verification**
 workflow. It calls the same CI jobs with `full_verification: true`: every
 Linux CI component runs, even for a release-only or narrowly selected target.
 Ordinary PR/push CI selection is unchanged. The opt-in pytest collector captures
 full collection before pytest-split and selected items afterward, hashes test
 IDs, and validates both shard unions against full collection for SQLite and
-Postgres. The historical assistant regression must actually pass on Postgres.
-Other declared skips/expected failures remain visible in the evidence.
+Postgres (requiring the historical Postgres assistant regression to pass).
+When `full_verification: true`, `Studio browser tests (sandbox)` also retains
+a 30-day `verification-browser-<run_id>-<attempt>` inventory that proves exact
+three-project (`desktop`, `phone`, `phone-webkit`) shard parity, binds the
+unchanged Git blob of `anteroom/e2e/chatStreaming.e2e.ts`
+(`0f040c3572c8c5a9c1e024c70be72dc11fcbc5f9`), and proves that `[phone-webkit] ›
+e2e/chatStreaming.e2e.ts:158` (`a reply delivered in large chunks is revealed
+word by word`) passed on its first attempt (`retry=0`, no skip or retry),
+without publishing raw test titles. Other declared skips/expected failures
+remain visible in the evidence.
 
 The operator must provide full `expected_target` and `production_base` SHAs.
-Target must equal the workflow event SHA and checkout, contain the historical
-failure and correcting merge #1653, and follow the base on main's first-parent
-line. Select a main ref resolving to that exact SHA; moving main causes a
-mismatch and failure, not an implicit update to a newer target. This workflow
-must first be present on the default branch before GitHub permits its initial
-manual dispatch. Do not merge this PR merely to obtain a verification run:
-merging is a release and requires separate authorization.
+Target must equal the workflow event SHA and checkout, contain the active
+historical failure (`cc22db3fae820d52c3e1b61af209e19221fa9502`, PR `#2257`) and
+correcting merge (`9c5df2f6d655f46313ba7218036deca1a75bf0c4`, PR `#2291`), keep
+`anteroom/e2e/chatStreaming.e2e.ts` byte-identical to the failed commit, and
+follow the base on `main`'s first-parent line. Select a `main` ref resolving to
+that exact SHA; moving `main` causes a mismatch and failure, not an implicit
+update to a newer target.
 
 Artifacts retained for 30 days bind repository, target/tree, declared production
-base, workflow/CI blobs, run/attempt, actual expanded GitHub jobs and backend
-shard inventories. API job pagination must be complete; skips, failed or
-cancelled jobs, missing shards, mismatched run attempts and a skipped historical
-regression fail closed. Archive the run and immutable artifact IDs/digests when
-using the evidence in a later review; expired/missing artifacts cannot serve as
-verification. The receipt is generated while its evidence job is still running,
-so future users must also confirm the **whole workflow's final success** via
-GitHub rather than treat the existence of a receipt as success.
+base, workflow/CI blobs, unchanged browser regression test blob, run/attempt,
+actual expanded GitHub jobs, backend shard inventories, and the sandbox browser
+verification inventory. API job pagination must be complete; skips, failed or
+cancelled jobs, missing shards, mismatched run attempts, an altered browser
+test file, and a skipped or retried historical regression fail closed. Archive the run and
+immutable artifact IDs/digests when using the evidence in a later review;
+expired/missing artifacts cannot serve as verification. The receipt is generated
+while its evidence job is still running, so future users must also confirm the
+**whole workflow's final success** via GitHub rather than treat the existence of
+a receipt as success.
 
 This is **Linux verification evidence, not a deployment approval/checkpoint**.
 The production base is supplied for the reviewed span, not independently
@@ -153,8 +163,8 @@ publish successful inventories. These fixtures do not access app or seller data.
 `.github/scripts/recovery_evidence.py` itself remains a read-only receipt
 validator (`deployment_authorized: false`, `require_runtime_authority` still
 disabled). For how `Deploy hosted` consumes a pinned Descendant verification
-receipt (see the active `#2053` retarget below; the spent `bbb4c8fc` /
-`a1a55df0` pin for `d19adbff` is removed), see
+receipt (see the `#2257`/`#2291` retarget below; the spent `23f8ab01` /
+`0.1.1211` pin for `99c3b700` is cleared to `None`), see
 [Hosted deploy gate recovery checkpoint](#hosted-deploy-gate-recovery-checkpoint)
 below. When invoked standalone, `recovery_evidence.py` fetches GitHub metadata
 and artifact archives through bounded GET-only `gh api` calls and reads local
@@ -166,16 +176,22 @@ alternate transport or retry. Run from a complete repo with an already refreshed
 
 Every binding is mandatory: repository name/ID, trusted verification workflow
 ID, original target/tree, production base, workflow/CI blobs, verification
-run/attempt, unique receipt artifact ID and archive SHA-256 digest. The checker
-requires both the latest run and pinned attempt to be finally successful,
-reconstructs source coverage from the original target's Git objects, validates
-all exact-attempt jobs, downloads all six evidence artifacts, checks each
-archive's provenance/digest and bounded single-file structure, recomputes both
-database shard unions and requires the historical Postgres regression to pass.
-It compares the receipt with those independent observations and rechecks the
-latest run after downloads. Missing/expired artifacts, unknown extra evidence
-artifacts, incomplete pagination, later reruns, wrong IDs/blobs/trees or altered
-receipt/archives fail closed. Unrelated screenshot/report artifacts are ignored.
+run/attempt, unique receipt artifact ID and archive SHA-256 digest, plus
+`--browser-regression-blob` for schema-2 browser-regression receipts (optional
+when inspecting archived schema-1 receipts). The checker requires both the
+latest run and pinned attempt to be finally successful, reconstructs source
+coverage from the original target's Git objects, validates all exact-attempt
+jobs, downloads all evidence artifacts (six for archived schema-1 receipts,
+seven including `verification-browser-<run_id>-<attempt>` for schema-2
+receipts), checks each archive's provenance/digest and bounded single-file
+structure, recomputes both database shard unions (requiring the historical
+Postgres regression to pass), and for schema-2 pins recomputes the 3-project
+sandbox browser shard union and requires the unchanged `phone-webkit`
+`chatStreaming.e2e.ts` regression test to pass on its first attempt (`retry=0`). It compares the receipt with
+those independent observations and rechecks the latest run after downloads.
+Missing/expired artifacts, unknown extra evidence artifacts, incomplete
+pagination, later reruns, wrong IDs/blobs/trees or altered receipt/archives
+fail closed. Unrelated screenshot/report artifacts are ignored.
 
 The exact green receipt observed November 20 is run `44662061597`, attempt 1,
 artifact `14596571781`, digest
@@ -185,7 +201,7 @@ It covers only target `b28ba4b361071373731b93bc49c12b4bf78326e9`, tree
 `b73c534707b9ef9bd70e4dc589b9c4b10863a852`. The docs-only #1659 merge
 `644fa65095840f5662fa606baa68bf19ac1eceba` is a different SHA/tree and cannot
 use that receipt as its own verification. No later main is selected implicitly.
-Pins for a read-only inspection of that evidence are:
+Pins for a read-only inspection of that archived schema-1 evidence are:
 
 ```bash
 python3 .github/scripts/recovery_evidence.py \
@@ -204,8 +220,8 @@ python3 .github/scripts/recovery_evidence.py \
 
 The pin carries its own `historical_failure` / `correcting_merge` pair (here the
 spent `fa824f9a` / `#1653` pair). Module-level `verification_evidence.HISTORICAL`
-/ `CORRECTED` name the next recovery (`99c3b700` / `afc3c2db`) and must not
-replace the archived pair when inspecting this receipt.
+/ `CORRECTED` name the next recovery (`cc22db3f` / `9c5df2f6`) and must not
+replace the archived pair when inspecting an older receipt.
 
 A successful standalone inspection explicitly returns `deployment_authorized: false`,
 `runtime_authority: disabled` and `live_reconciliation: not performed`. On its
@@ -227,54 +243,55 @@ repository.
 
 ## Hosted deploy gate recovery checkpoint
 
-For [#2053](https://github.com/btxbtwn/anteroom/issues/2053), nine push CI runs
-blocked deployments from production `0.1.1211` (`23f8ab01`). They failed across
-three periods when main had two Alembic heads.
+Push CI run `46036588227` on [#2257](https://github.com/btxbtwn/anteroom/pull/2257)
+(`cc22db3fae820d52c3e1b61af209e19221fa9502`) failed `Studio browser tests
+(sandbox)` on `[phone-webkit] › e2e/chatStreaming.e2e.ts:158:1` (`a reply
+delivered in large chunks is revealed word by word`), blocking deployments past
+production `0.1.1286` (`2334fe2f33b97ff6a9ec8aba6e256d71c86743c9`).
+[#2291](https://github.com/btxbtwn/anteroom/pull/2291)
+(`9c5df2f6d655f46313ba7218036deca1a75bf0c4`) fixed WebKit streaming pacing
+without changing `anteroom/e2e/chatStreaming.e2e.ts` (Git blob
+`0f040c3572c8c5a9c1e024c70be72dc11fcbc5f9`).
 
-| Failed push commits | Migration repair |
-| --- | --- |
-| `99c3b700`, `08b97e99`, `fb7d5c07` | [#2045](https://github.com/btxbtwn/anteroom/pull/2045) (`afc3c2db`) |
-| `1e3756a0`, `7d9b5161`, `55c4ceaf`, `8e9a0880`, `8265f86e` | [#2059](https://github.com/btxbtwn/anteroom/pull/2059) (`f9319bf9`) |
-| `ab40d2ef` | [#2065](https://github.com/btxbtwn/anteroom/pull/2065) (`684c73b7`) |
+`HISTORICAL_RECOVERY_CHECKPOINT` in `.github/scripts/wait-for-tested-code.py`
+is cleared to `None` (the spent `23f8ab01` / `0.1.1211` pin is removed), so
+`cc22db3f` continues to fail closed until a real passing schema-2 **Descendant
+verification** receipt is produced and separately pinned in a follow-up PR.
+Once pinned, recovery requires all of the following inside `Deploy hosted`'s
+serialized `deploy-hosted` concurrency group:
 
-The pinned [Descendant verification run](https://github.com/btxbtwn/anteroom/actions/runs/45456408146)
-passed on `7d6331d2` (0.1.1227). Its attempt 1 receipt (artifact `14951178773`)
-identifies the original `99c3b700` / `afc3c2db` pair and covers the full source
-range from production through `7d6331d2`. The deploy gate requires that target
-to follow the final migration repair, `684c73b7`.
-Recovery requires all of the following inside `Deploy hosted`'s serialized
-`deploy-hosted` concurrency group.
-
-- Recorded `production_commit` equals `23f8ab0110c1ef359949462996c321acdbc92c49`,
+- Recorded `production_commit` equals `2334fe2f33b97ff6a9ec8aba6e256d71c86743c9`,
   corroborated by HTTPS `HEALTH_URL` reporting `status: ok`,
-  `service: anteroom-hosted`, and version `0.1.1211`.
-- The nine commits above are eligible for supersession when their push CI
-  conclusion is `failure`. All must precede `684c73b7` and the exact verified
-  checkpoint on `origin/main` first-parent history at or before the target
-  `HEAD`.
+  `service: anteroom-hosted`, and version `0.1.1286`.
+- Only `cc22db3fae820d52c3e1b61af209e19221fa9502` is eligible for supersession
+  when its push CI conclusion is `failure`, and it must precede `9c5df2f6` and
+  the exact verified schema-2 checkpoint (binding unchanged
+  `anteroom/e2e/chatStreaming.e2e.ts` blob
+  `0f040c3572c8c5a9c1e024c70be72dc11fcbc5f9` and proving the `phone-webkit`
+  regression passed on its first attempt without skip or retry) on `origin/main` first-parent history at or before `HEAD`.
 - Every other non-release commit in `production..HEAD` — including every commit
   merged after the checkpoint — passes its own push `CI` first; the receipt is
   never applied to any other SHA.
 - Before any build push, migration, category-tree write, or Fly rollout,
   `Reconcile live production base for recovery` (`--reconcile-live-base`)
-  re-verifies that recorded `production_commit` is still `23f8ab01`, live
-  `HEALTH_URL` still reports `0.1.1211`, **both** Fly `app` (web) and `worker`
-  Machines are `started` on exact image tag `v0.1.1211-23f8ab01` and digest
-  `sha256:22df137ee877807504d7223d6aff53e8cee6777cf2ddfd70838a14a822641591`, and
+  re-verifies that recorded `production_commit` is still `2334fe2f`, live
+  `HEALTH_URL` still reports `0.1.1286`, **both** Fly `app` (web) and `worker`
+  Machines are `started` on exact image tag `v0.1.1286-2334fe2f` and digest
+  `sha256:169925b25de2919256f7bb23e7dec2495b727daecb6b60417929cb69de4d241c`, and
   the live Postgres Alembic revision (`python -m alembic current` over
-  `verify-full` TLS) is still `e3b7a1c9d402`.
+  `verify-full` TLS) is still `f1b4c8d2e930`.
 - Workflow permissions remain unchanged (`contents: read`, `actions: read`,
   `checks: read`); no new environments, rulesets, or tokens are added.
 
-Once a deploy mutates the database past `e3b7a1c9d402`, moves either
-Fly `app` or `worker` Machine off `v0.1.1211-23f8ab01`, or records a newer
+Once a deploy mutates the database past `f1b4c8d2e930`, moves either
+Fly `app` or `worker` Machine off `v0.1.1286-2334fe2f`, or records a newer
 `Deployed commit` notice, the pinned checkpoint fails closed on any subsequent
 run and cannot be reused against partially mutated state. Post-rollout,
 `Confirm every Machine runs the new image` passes `--require-group app
 --require-group worker` to `check-fly-machines.py`, so both web and worker
 Machines must be `started` on the new image before `Deployed commit` is
 recorded. Remove `HISTORICAL_RECOVERY_CHECKPOINT` in a cleanup PR once
-production is verified past `23f8ab01`. The offline gate-recovery tests live in
+production is verified past `2334fe2f`. The offline gate-recovery tests live in
 `.github/scripts/test_wait_for_tested_code.py` and run in `Repo checks`.
 
 ## CI timing and coverage
