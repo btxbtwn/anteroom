@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from anteroom.repositories import hosted_drafts as drafts
 from anteroom.services.hosted_database import get_seller_db
 from anteroom.services.hosted_fields import DraftFields
+from anteroom.services.listing_quality import record_revision
 
 router = APIRouter(prefix='/api/drafts')
 
@@ -70,7 +71,12 @@ def get_draft(draft_id: str, db=Depends(get_seller_db, scope="function")):
 def save_draft(draft_id: str, body: DraftSave, db=Depends(get_seller_db, scope="function")):
     if drafts.get(db, draft_id) is None:
         raise HTTPException(404, 'Draft not found')
-    draft = drafts.save(db, draft_id, body.title, body.notes, body.expected_updated_at, body.fields)
-    if draft is None:
+    saved = drafts.save(db, draft_id, body.title, body.notes, body.expected_updated_at, body.fields)
+    if saved is None:
         raise HTTPException(409, 'This draft changed on another device. Reload it before saving again.')
-    return detail(db, draft)
+    draft, previous, revision = saved
+    if revision is not None:
+        record_revision(db, previous, revision)
+    result = detail(db, draft)
+    db.commit()
+    return result

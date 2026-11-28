@@ -43,6 +43,7 @@ def save(db, draft_id, title, notes, expected_updated_at, fields=None):
     if result.rowcount != 1:
         db.rollback()
         return None
+    previous = revision = None
     if fields is not None:
         listing = db.get(Listing, draft_id)
         previous = current_fields_revision(db, draft_id)
@@ -61,8 +62,7 @@ def save(db, draft_id, title, notes, expected_updated_at, fields=None):
         listing.current_revision_id = revision.id
         listing.validation_status = None
         listing.validation_errors = None
-    db.commit()
-    return get(db, draft_id)
+    return get(db, draft_id), previous, revision
 
 
 def current_fields_revision(db, draft_id):

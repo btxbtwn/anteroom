@@ -1,0 +1,1 @@
+- Choose whether Anteroom may count which generated fields you change, in Settings → Listings → Help improve listings on the web. It stays off unless you turn it on, never records your photos, listing text, chats or the values you enter, and turning it off deletes the counts.

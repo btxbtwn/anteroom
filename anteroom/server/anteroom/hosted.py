@@ -707,6 +707,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(account_router)
     from anteroom.routes.operator_usage import router as operator_usage_router
     app.include_router(operator_usage_router)
+    from anteroom.routes.hosted_listing_quality import router as listing_quality_router
+    app.include_router(listing_quality_router)
     from anteroom.routes.subscriptions import operator_router as operator_plans_router, router as subscriptions_router
     app.include_router(subscriptions_router)
     app.include_router(operator_plans_router)

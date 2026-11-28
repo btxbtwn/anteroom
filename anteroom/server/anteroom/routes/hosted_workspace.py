@@ -23,7 +23,7 @@ from anteroom.routes import api_contract as contract
 from anteroom.routes.api_contract import CONFLICT, NOT_FOUND, REFUSED
 from anteroom.routes.hosted_direct_listing import ACTION_MARKETPLACES
 from anteroom.routes.suggestions import SuggestionsResponse
-from anteroom.services import generation_feedback, user_settings
+from anteroom.services import generation_feedback, listing_quality, user_settings
 from anteroom.services.hosted_database import get_seller_db, in_seller_session
 from anteroom.services.hosted_limits import bounded_route_class
 from anteroom.services.hosted_listing_contract import editable_listing, stored_listing_fields
@@ -371,6 +371,10 @@ def get_listing(identity: str, db=Depends(get_seller_db, scope="function")):
 
 @router.put('/conversations/{identity}/listing', response_model=contract.ListingSaveResult, responses={**NOT_FOUND, **CONFLICT})
 def save_listing(identity: str, body: contract.ListingSave, db=Depends(get_seller_db, scope="function")):
+    return _save_listing(identity, body, db)
+
+
+def _save_listing(identity: str, body: contract.ListingSave, db, *, restore: bool = False):
     import copy
     payload = copy.deepcopy(editable_listing(body.listing))
     conv = conversation(db, identity, lock=True)
@@ -419,6 +423,7 @@ def save_listing(identity: str, body: contract.ListingSave, db=Depends(get_selle
         stored['title'] = title or ''
     validation = validate_listing(copy.deepcopy(stored), photo_count, require_photos=True)
     revision_id = revision.id
+    listing_quality.record_revision(db, before, revision, seller_input=body.listing, restore=restore)
     db.commit()
     return {'ok': True, 'revision_id': revision_id, 'listing': stored,
             'validation': {'valid': not validation.errors, 'can_send': validation.can_send,
@@ -699,7 +704,8 @@ class RestoreInput(BaseModel):
 @router.post('/conversations/{identity}/revisions/{revision_id}/restore')
 def restore_revision(identity: str, revision_id: str, body: RestoreInput, db=Depends(get_seller_db, scope="function")):
     earlier = get_revision(identity, revision_id, db)
-    result = save_listing(identity, contract.ListingSave(listing=earlier['listing'], expected_revision_id=body.expected_revision_id), db)
+    result = _save_listing(identity, contract.ListingSave(listing=earlier['listing'], expected_revision_id=body.expected_revision_id),
+                           db, restore=True)
     return {'ok': True, 'revision_id': result['revision_id']}
 
 

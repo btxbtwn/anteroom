@@ -28,7 +28,7 @@ SKIPPED_TABLES = frozenset({
     'background_tasks', 'background_task_events', 'user_secret_references',
     'cloud_marketplace_sessions', 'cloud_session_audit', 'cloud_operation_journals', 'marketplace_sign_ins',
     'mcp_access_tokens', 'mcp_oauth_connections', 'mcp_feedback', 'mcp_photo_uploads',
-    'listing_videos', 'photo_fingerprints',
+    'listing_videos', 'photo_fingerprints', 'listing_quality_attempts',
     'plaid_connections', 'plaid_transactions',
     'seller_plans', 'plan_usage_events',
 })
@@ -68,6 +68,11 @@ def _value(column, value: Any) -> Any:
 
 
 def _row(table: Table, raw: dict, user_id: str) -> dict:
+    if table.name == 'user_preferences':
+        from anteroom.services.listing_quality import CONSENT
+
+        if raw.get('key') == CONSENT:
+            raise HTTPException(422, 'Choose listing quality sharing in account settings')
     unknown = set(raw) - set(table.c.keys())
     if unknown:
         # A newer Mac build than this server: refuse rather than drop fields.

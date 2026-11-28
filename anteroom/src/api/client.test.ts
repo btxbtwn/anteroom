@@ -698,3 +698,21 @@ describe("API path segment encoding", () => {
   });
 });
 
+
+describe("Listing quality consent", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("reads and saves the seller's choice at /api/listing-quality/consent", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ enabled: false })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ enabled: true })));
+    vi.stubGlobal("fetch", fetch);
+    await expect(api.settings.listingQualityConsent()).resolves.toEqual({ enabled: false });
+    await expect(api.settings.setListingQualityConsent(true)).resolves.toEqual({ enabled: true });
+    expect(fetch.mock.calls[0][0]).toBe("/api/listing-quality/consent");
+    expect(fetch.mock.calls[0][1]?.method ?? "GET").toBe("GET");
+    expect(fetch.mock.calls[1][0]).toBe("/api/listing-quality/consent");
+    expect(fetch.mock.calls[1][1]).toMatchObject({ method: "PUT" });
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ enabled: true });
+  });
+});

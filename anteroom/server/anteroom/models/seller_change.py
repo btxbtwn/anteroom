@@ -94,6 +94,7 @@ TOPIC_BY_TABLE: dict[str, str | None] = {
     "field_registry": None,
     "generation_timings": None,
     "api_usage_events": None,
+    "listing_quality_attempts": None,
     "seller_plans": "settings",
     "plan_usage_events": None,
     "listing_corrections": None,
