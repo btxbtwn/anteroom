@@ -1,4 +1,4 @@
-# Browser CI comparison — initial evidence
+# Browser CI comparison — completed bounded trial
 
 Tracks #2348; one-active-job coordination follows #2349. This investigation
 does not change required checks, deployment, production settings, or CI reuse.
@@ -74,6 +74,74 @@ time. They do not establish a performance or cost benefit.
    sequentially before drawing median/p95 conclusions. Four historical samples
    do not establish a reliable p95 or an empirical before/after comparison.
 
-This initial investigation is complete; the live three-runner pilot has not
-run. No active workflow has been changed, no further PR is armed, and this
-experiment is not a staging gate for the existing PR backlog.
+## Trial result and decision
+
+**Recommend the three-project topology as the next reviewed CI optimization.**
+The bounded experiment demonstrated a shorter wait at a higher runner cost.
+It does not authorize reusing results or changing required CI in this branch.
+
+[Trial run 46165858577](https://github.com/btxbtwn/anteroom/actions/runs/46165858577)
+passed at wrapper commit `d41138adcdfd24582e98dcefbc8e035113364ff5`.
+Its three independent runners checked out the exact latest baseline source,
+`7f81013122e8e50636c3d3e516757536408e2dcc`, rather than testing the wrapper's
+application code. SHA, tree, original CI workflow blob, both lock hashes,
+Playwright 1.65.1, Node v22.23.5, x64 architecture and runner image
+`ubuntu26 / 20261122.9.1` matched the baseline and every project artifact.
+Job logs also confirm Python 3.12.16 on the baseline and all three trial jobs.
+
+| Observed metric | Baseline 46147855712 | Trial 46165858577 |
+| --- | ---: | ---: |
+| Elapsed, event creation to complete sandbox evidence | 21m22s | 10m59s |
+| Total runner time, including trial evidence job | 21m10s | 28m47s |
+| Runner queue | 2s | 1s per project; 2s for evidence job |
+| Setup before browser execution | 129s | 70–77s per project |
+| Browser execution, critical path | 1130s | 556s |
+| Upload/cleanup after execution | 11s | 4–8s per project |
+
+Baseline elapsed includes 10s of prerequisite work before the browser job was
+created. Trial elapsed includes project scheduling, all setup, execution,
+uploads/cleanup and final aggregate evidence validation. Baseline excludes
+unrelated CI jobs finishing later; this compares the sandbox browser path,
+not the whole CI or hosted deployment. Trial evidence validation used another
+14 runner seconds. These are observed job minutes, not invoiced rounded minutes.
+
+The observed elapsed reduction is 10m23s (48.6%), with 7m37s (36.0%) more
+runner time. Setup was also faster, so not all of the elapsed difference can
+be attributed to topology. This is one historical baseline and one trial;
+it does not establish median/p95, repeatability or a causal benchmark.
+No runner hardware benchmark was available for the original baseline.
+
+### Coverage and retained diagnostics
+
+- The source validator verified the exact full inventory against the union of
+  the three executed project inventories: 120 cases each, 360 total, with no
+  omissions or duplicates. Each project's unfiltered full inventory also
+  matched the other two exactly within this run's common identity namespace.
+- Outcomes match the baseline: desktop has 5 expected skips, phone and
+  phone-webkit have 17 each; the other 321 cases passed. All projects had zero
+  retries and no expected failures. Skips were retained, not counted as passes.
+- Downloaded and checked all seven artifact ZIPs for integrity: three evidence
+  bundles, three HTML report bundles and the aggregate receipt. Each HTML
+  report contains `index.html`; the bundles contain 125 desktop, 126 phone and
+  127 phone-webkit PNG entries. There were no trace ZIPs because no failure
+  or retry occurred; the existing retain-on-failure setting remains intact.
+- Reproduced the GitHub receipt locally from the downloaded inventories using
+  the pinned source's validator; the result exactly matched the published
+  receipt. Targeted validator/safety tests passed (19 tests), and actionlint
+  and JavaScript syntax checks passed. Actual local Playwright enumeration
+  separately proved the three project selections partition the 360 cases.
+
+### Scope and disposition
+
+Only this experiment ran; no second heavy suite, rerun, PR, merge or auto-merge
+was started. The trial workflow is branch-only, separately named, read-only,
+has fixed job/test timeouts, and references no production environment or
+secrets. It uses ordinary existing GitHub-hosted runners, with no billing or
+runner provisioning change. Required CI, release gates, hosted coverage and
+production settings remain unchanged. This trial cannot supply release evidence.
+
+The experiment is complete and no heavy workflow remains active. A future
+reviewed adoption should preserve the three-project exact-union gate,
+per-project retries/annotations/reports and the existing hosted suite, and
+accept the measured cost tradeoff explicitly. This work is not a staging gate
+for the existing PR backlog.
