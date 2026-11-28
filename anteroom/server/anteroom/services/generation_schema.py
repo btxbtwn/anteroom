@@ -12,6 +12,8 @@ from anteroom.services import listing_persistence
 from anteroom.services.vendoo_import import parse_notes
 
 DEFAULT_CONDITION = "Good"
+# The title a draft starts with until generation writes one.
+PLACEHOLDER_TITLE = "Draft listing"
 # What the saved category was chosen from: a retry with the same photo reading
 # and Item Details (so the same department and category override) keeps it.
 CATEGORY_INPUTS_KEY = "_category_inputs"
@@ -31,7 +33,7 @@ def seed_general_fields(snapshot: dict, notes: str | None = None) -> dict:
         condition = str(parsed.get("condition") or "").strip() or DEFAULT_CONDITION
         out["condition"] = condition
     if not str(out.get("title") or "").strip():
-        out["title"] = "Draft listing"
+        out["title"] = PLACEHOLDER_TITLE
     if not str(out.get("zipCode") or out.get("zip_code") or "").strip():
         from anteroom.services.user_settings import get_ebay_inventory_location
 
