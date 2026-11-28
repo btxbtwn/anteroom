@@ -296,6 +296,7 @@ jobs:
         run: npm run e2e:hosted
       - name: Upload verified sandbox browser profile
         if: matrix.suite.name == 'sandbox'
+        timeout-minutes: 10
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -305,6 +306,7 @@ jobs:
           retention-days: 7
       - name: Retain complete sandbox browser verification evidence
         if: success() && inputs.full_verification && matrix.suite.name == 'sandbox'
+        timeout-minutes: 10
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: verification-browser-${{ github.run_id }}-${{ github.run_attempt }}
@@ -313,6 +315,7 @@ jobs:
           retention-days: 30
       - name: Keep marketplace-session desktop and phone screenshots
         if: always() && matrix.suite.name == 'hosted'
+        timeout-minutes: 10
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hosted-marketplace-sessions-screenshots
@@ -321,6 +324,7 @@ jobs:
           retention-days: 7
       - name: Keep the report, screenshots and traces
         if: always()
+        timeout-minutes: 10
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: studio-browser-report-${{ matrix.suite.name }}
@@ -419,6 +423,7 @@ jobs:
 
       - name: Retain complete backend collection evidence
         if: success() && inputs.full_verification
+        timeout-minutes: 10
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: verification-inventory-sqlite-${{ matrix.group }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -524,6 +529,7 @@ jobs:
       # separate from the checked-in scheduling input.
       - name: Keep successful Postgres shard duration observations
         if: success() && steps.postgres-tests.outcome == 'success'
+        timeout-minutes: 10
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pg-duration-observations-${{ github.run_id }}-${{ matrix.group }}
@@ -536,6 +542,7 @@ jobs:
 
       - name: Retain complete backend collection evidence
         if: success() && inputs.full_verification
+        timeout-minutes: 10
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: verification-inventory-postgres-${{ matrix.group }}-${{ github.run_id }}-${{ github.run_attempt }}
