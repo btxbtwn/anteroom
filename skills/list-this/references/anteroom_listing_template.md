@@ -303,6 +303,7 @@ Depop: No title field → use Universal Description only
 **eBay Specifics:**
 All eBay Item Specifics fields. Use Appendix values. Omit fields that do not apply — never write `"N/A"` or `"Does Not Apply"`.
 - Jackets/coats must include `category_specifics["Outer Shell Material"]` (or the discovered schema key) when evidence establishes the shell, following the Outer Shell Material and evidence rules in `SKILL.md` (leave unsupported required shell material as a blocker; never add shell uncertainty to the buyer-facing description).
+- Collar Style: read it from the collar in the photos, never from the shirt type or title. A "button-down" or "button-up" shirt has a buttoned front; that is not its collar. Use `Button-Down` only when buttons fasten the collar points to the shirt. A plain pointed collar is `Point` (most dress, western and snap shirts); points angled wide apart are `Spread` (very wide: `Cutaway`); a short standing collar with no fold-over is `Band`. A flat, open camp or bowling collar has no Collar Style option: leave Collar Style out (eBay Style offers `Camp`). Leave it out when no photo shows the collar.
 
 **Etsy Specifics:**
 - `who_made`, `what_is`, `when_made` (required for Etsy). `when_made` must be an exact Etsy dropdown year range from `anteroom-dropdown-options.json`, such as `2010 - 2019 (Recently)`, not `2010s`, `2010-2019`, or Made To Order. Non-vintage items use `2020 - 2026 (Recently)`, `2010 - 2019 (Recently)`, or `2007 - 2009 (Recently)`.
@@ -348,7 +349,7 @@ Use these lists only to select valid dropdown values. Outputs should still be th
 * Accents: Beaded, Bow, Button, Crochet, Embroidered, Fringe, Fur Trim, Glitter, Jewel, Logo, Pleated, Quilted, Rhinestone, Ruffle, Sequin, Strap, Studded, Tasseled, Zipper  
 * Character: (if applicable) Disney, Marvel, Band name, etc.  
 * Closure: Zip, Button, Snap, Tie, Pullover, Hook & Eye, Elastic, Toggle, Velcro, Drawstring, Clasp, Lace-up, Magnetic  
-* Collar Style: Band, Button-Down, Point, Sailor, Shawl, Spread, Stand-Up, Wing  
+* Collar Style: Band, Button-Down, Cutaway, Point, Sailor, Shawl, Spread, Stand-Up, Wing (read from the collar; see eBay Specifics above)  
 * Country/Region of Manufacture: USA, China, Vietnam, Mexico, India, Bangladesh, Italy, etc.  
 * Fabric Type: Canvas, Chiffon, Corduroy, Crochet, Denim, Flannel, Fleece, Jersey, Knit, Lace, Microfiber, Rayon, Satin, Tweed, Twill, Velvet  
 * Features: 1/2 Zip, 1/4 Zip, Adjustable, All Seasons, Belted, Breathable, Buckle, Collarless, Full Zip, Graphic Print, Heavyweight, Hooded, Insulated, Lightweight, Lined, Moisture Wicking, Open, Oversized, Pockets, Preshrunk, Reflective, Reversible, Ring Spun, Sheer, Shoulder Pads, Stretch, Tagless, Taped Seams, Thermal, Waterproof, Water Resistant  

@@ -1,0 +1,1 @@
+- eBay Collar Style is read from the collar in your photos, so point-collar and snap shirts are no longer marked "Button-Down" just because they are button-down shirts.

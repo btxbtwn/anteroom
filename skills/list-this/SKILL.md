@@ -208,6 +208,7 @@ For eBay apparel, populate every listed field that applies to the garment and is
 | **Features** | Graphic Print, Preshrunk, Tagless, Pocket, All Seasons, etc. |
 | **Neckline** | Crew Neck, V-Neck, Scoop Neck, Henley, etc. |
 | **Closure** | Pullover, Button, Zip, Snap, etc. |
+| **Collar Style** | From the collar in the photos, not the shirt type; follow the Collar Style rule in the template's eBay Specifics. |
 | **Country of Origin** | From tag: China, Haiti, Bangladesh, etc. |
 | **Fabric Type** | Exact category dropdown option for construction/texture, such as Denim, Jersey, Knit, or Woven. Polyester/Spandex belong in Material unless the category explicitly offers them for Fabric Type. Never stringify a list into this single select. |
 | **Garment Care** | Machine Washable (default) |
