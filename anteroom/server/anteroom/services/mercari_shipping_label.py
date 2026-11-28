@@ -6,8 +6,7 @@ read this package's labels), or the seller's saved carrier
 (``form.mercari_shipping_label``). The saved carrier is a preference, not a
 label Mercari has offered for this package: Mercari offers each carrier under a
 different id per weight tier, and only for the tiers that carry the package.
-It counts as the answer only where this package's labels are known; elsewhere
-it is said as what List will try, never as a verified choice.
+Readiness accepts the preference until package-specific options are available.
 """
 from __future__ import annotations
 
@@ -60,21 +59,6 @@ def label_answer(snapshot: dict) -> LabelAnswer:
     if saved:
         return LabelAnswer("default", saved)
     return LabelAnswer("none", "")
-
-
-def unverified_default_message(label: str) -> str:
-    """Said beside List while this package's labels have not been read.
-
-    It says what List does at that point: the saved carrier if Mercari offers
-    it, else Ground Advantage, else no label, which Mercari refuses.
-    """
-    if label == AUTOMATIC:
-        fallback = ". If not, Mercari refuses the listing until you choose a label."
-    else:
-        fallback = (f", otherwise {AUTOMATIC}. "
-                    "If Mercari offers neither, it refuses the listing until you choose a label.")
-    return (f"Shipping label: List uses your saved label, {label}, if Mercari offers it for this package{fallback} "
-            "Mercari's labels are checked when you list.")
 
 
 def automatic_instead_message(label: str) -> str:

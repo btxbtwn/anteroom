@@ -2,8 +2,7 @@
 
 The listing's own label id wins. A saved carrier is a preference: where this
 package's labels are known (a captured form) it counts only when Mercari offers
-it; where they are not (the form the readiness check builds) it is said as what
-List will try, not reported as an empty required field.
+it. Until then, the saved carrier needs no seller action.
 """
 from __future__ import annotations
 
@@ -37,39 +36,12 @@ def missing_label(listing: dict) -> bool:
     return any(item["field"] == LABEL for item in listing_readiness.missing(direct_preflight.gaps(listing, "mercari")))
 
 
-def test_a_saved_carrier_is_not_reported_as_an_empty_required_label():
-    listing = snapshot(form={"mercari_shipping_label": SAVED})
+@pytest.mark.parametrize("carrier", ["USPS Ground Advantage", "UPS Ground Saver"])
+def test_saved_carrier_needs_no_review_before_package_labels_are_known(carrier):
+    listing = snapshot(form={"mercari_shipping_label": {"label": carrier}})
 
-    found = label_gaps(listing)
-
-    assert [item["message"] for item in found if "Required field is empty" in item["message"]] == []
-    assert len(found) == 1
-    assert found[0]["blocking"] is False and not found[0].get("required")
-    # It says what List will try; it does not claim Mercari offers it for this package.
-    assert "USPS Ground Advantage" in found[0]["message"] and "if Mercari offers it" in found[0]["message"]
-    assert "checked when you list" in found[0]["message"]
+    assert label_gaps(listing) == []
     assert not missing_label(listing)
-
-
-def test_the_note_says_list_falls_back_to_ground_advantage_for_another_saved_carrier():
-    """List sends the saved carrier, else Ground Advantage, else nothing (``mercariShippingListing``)."""
-    listing = snapshot(form={"mercari_shipping_label": {"id": "2610", "label": "UPS Ground Saver"}})
-
-    found = label_gaps(listing)
-
-    assert len(found) == 1 and found[0]["blocking"] is False
-    message = found[0]["message"]
-    assert "your saved label, UPS Ground Saver, if Mercari offers it for this package, otherwise USPS Ground Advantage" in message
-    assert "If Mercari offers neither, it refuses the listing until you choose a label." in message
-    assert not missing_label(listing)
-
-
-def test_the_note_names_no_fallback_when_ground_advantage_is_the_saved_carrier():
-    found = label_gaps(snapshot(form={"mercari_shipping_label": SAVED}))
-
-    message = found[0]["message"]
-    assert "otherwise" not in message
-    assert "If not, Mercari refuses the listing until you choose a label." in message
 
 
 def test_no_label_and_no_saved_carrier_still_holds_list():
