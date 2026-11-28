@@ -6,14 +6,16 @@ struct MoreView: View {
     let api: AnteroomAPI
     let views: [String]
     let features: [String]
+    /// Analytics is listed here when Today holds its place in the tab bar.
+    var showsAnalytics = false
     var runtimeUnavailable = false
     var retryingRuntime = false
     var runtimeError: String?
     var onRetryRuntime: (@MainActor () async -> Void)?
-    @State private var path: [Destination] = []
+    @State private var path = NavigationPath()
 
     enum Destination: Hashable {
-        case attention, automations, settings
+        case analytics, automations, settings
     }
 
     var body: some View {
@@ -46,9 +48,9 @@ struct MoreView: View {
                         }
                     }
                 }
-                if views.contains("home") {
-                    NavigationLink(value: Destination.attention) {
-                        Label("Needs attention", systemImage: "exclamationmark.bubble")
+                if showsAnalytics {
+                    NavigationLink(value: Destination.analytics) {
+                        Label("Analytics", systemImage: "chart.bar")
                     }
                 }
                 if views.contains("automations") {
@@ -63,7 +65,7 @@ struct MoreView: View {
             .navigationTitle("More")
             .navigationDestination(for: Destination.self) { destination in
                 switch destination {
-                case .attention: NeedsAttentionView(api: api)
+                case .analytics: AnalyticsDestination(api: api)
                 case .automations: AutomationsView(api: api, canApprove: features.contains("marketplace_actions"), showsEbayOffers: features.contains("ebay_offers"), showsPromotions: features.contains("marketplace_sessions"))
                 case .settings: SettingsRootView(api: api, canDeleteAccount: features.contains("account_deletion"), managedAI: features.contains("managed_ai"))
                 }

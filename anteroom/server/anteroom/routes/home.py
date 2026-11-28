@@ -2,15 +2,14 @@
 from __future__ import annotations
 
 import logging
-from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from anteroom.database import get_db
 from anteroom.routes.api_contract import (
     CONFLICT,
+    GOAL_NOT_FOUND,
     NOT_FOUND,
     AttentionInbox,
     AttentionResolveInput,
@@ -19,6 +18,10 @@ from anteroom.routes.api_contract import (
     AttentionRestoreResult,
     AttentionSnoozeInput,
     AttentionSnoozeResult,
+    GoalChangeResult,
+    GoalInput,
+    GoalUpdate,
+    HomeSummary,
 )
 from anteroom.services import home_dashboard, similar_items
 
@@ -36,23 +39,7 @@ def _mutation_result(db: Session, timezone: str, *, goal_id: str | None = None) 
     return result
 
 
-class GoalCreateInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    period: Literal["weekly", "monthly", "quarterly", "yearly"]
-    metric: Literal["profit", "sales", "listings", "sell_through_rate"]
-    target: float = Field(gt=0, le=100_000_000)
-    label: str | None = Field(default=None, max_length=80)
-
-
-class GoalUpdateInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    period: Literal["weekly", "monthly", "quarterly", "yearly"] | None = None
-    metric: Literal["profit", "sales", "listings", "sell_through_rate"] | None = None
-    target: float | None = Field(default=None, gt=0, le=100_000_000)
-    label: str | None = Field(default=None, max_length=80)
-
-
-@router.get("")
+@router.get("", response_model=HomeSummary)
 def get_home_summary(
     response: Response,
     timezone: str = Query("UTC", max_length=100),
@@ -62,9 +49,9 @@ def get_home_summary(
     return home_dashboard.home_summary(db, tz_name=timezone)
 
 
-@router.post("/goals")
+@router.post("/goals", response_model=GoalChangeResult)
 def upsert_goal(
-    body: GoalCreateInput,
+    body: GoalInput,
     timezone: str = Query("UTC", max_length=100),
     db: Session = Depends(get_db, scope="function"),
 ):
@@ -81,10 +68,10 @@ def upsert_goal(
     return _mutation_result(db, timezone, goal_id=goal)
 
 
-@router.patch("/goals/{goal_id}")
+@router.patch("/goals/{goal_id}", response_model=GoalChangeResult, responses=GOAL_NOT_FOUND)
 def update_goal(
     goal_id: str,
-    body: GoalUpdateInput,
+    body: GoalUpdate,
     timezone: str = Query("UTC", max_length=100),
     db: Session = Depends(get_db, scope="function"),
 ):
@@ -105,7 +92,7 @@ def update_goal(
     return _mutation_result(db, timezone, goal_id=updated)
 
 
-@router.delete("/goals/{goal_id}")
+@router.delete("/goals/{goal_id}", response_model=GoalChangeResult, responses=GOAL_NOT_FOUND)
 def delete_goal(
     goal_id: str,
     timezone: str = Query("UTC", max_length=100),

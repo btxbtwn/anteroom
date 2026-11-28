@@ -803,8 +803,123 @@ struct FavoriteResult: Identifiable, Codable, Hashable, Sendable {
     var favorite: Bool
 }
 
+struct GoalChangeResult: Codable, Hashable, Sendable {
+    var ok: Bool
+    var goalID: String?
+    /// Today after the change; missing when it could not be rebuilt, so the client reloads.
+    var home: HomeSummary?
+
+    enum CodingKeys: String, CodingKey {
+        case ok, home
+        case goalID = "goal_id"
+    }
+}
+
+struct GoalInput: Codable, Hashable, Sendable {
+    /// One of: weekly, monthly, quarterly, yearly.
+    var period: String
+    /// One of: profit, sales, listings, sell_through_rate.
+    var metric: String
+    var target: Double
+    var label: String?
+}
+
+/// One goal and how far the current window is toward it.
+struct GoalProgress: Identifiable, Codable, Hashable, Sendable {
+    var id: String
+    /// One of: weekly, monthly, quarterly, yearly.
+    var period: String
+    /// One of: profit, sales, listings, sell_through_rate.
+    var metric: String
+    var label: String
+    var customLabel: String?
+    var target: Double
+    var current: Double
+    var remaining: Double
+    var progressPercent: Double
+    /// Where the seller would be by now at an even pace.
+    var expectedPercent: Double
+    /// One of: achieved, ahead, on_track, behind.
+    var pace: String
+    var windowStart: String
+    var windowEnd: String
+    var daysElapsed: Int
+    var daysTotal: Int
+    var daysRemaining: Int
+    /// One of: currency, percent, count.
+    var unit: String
+    var note: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, period, metric, label, target, current, remaining, pace, unit, note
+        case customLabel = "custom_label"
+        case progressPercent = "progress_percent"
+        case expectedPercent = "expected_percent"
+        case windowStart = "window_start"
+        case windowEnd = "window_end"
+        case daysElapsed = "days_elapsed"
+        case daysTotal = "days_total"
+        case daysRemaining = "days_remaining"
+    }
+}
+
+/// Only the fields sent change; a label sent as null clears it.
+struct GoalUpdate: Codable, Hashable, Sendable {
+    /// One of: weekly, monthly, quarterly, yearly.
+    var period: String?
+    /// One of: profit, sales, listings, sell_through_rate.
+    var metric: String?
+    var target: Double?
+    var label: String?
+}
+
 struct HTTPValidationError: Codable, Hashable, Sendable {
     var detail: [ValidationError]?
+}
+
+/// Today: the day's activity, goals and Needs Attention.
+struct HomeSummary: Codable, Hashable, Sendable {
+    var needsAttention: [AttentionItem]
+    /// Snoozed items, back after 7 days if they still apply.
+    var dismissed: [AttentionItem]
+    /// Resolved items. A duplicate pair stays resolved; anything else shows again when its state changes.
+    var resolved: [AttentionItem]
+    var counts: AttentionCounts
+    var today: HomeToday
+    var goals: [GoalProgress]
+
+    enum CodingKeys: String, CodingKey {
+        case dismissed, resolved, counts, today, goals
+        case needsAttention = "needs_attention"
+    }
+}
+
+/// Today's activity, counted in the seller's time zone.
+struct HomeToday: Codable, Hashable, Sendable {
+    var date: String
+    var timezone: String
+    var unitsListed: Int
+    var draftsCreated: Int
+    var unitsSold: Int
+    var revenue: Double
+    /// Null until a sale today has its cost recorded.
+    var profit: Double?
+    /// How many of today's sales have their cost recorded.
+    var profitKnown: Int
+    var sharesSent: Int
+    var offersSent: Int
+    var automationActions: Int
+
+    enum CodingKeys: String, CodingKey {
+        case date, timezone, revenue, profit
+        case unitsListed = "units_listed"
+        case draftsCreated = "drafts_created"
+        case unitsSold = "units_sold"
+        case profitKnown = "profit_known"
+        case sharesSent = "shares_sent"
+        case offersSent = "offers_sent"
+        case automationActions = "automation_actions"
+    }
 }
 
 /// The listing's current revision, its revision pointer and its validation.

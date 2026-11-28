@@ -1,61 +1,27 @@
-import type { AttentionInbox, AttentionItem, AttentionResolution, AttentionSnooze } from "./contract.gen";
+import type {
+  AttentionInbox,
+  AttentionItem,
+  AttentionResolution,
+  AttentionSnooze,
+  GoalChangeResult,
+  GoalProgress,
+  HomeSummary,
+} from "./contract.gen";
 
-export type GoalPeriod = "weekly" | "monthly" | "quarterly" | "yearly";
-export type GoalMetric = "profit" | "sales" | "listings" | "sell_through_rate";
-export type GoalPace = "achieved" | "ahead" | "on_track" | "behind";
-
-export interface HomeTodaySummary {
-  date: string;
-  timezone: string;
-  units_listed: number;
-  drafts_created: number;
-  units_sold: number;
-  revenue: number;
-  profit: number | null;
-  profit_known: number;
-  shares_sent: number;
-  offers_sent: number;
-  automation_actions: number;
-}
-
-export interface SellerGoalProgress {
-  id: string;
-  period: GoalPeriod;
-  metric: GoalMetric;
-  label: string;
-  custom_label: string | null;
-  target: number;
-  current: number;
-  remaining: number;
-  progress_percent: number;
-  expected_percent: number;
-  pace: GoalPace;
-  window_start: string;
-  window_end: string;
-  days_elapsed: number;
-  days_total: number;
-  days_remaining: number;
-  unit: "currency" | "percent" | "count";
-  note: string | null;
-}
+export type GoalPeriod = GoalProgress["period"];
+export type GoalMetric = GoalProgress["metric"];
+export type GoalPace = GoalProgress["pace"];
+export type SellerGoalProgress = GoalProgress;
 
 export type { AttentionItem, AttentionTarget } from "./contract.gen";
 export type AttentionKind = AttentionItem["kind"];
 
-export interface HomeSummaryResponse extends AttentionInbox {
-  today: HomeTodaySummary;
-  goals: SellerGoalProgress[];
-}
-
-export interface HomeMutationResponse {
-  ok: boolean;
-  goal_id?: string;
-  home?: HomeSummaryResponse;
-}
+export type HomeSummaryResponse = HomeSummary;
+export type HomeMutationResponse = GoalChangeResult;
 
 const ATTENTION_DISMISS_DAYS = 7;
 
-type AttentionLists = Pick<HomeSummaryResponse, "needs_attention" | "dismissed" | "resolved">;
+type AttentionLists = Pick<AttentionInbox, "needs_attention" | "dismissed" | "resolved">;
 
 function withLists(home: HomeSummaryResponse, lists: AttentionLists): HomeSummaryResponse {
   const by_kind: Record<string, number> = {};

@@ -1,7 +1,7 @@
 import { listingScreenRead } from "./listingScreen";
 import { reportError } from "./errorReports";
 import type { VendooDraft } from "./vendooDraft";
-import type { AttentionItem, AttentionResolveInput, AttentionResolveResult, AttentionRestoreInput, AttentionRestoreResult, AttentionSnoozeInput, AttentionSnoozeResult, ConnectionStatus, CsvInput, CsvResult, CurrencyReport, Expense, ExpenseInput, ExpenseUpdate, MarketplaceCloudResult, MarketplaceCloudSessions, MileageAmount, MileageInput, OfferLogResponse, PlaidExchange, PlaidLinkToken, PlaidStatus, PreferredName, PreferredNameInput } from "./contract.gen";
+import type { AttentionItem, AttentionResolveInput, AttentionResolveResult, AttentionRestoreInput, AttentionRestoreResult, AttentionSnoozeInput, AttentionSnoozeResult, ConnectionStatus, CsvInput, CsvResult, CurrencyReport, Expense, ExpenseInput, ExpenseUpdate, GoalInput, GoalUpdate, MarketplaceCloudResult, MarketplaceCloudSessions, MileageAmount, MileageInput, OfferLogResponse, PlaidExchange, PlaidLinkToken, PlaidStatus, PreferredName, PreferredNameInput } from "./contract.gen";
 import { ApiRequestError, currentHostedSession, retryAfterMs, studioFetch, studioUpload, hasHostedApiSession } from "./transport";
 import { trackPhotoUpload } from "../photoUploads";
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
@@ -103,7 +103,7 @@ import type {
   McpTokenCreateResponse,
   McpTokenPermissions,
 } from "./agentConnection";
-import { browserTimeZone, type GoalMetric, type GoalPeriod, type HomeMutationResponse, type HomeSummaryResponse } from "./home";
+import { browserTimeZone, type HomeMutationResponse, type HomeSummaryResponse } from "./home";
 import type {
   DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus,
   SaleSyncOutcome, SaleTrackerResponse, StillListedResponse,
@@ -1897,7 +1897,7 @@ export const api = {
     summary: (timezone = browserTimeZone()) =>
       request<HomeSummaryResponse>(`/home?timezone=${encodeURIComponent(timezone)}`),
     upsertGoal: (
-      body: { period: GoalPeriod; metric: GoalMetric; target: number; label?: string | null },
+      body: GoalInput,
       timezone = browserTimeZone(),
     ) =>
       request<HomeMutationResponse>(`/home/goals?timezone=${encodeURIComponent(timezone)}`, {
@@ -1906,7 +1906,7 @@ export const api = {
       }),
     updateGoal: (
       goalId: string,
-      body: { period?: GoalPeriod; metric?: GoalMetric; target?: number; label?: string | null },
+      body: GoalUpdate,
       timezone = browserTimeZone(),
     ) =>
       request<HomeMutationResponse>(

@@ -222,9 +222,9 @@ final class DestinationSandboxTests: XCTestCase {
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: notListed)
         waitForExpectations(timeout: 5)
 
-        let analytics = app.tabBars.buttons["Analytics"]
-        XCTAssertTrue(analytics.isHittable, "The Filters menu must release the tab bar")
-        analytics.tap()
+        XCTAssertTrue(app.tabBars.buttons["More"].isHittable, "The Filters menu must release the tab bar")
+        // Today holds the tab bar's place for Analytics, which is in More.
+        openMorePage("Analytics", app: app)
         XCTAssertTrue(app.buttons["Sales records"].waitForExistence(timeout: 15))
         keep(app, "Analytics sales records")
         app.buttons["Inventory analytics"].tap()
@@ -241,10 +241,8 @@ final class DestinationSandboxTests: XCTestCase {
         keep(app, "eBay connection")
         app.buttons["Close"].tap()
 
-        app.tabBars.buttons["More"].tap()
-        let settings = app.buttons["Settings"].firstMatch
-        XCTAssertTrue(settings.waitForExistence(timeout: 10))
-        settings.tap()
+        // More still shows Analytics from earlier; this goes back to its list first.
+        openMorePage("Settings", app: app)
 
         let listings = app.buttons["Listings"].firstMatch
         XCTAssertTrue(listings.waitForExistence(timeout: 10))
@@ -305,10 +303,7 @@ final class AnalyticsSandboxTests: XCTestCase {
         launchSandbox(app)
         let activeTab = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Active,'")).firstMatch
         XCTAssertTrue(activeTab.waitForExistence(timeout: 30), "Inventory has loaded")
-        let analytics = app.tabBars.buttons["Analytics"]
-        analytics.tap()
-        // The first tap on the floating tab bar after launch can land before it accepts touches.
-        if !app.buttons["Sales records"].waitForExistence(timeout: 5) { analytics.tap() }
+        openMorePage("Analytics", app: app)
         XCTAssertTrue(app.buttons["Sales records"].waitForExistence(timeout: 15))
         XCTAssertTrue(app.staticTexts["Revenue"].waitForExistence(timeout: 30))
         XCTAssertTrue(app.staticTexts["Items sold"].exists)
@@ -715,7 +710,7 @@ final class PolishScreenshotTests: XCTestCase {
             XCTAssertTrue(app.buttons["Date created"].waitForExistence(timeout: 10), "Sort by lists the fields")
             keep(app, "\(theme): Sort menu")
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.6)).tap()
-            app.tabBars.buttons["Analytics"].tap()
+            openMorePage("Analytics", app: app)
             XCTAssertTrue(app.staticTexts["Items sold"].waitForExistence(timeout: 30))
             keep(app, "\(theme): Sales records")
             app.buttons["Inventory analytics"].tap()
@@ -874,6 +869,72 @@ final class CoreFlowSandboxTests: XCTestCase {
             XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'on eBay?'")).firstMatch.waitForExistence(timeout: 10))
             cancel.tap()
         }
+    }
+
+    private func keep(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}
+
+/// Today comes first in the tab bar, badged with the alerts that need
+/// attention, and shows the web's summary and goals.
+@MainActor
+final class TodaySandboxTests: XCTestCase {
+    func testTodayShowsAttentionSummaryAndGoals() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        launchSandbox(app, tab: "Today")
+        let today = app.tabBars.buttons["Today"].firstMatch
+        XCTAssertTrue(app.staticTexts["Today's summary"].waitForExistence(timeout: 30) || app.staticTexts["TODAY'S SUMMARY"].exists)
+        XCTAssertTrue(app.staticTexts["Units listed"].waitForExistence(timeout: 10))
+        // The badge counts the active alerts shown under Needs attention.
+        let open = app.buttons["today-open-attention"]
+        XCTAssertTrue(open.waitForExistence(timeout: 10))
+        keep(app, "Today")
+        open.tap()
+        XCTAssertTrue(app.navigationBars["Needs attention"].waitForExistence(timeout: 15))
+        let active = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Active'")).firstMatch
+        XCTAssertTrue(active.waitForExistence(timeout: 15))
+        let count = active.label.split(separator: " ").last.flatMap { Int($0) } ?? 0
+        // The badge follows the list it counts (it updates once the list loads).
+        let badge = NSPredicate { object, _ in
+            let value = (object as? XCUIElement)?.value as? String ?? ""
+            return (value.isEmpty ? 0 : Int(value.split(separator: " ").first ?? "") ?? -1) == count
+        }
+        expectation(for: badge, evaluatedWith: today)
+        waitForExpectations(timeout: 15)
+        let attention = app.navigationBars["Needs attention"]
+        for _ in 0..<3 where attention.exists {
+            attention.buttons["BackButton"].tap()
+            _ = open.waitForExistence(timeout: 10)
+        }
+        XCTAssertFalse(attention.exists, "Back returns to Today")
+
+        // Add a goal, see its progress, then delete it after confirming.
+        let add = app.buttons["today-add-goal"]
+        for _ in 0..<4 where !add.isHittable { app.swipeUp() }
+        add.tap()
+        let target = app.textFields["goal-target"]
+        XCTAssertTrue(target.waitForExistence(timeout: 10))
+        target.tap()
+        target.typeText("40")
+        keep(app, "New goal")
+        app.buttons["Save goal"].tap()
+        let goal = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Monthly profit'")).firstMatch
+        XCTAssertTrue(goal.waitForExistence(timeout: 30), "The new goal shows on Today")
+        XCTAssertTrue(goal.label.contains("/ $40"), "The goal shows its target")
+        keep(app, "Today with a goal")
+        goal.swipeLeft()
+        app.buttons["Delete"].firstMatch.tap()
+        let confirm = app.buttons["Delete Monthly profit"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 10), "Deleting a goal asks first")
+        confirm.tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: goal)
+        waitForExpectations(timeout: 30)
     }
 
     private func keep(_ app: XCUIApplication, _ name: String) {
