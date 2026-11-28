@@ -122,7 +122,9 @@ test("a queued follow-up is still sent after the page reloads", async ({ page, p
   await expect(page.locator("[data-queued-message-id]")).toHaveCount(1);
 
   await page.reload();
-  // The assistant opens on its home screen; go back to the conversation.
+  // Reopen Assistant from Today, then go back to the conversation.
+  if (phone) await page.getByRole("button", { name: "Open navigation" }).click();
+  await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Assistant", exact: true }).click();
   if (phone) {
     await page.getByRole("button", { name: "Show chat history" }).click();
     await page.getByRole("button").filter({ hasText: title }).first().click();

@@ -23,6 +23,7 @@ test.describe("navigation rail", () => {
 
     await page.getByRole("button", { name: "Hide listings" }).click();
     await expect(listings).toBeHidden();
+    await pages.getByRole("button", { name: "Analytics", exact: true }).click();
     await today.click();
     await expect(today).toHaveAttribute("aria-current", "page");
   });

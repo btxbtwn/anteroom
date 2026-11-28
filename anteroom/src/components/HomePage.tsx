@@ -32,19 +32,21 @@ import {
 } from "../api/home";
 import { homeQuery } from "../api/pageQueries";
 import { cn } from "../lib/utils";
+import { confirmDialog } from "../ui/confirmDialog";
 import { Stat, StatGrid } from "./AnalyticsStat";
 import { WorkspaceTabs } from "./ebay/WorkspaceTabs";
+import "./ebay/ebay.css";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Spinner } from "./ui/spinner";
+import { toastManager } from "./ui/toast";
 import {
   EmptyRow,
   FormError,
   FormField,
   PageError,
-  PageHeader,
   PageSection,
   PageSkeleton,
   Panel,
@@ -228,6 +230,7 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
     scope: goalMutationScope,
     mutationFn: (goalId: string) => api.home.deleteGoal(goalId, timezone),
     onSuccess: (res) => syncGoalsHome(res.home),
+    onError: () => { toastManager.add({ type: "error", title: "Could not delete goal" }); },
   });
 
   const dismissItem = useMutation({
@@ -245,6 +248,7 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
     },
     onError: async (_err, item, ctx) => {
       if (!attentionOpIsCurrent(item.key, ctx?.epoch)) return;
+      toastManager.add({ type: "error", title: "Could not snooze alert" });
       await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
     },
   });
@@ -264,6 +268,7 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
     },
     onError: async (_err, item, ctx) => {
       if (!attentionOpIsCurrent(item.key, ctx?.epoch)) return;
+      toastManager.add({ type: "error", title: "Could not resolve alert" });
       await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
     },
   });
@@ -283,6 +288,7 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
     },
     onError: async (_err, itemKey, ctx) => {
       if (!attentionOpIsCurrent(itemKey, ctx?.epoch)) return;
+      toastManager.add({ type: "error", title: "Could not restore alert" });
       await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
     },
   });
@@ -342,7 +348,8 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
   if (isPending && !data) {
     return (
       <WorkspacePage width="expanded">
-        <PageSkeleton label="Loading Today…" cards={5} />
+        <h1 className="sr-only">Today</h1>
+        <PageSkeleton label="Loading Today…" />
       </WorkspacePage>
     );
   }
@@ -350,7 +357,7 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
   if (error && !data) {
     return (
       <WorkspacePage width="expanded">
-        <PageHeader title="Today" />
+        <h1 className="sr-only">Today</h1>
         <PageError message={error.message} />
       </WorkspacePage>
     );
@@ -375,27 +382,190 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
 
   return (
     <WorkspacePage width="expanded">
-      <PageHeader
-        title="Today"
-        description={today ? formatHeaderDate(today.date) : "Daily snapshot, goals, and items needing your attention."}
-        actions={
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => void refetch()}
-            disabled={isFetching}
-          >
-            {isFetching ? <Spinner /> : <RefreshCwIcon />}
-            Refresh
-          </Button>
-        }
-      />
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="sr-only">Today</h1>
+        {today ? <p className="text-sm text-muted-foreground">{formatHeaderDate(today.date)}</p> : null}
+        <Button type="button" variant="outline" size="sm" onClick={() => void refetch()} disabled={isFetching}>
+          {isFetching ? <Spinner /> : <RefreshCwIcon />}
+          Refresh
+        </Button>
+      </header>
 
       {error ? <PageError message={error.message} /> : null}
 
+      <PageSection
+        title={
+          <span className="flex items-center gap-2">
+            <span>Needs attention</span>
+            <Badge variant={activeAttention.length > 0 ? "secondary" : "outline"} size="sm">
+              {activeAttention.length}
+            </Badge>
+          </span>
+        }
+        description="Review alerts that may need action."
+      >
+        <WorkspaceTabs
+          label="Needs attention views"
+          items={ATTENTION_TABS}
+          value={attentionTab}
+          onChange={(next) => setAttentionTab(next as AttentionTab)}
+        >
+          {attentionTab === "Active" ? (
+            activeAttention.length === 0 ? (
+              <EmptyRow>
+                <span className="inline-flex items-center gap-1.5">
+                  <CheckCircle2Icon className="size-3.5 text-success" />
+                  All caught up. Nothing needs attention right now.
+                </span>
+              </EmptyRow>
+            ) : (
+              <RowList>
+                {activeAttention.map((item) => (
+                  <li key={item.key} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant={priorityBadgeVariant(item.priority)} size="sm">
+                          {KIND_LABELS[item.kind]}
+                        </Badge>
+                        <span className="truncate font-medium text-foreground">{item.title}</span>
+                        {formatRelativeTime(item.occurred_at) ? (
+                          <span className="text-xs text-muted-foreground tabular-nums">
+                            {formatRelativeTime(item.occurred_at)}
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="text-xs text-muted-foreground">{item.detail}</p>
+                    </div>
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="xs"
+                        onClick={() => onNavigateAttention(item.target)}
+                      >
+                        {item.action_label}
+                        <ArrowRightIcon />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => resolveItem.mutate(item)}
+                        aria-label={`${resolveLabel(item.kind)}: ${item.title}`}
+                        title={item.kind === "duplicate_listing"
+                          ? "Never flag this pair again"
+                          : "Hide until something changes"}
+                      >
+                        <CheckIcon />
+                        {resolveLabel(item.kind)}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => dismissItem.mutate(item)}
+                        aria-label={`Snooze ${item.title} for 7 days`}
+                        title="Hide for 7 days"
+                      >
+                        <AlarmClockIcon />
+                        Snooze 7 days
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </RowList>
+            )
+          ) : attentionTab === "Resolved" ? (
+            resolvedAttention.length === 0 ? (
+              <EmptyRow>
+                No resolved items. A resolved alert stays here until its situation changes, like another sale or a new error. Pairs marked not duplicates stay here for good.
+              </EmptyRow>
+            ) : (
+              <RowList>
+                {resolvedAttention.map((item) => (
+                  <li key={item.key} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" size="sm">
+                          {KIND_LABELS[item.kind]}
+                        </Badge>
+                        <span className="truncate font-medium text-foreground">{item.title}</span>
+                        {formatRelativeTime(item.resolved_at) ? (
+                          <span className="text-xs text-muted-foreground tabular-nums">
+                            {item.kind === "duplicate_listing" ? "Not duplicates" : "Resolved"} {formatRelativeTime(item.resolved_at)}
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="text-xs text-muted-foreground">{item.detail}</p>
+                    </div>
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => restoreItem.mutate(item.key)}
+                        aria-label={`Restore ${item.title}`}
+                      >
+                        <RotateCcwIcon />
+                        Restore
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </RowList>
+            )
+          ) : dismissedAttention.length === 0 ? (
+            <EmptyRow>
+              No snoozed items. Snoozed alerts stay here for 7 days, then come back if they still apply.
+            </EmptyRow>
+          ) : (
+            <RowList>
+              {dismissedAttention.map((item) => (
+                <li key={item.key} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline" size="sm">
+                        {KIND_LABELS[item.kind]}
+                      </Badge>
+                      <span className="truncate font-medium text-foreground">{item.title}</span>
+                      {item.reappears_in_days != null ? (
+                        <span className="text-xs text-muted-foreground tabular-nums">
+                          Reappears in {item.reappears_in_days} {item.reappears_in_days === 1 ? "day" : "days"}
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="text-xs text-muted-foreground">{item.detail}</p>
+                  </div>
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      onClick={() => onNavigateAttention(item.target)}
+                    >
+                      {item.action_label}
+                      <ArrowRightIcon />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => restoreItem.mutate(item.key)}
+                      aria-label={`Restore ${item.title}`}
+                    >
+                      <RotateCcwIcon />
+                      Restore
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </RowList>
+          )}
+        </WorkspaceTabs>
+      </PageSection>
+
       <PageSection title="Today's summary">
-        <StatGrid className="@3xl/page:grid-cols-5">
+        <StatGrid className="grid-cols-2 @3xl/page:grid-cols-5">
           <Stat
             label="Units listed"
             value={String(today?.units_listed ?? 0)}
@@ -559,7 +729,11 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
                         variant="ghost"
                         size="icon-xs"
                         disabled={removeGoal.isPending}
-                        onClick={() => removeGoal.mutate(goal.id)}
+                        onClick={async () => {
+                          if (await confirmDialog(`Delete “${goal.label}”?`, { variant: "destructive", confirmLabel: "Delete goal" })) {
+                            removeGoal.mutate(goal.id);
+                          }
+                        }}
                         aria-label={`Delete ${goal.label}`}
                       >
                         <Trash2Icon />
@@ -596,12 +770,12 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
                         style={{ width: `${clampedWidth}%` }}
                       />
                     </div>
-                    <div className="flex items-center justify-between text-xs text-muted-foreground tabular-nums">
+                    <div className="flex flex-wrap items-center justify-between gap-x-2 text-xs text-muted-foreground tabular-nums">
                       <span>{Math.round(goal.progress_percent)}% of target</span>
                       <span>
                         {goal.metric === "sell_through_rate"
-                          ? goal.note ?? `Window ${goal.days_elapsed}/${goal.days_total}d`
-                          : `Pace target ${Math.round(goal.expected_percent)}%`}
+                          ? `Day ${goal.days_elapsed} of ${goal.days_total}.`
+                          : `Should be at ${Math.round(goal.expected_percent)}% by today.`}
                       </span>
                     </div>
                   </div>
@@ -610,177 +784,6 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
             })}
           </div>
         )}
-      </PageSection>
-
-      <PageSection
-        title={
-          <span className="flex items-center gap-2">
-            <span>Needs attention</span>
-            <Badge variant={activeAttention.length > 0 ? "secondary" : "outline"} size="sm">
-              {activeAttention.length}
-            </Badge>
-          </span>
-        }
-        description="High-priority alerts across sales, marketplace connections, failed jobs, unsent live edits, automation approvals, and possible duplicates."
-      >
-        <WorkspaceTabs
-          label="Needs attention views"
-          items={ATTENTION_TABS}
-          value={attentionTab}
-          onChange={(next) => setAttentionTab(next as AttentionTab)}
-        >
-          {attentionTab === "Active" ? (
-            activeAttention.length === 0 ? (
-              <EmptyRow>
-                <span className="inline-flex items-center gap-1.5">
-                  <CheckCircle2Icon className="size-3.5 text-success" />
-                  All caught up. Nothing needs attention right now.
-                </span>
-              </EmptyRow>
-            ) : (
-              <RowList>
-                {activeAttention.map((item) => (
-                  <li key={item.key} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
-                    <div className="flex min-w-0 flex-1 flex-col gap-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant={priorityBadgeVariant(item.priority)} size="sm">
-                          {KIND_LABELS[item.kind]}
-                        </Badge>
-                        <span className="truncate font-medium text-foreground">{item.title}</span>
-                        {formatRelativeTime(item.occurred_at) ? (
-                          <span className="text-xs text-muted-foreground tabular-nums">
-                            {formatRelativeTime(item.occurred_at)}
-                          </span>
-                        ) : null}
-                      </div>
-                      <p className="text-xs text-muted-foreground">{item.detail}</p>
-                    </div>
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="xs"
-                        onClick={() => onNavigateAttention(item.target)}
-                      >
-                        {item.action_label}
-                        <ArrowRightIcon />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => resolveItem.mutate(item)}
-                        aria-label={`${resolveLabel(item.kind)}: ${item.title}`}
-                        title={item.kind === "duplicate_listing"
-                          ? "Never flag this pair again"
-                          : "Hide until something changes"}
-                      >
-                        <CheckIcon />
-                        {resolveLabel(item.kind)}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => dismissItem.mutate(item)}
-                        aria-label={`Snooze ${item.title} for 7 days`}
-                        title="Hide for 7 days"
-                      >
-                        <AlarmClockIcon />
-                        Snooze 7 days
-                      </Button>
-                    </div>
-                  </li>
-                ))}
-              </RowList>
-            )
-          ) : attentionTab === "Resolved" ? (
-            resolvedAttention.length === 0 ? (
-              <EmptyRow>
-                No resolved items. A resolved alert stays here until its situation changes, like another sale or a new error. Pairs marked not duplicates stay here for good.
-              </EmptyRow>
-            ) : (
-              <RowList>
-                {resolvedAttention.map((item) => (
-                  <li key={item.key} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
-                    <div className="flex min-w-0 flex-1 flex-col gap-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline" size="sm">
-                          {KIND_LABELS[item.kind]}
-                        </Badge>
-                        <span className="truncate font-medium text-foreground">{item.title}</span>
-                        {formatRelativeTime(item.resolved_at) ? (
-                          <span className="text-xs text-muted-foreground tabular-nums">
-                            {item.kind === "duplicate_listing" ? "Not duplicates" : "Resolved"} {formatRelativeTime(item.resolved_at)}
-                          </span>
-                        ) : null}
-                      </div>
-                      <p className="text-xs text-muted-foreground">{item.detail}</p>
-                    </div>
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => restoreItem.mutate(item.key)}
-                        aria-label={`Restore ${item.title}`}
-                      >
-                        <RotateCcwIcon />
-                        Restore
-                      </Button>
-                    </div>
-                  </li>
-                ))}
-              </RowList>
-            )
-          ) : dismissedAttention.length === 0 ? (
-            <EmptyRow>
-              No snoozed items. Snoozed alerts stay here for 7 days, then come back if they still apply.
-            </EmptyRow>
-          ) : (
-            <RowList>
-              {dismissedAttention.map((item) => (
-                <li key={item.key} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
-                  <div className="flex min-w-0 flex-1 flex-col gap-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline" size="sm">
-                        {KIND_LABELS[item.kind]}
-                      </Badge>
-                      <span className="truncate font-medium text-foreground">{item.title}</span>
-                      {item.reappears_in_days != null ? (
-                        <span className="text-xs text-muted-foreground tabular-nums">
-                          Reappears in {item.reappears_in_days} {item.reappears_in_days === 1 ? "day" : "days"}
-                        </span>
-                      ) : null}
-                    </div>
-                    <p className="text-xs text-muted-foreground">{item.detail}</p>
-                  </div>
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="xs"
-                      onClick={() => onNavigateAttention(item.target)}
-                    >
-                      {item.action_label}
-                      <ArrowRightIcon />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => restoreItem.mutate(item.key)}
-                      aria-label={`Restore ${item.title}`}
-                    >
-                      <RotateCcwIcon />
-                      Restore
-                    </Button>
-                  </div>
-                </li>
-              ))}
-            </RowList>
-          )}
-        </WorkspaceTabs>
       </PageSection>
     </WorkspacePage>
   );
