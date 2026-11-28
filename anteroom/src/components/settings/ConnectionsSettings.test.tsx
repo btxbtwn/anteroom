@@ -72,7 +72,8 @@ describe("Connections settings", () => {
     for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop"]) {
       expect(section).toContain(`Sale detection for ${name}`);
     }
-    expect(section).toContain("Poshmark closet");
+    expect(section).toContain(">After a sale<");
+    expect(section.indexOf('id="sale-detection"')).toBeGreaterThan(section.indexOf('id="after-sale"'));
     expect(section).toContain("Detect sales");
     expect(section).toContain("Where the sign-in lives");
     expect(html).toContain("Marketplaces → eBay → Offers");

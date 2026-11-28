@@ -122,6 +122,8 @@ struct ConnectionsSettingsView: View {
                         Button("Disconnect Cloud", role: .destructive) {
                             Task { await updateCloud(marketplace, disconnect: true) }
                         }
+                    } message: {
+                        Text("Listing actions, sales checks and automations for \(name) will need Chrome open with Anteroom Bridge again. Listings already live on \(name) stay up.")
                     }
             }
             if let message = cloudMessages[marketplace] {
