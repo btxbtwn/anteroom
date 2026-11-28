@@ -6,6 +6,34 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1293 — 2026-11-28
+
+- On iPhone, photos you add no longer say they didn't upload when they did.
+
+## 0.1.1292 — 2026-11-28
+
+- Surface failed and retried automated browser checks on release runs so regressions are caught faster.
+
+## 0.1.1291 — 2026-11-28
+
+- Stop a stuck test-report upload from holding up new Anteroom releases for hours.
+
+## 0.1.1290 — 2026-11-28
+
+- Starting a new listing while inventory is still loading now opens on Draft and appears in the inventory list right away.
+
+## 0.1.1289 — 2026-11-27
+
+- Mercari saves no longer fail with "Mercari changed its listing form" when Mercari briefly misses a request; Anteroom sends it once more.
+
+## 0.1.1288 — 2026-11-27
+
+- Keep streaming chat replies pacing smoothly from the first chunk, even when frames paint slowly.
+
+## 0.1.1287 — 2026-11-27
+
+- The phone accessibility check now tests the sale calendar’s tap targets after the navigation drawer closes.
+
 ## 0.1.1286 — 2026-11-27
 
 - Hosted updates are less likely to be held up by a test of AI agent form reads that ran out of time on busy build machines.

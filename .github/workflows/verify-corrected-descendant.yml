@@ -71,10 +71,14 @@ jobs:
           pattern: verification-inventory-*-${{ github.run_id }}-${{ github.run_attempt }}
           path: inventories
           merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verification-browser-${{ github.run_id }}-${{ github.run_attempt }}
+          path: browser-evidence
       - name: Validate exact-attempt GitHub job results and shard completeness
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 .github/scripts/verification_evidence.py receipt --evidence evidence/verification-source.json --inventories inventories > verification-receipt.json
+        run: python3 .github/scripts/verification_evidence.py receipt --evidence evidence/verification-source.json --inventories inventories --browser browser-evidence/verification-browser.json > verification-receipt.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: verification-receipt-${{ github.run_id }}-${{ github.run_attempt }}

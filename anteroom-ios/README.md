@@ -329,3 +329,10 @@ Photo uploads keep going for a while after switching apps, count every photo
 that didn't upload ("2 of 10 photos didn't upload") and keep those photos for
 Retry. Camera photos are shrunk to the upload size off the main thread and
 encoded once.
+
+The camera stays open between shots (`Sources/Photos/MultiShotCamera.swift`):
+each shot joins a tray with a running count, any shot can be discarded, and
+Done adds the kept shots in the order taken, up to the listing's free places.
+Bulk listing uses the same camera, beside Library and Files. The simulator
+has no camera, so Debug builds on the local sandbox stand in a generated photo
+for each shot; `CameraSandboxTests` drives the tray that way.

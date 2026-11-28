@@ -24,13 +24,21 @@ export default class BrowserEvidenceReporter {
       const key = readFileSync(join(dirname(output), "identity-key"));
       if (key.length !== 32) throw new Error("Invalid evidence key");
       const hash = (kind, value) => createHmac("sha256", key).update(kind + "\0" + value).digest("hex");
-      const cases = this.tests.map((test) => ({
-        id: hash("case", test.id),
-        project: test.parent.project().name,
-        file: hash("file", relative(this.root, test.location.file).split("\\").join("/")),
-        expected: test.expectedStatus,
-        attempts: test.results.map(({ status, duration, retry }) => ({ status, duration, retry })),
-      }));
+      const cases = this.tests.map((test) => {
+        const project = test.parent.project().name;
+        const relFile = relative(this.root, test.location.file).split("\\").join("/");
+        const titleSpec = typeof test.titlePath === "function"
+          ? test.titlePath().slice(3).join("\0")
+          : (typeof test.title === "string" ? test.title : "");
+        return {
+          id: hash("case", test.id),
+          project,
+          file: hash("file", relFile),
+          spec: hash("spec", `${project}\0${relFile}\0${titleSpec}`),
+          expected: test.expectedStatus,
+          attempts: test.results.map(({ status, duration, retry }) => ({ status, duration, retry })),
+        };
+      });
       writeFileSync(output, JSON.stringify(cases), { flag: "wx" });
     } catch {
       // Coverage still comes from the ordinary Playwright run. The evidence

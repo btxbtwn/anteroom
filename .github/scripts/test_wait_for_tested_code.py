@@ -103,6 +103,8 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
             ("rev-parse", self.target + "^{tree}"): self.tree,
             ("rev-parse", self.target + ":" + verification.WORKFLOW): self.wf_blob,
             ("rev-parse", self.target + ":.github/workflows/ci.yml"): self.ci_blob,
+            ("rev-parse", self.target + ":" + verification.BROWSER_REGRESSION_FILE): verification.BROWSER_REGRESSION_BLOB,
+            ("rev-parse", self.hist + ":" + verification.BROWSER_REGRESSION_FILE): verification.BROWSER_REGRESSION_BLOB,
             ("diff", "--name-only", "--no-renames", "-z", f"{self.prod}..{self.target}"): "",
             ("show", f"{self.prod}:vendoo-studio/VERSION"): "0.1.1011",
         }
@@ -121,7 +123,7 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
             "conclusion": "success",
         }
         self.source = {
-            "schema": 1,
+            "schema": 2,
             "repository": self.repo,
             "target": self.target,
             "tree": self.tree,
@@ -129,6 +131,8 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
             "production_base_is_live_verified": False,
             "historical_failure": self.hist,
             "correcting_merge": self.corr,
+            "browser_regression_file": verification.BROWSER_REGRESSION_FILE,
+            "browser_regression_blob": verification.BROWSER_REGRESSION_BLOB,
             "span": self.span_to_target,
             "native_changes": [],
             "migration_changes": [],
@@ -160,10 +164,35 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
             for db in ("sqlite", "postgres")
             for group in (1, 2)
         ]
+        reg_case_id = verification.digest("pw-chat-streaming")
+        full_browser = [
+            {"id": verification.digest("d-1"), "project": "desktop", "file": verification.digest("chat"), "expected": "passed"},
+            {"id": verification.digest("p-1"), "project": "phone", "file": verification.digest("chat"), "expected": "passed"},
+            {"id": reg_case_id, "project": "phone-webkit", "file": verification.digest("chat"), "expected": "passed"},
+        ]
+        self.browser_inventory = {
+            "schema": 1,
+            "target": self.target,
+            "tree": self.tree,
+            "ci_blob": self.ci_blob,
+            "run_id": "42",
+            "attempt": "1",
+            "regression_file": verification.BROWSER_REGRESSION_FILE,
+            "regression_file_blob": verification.BROWSER_REGRESSION_BLOB,
+            "regression_key_sha256": verification.digest(verification.BROWSER_REGRESSION_KEY),
+            "regression_case_id": reg_case_id,
+            "full": full_browser,
+            "cases": [
+                {**full_browser[0], "shard": 1, "attempts": [{"status": "passed", "duration": 10, "retry": 0}]},
+                {**full_browser[1], "shard": 1, "attempts": [{"status": "passed", "duration": 11, "retry": 0}]},
+                {**full_browser[2], "shard": 2, "attempts": [{"status": "passed", "duration": 15, "retry": 0}]},
+            ],
+        }
         self.receipt = {
             **self.source,
             "jobs": verification.validate_jobs(self.jobs),
             "backend_inventory": verification.validate_inventory(self.inventories, self.source),
+            "browser_inventory": verification.validate_browser_inventory(self.browser_inventory, self.source),
             "scope": "all Linux CI components; native validation remains separate",
             "native_validation": "not performed; separate native impact assessment and pinned receipts required",
         }
@@ -178,6 +207,7 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
                 f"inventory-{inv['database']}-{inv['group']}.json",
                 inv,
             )
+        self._add_artifact(106, "verification-browser-42-1", "verification-browser.json", self.browser_inventory)
         self.pin = recovery.EvidencePin(
             repository=self.repo,
             repository_id=10,
@@ -193,6 +223,7 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
             attempt=1,
             receipt_artifact_id=100,
             receipt_digest=self.artifacts[0]["digest"],
+            browser_regression_blob=verification.BROWSER_REGRESSION_BLOB,
         )
 
     def _add_artifact(self, ident: int, name: str, filename: str, payload: dict) -> None:
@@ -229,30 +260,100 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
             return {"total_count": len(self.artifacts), "artifacts": copy.deepcopy(self.artifacts)}
         raise AssertionError(f"Unexpected API path: {path}")
 
-    def test_committed_recovery_spans_the_three_split_head_windows(self):
+    def test_committed_pin_matches_exact_documented_receipt(self):
         pin = self.gate.HISTORICAL_RECOVERY_CHECKPOINT
         self.assertIsNotNone(pin)
-        self.assertEqual(pin.production_base, "23f8ab0110c1ef359949462996c321acdbc92c49")
+        assert pin is not None
+        self.assertEqual(pin.repository, "btxbtwn/anteroom")
+        self.assertEqual(pin.repository_id, 1183824317)
+        self.assertEqual(pin.workflow_id, 422931456)
+        self.assertEqual(pin.target, "be0144a0f218d359c73ed33281f7ff9e5ef32a70")
+        self.assertEqual(pin.tree, "513a02d462217033f72b262b9df47263b8cf549b")
+        self.assertEqual(pin.production_base, "2334fe2f33b97ff6a9ec8aba6e256d71c86743c9")
         self.assertEqual(pin.historical_failure, verification.HISTORICAL)
         self.assertEqual(pin.correcting_merge, verification.CORRECTED)
-        self.assertEqual(self.committed_correction, "684c73b7618390a92555666589d7b0c8f6efec8b")
-        self.assertEqual(self.committed_failures, {
-            "99c3b7003d1d79cfc20cea283bebde7e54572081",
-            "08b97e99edaa02f021bc7bcf876d2fd2ade83c69",
-            "fb7d5c076cce6021b48240014ba6fb0e71256300",
-            "1e3756a043eb56aed73ff72b9401da5076533f64",
-            "7d9b51611d4923565d817e172170bb70d7d05f8b",
-            "55c4ceaf7b767cd9094881f2730013a62d33e29c",
-            "8e9a08803af54e159495ed80f3ca0c2735fde36e",
-            "8265f86e3639860a9560088b7d50fe212a186cc4",
-            "ab40d2ef7120f16747246c6ee20aa52a32fd92ba",
-        })
+        self.assertEqual(pin.workflow_blob, "cc4a53b95a23bc4f02e3e1cb1c50ea672679ae94")
+        self.assertEqual(pin.ci_blob, "be450a74d6fdeb4d309b1156337e0d10397c4406")
+        self.assertEqual(pin.run_id, 46093755351)
+        self.assertEqual(pin.attempt, 1)
+        self.assertEqual(pin.receipt_artifact_id, 15243004283)
+        self.assertEqual(
+            pin.receipt_digest,
+            "sha256:2a98eb5e6a9efd67a9c1ca20a5925b134c84390f0bce1415109d4d19762a095d",
+        )
+        self.assertEqual(pin.browser_regression_blob, verification.BROWSER_REGRESSION_BLOB)
+        self.assertEqual(verification.HISTORICAL, "cc22db3fae820d52c3e1b61af209e19221fa9502")
+        self.assertEqual(verification.CORRECTED, "9c5df2f6d655f46313ba7218036deca1a75bf0c4")
+        self.assertEqual(self.committed_correction, "9c5df2f6d655f46313ba7218036deca1a75bf0c4")
+        self.assertEqual(self.committed_failures, {"cc22db3fae820d52c3e1b61af209e19221fa9502"})
         self.assertEqual(
             self.gate.HISTORICAL_BASE_IMAGE_DIGEST,
-            "sha256:22df137ee877807504d7223d6aff53e8cee6777cf2ddfd70838a14a822641591",
+            "sha256:169925b25de2919256f7bb23e7dec2495b727daecb6b60417929cb69de4d241c",
         )
-        self.assertEqual(self.gate.HISTORICAL_BASE_DB_REVISION, "e3b7a1c9d402")
+        self.assertEqual(self.gate.HISTORICAL_BASE_DB_REVISION, "f1b4c8d2e930")
         self.assertEqual(self.gate.HISTORICAL_BASE_FLY_APP, "peaceful-meadowstone-6944")
+
+    def test_old_schema1_or_prior_incident_receipt_cannot_be_reused(self):
+        old_pair_pin = replace(
+            self.pin,
+            historical_failure="99c3b7003d1d79cfc20cea283bebde7e54572081",
+            correcting_merge="afc3c2dbde647b59203c0b761c8c0dfb2b697264",
+            browser_regression_blob=None,
+        )
+        for bad_pin in (
+            old_pair_pin,
+            replace(self.pin, browser_regression_blob=None),
+            replace(self.pin, browser_regression_blob="f" * 40),
+        ):
+            with self.subTest(bad_pin=bad_pin):
+                eligible, _ = self.gate.checkpoint_eligible(
+                    self.repo, self.head, self.prod, self.hist, pin=bad_pin, git_fn=self.fake_git
+                )
+                self.assertFalse(eligible)
+                with self.assertRaises(ValueError):
+                    self.gate.verify_historical_checkpoint(
+                        self.repo,
+                        self.head,
+                        self.prod,
+                        self.hist,
+                        pin=bad_pin,
+                        health_url="https://myanteroom.com/api/health",
+                        fetch=self.fake_fetch,
+                        download=self.downloads.__getitem__,
+                        git_fn=self.fake_git,
+                        live_version_fn=lambda _: "0.1.1011",
+                    )
+
+        # A skipped or retried phone-webkit chatStreaming regression must also fail closed end-to-end.
+        for mutation in (
+            {"expected": "skipped", "attempts": [{"status": "skipped", "duration": 0, "retry": 0}]},
+            {
+                "expected": "passed",
+                "attempts": [
+                    {"status": "failed", "duration": 10, "retry": 0},
+                    {"status": "passed", "duration": 15, "retry": 1},
+                ],
+            },
+        ):
+            mutated = copy.deepcopy(self.browser_inventory)
+            mutated["cases"][2].update(mutation)
+            raw = _archive("verification-browser.json", mutated)
+            self.downloads[106] = raw
+            self.artifacts[6]["size_in_bytes"] = len(raw)
+            self.artifacts[6]["digest"] = "sha256:" + hashlib.sha256(raw).hexdigest()
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(ValueError, "first attempt"):
+                self.gate.verify_historical_checkpoint(
+                    self.repo,
+                    self.head,
+                    self.prod,
+                    self.hist,
+                    pin=self.pin,
+                    health_url="https://myanteroom.com/api/health",
+                    fetch=self.fake_fetch,
+                    download=self.downloads.__getitem__,
+                    git_fn=self.fake_git,
+                    live_version_fn=lambda _: "0.1.1011",
+                )
 
     def test_valid_checkpoint_passes_when_base_live_version_and_receipt_match(self):
         report = self.gate.verify_historical_checkpoint(

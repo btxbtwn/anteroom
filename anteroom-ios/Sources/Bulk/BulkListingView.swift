@@ -1,5 +1,6 @@
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Bulk listing, as on web and desktop: everything is set up in one place
 /// before anything is created. Pick photos, group each item's photos, set the
@@ -25,6 +26,8 @@ struct BulkListingView: View {
     @State private var thumbnails: [UUID: UIImage] = [:]
     @State private var selection: Set<UUID> = []
     @State private var picked: [PhotosPickerItem] = []
+    @State private var showingCamera = false
+    @State private var showingFiles = false
     @State private var preparing = 0
     @State private var unreadable = 0
     @State private var cog = ""
@@ -98,6 +101,15 @@ struct BulkListingView: View {
                 picked = []
                 Task { await prepare(items) }
             }
+            .fileImporter(isPresented: $showingFiles, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
+                switch result {
+                case .success(let urls): Task { await prepareFiles(urls) }
+                case .failure: unreadable += 1
+                }
+            }
+            .fullScreenCover(isPresented: $showingCamera) {
+                MultiShotCamera(limit: nil) { shots in addCaptured(shots) }
+            }
             // The box list is optional; without it every draft is "Not from a box".
             .task { if let rows = try? await api.boxes() { boxes = rows } }
         }
@@ -106,12 +118,25 @@ struct BulkListingView: View {
     // MARK: Sections
 
     private var pickSection: some View {
-        Section {
+        let started = !jpegs.isEmpty
+        return Section {
+            if CameraSource.isAvailable {
+                Button { showingCamera = true } label: {
+                    Label(!started ? "Take photos" : "Take more photos", systemImage: "camera")
+                        .frame(minHeight: 44)
+                }
+                .accessibilityIdentifier("bulk-camera")
+            }
             PhotosPicker(selection: $picked, matching: .images) {
-                Label(jpegs.isEmpty ? "Choose photos" : "Add more photos", systemImage: "photo.on.rectangle")
+                Label(!started ? "Choose from library" : "Add from library", systemImage: "photo.on.rectangle")
                     .frame(minHeight: 44)
             }
             .accessibilityIdentifier("bulk-choose-photos")
+            Button { showingFiles = true } label: {
+                Label(!started ? "Choose from Files" : "Add from Files", systemImage: "folder")
+                    .frame(minHeight: 44)
+            }
+            .accessibilityIdentifier("bulk-choose-files")
             if preparing > 0 {
                 HStack { ProgressView(); Text("Preparing \(preparing) photos…").foregroundStyle(.secondary) }
             }
@@ -122,7 +147,7 @@ struct BulkListingView: View {
             }
         } footer: {
             Text(jpegs.isEmpty
-                 ? "Choose the photos for every item at once. Next, you group each item's photos, and Anteroom makes one draft per item."
+                 ? "Take or choose the photos for every item at once. Next, you group each item's photos, and Anteroom makes one draft per item."
                  : "\(plan.items.count) \(plan.items.count == 1 ? "item" : "items") · \(plan.loose.count) \(plan.loose.count == 1 ? "photo" : "photos") to group")
         }
     }
@@ -393,13 +418,41 @@ struct BulkListingView: View {
         thumbnails[id] = nil
     }
 
-    /// Prepares picked photos in picking order, off the main thread.
+    /// Prepares library photos in picking order, off the main thread.
     private func prepare(_ items: [PhotosPickerItem]) async {
-        preparing += items.count
+        await prepare(items) { try? await $0.loadTransferable(type: Data.self) }
+    }
+
+    /// Photos picked in Files sit outside the app's sandbox, so each is opened only while it is read.
+    private func prepareFiles(_ urls: [URL]) async {
+        await prepare(urls) { url in
+            await Task.detached(priority: .userInitiated) {
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                return try? Data(contentsOf: url)
+            }.value
+        }
+    }
+
+    /// Camera shots arrive already prepared, in the order they were taken.
+    private func addCaptured(_ shots: [CapturedShot]) {
         var ready: [UUID] = []
-        for item in items {
+        for shot in shots {
+            let id = UUID()
+            jpegs[id] = shot.jpeg
+            thumbnails[id] = shot.thumbnail
+            ready.append(id)
+        }
+        plan.add(ready)
+    }
+
+    /// Prepares photos in the order given, off the main thread.
+    private func prepare<Source>(_ sources: [Source], load: @MainActor (Source) async -> Data?) async {
+        preparing += sources.count
+        var ready: [UUID] = []
+        for source in sources {
             defer { preparing -= 1 }
-            guard let data = try? await item.loadTransferable(type: Data.self) else { unreadable += 1; continue }
+            guard let data = await load(source) else { unreadable += 1; continue }
             // Only Data crosses threads; the small thumbnail decodes here.
             let prepared = await Task.detached(priority: .userInitiated) { () -> (Data, Data?)? in
                 guard let jpeg = PhotoPreparer.jpeg(from: data) else { return nil }

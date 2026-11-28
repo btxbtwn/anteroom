@@ -123,3 +123,7 @@ xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift So
 echo "Test Today's summary, goals and badge"
 xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift Sources/Today/TodayModels.swift Tests/TodayTests.swift -o "$RUNNER_TEMP/today-tests"
 "$RUNNER_TEMP/today-tests"
+
+echo "Test the multi-shot camera tray"
+xcrun swiftc Sources/Photos/CameraShots.swift Tests/CameraShotsTests.swift -o "$RUNNER_TEMP/camera-shots-tests"
+"$RUNNER_TEMP/camera-shots-tests"

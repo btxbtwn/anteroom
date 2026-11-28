@@ -124,6 +124,8 @@ test("xs, icon-xs, and aligned buttons have centered 44 point hit areas on a pho
   await page.goto("/");
   await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Marketplaces", exact: true }).click();
+  // The calendar is visible through the closing navigation sheet before it can receive taps.
+  await expect(page.locator('[data-slot="sheet-backdrop"]:visible')).toHaveCount(0);
   const prevMonth = page.getByRole("button", { name: "Previous month", exact: true });
   await expect(prevMonth).toBeVisible();
   await prevMonth.scrollIntoViewIfNeeded();

@@ -169,19 +169,19 @@ struct PhotoStrip: View {
             }
         }
         .fullScreenCover(isPresented: $showingCamera) {
-            CameraPicker { image in
-                Task { await uploadCaptured(image) }
+            MultiShotCamera(limit: remaining) { shots in
+                guard !shots.isEmpty else { return }
+                Task { await send(shots.map(\.jpeg)) { $0 } }
             }
-            .ignoresSafeArea()
         }
     }
 
     @ViewBuilder private var addButtons: some View {
-        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+        if CameraSource.isAvailable {
             Button { showingCamera = true } label: {
                 Label("Camera", systemImage: "camera").frame(minHeight: 44)
             }
-                .accessibilityLabel("Take a listing photo")
+                .accessibilityLabel("Take listing photos")
                 .buttonStyle(.bordered)
         }
         PhotosPicker(selection: $picked, maxSelectionCount: remaining, matching: .images) {
@@ -222,13 +222,6 @@ struct PhotoStrip: View {
                 guard let data = try? Data(contentsOf: url) else { return nil }
                 return PhotoPreparer.jpeg(from: data)
             }.value
-        }
-    }
-
-    private func uploadCaptured(_ image: UIImage) async {
-        let photo = CapturedPhoto(image: image)
-        await send([photo]) { captured in
-            await Task.detached(priority: .userInitiated) { PhotoPreparer.jpeg(from: captured.image) }.value
         }
     }
 
@@ -360,11 +353,6 @@ enum PhotoCache {
     private static func key(_ photoID: String, _ version: String?, _ size: Int) -> NSString {
         ThumbnailSize.key(photoID: photoID, version: version, size: size) as NSString
     }
-}
-
-/// A camera photo on its way to `PhotoPreparer`; UIKit images are safe to read from any thread.
-private struct CapturedPhoto: @unchecked Sendable {
-    let image: UIImage
 }
 
 private struct PhotoSelection: Identifiable {
