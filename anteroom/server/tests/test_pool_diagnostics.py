@@ -183,3 +183,22 @@ def test_async_holder_and_reporting_failure_preserve_pool_behavior(monkeypatch):
     with engine.connect():
         pass
     engine.dispose()
+
+
+def test_pool_timer_belongs_to_request_that_acquired_connection():
+    from anteroom import request_phases
+    engine = pool_engine()
+    first, second = request_phases.Phases(), request_phases.Phases()
+    token = request_phases.current.set(first)
+    try:
+        connection = engine.connect()
+        request_phases.current.set(second)
+        assert exhaust(engine).exc_info
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            executor.submit(connection.close).result()
+        assert not first.active and 'db_held_ms' in first.snapshot()
+        assert 'db_held_ms' not in second.snapshot()
+        assert second.snapshot()['db_pool_wait_ms'] >= 1
+    finally:
+        request_phases.current.reset(token)
+        engine.dispose()

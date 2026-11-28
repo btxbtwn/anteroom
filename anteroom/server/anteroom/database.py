@@ -81,7 +81,8 @@ def make_engine(url: str):
         # more than 5 checkouts. Stay well under Supabase's remaining headroom
         # (max_connections 60 with ~40 already busy elsewhere); do not size this
         # to one connection per seller.
-        return create_engine(
+        from anteroom.request_phases import observe_sql
+        hosted_engine = create_engine(
             url,
             poolclass=DiagnosticQueuePool,
             pool_size=int(os.environ.get("ANTEROOM_DB_POOL_SIZE", "8")),
@@ -91,6 +92,8 @@ def make_engine(url: str):
             connect_args=connect_args,
             echo=False, hide_parameters=True,
         )
+        observe_sql(hosted_engine)
+        return hosted_engine
     return create_engine(url, poolclass=NullPool,
                          connect_args={**POSTGRES_NETWORK_DEADLINES, "prepare_threshold": None},
                          echo=False, hide_parameters=True)

@@ -8,6 +8,7 @@ from weakref import WeakKeyDictionary
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from sqlalchemy.orm import Session
 
+from anteroom import request_phases
 from anteroom.database import get_db
 from anteroom.models.catalog import (
     CategoryNode,
@@ -39,50 +40,52 @@ def _etag_matches(header: str | None, etag: str) -> bool:
 
 
 def _serialize_tree_nodes(db: Session, marketplace: str) -> tuple[bytes, str, _TreeVersion | None]:
-    rows = (
-        db.query(
-            CategoryTreeNode.category_id,
-            CategoryTreeNode.parent_id,
-            CategoryTreeNode.path,
-            CategoryTreeNode.label,
-            CategoryTreeNode.is_leaf,
-            CategoryTreeNode.has_children,
-            CategoryTree.status,
-            CategoryTree.updated_at,
-            CategoryTree.source,
-            CategoryTree.content_hash,
+    with request_phases.measure('db_read_ms'):
+        rows = (
+            db.query(
+                CategoryTreeNode.category_id,
+                CategoryTreeNode.parent_id,
+                CategoryTreeNode.path,
+                CategoryTreeNode.label,
+                CategoryTreeNode.is_leaf,
+                CategoryTreeNode.has_children,
+                CategoryTree.status,
+                CategoryTree.updated_at,
+                CategoryTree.source,
+                CategoryTree.content_hash,
+            )
+            .select_from(CategoryTree)
+            .outerjoin(CategoryTreeNode, CategoryTreeNode.marketplace == CategoryTree.marketplace)
+            .filter(CategoryTree.marketplace == marketplace)
+            .order_by(CategoryTreeNode.path)
+            .all()
         )
-        .select_from(CategoryTree)
-        .outerjoin(CategoryTreeNode, CategoryTreeNode.marketplace == CategoryTree.marketplace)
-        .filter(CategoryTree.marketplace == marketplace)
-        .order_by(CategoryTreeNode.path)
-        .all()
-    )
     # A single statement binds the cache version to the nodes' snapshot, even
     # under READ COMMITTED and when a seed is imported and then restored.
     status, updated_at, source, content_hash = rows[0][6:] if rows else (None, None, None, None)
     version = (updated_at, source, content_hash) if status == "complete" and updated_at is not None else None
-    body = json.dumps(
-        {
-            "coverage": "tree",
-            "complete": status == "complete",
-            "nodes": [
-                {
-                    "id": category_id,
-                    "parent_id": parent_id,
-                    "path": path,
-                    "label": label,
-                    "is_leaf": is_leaf,
-                    "has_children": has_children,
-                }
-                for category_id, parent_id, path, label, is_leaf, has_children, *_version in rows
-                if category_id is not None
-            ],
-        },
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode("utf-8")
-    etag = f'"{hashlib.sha256(body).hexdigest()[:16]}"'
+    with request_phases.measure('encode_ms'):
+        body = json.dumps(
+            {
+                "coverage": "tree",
+                "complete": status == "complete",
+                "nodes": [
+                    {
+                        "id": category_id,
+                        "parent_id": parent_id,
+                        "path": path,
+                        "label": label,
+                        "is_leaf": is_leaf,
+                        "has_children": has_children,
+                    }
+                    for category_id, parent_id, path, label, is_leaf, has_children, *_version in rows
+                    if category_id is not None
+                ],
+            },
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        etag = f'"{hashlib.sha256(body).hexdigest()[:16]}"'
     return body, etag, version
 
 

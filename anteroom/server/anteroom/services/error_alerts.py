@@ -180,6 +180,7 @@ def build_report(record: logging.LogRecord) -> dict[str, Any]:
         "marketplace_context": sanitize_context(getattr(record, "marketplace_context", None)),
         "stack": stack,
         "database_pool": database_pool,
+        "request_phases": (request_context.get() or {}).get("scope", {}).get("anteroom_request_phases"),
     }
 
 

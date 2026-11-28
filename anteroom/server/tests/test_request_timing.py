@@ -183,3 +183,70 @@ def test_reply_step_elapsed_bounds_and_invalid_names(monkeypatch):
                            'relay_persist_calls': 1, 'relay_persist_ms': 600000}
     finally:
         request_timing._details.reset(token)
+
+
+def test_fast_failed_request_includes_db_and_encoding_phases(caplog):
+    from sqlalchemy import create_engine
+    from anteroom import request_phases
+    from anteroom.database_pool import DiagnosticQueuePool
+
+    engine = create_engine('sqlite://', poolclass=DiagnosticQueuePool)
+    request_phases.observe_sql(engine)
+    app = FastAPI()
+    app.add_middleware(RequestTimingMiddleware)
+
+    from anteroom.hosted import AccessLogMiddleware
+    app.add_middleware(AccessLogMiddleware)
+
+    @app.get('/item/{item_id}')
+    def lookup(item_id: str):
+        from fastapi.responses import JSONResponse
+        with engine.connect() as db:
+            db.exec_driver_sql('SELECT 1').all()
+        with request_phases.measure('encode_ms'):
+            return JSONResponse({}, status_code=503)
+
+    try:
+        with (caplog.at_level('INFO'), patch('anteroom.hosted.access_log.info') as access,
+              TestClient(app) as client):
+            assert client.get('/item/private-id').status_code == 503
+        record, = [r for r in caplog.records if r.name == "anteroom.http"]
+        line = record.getMessage()
+        assert '/item/{item_id} answered 503' in line and 'private-id' not in line
+        for phase in ('db_acquire_ms', 'db_pool_wait_ms', 'db_sql_ms', 'db_held_ms', 'encode_ms'):
+            assert phase + '=' in access.call_args.args[-1]
+    finally:
+        engine.dispose()
+
+
+def test_inherited_worker_cannot_record_after_request_or_leak_dynamic_keys():
+    from anteroom import request_phases
+
+    async def scenario():
+        release = asyncio.Event()
+        child = None
+
+        async def app(_scope, _receive, send):
+            async def deferred():
+                with request_phases.measure("encode_ms"):
+                    await release.wait()
+                frozen = request_phases.current.get().snapshot()
+                with request_phases.measure("db_sql_ms"), request_phases.measure("private request value"):
+                    pass
+                assert request_phases.current.get().snapshot() == frozen
+                return frozen
+
+            nonlocal child
+            child = asyncio.create_task(deferred())
+            await asyncio.sleep(0)
+            await send({"type": "http.response.start", "status": 200})
+
+        async def send(_message):
+            pass
+
+        await RequestTimingMiddleware(app)({"type": "http", "method": "GET"}, None, send)
+        release.set()
+        assert set(await child) == {"encode_ms"}
+        assert request_phases.current.get() is None
+
+    asyncio.run(scenario())
