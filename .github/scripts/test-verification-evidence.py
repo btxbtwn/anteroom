@@ -1,5 +1,8 @@
 """Bounded stdlib tests: fake API, fake pytest hooks, no application or database."""
 import importlib.util
+import copy
+import hashlib
+import json
 import os
 from pathlib import Path
 import sys
@@ -25,6 +28,13 @@ MANIFEST = {
     'attempt': '2',
     'browser_regression_blob': evidence.BROWSER_REGRESSION_BLOB,
 }
+
+
+def current_jobs(value):
+    text = (ROOT / '.github/workflows/ci.yml').read_text()
+    raw = text.encode()
+    blob = hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
+    return evidence.validate_jobs(value, blob, lambda *args: text)
 
 
 def inventories():
@@ -136,6 +146,14 @@ class VerificationEvidence(unittest.TestCase):
         self.assertEqual(result['projects']['phone']['skipped'], 1)
         self.assertEqual(result['projects']['phone-webkit']['passed'], 1)
 
+    def test_browser_inventory_retains_three_project_partitions(self):
+        payload = browser_inventory()
+        for index, row in enumerate(payload['cases'], 1):
+            row['shard'] = index
+        result = evidence.validate_browser_inventory(payload, MANIFEST)
+        self.assertEqual(result['regression']['shard'], 3)
+        self.assertEqual(result['projects']['phone-webkit']['shard_counts'], [0, 0, 1])
+
     def test_browser_inventory_rejects_skip_retry_wrong_provenance_altered_blob_and_parity_breaks(self):
         # Retried pass (failed retry=0 then passed retry=1) must fail closed.
         retried = browser_inventory()
@@ -178,23 +196,49 @@ class VerificationEvidence(unittest.TestCase):
             evidence.validate_browser_inventory(bool_dur, MANIFEST)
 
     def test_job_success_requires_all_expanded_jobs(self):
-        self.assertEqual(len(evidence.validate_jobs(jobs())), len(evidence.CHECKS))
+        self.assertEqual(len(current_jobs(jobs())), len(evidence.CHECKS))
         for state in ('failure', 'cancelled', 'skipped', 'neutral', None):
             value = jobs()
             value[0]['conclusion'] = state
             with self.subTest(state=state), self.assertRaises(ValueError):
-                evidence.validate_jobs(value)
-        for value in (jobs()[:-1], jobs() + [jobs()[0]], jobs() + [
+                current_jobs(value)
+        for value in (jobs()[:-1], jobs() + [jobs()[0]], jobs() + [{'id': 901, 'name': 'unknown job'}], jobs() + [
                 {'id': 900, 'name': 'checks / new uncontracted job', 'conclusion': 'success'}]):
             with self.assertRaises(ValueError):
-                evidence.validate_jobs(value)
+                current_jobs(value)
 
     def test_reusable_dependency_job_name_is_not_a_skip_exception(self):
         value = jobs()
         for j in value:
             if j['name'].endswith('Audit locked Python dependencies'):
                 j['name'] = 'checks / Dependency audit / Audit locked Python dependencies'
-        evidence.validate_jobs(value)
+        current_jobs(value)
+
+    def test_pinned_historical_receipt_keeps_its_exact_job_contract(self):
+        fixture = json.loads((Path(__file__).parent / 'fixtures/recovery-receipt-46093755351.json').read_text())
+        receipt = fixture['receipt']
+        self.assertEqual(receipt['run_id'], '46093755351')
+        self.assertEqual(receipt['attempt'], '1')
+        self.assertEqual(receipt['ci_blob'], evidence.LEGACY_CI_BLOB)
+        self.assertEqual(fixture['artifact_sha256'], '2a98eb5e6a9efd67a9c1ca20a5925b134c84390f0bce1415109d4d19762a095d')
+        actual = evidence.validate_jobs(fixture['jobs'], receipt['ci_blob'])
+        self.assertEqual(sorted(actual, key=lambda j: j['id']), sorted(receipt['jobs'], key=lambda j: j['id']))
+        with self.assertRaises(ValueError):
+            current_jobs(fixture['jobs'])
+        for value in (fixture['jobs'][:-2], fixture['jobs'] + [jobs()[0]]):
+            with self.assertRaises(ValueError):
+                evidence.validate_jobs(value, receipt['ci_blob'])
+        failed = copy.deepcopy(fixture['jobs'])
+        next(j for j in failed if j['name'].startswith('checks / '))['conclusion'] = 'skipped'
+        with self.assertRaises(ValueError):
+            evidence.validate_jobs(failed, receipt['ci_blob'])
+
+    def test_unknown_or_missing_workflow_contract_rejects_both_layouts(self):
+        for text in ('name: CI', '# verification-job-contract: unknown',
+                     '# verification-job-contract: browser-projects-v1\n# verification-job-contract: browser-projects-v1'):
+            for value in (jobs(), [j for j in jobs() if j['name'].removeprefix('checks / ') not in evidence.PROJECT_CHECKS]):
+                with self.subTest(text=text), self.assertRaises(ValueError):
+                    evidence.validate_jobs(value, 'f' * 40, lambda *args: text)
 
     def test_pagination_uses_exact_attempt_and_keeps_all_jobs(self):
         first = [{'id': n} for n in range(100)]

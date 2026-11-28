@@ -38,10 +38,10 @@ function inventory(cases, executed, requireSpec = false) {
   return entries;
 }
 
-export function verifyCollections(full, first, second, requireSpec = false) {
+export function verifyCollections(full, collections, requireSpec = false) {
   const complete = inventory(full, false, requireSpec);
-  const shards = [inventory(first, true, requireSpec), inventory(second, true, requireSpec)];
-  const actual = [...first, ...second];
+  const shards = collections.map((cases) => inventory(cases, true, requireSpec));
+  const actual = collections.flat();
   const recorded = inventory(actual, true, requireSpec);
   const sameCase = (id, row) => {
     const original = complete.get(id);
@@ -67,8 +67,37 @@ export function verifyCollections(full, first, second, requireSpec = false) {
   }));
 }
 
-export function buildVerificationInventory(full, first, second, {
-  key,
+export function verifyProjectCollections(records) {
+  if (!Array.isArray(records) || records.length !== projects.length) throw new Error("Missing project evidence");
+  const full = [];
+  const collections = projects.map((project) => {
+    const matches = records.filter((record) => record.project === project);
+    if (matches.length !== 1) throw new Error("Missing or duplicate project evidence");
+    const [record] = matches;
+    inventory(record.full, false, true);
+    if (projects.some((name) => !record.full.some((row) => row.project === name))
+      || !Array.isArray(record.cases) || record.cases.some((row) => row.project !== project)) {
+      throw new Error("Wrong project evidence");
+    }
+    // Each runner keeps its own private key. Compare its execution against its
+    // own unfiltered collection, then combine the three disjoint projects.
+    full.push(...record.full.filter((row) => row.project === project));
+    return record.cases;
+  });
+  return { full, collections, counts: verifyCollections(full, collections, true) };
+}
+
+export function regressionIdentity(key) {
+  if (!Buffer.isBuffer(key) || key.length !== 32) throw new Error("Invalid evidence key");
+  const hash = (kind, value) => createHmac("sha256", key).update(kind + "\0" + value).digest("hex");
+  return {
+    file: hash("file", BROWSER_REGRESSION.relativeFile),
+    spec: hash("spec", `${BROWSER_REGRESSION.project}\0${BROWSER_REGRESSION.relativeFile}\0${BROWSER_REGRESSION.title}`),
+  };
+}
+
+export function buildVerificationInventory(full, collections, {
+  regression,
   target,
   tree,
   ciBlob,
@@ -76,8 +105,9 @@ export function buildVerificationInventory(full, first, second, {
   attempt,
   regressionFileBlob,
 }) {
-  if (!Buffer.isBuffer(key) || key.length !== 32) {
-    throw new Error("Invalid evidence key");
+  if (!regression || typeof regression.file !== "string" || typeof regression.spec !== "string"
+    || !digest.test(regression.file) || !digest.test(regression.spec)) {
+    throw new Error("Invalid regression identity");
   }
   for (const sha of [target, tree, ciBlob, regressionFileBlob]) {
     if (typeof sha !== "string" || !gitSha.test(sha)) {
@@ -87,14 +117,10 @@ export function buildVerificationInventory(full, first, second, {
   if (!/^[1-9]\d*$/.test(String(runId ?? "")) || !/^[1-9]\d*$/.test(String(attempt ?? ""))) {
     throw new Error("Invalid run/attempt provenance for browser verification inventory");
   }
-  verifyCollections(full, first, second, true);
-  const actual = [...first, ...second];
-  const hash = (kind, value) => createHmac("sha256", key).update(kind + "\0" + value).digest("hex");
-  const expectedFile = hash("file", BROWSER_REGRESSION.relativeFile);
-  const expectedSpec = hash(
-    "spec",
-    `${BROWSER_REGRESSION.project}\0${BROWSER_REGRESSION.relativeFile}\0${BROWSER_REGRESSION.title}`,
-  );
+  verifyCollections(full, collections, true);
+  const actual = collections.flat();
+  const expectedFile = regression.file;
+  const expectedSpec = regression.spec;
   const fullMatches = full.filter((row) => row.spec === expectedSpec);
   const actualMatches = actual.filter((row) => row.spec === expectedSpec);
   if (fullMatches.length !== 1 || actualMatches.length !== 1 || fullMatches[0].id !== actualMatches[0].id) {
@@ -113,7 +139,7 @@ export function buildVerificationInventory(full, first, second, {
     || matchedActual.attempts[0].retry !== 0) {
     throw new Error("The historical phone-webkit chatStreaming regression must pass on first attempt without skip or retry");
   }
-  const firstIds = new Set(first.map(({ id }) => id));
+  const shards = new Map(collections.flatMap((rows, index) => rows.map(({ id }) => [id, index + 1])));
   const regressionKeySha256 = createHash("sha256")
     .update(`${BROWSER_REGRESSION.project}\0${BROWSER_REGRESSION.repoFile}\0${BROWSER_REGRESSION.title}`)
     .digest("hex");
@@ -133,7 +159,7 @@ export function buildVerificationInventory(full, first, second, {
       id,
       project,
       file,
-      shard: firstIds.has(id) ? 1 : 2,
+      shard: shards.get(id),
       expected,
       attempts: attempts.map(({ status, duration, retry }) => ({ status, duration, retry })),
     })),
@@ -151,7 +177,7 @@ function main(directory) {
   const first = readInventory(directory, "shard-1");
   const second = readInventory(directory, "shard-2");
   const actual = [...first, ...second];
-  const counts = verifyCollections(full, first, second);
+  const counts = verifyCollections(full, [first, second]);
   console.log(`Verified ${actual.length} sandbox cases across both shards.`);
   const verificationOutput = process.env.VERIFICATION_BROWSER_INVENTORY_PATH || "";
   if (process.env.GITHUB_ACTIONS !== "true") {
@@ -200,8 +226,8 @@ function main(directory) {
   if (verificationOutput) {
     const key = readFileSync(join(directory, "identity-key"));
     const regressionFileBlob = git("rev-parse", `HEAD:${BROWSER_REGRESSION.repoFile}`);
-    const payload = JSON.stringify(buildVerificationInventory(full, first, second, {
-      key,
+    const payload = JSON.stringify(buildVerificationInventory(full, [first, second], {
+      regression: regressionIdentity(key),
       target: sha,
       tree,
       ciBlob: workflowBlob,

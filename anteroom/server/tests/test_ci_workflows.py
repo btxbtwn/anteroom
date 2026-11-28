@@ -55,7 +55,15 @@ def test_ci_gate_rejects_failures_and_accepts_intentional_skips(changes: str, re
 def test_every_selected_job_is_wired_into_the_required_gate() -> None:
     jobs = workflow("ci.yml")["jobs"]
     selected_jobs = {name for name, job in jobs.items() if "needs.changes.outputs." in job.get("if", "")}
-    assert selected_jobs <= set(jobs["ci"]["needs"])
+    direct = set(jobs["ci"]["needs"])
+    browser_gate = jobs["studio-browser"]
+    execution_jobs = {"studio-browser-projects", "studio-browser-hosted"}
+    assert "studio-browser" in direct
+    assert execution_jobs <= set(browser_gate["needs"])
+    assert browser_gate["if"].startswith("always() &&")
+    # The stable browser gate checks both execution results. Required CI still
+    # rejects a failed/skipped gate; execution jobs need not be direct children.
+    assert selected_jobs <= direct | execution_jobs
     outputs = jobs["changes"]["outputs"]
     for name in selected_jobs:
         group = jobs[name]["if"].split("needs.changes.outputs.")[1].split()[0]

@@ -1,0 +1,1 @@
+- Browser checks run desktop and phone projects separately so changes can be verified sooner.
