@@ -100,6 +100,13 @@ struct MarketplaceFormView: View {
         .task(id: "\(marketplace)-\(model.forms[marketplace] == nil)") {
             if model.forms[marketplace] == nil { await model.loadForm(marketplace) }
         }
+        .task(id: "\(marketplace)-\(model.forms[marketplace]?.fields.contains(where: \.choicesLoading) == true)") {
+            for _ in 0..<16 {
+                guard model.forms[marketplace]?.fields.contains(where: \.choicesLoading) == true else { return }
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                await model.loadForm(marketplace)
+            }
+        }
         .reloadingOnReturn(when: model.forms[marketplace] == nil && model.formErrors[marketplace] != nil) {
             await model.loadForm(marketplace)
         }
@@ -219,7 +226,9 @@ struct MarketplaceFormView: View {
 
     private func shown(_ key: String, _ form: NativeForm) -> String {
         guard let field = form.fields.first(where: { $0.key == key }) else { return "" }
-        let text = model.value(field)?.text ?? ""
+        let value = model.value(field)
+        if case .bool(let enabled) = value { return enabled ? "true" : "false" }
+        let text = value?.text ?? ""
         return field.stored(for: text)
     }
 }
@@ -238,12 +247,29 @@ private struct NativeFieldControl: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             control
+            if field.key == "ebay_specifics.promotion.adRate",
+               EbayFormRules.highPromotionRate(current?.number, suggested: field.suggestedAdRate) {
+                Text("\(current?.text ?? "")% is a high ad rate. Check it before confirming promotion.")
+                    .font(.footnote).foregroundStyle(WorkspaceStyle.warning)
+            }
+            if field.key == "ebay_specifics.promotion.enabled" && promotionNeedsSettings {
+                Text("Choose a campaign and enter an ad rate to turn on promotion.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
             if let help = field.help, !help.isEmpty, field.inputType != "note", !hiddenHelp.contains(help) {
                 Text(help).font(.footnote).foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .fieldAnchor(field.path)
+    }
+
+    private var promotionNeedsSettings: Bool {
+        guard current != .bool(true) else { return false }
+        return !EbayFormRules.validPromotion(
+            campaign: model.current(at: "ebay_specifics.promotion.campaignId")?.text ?? "",
+            rate: model.current(at: "ebay_specifics.promotion.adRate")?.text ?? ""
+        )
     }
 
     private var title: String { field.required ? "\(field.label) *" : field.label }
@@ -290,6 +316,7 @@ private struct NativeFieldControl: View {
                     Text(field.label).font(.subheadline)
                 }
                 .frame(minHeight: 44)
+                .disabled(field.key == "ebay_specifics.promotion.enabled" && promotionNeedsSettings)
             }
         case "segmented":
             WorkspaceField(title) {

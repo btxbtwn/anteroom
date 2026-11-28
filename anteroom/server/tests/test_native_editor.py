@@ -104,6 +104,9 @@ class NativeEditorTest(unittest.TestCase):
             form = asyncio.run(native_editor.ebay_form(self.listing))
         self.assertEqual(form["marketplace"], "ebay")
         self.assertTrue(form["fields"])
+        promotion = next(row for row in form["fields"] if row.get("key") == "ebay_specifics.promotion.enabled")
+        self.assertEqual(promotion["section"], "Promote your listing")
+        self.assertIs(promotion["value"], False)
         self.bridge.assert_not_called()
 
     def test_category_failure_types_distinguish_known_api_and_database_failures(self):
@@ -386,7 +389,11 @@ class NativeEditorTest(unittest.TestCase):
                 result = answer.json()
                 self.assertTrue(result["page_labels"])
                 rows = result["fields"]
-                self.assertEqual([row["value"] for row in rows], ["cotton", "Edited description", 20])
+                # eBay's Promote your listing rows are read live and appended after the saved ones.
+                self.assertEqual([row["path"] for row in rows[3:]], [
+                    "ebay_specifics.promotion.enabled", "ebay_specifics.promotion.campaignId",
+                    "ebay_specifics.promotion.adRate"])
+                self.assertEqual([row["value"] for row in rows[:3]], ["cotton", "Edited description", 20])
                 self.assertEqual(rows[0]["section"], "Details")
                 self.assertEqual(rows[0]["width"], "half")
                 self.assertEqual(rows[0]["option_values"], {"Cotton": "cotton"})
@@ -689,6 +696,27 @@ class NativeEditorTest(unittest.TestCase):
 
 
 class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
+    async def test_promotion_choices_do_not_block_a_cold_form(self):
+        import asyncio
+        from anteroom.services import ebay_listing_promotion, saved_choices
+
+        async def stalled(*_args):
+            await asyncio.Event().wait()
+
+        background = []
+        with (
+            patch("anteroom.services.marketplace_accounts.account_id", new=AsyncMock(return_value="test-seller")),
+            saved_choices.preload_entries({"ebay-campaigns": None, "ebay-suggested-rate:123456789012": None}),
+            patch.object(saved_choices, "on_this_loop", side_effect=background.append),
+            patch.object(ebay_listing_promotion, "campaigns", side_effect=stalled),
+            patch.object(ebay_listing_promotion, "suggested_rate", side_effect=stalled),
+        ):
+            rows = await asyncio.wait_for(native_editor._ebay_promotion_fields({
+                "_promotion_listing_id": "123456789012",
+            }), timeout=1)
+        self.assertFalse(rows[0]["value"])
+        self.assertEqual(len(background), 2)
+
     async def test_slab_evidence_reaches_native_condition_rows_and_submission(self):
         from anteroom.services.ebay_listings import _inventory_body, _listing_fields
         from anteroom.services.listing_generate import format_photo_analysis
@@ -789,6 +817,7 @@ class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
                           "Irregular package"]),
             ("Preferences", ["Item location", "Return policy"]),
             ("Charity", ["Charity", "Percentage"]),
+            ("Promote your listing", ["Promoted Listings", "Select campaign", "Ad rate (%)"]),
         ])
         # What eBay's page keeps behind its buttons.
         self.assertEqual({(row["label"], row["reveal"]) for row in form["fields"] if row.get("reveal")}, {
@@ -811,7 +840,7 @@ class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([row["label"] for row in form["fields"] if row.get("width") == "half"], [
             "Category", "Second category", "First category", "Second category", "Custom item specific", "Custom detail",
             "Minimum offer", "Auto accept", "Listing start time", "Your cost", "Quantity in lot", "Package dimensions (in.)",
-            "Charity", "Percentage"])
+            "Charity", "Percentage", "Select campaign", "Ad rate (%)"])
         # Weight in lbs. and oz. and the dimensions share one row, as on eBay's page.
         self.assertEqual([label for label, row in fields.items() if row.get("width") == "quarter"], [
             "Package weight (lbs.)", "Package weight (oz.)"])

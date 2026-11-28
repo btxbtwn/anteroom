@@ -82,6 +82,8 @@ class MarketplaceListing(SellerOwned, Base):
     # A listing with variations: its inventory item group, and {variation SKU: offer ID}.
     ebay_group_key: Mapped[str | None] = mapped_column(String, nullable=True)
     ebay_variant_offers: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # Listing and campaign pinned before creating a form-managed ad, including lost replies.
+    ebay_promotion: Mapped[Any] = mapped_column(JSON, nullable=True)
 
     etsy_shop_id: Mapped[str | None] = mapped_column(String, nullable=True)
     etsy_pending_write: Mapped[str | None] = mapped_column(String, nullable=True)

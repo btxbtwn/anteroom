@@ -50,7 +50,7 @@ struct ListEverywhereSheet: View {
                 VStack(spacing: 0) {
                     Divider()
                     Button {
-                        confirming = .listEverywhere(title: model.title, marketplaces: chosen)
+                        confirming = .listEverywhere(title: model.title, marketplaces: chosen, ebayPromotion: model.ebayAdRate)
                     } label: {
                         Group {
                             if sending { ProgressView() } else { Text(confirmLabel).fontWeight(.semibold) }

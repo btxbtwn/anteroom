@@ -36,7 +36,8 @@ def _active_job(db: Session) -> bool:
     return bool(JobRepo(db).get_active())
 
 
-async def perform(item: dict, action: dict, marketplaces: list[str], revision_id: str | None, *, confirm: bool = False) -> dict:
+async def perform(item: dict, action: dict, marketplaces: list[str], revision_id: str | None, *, confirm: bool = False,
+                  confirmed_ebay_ad_rate: str | None = None) -> dict:
     if action["type"] in {"delist", "relist"} and confirm is not True:
         return {"ok": False, "error": "Review and confirm this item’s marketplace action first."}
     if await _db_work(_active_job):
@@ -45,7 +46,7 @@ async def perform(item: dict, action: dict, marketplaces: list[str], revision_id
     if kind == "delist":
         return await _delist(item["conversation_id"], marketplaces)
     if kind == "relist":
-        return await _relist(item["conversation_id"], marketplaces, revision_id)
+        return await _relist(item["conversation_id"], marketplaces, revision_id, confirmed_ebay_ad_rate=confirmed_ebay_ad_rate)
     if kind == "regenerate":
         return await _regenerate(item["conversation_id"])
     return {"ok": True, "skipped": kind}
@@ -69,7 +70,8 @@ async def _delist(conv_id: str, marketplaces: list[str]) -> dict:
     return {"ok": True, "detail": result}
 
 
-async def _relist(conv_id: str, marketplaces: list[str], revision_id: str | None) -> dict:
+async def _relist(conv_id: str, marketplaces: list[str], revision_id: str | None, *,
+                  confirmed_ebay_ad_rate: str | None = None) -> dict:
     """Take the named listings down, then list those same items again.
 
     A marketplace that fails to list does not stop the others. Each is tried
@@ -78,6 +80,13 @@ async def _relist(conv_id: str, marketplaces: list[str], revision_id: str | None
     A delist that itself fails returns before anything is marked down, because
     the listings may still be up.
     """
+    if "ebay" in marketplaces:
+        from anteroom.services.listing_result import ListingProblem
+
+        try:
+            await _db_work(_check_ebay_relist, conv_id, revision_id, confirmed_ebay_ad_rate)
+        except (ListingProblem, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
     taken_down = await _delist(conv_id, marketplaces)
     if not taken_down.get("ok"):
         confirmed = [name for name in marketplaces if (taken_down.get("detail", {}).get(name) or {}).get("state") == "deleted"]
@@ -87,7 +96,22 @@ async def _relist(conv_id: str, marketplaces: list[str], revision_id: str | None
     from anteroom.services import subscriptions
 
     with subscriptions.exempt_listed_item_count():
-        return await _list_remaining(conv_id, marketplaces, revision_id)
+        return await _list_remaining(conv_id, marketplaces, revision_id, confirmed_ebay_ad_rate=confirmed_ebay_ad_rate)
+
+
+def _check_ebay_relist(db: Session, conv_id: str, revision_id: str | None, rate: str | None) -> None:
+    from anteroom.repositories.queries import ListingRepo
+    from anteroom.services.ebay_listing_promotion import confirmed_selection, selection
+
+    repo = ListingRepo(db)
+    current = repo.get_current(conv_id)
+    revision = repo.get_revision(revision_id) if revision_id else None
+    if not current or current.current_revision_id != revision_id or not revision:
+        raise ValueError("The listing changed. Review it before relisting.")
+    if rate is None:
+        selection(revision.listing_json)
+    else:
+        confirmed_selection(revision.listing_json, rate)
 
 
 def _is_sold(db: Session, conv_id: str) -> bool:
@@ -98,7 +122,8 @@ def _is_sold(db: Session, conv_id: str) -> bool:
     return _is_sold_or_has_sale(db, conv) if conv is not None else False
 
 
-async def publish_revision(conv_id: str, marketplaces: list[str], revision_id: str | None) -> dict:
+async def publish_revision(conv_id: str, marketplaces: list[str], revision_id: str | None, *,
+                           confirmed_ebay_ad_rate: str | None = None) -> dict:
     """List a saved revision on named marketplaces after explicit approval.
 
     An existing live listing needs a separate Relist approval; List never
@@ -118,7 +143,7 @@ async def publish_revision(conv_id: str, marketplaces: list[str], revision_id: s
     if live:
         return {"ok": False, "error": "Already listed on " + ", ".join(live) + ". Choose and approve Relist explicitly."}
     if fresh:
-        listed = await _list_remaining(conv_id, fresh, revision_id)
+        listed = await _list_remaining(conv_id, fresh, revision_id, confirmed_ebay_ad_rate=confirmed_ebay_ad_rate)
         detail.extend(listed.get("detail") or [])
         down.extend(listed.get("down") or [])
         errors.update(listed.get("errors") or {})
@@ -159,7 +184,8 @@ def _partition(db: Session, conv_id: str, marketplaces: list[str]) -> tuple[list
     return live, fresh
 
 
-async def _list_remaining(conv_id: str, marketplaces: list[str], revision_id: str | None) -> dict:
+async def _list_remaining(conv_id: str, marketplaces: list[str], revision_id: str | None, *,
+                          confirmed_ebay_ad_rate: str | None = None) -> dict:
     if not revision_id:
         return {"ok": False, "error": "Relist needs the listing that was just saved."}
     pending = list(marketplaces)
@@ -167,7 +193,11 @@ async def _list_remaining(conv_id: str, marketplaces: list[str], revision_id: st
     errors: dict[str, str] = {}
     still = []
     # Every marketplace starts at once; each waits only for its own turn.
-    outcomes = await asyncio.gather(*(_list_one(conv_id, name, revision_id) for name in pending))
+    outcomes = await asyncio.gather(*(
+        _list_one(conv_id, name, revision_id) if confirmed_ebay_ad_rate is None else
+        _native_one(conv_id, name, revision_id, "list", confirmed_ebay_ad_rate=confirmed_ebay_ad_rate)
+        for name in pending
+    ))
     for name, outcome in zip(pending, outcomes, strict=True):
         if outcome.get("ok"):
             detail.append(outcome)
@@ -196,7 +226,16 @@ def _job_outcome(db: Session, job_id: str) -> tuple[str | None, str | None] | No
     return (job.status, job.last_error) if job is not None else None
 
 
-async def _native_one(conv_id: str, name: str, revision_id: str, kind: str) -> dict:
+def _ebay_promotion_enabled(db: Session, revision_id: str) -> bool:
+    from anteroom.repositories.queries import ListingRepo
+    from anteroom.services.ebay_listing_promotion import choice
+
+    revision = ListingRepo(db).get_revision(revision_id)
+    return revision is not None and choice(revision.listing_json).get("enabled") is True
+
+
+async def _native_one(conv_id: str, name: str, revision_id: str, kind: str, *,
+                      confirmed_ebay_ad_rate: str | None = None) -> dict:
     """One List or Update on one marketplace, waited on until the marketplace answers. Never retried."""
     from typing import cast
 
@@ -211,17 +250,23 @@ async def _native_one(conv_id: str, name: str, revision_id: str, kind: str) -> d
         if not await _wait_until_free(name):
             return stalled
         try:
-            from anteroom.services.draft_scheduling import scheduled_requester
+            from anteroom.services.draft_scheduling import scheduled_ebay_ad_rate, scheduled_requester
 
-            # A publish an MCP agent scheduled names it on its jobs, as one it started would.
             # This call follows the seller's consumed item-specific approval.
-            body = ListRequest(revision_id=revision_id, confirm=True)
-            agent = scheduled_requester()
-            result = (
-                await start(conv_id, cast(Marketplace, name), body, requested_by=agent)
-                if agent
-                else await start(conv_id, cast(Marketplace, name), body)
+            target = cast(Marketplace, name)
+            rate = (confirmed_ebay_ad_rate or scheduled_ebay_ad_rate()) if name == "ebay" else None
+            body = ListRequest(revision_id=revision_id, confirm=True, confirmed_ebay_ad_rate=rate)
+            leave_ad = name == "ebay" and rate is None and (
+                kind == "list" or await _db_work(_ebay_promotion_enabled, revision_id)
             )
+            # A publish an MCP agent scheduled names it on its jobs, as one it started would.
+            if agent := scheduled_requester():
+                result = await start(conv_id, target, body, requested_by=agent,
+                                     promotion_mode="leave" if leave_ad else "confirm")
+            elif leave_ad:
+                result = await start(conv_id, target, body, promotion_mode="leave")
+            else:
+                result = await start(conv_id, target, body)
         except NativeMarketplaceError as exc:
             return {"ok": False, "marketplace": name, "error": str(exc)}
         except PlanLimitError as exc:
@@ -234,7 +279,15 @@ async def _native_one(conv_id: str, name: str, revision_id: str, kind: str) -> d
     if (job is not None and job[0] != "completed") or refused:
         fallback = "The marketplace did not confirm publication." if kind == "list" else "The marketplace did not confirm the update."
         return {"marketplace": name, "ok": False, "error": (job[1] if job else result.get("error")) or fallback}
-    return {"marketplace": name, "ok": True, "detail": _brief(result)}
+    detail = _brief(result)
+    if name == "ebay" and job is not None:
+        from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
+        from anteroom.services.ebay_listing_promotion import WARNING_CODE
+
+        final = await _db_work(lambda db: MarketplaceListingRepo(db).get(conv_id, "ebay"))
+        if final.get("job_id") == result["job_id"] and final.get("error_code") == WARNING_CODE:
+            detail.update(state=final["state"], warning=final["error"])
+    return {"marketplace": name, "ok": True, "detail": detail}
 
 
 async def wait_for_native_result(conv_id: str, marketplace: str, started: dict, *, session_factory=None) -> dict:
@@ -313,7 +366,8 @@ async def wait_for_native_result(conv_id: str, marketplace: str, started: dict, 
     return await _run_db(read)
 
 
-async def update_revision(conv_id: str, marketplaces: list[str], revision_id: str | None) -> dict:
+async def update_revision(conv_id: str, marketplaces: list[str], revision_id: str | None, *,
+                          confirmed_ebay_ad_rate: str | None = None) -> dict:
     """Write a saved revision onto listings already live, after explicit approval.
 
     Each named marketplace is tried once, all at the same time. A failed update leaves that
@@ -325,7 +379,11 @@ async def update_revision(conv_id: str, marketplaces: list[str], revision_id: st
         return {"ok": False, "error": "Update needs the listing that was reviewed."}
     detail: list[dict] = []
     errors: dict[str, str] = {}
-    outcomes = await asyncio.gather(*(_native_one(conv_id, name, revision_id, "update") for name in marketplaces))
+    outcomes = await asyncio.gather(*(
+        _native_one(conv_id, name, revision_id, "update") if confirmed_ebay_ad_rate is None else
+        _native_one(conv_id, name, revision_id, "update", confirmed_ebay_ad_rate=confirmed_ebay_ad_rate)
+        for name in marketplaces
+    ))
     for name, outcome in zip(marketplaces, outcomes, strict=True):
         if outcome.get("ok"):
             detail.append(outcome)

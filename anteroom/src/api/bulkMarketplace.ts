@@ -10,6 +10,8 @@ export interface BulkMarketplaceRow {
   skipped: { marketplace: DelistMarketplace; reason: string }[];
   skip_reason: string | null;
   review_token: string | null;
+  ebay_ad_rate?: string;
+  ebay_remove_promotion?: boolean;
 }
 export interface BulkMarketplacePreview { action: BulkMarketplaceAction; marketplaces: DelistMarketplace[]; rows: BulkMarketplaceRow[] }
 export interface BulkMarketplacePerform {
@@ -19,6 +21,7 @@ export interface BulkMarketplacePerform {
   revision_id: string | null;
   review_token: string;
   confirm: true;
+  confirmed_ebay_ad_rate?: string;
 }
 export interface BulkMarketplaceResult {
   conversation_id: string;

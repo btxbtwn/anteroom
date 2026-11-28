@@ -143,6 +143,7 @@ final class MarketplaceActionsModel {
 
 struct MarketplaceActionsView: View {
     let title: String
+    let ebayPromotion: String?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @State private var model: MarketplaceActionsModel
@@ -150,8 +151,9 @@ struct MarketplaceActionsView: View {
     /// Hand a prompt to the listing assistant, which fixes the listing but never lists it.
     let onAskChat: ((String) -> Void)?
 
-    init(api: AnteroomAPI, listingID: String, revisionID: String?, title: String, onAskChat: ((String) -> Void)? = nil) {
+    init(api: AnteroomAPI, listingID: String, revisionID: String?, title: String, ebayPromotion: String? = nil, onAskChat: ((String) -> Void)? = nil) {
         self.title = title
+        self.ebayPromotion = ebayPromotion
         self.onAskChat = onAskChat
         _model = State(initialValue: MarketplaceActionsModel(api: api, listingID: listingID, revisionID: revisionID))
     }
@@ -266,7 +268,7 @@ struct MarketplaceActionsView: View {
                         .disabled(busy)
                 } else {
                     if row.canUpdate {
-                        Button("Update…") { confirming = .update(title: title, marketplace: row.marketplace) }
+                        Button("Update…") { confirming = .update(title: title, marketplace: row.marketplace, ebayPromotion: ebayPromotion) }
                             .buttonStyle(.bordered)
                             .tint(row.outdated ? WorkspaceStyle.accent : nil)
                             .disabled(busy || model.revisionID == nil)
@@ -284,7 +286,7 @@ struct MarketplaceActionsView: View {
                     if row.canList {
                         let wait = model.retryIn(row.marketplace)
                         Button(busy ? "Working…" : wait > 0 ? "Retry in \(wait)s" : "List…") {
-                            confirming = .list(title: title, marketplace: row.marketplace)
+                            confirming = .list(title: title, marketplace: row.marketplace, ebayPromotion: ebayPromotion)
                         }
                         .workspaceProminentButton()
                         .disabled(busy || wait > 0 || model.revisionID == nil)

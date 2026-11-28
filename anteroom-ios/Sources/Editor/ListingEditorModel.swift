@@ -31,6 +31,7 @@ final class ListingEditorModel {
     private var saved = Form()
     /// The full listing as loaded; edits are written into it, never rebuilt.
     private var document: [String: JSONValue] = [:]
+    var ebayAdRate: String? { SellerConfirmationRequest.ebayPromotion(in: document) }
     /// The saved version, which List, Update and Save draft send.
     private(set) var revisionID: String?
     /// Marketplace tab edits by listing path, written into the listing on Save.

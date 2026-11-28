@@ -652,6 +652,24 @@ struct ErrorDetail: Codable, Hashable, Sendable {
     var detail: String
 }
 
+struct EtsyPackage: Codable, Hashable, Sendable {
+    var itemWeight: Double
+    var itemLength: Double
+    var itemWidth: Double
+    var itemHeight: Double
+    var itemWeightUnit: String
+    var itemDimensionsUnit: String
+
+    enum CodingKeys: String, CodingKey {
+        case itemWeight = "item_weight"
+        case itemLength = "item_length"
+        case itemWidth = "item_width"
+        case itemHeight = "item_height"
+        case itemWeightUnit = "item_weight_unit"
+        case itemDimensionsUnit = "item_dimensions_unit"
+    }
+}
+
 struct Expense: Identifiable, Codable, Hashable, Sendable {
     var incurredDate: String
     var amountCents: Int
@@ -805,6 +823,39 @@ struct FavoriteResult: Identifiable, Codable, Hashable, Sendable {
 
 struct HTTPValidationError: Codable, Hashable, Sendable {
     var detail: [ValidationError]?
+}
+
+struct ListRequest: Codable, Hashable, Sendable {
+    var revisionID: String
+    var confirm: Bool = false
+    var confirmedEbayAdRate: String?
+    var shippingProfileID: String?
+    var readinessStateID: String?
+    var returnPolicyID: String?
+    var etsyPackage: EtsyPackage?
+
+    enum CodingKeys: String, CodingKey {
+        case confirm
+        case revisionID = "revision_id"
+        case confirmedEbayAdRate = "confirmed_ebay_ad_rate"
+        case shippingProfileID = "shipping_profile_id"
+        case readinessStateID = "readiness_state_id"
+        case returnPolicyID = "return_policy_id"
+        case etsyPackage = "etsy_package"
+    }
+}
+
+extension ListRequest {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        revisionID = try values.decode(String.self, forKey: .revisionID)
+        confirm = try values.decodeIfPresent(Bool.self, forKey: .confirm) ?? false
+        confirmedEbayAdRate = try values.decodeIfPresent(String.self, forKey: .confirmedEbayAdRate)
+        shippingProfileID = try values.decodeIfPresent(String.self, forKey: .shippingProfileID)
+        readinessStateID = try values.decodeIfPresent(String.self, forKey: .readinessStateID)
+        returnPolicyID = try values.decodeIfPresent(String.self, forKey: .returnPolicyID)
+        etsyPackage = try values.decodeIfPresent(EtsyPackage.self, forKey: .etsyPackage)
+    }
 }
 
 /// The listing's current revision, its revision pointer and its validation.

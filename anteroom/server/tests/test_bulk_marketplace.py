@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -66,7 +67,7 @@ def calls(monkeypatch, db):
         await in_worker_session(save)
         return {name: {"state": "deleted"} for name in marketplaces}
 
-    async def fake_list(conv_id, name, body):
+    async def fake_list(conv_id, name, body, *, promotion_mode="confirm"):
         seen.append(("list", conv_id, name, body.confirm, body.revision_id))
         await in_worker_session(lambda session: MarketplaceListingRepo(session).save(
             conv_id, name, {"state": "published", "listing_id": f"{name}-1", "listing_url": EBAY_URL if name == "ebay" else None}))
@@ -141,12 +142,34 @@ def test_preview_names_what_each_item_would_do_and_sends_nothing(db, client, cal
     assert rows["Live coat"]["marketplaces"] == ["poshmark"]
     assert "Choose Relist" in rows["Live coat"]["skipped"][0]["reason"]
     assert rows["Fresh coat"]["marketplaces"] == ["ebay", "poshmark"] and rows["Fresh coat"]["review_token"]
+    assert "ebay_ad_rate" not in rows["Fresh coat"]
     assert rows["Sold coat"]["skip_reason"] and rows["Sold coat"]["review_token"] is None
 
     delist = {row["title"]: row for row in _preview(client, [live.id, fresh.id], "delist", ["ebay", "poshmark"])}
     assert delist["Live coat"]["marketplaces"] == ["ebay"]
     assert delist["Fresh coat"]["skip_reason"] == "Nothing to do on the chosen marketplaces."
     assert calls == []
+
+
+@pytest.mark.parametrize("source", ["mcp", "bulk_edit", "generation"])
+def test_bulk_review_only_uses_the_sellers_persisted_promotion(db, client, source):
+    conv = _item(db)
+    attempted = {"title": "Coat", "price": 40, "ebay_specifics": {
+        "promotion": {"enabled": True, "campaignId": "42", "adRate": "7.5"},
+    }}
+    unauthorized = listing_persistence.save_revision(db, conv.id, attempted, source)
+    assert "promotion" not in unauthorized.listing_json["ebay_specifics"]
+    row, = _preview(client, [conv.id], "list", ["ebay"])
+    assert "ebay_ad_rate" not in row
+
+    listing_persistence.save_revision(db, conv.id, attempted, "user_form")
+    edited = listing_persistence.save_revision(db, conv.id, {"title": "New title", "price": 40}, source)
+    assert edited.listing_json["ebay_specifics"]["promotion"] == attempted["ebay_specifics"]["promotion"]
+    row, = _preview(client, [conv.id], "list", ["ebay"])
+    assert row["ebay_ad_rate"] == "7.5"
+    refused = _perform(client, _body(row, confirmed_ebay_ad_rate="8"))
+    assert refused.status_code == 409
+    assert "7.5%" in refused.json()["detail"]
 
 
 def test_perform_requires_confirmation_and_the_exact_reviewed_action(db, client, calls):
@@ -222,7 +245,7 @@ def test_list_and_relist_publish_only_the_named_marketplaces_once(db, client, ca
 def test_a_failed_marketplace_is_reported_and_not_retried(db, client, monkeypatch):
     seen = []
 
-    async def refuse(conv_id, name, body):
+    async def refuse(conv_id, name, body, **_kwargs):
         seen.append(name)
         return {"ok": False, "state": "not_saved", "error": f"{name} refused"}
 
@@ -258,7 +281,7 @@ def test_delist_still_applies_to_other_marketplaces_after_a_sale(db, client, cal
 
 @pytest.fixture
 def updates(monkeypatch, calls, db):
-    async def fake_update(conv_id, name, body):
+    async def fake_update(conv_id, name, body, *, promotion_mode="confirm"):
         calls.append(("update", conv_id, name, body.confirm, body.revision_id))
         MarketplaceListingRepo(db).save(conv_id, name, {"state": "published", "revision_id": body.revision_id})
         return {"ok": True, "state": "published"}
@@ -310,7 +333,7 @@ def test_update_after_an_edit_needs_a_new_review(db, client, updates):
 def test_a_failed_update_is_reported_and_not_retried(db, client, monkeypatch, calls):
     seen = []
 
-    async def refuse(conv_id, name, body):
+    async def refuse(conv_id, name, body, **_kwargs):
         seen.append(name)
         return {"ok": False, "state": "published", "error": "eBay refused"}
 
@@ -337,12 +360,82 @@ def test_mark_not_listed_changes_only_anteroom(db, client, calls):
     assert calls == []
 
 
+def test_bulk_update_removes_disabled_ebay_promotion(db, client, monkeypatch):
+    from test_ebay_listings import Client
+    from anteroom.services import ebay_listings, native_marketplaces
+
+    conv = _item(db, live_on_ebay=True)
+    snapshot = {"title": "Coat", "price": 40, "ebay_specifics": {"promotion": {"enabled": False}}}
+    listing_persistence.save_revision(db, conv.id, snapshot, "user_form")
+    ad = {"listing_id": "123456789012", "campaign_id": "42", "account_id": "fake-ebay-account"}
+    binding = MarketplaceListingRepo(db).save(conv.id, "ebay", {"ebay_promotion": ad})
+    remote = Client()
+    remote.ad = {"listingId": "123456789012", "adId": "ad-1", "bidPercentage": "5.5"}
+    monkeypatch.setattr(ebay_listings.EbayClient, "connect", AsyncMock(return_value=remote))
+    monkeypatch.setattr(ebay_listings, "_execute_listing", AsyncMock(return_value={
+        "ok": True, "state": "published", "listing_url": EBAY_URL,
+    }))
+
+    async def update(_conv_id, _name, _body, *, promotion_mode="confirm"):
+        return await ebay_listings.execute("update", snapshot, [], binding, AsyncMock(), AsyncMock(return_value=True),
+                                           confirm=True, promotion_mode=promotion_mode)
+
+    monkeypatch.setattr(native_marketplaces, "update_live", update)
+    row, = _preview(client, [conv.id], "update", ["ebay"])
+    assert row.get("ebay_remove_promotion") is True
+    response = _perform(client, _body(row))
+    assert response.status_code == 200 and response.json()["ok"], response.text
+    assert any(method == "DELETE" and "/ad/ad-1" in path for method, path, _ in remote.calls)
+
+
+def test_discard_restores_last_sent_ebay_promotion(db):
+    from anteroom.services.pending_edits import discard_pending_edits
+
+    conv = _item(db, live_on_ebay=True)
+    sent_choice = {"enabled": True, "campaignId": "42", "adRate": "5.5"}
+    sent = listing_persistence.save_revision(db, conv.id, {
+        "title": "Coat", "price": 40, "ebay_specifics": {"promotion": sent_choice},
+    }, "user_form")
+    MarketplaceListingRepo(db).save(conv.id, "ebay", {"revision_id": sent.id})
+    edited = listing_persistence.save_revision(db, conv.id, {
+        "title": "Coat", "price": 40, "ebay_specifics": {"promotion": {"enabled": False}},
+    }, "user_form")
+    result = discard_pending_edits(db, conv.id, expected_revision_id=edited.id, marketplace="ebay")
+    assert result["discarded"]
+    assert result["listing"]["ebay_specifics"]["promotion"] == sent_choice
+    assert ListingRepo(db).get_revision(result["revision_id"]).listing_json["ebay_specifics"]["promotion"] == sent_choice
+
+
+def test_price_push_and_ordinary_automation_leave_ebay_ads_alone(db, monkeypatch):
+    from anteroom.routes import listing_commands
+    from anteroom.services import automation_actions, native_marketplaces
+
+    conv = _item(db, live_on_ebay=True)
+    MarketplaceListingRepo(db).save(conv.id, "ebay", {"ebay_promotion": {
+        "listing_id": "123456789012", "campaign_id": "42",
+    }})
+    update = AsyncMock(return_value={"state": "published"})
+    publish = AsyncMock(return_value={"state": "published"})
+    monkeypatch.setattr(native_marketplaces, "update_live", update)
+    monkeypatch.setattr(native_marketplaces, "list_now", publish)
+    result = asyncio.run(listing_commands.set_price(
+        conv.id, listing_commands.SetPriceBody(price=50, marketplace="ebay", push=True, confirm=True),
+    ))
+    assert result["pushed"] == ["ebay"]
+    assert result["waiting"] == ["Promotion is still on at eBay; use Update on eBay to remove it."]
+    assert update.await_args.kwargs["promotion_mode"] == "leave"
+    asyncio.run(automation_actions._list_remaining(
+        conv.id, ["ebay"], ListingRepo(db).get_current(conv.id).current_revision_id,
+    ))
+    assert publish.await_args.kwargs["promotion_mode"] == "leave"
+
+
 def test_list_starts_every_marketplace_at_once_and_takes_turns_on_each(db, monkeypatch):
     from anteroom.services import automation_actions
 
     events = []
 
-    async def fake_list(conv_id, name, _body):
+    async def fake_list(conv_id, name, _body, *, promotion_mode="confirm"):
         events.append(("start", conv_id, name))
         await asyncio.sleep(0.01)
         events.append(("end", conv_id, name))

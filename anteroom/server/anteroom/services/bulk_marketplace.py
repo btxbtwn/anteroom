@@ -55,6 +55,7 @@ class PerformRequest(BaseModel):
     revision_id: str | None
     review_token: str = Field(pattern=r"^[a-f0-9]{64}$")
     confirm: bool = False
+    confirmed_ebay_ad_rate: str | None = None
 
 
 def _name(marketplace: str) -> str:
@@ -125,10 +126,17 @@ def review_row(db: Session, conv_id: str, action: str, marketplaces: list[str]) 
             return row
     known = listings(db, conv_id)
     records = MarketplaceListingRepo(db).for_conversation(conv_id)
+    removes_ad = False
+    if action == "update" and "ebay" in marketplaces:
+        from anteroom.services.ebay_listing_promotion import has_disabled_live_ad
+
+        revision = ListingRepo(db).get_revision(row["revision_id"])
+        removes_ad = bool(revision and has_disabled_live_ad(revision.listing_json, records.get("ebay") or {}))
     for marketplace in dict.fromkeys(marketplaces):
         record = records.get(marketplace) or {}
         reason = _target_reason(action, marketplace, known.get(marketplace) or {}, record)
         if (not reason and action == "update" and record.get("state") == "published"
+                and not (marketplace == "ebay" and removes_ad)
                 and record.get("revision_id") and record.get("revision_id") == row["revision_id"]
                 and _same_price(db, marketplace, record, row["revision_id"])):
             reason = f"Already up to date on {_name(marketplace)}."
@@ -139,7 +147,27 @@ def review_row(db: Session, conv_id: str, action: str, marketplaces: list[str]) 
     if not row["marketplaces"]:
         row["skip_reason"] = "Nothing to do on the chosen marketplaces."
         return row
+    if "ebay" in row["marketplaces"] and action in {"list", "update", "relist"}:
+        from anteroom.services.ebay_listing_promotion import selection
+        from anteroom.services.listing_result import ListingProblem
+
+        revision = ListingRepo(db).get_revision(row["revision_id"])
+        try:
+            selected = selection(revision.listing_json) if revision and isinstance(revision.listing_json, dict) else None
+        except ListingProblem as exc:
+            row["marketplaces"].remove("ebay")
+            row["skipped"].append({"marketplace": "ebay", "reason": str(exc)})
+            if not row["marketplaces"]:
+                row["skip_reason"] = str(exc)
+                return row
+        else:
+            if selected:
+                row["ebay_ad_rate"] = str(selected[1])
+            elif removes_ad:
+                row["ebay_remove_promotion"] = True
     basis, _targets = approval_snapshot(db, conv_id, row["marketplaces"], includes_prices=action in {"list", "relist", "update"})
+    if row.get("ebay_remove_promotion"):
+        basis += ":remove-ebay-promotion"
     row["review_token"] = _token(action, row["marketplaces"], basis)
     return row
 
@@ -195,20 +223,26 @@ def _check_reviewed(db: Session, body: PerformRequest, side_by_side: bool) -> No
         if (current["marketplaces"] != list(body.marketplaces) or current["revision_id"] != body.revision_id
                 or current["review_token"] != body.review_token):
             raise HTTPException(409, "The item, its photos, marketplace links or pricing rules changed since the review. Review again.")
+        if (rate := current.get("ebay_ad_rate")) is not None and body.confirmed_ebay_ad_rate != rate:
+            raise HTTPException(409, f"Confirm the saved {rate}% eBay ad rate. Review again.")
 
 
 async def _dispatch(body: PerformRequest) -> dict:
     from anteroom.services import automation_actions
 
     marketplaces: list[str] = [*body.marketplaces]
+    rate = body.confirmed_ebay_ad_rate if "ebay" in marketplaces else None
     if body.action == "list":
-        return await automation_actions.publish_revision(body.conversation_id, marketplaces, body.revision_id)
+        return await automation_actions.publish_revision(body.conversation_id, marketplaces, body.revision_id,
+                                                        confirmed_ebay_ad_rate=rate)
     if body.action == "update":
-        return await automation_actions.update_revision(body.conversation_id, marketplaces, body.revision_id)
+        return await automation_actions.update_revision(body.conversation_id, marketplaces, body.revision_id,
+                                                       confirmed_ebay_ad_rate=rate)
     if body.action == "not_listed":
         return await in_worker_session(_mark_not_listed, body.conversation_id, marketplaces)
     item = {"conversation_id": body.conversation_id}
-    return await automation_actions.perform(item, {"type": body.action}, marketplaces, body.revision_id, confirm=True)
+    return await automation_actions.perform(item, {"type": body.action}, marketplaces, body.revision_id, confirm=True,
+                                            confirmed_ebay_ad_rate=rate)
 
 
 def _mark_not_listed(db: Session, conv_id: str, marketplaces: list[str]) -> dict:

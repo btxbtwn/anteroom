@@ -57,6 +57,23 @@ def scheduled_requester() -> str | None:
     return (_active_claim.get() or {}).get("requested_by")
 
 
+def scheduled_ebay_ad_rate() -> str | None:
+    return (_active_claim.get() or {}).get("confirmed_ebay_ad_rate")
+
+
+def _confirmed_ebay_rate(snapshot: dict, markets: list[str], rate: str | None) -> str | None:
+    if "ebay" not in markets:
+        return None
+    from anteroom.services.ebay_listing_promotion import confirmed_selection
+    from anteroom.services.listing_result import ListingProblem
+
+    try:
+        selected = confirmed_selection(snapshot, rate)
+    except ListingProblem as exc:
+        raise SchedulePublishError(str(exc), 409) from exc
+    return format(selected[1].normalize(), "f") if selected else None
+
+
 def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
@@ -337,6 +354,7 @@ def verified_scheduled_media(
         or listing.current_revision_id != entry["revision_id"]
         or listing.scheduled_publish_at != entry["scheduled_for"]
         or listing.scheduled_confirmed_at != entry["scheduled_confirmed_at"]
+        or listing.scheduled_ebay_ad_rate != entry.get("confirmed_ebay_ad_rate")
         or marketplace not in entry["marketplaces"]
     ):
         raise SchedulePublishError(reason, 409)
@@ -470,6 +488,7 @@ def _clear_schedule(db: Session, listing: Listing, *, reason: str | None = None)
     listing.scheduled_error = None
     listing.scheduled_content_digest = None
     listing.scheduled_requested_by = None
+    listing.scheduled_ebay_ad_rate = None
     return was_scheduled
 
 
@@ -482,6 +501,7 @@ def schedule_draft(
     confirm: bool,
     now: datetime | None = None,
     requested_by: str | None = None,
+    confirmed_ebay_ad_rate: str | None = None,
 ) -> dict[str, Any]:
     """Schedule a validated draft for future publishing to named marketplaces.
 
@@ -495,6 +515,7 @@ def schedule_draft(
     if when <= moment:
         raise SchedulePublishError("Choose a future date and time to schedule publishing.")
     listing, revision = _validate_ready(db, conv_id, marketplaces=markets)
+    rate = _confirmed_ebay_rate(revision.listing_json, markets, confirmed_ebay_ad_rate)
     if listing.scheduled_status == "publishing":
         raise SchedulePublishError("This draft is currently publishing and cannot be rescheduled yet.", 409)
     conv = db.get(Conversation, conv_id)
@@ -508,6 +529,7 @@ def schedule_draft(
     listing.scheduled_error = None
     listing.scheduled_content_digest = digest
     listing.scheduled_requested_by = requested_by
+    listing.scheduled_ebay_ad_rate = rate
     db.add(ScheduledPublishLog(
         id=new_id(),
         conversation_id=conv_id,
@@ -515,7 +537,9 @@ def schedule_draft(
         marketplaces=markets,
         scheduled_for=when,
         status="scheduled",
-        results={"requested_by": requested_by} if requested_by else None,
+        results={key: value for key, value in {
+            "requested_by": requested_by, "confirmed_ebay_ad_rate": rate,
+        }.items() if value is not None} or None,
         created_at=moment,
     ))
     db.commit()
@@ -700,6 +724,16 @@ def _claim_due_drafts(db: Session, moment: datetime) -> list[dict[str, Any]]:
         if row.current_revision_id != row.scheduled_revision_id:
             _clear_schedule(db, row, reason="Draft changed after scheduling; review and reschedule before publishing.")
             continue
+        if "ebay" in markets:
+            revision = db.get(ListingRevision, row.scheduled_revision_id)
+            if revision is None:
+                _clear_schedule(db, row, reason="Scheduled draft is missing; review and reschedule before publishing.")
+                continue
+            try:
+                _confirmed_ebay_rate(revision.listing_json, markets, row.scheduled_ebay_ad_rate)
+            except SchedulePublishError as exc:
+                _clear_schedule(db, row, reason=f"Scheduled publish refused: {exc.detail}")
+                continue
         if not row.scheduled_content_digest:
             _clear_schedule(db, row, reason="Schedule has no verified content; review and reschedule before publishing.")
             continue
@@ -736,6 +770,7 @@ def _claim_due_drafts(db: Session, moment: datetime) -> list[dict[str, Any]]:
             "pricing_rules": rules,
             "content_digest": digest,
             "requested_by": row.scheduled_requested_by,
+            "confirmed_ebay_ad_rate": row.scheduled_ebay_ad_rate,
         })
         break
     db.commit()

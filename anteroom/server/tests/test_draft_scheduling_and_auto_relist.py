@@ -919,6 +919,42 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertEqual(pending, {(attempt.conversation_id, "poshmark")
                                    for case, attempt in attempts.items() if case != "confirmed"})
 
+    def test_schedule_pins_and_rechecks_the_ebay_ad_rate(self):
+        conv, listing, revision = self._create_draft()
+        data = revision.listing_json
+        revision.listing_json = {**data, "ebay_specifics": {**data["ebay_specifics"],
+                                 "promotion": {"enabled": True, "campaignId": "42", "adRate": "7.5"}}}
+        self.db.commit()
+        now = _now()
+        args = {"publish_at": now + timedelta(hours=1), "marketplaces": ["ebay"], "confirm": True, "now": now}
+        with self.assertRaisesRegex(draft_scheduling.SchedulePublishError, "7.5%"):
+            draft_scheduling.schedule_draft(self.db, conv.id, **args)
+        draft_scheduling.schedule_draft(self.db, conv.id, confirmed_ebay_ad_rate="7.50", **args)
+        self.assertEqual(listing.scheduled_ebay_ad_rate, "7.5")
+        listing.scheduled_ebay_ad_rate = "9"
+        self.db.commit()
+        self.assertEqual(draft_scheduling._claim_due_drafts(self.db, now + timedelta(hours=2)), [])
+        self.assertIsNone(listing.scheduled_publish_at)
+
+    def test_ebay_auto_relist_refuses_invalid_saved_promotion_before_delisting(self):
+        now = _now()
+        conv, _, revision = self._create_draft()
+        data = revision.listing_json
+        revision.listing_json = {**data, "ebay_specifics": {**data["ebay_specifics"],
+                                 "promotion": {"enabled": True, "campaignId": "42", "adRate": "101"}}}
+        self.db.add(MarketplaceListing(
+            id=new_id(), conversation_id=conv.id, marketplace="ebay", state="published",
+            listing_id="123456789012", listing_url="https://www.ebay.com/itm/123456789012",
+            listed_at=now - timedelta(days=30) + timedelta(minutes=10), listed_price=40,
+        ))
+        self.db.commit()
+        auto_relist.save_rule(self.db, "ebay", {"enabled": True}, confirm=True)
+        delister, lister = AsyncMock(), AsyncMock()
+        outcomes = asyncio.run(auto_relist.run_auto_relist(now=now, delister=delister, lister=lister))
+        delister.assert_not_awaited()
+        lister.assert_not_awaited()
+        self.assertIn("2% to 100%", outcomes[0]["reason"])
+
     def test_schedule_validates_target_marketplaces_and_blocks_mutations_while_publishing(self):
         # Finding #4: missing eBay specifics is rejected when scheduling for ["ebay"] even if selected marketplaces is []
         c_missing, _lm, _rm = self._create_draft("Missing Ebay Fields", ebay_specifics={})

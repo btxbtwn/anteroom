@@ -173,12 +173,26 @@ struct InventoryView: View {
             },
             onList: {
                 guard let rev = sheetRow?.revisionID, !rev.isEmpty else { return }
-                pendingRowList = RowListTarget(listing: listing, marketplace: marketplace, revisionID: rev)
-                pendingRowListRequest = SellerConfirmationRequest.list(
-                    title: listing.displayTitle,
-                    marketplace: marketplace,
-                    priceLabel: price
-                )
+                Task {
+                    do {
+                        var adRate: String?
+                        if marketplace == "ebay" {
+                            let doc = try await model.api.listing(listing.id)
+                            guard model.activeTab == .marketplace(marketplace) else { return }
+                            guard doc.currentRevisionID == rev else {
+                                sheetListError = "This listing changed. Refresh before listing on eBay."
+                                return
+                            }
+                            adRate = SellerConfirmationRequest.ebayPromotion(in: doc.listing)
+                        }
+                        pendingRowList = RowListTarget(listing: listing, marketplace: marketplace, revisionID: rev)
+                        pendingRowListRequest = SellerConfirmationRequest.list(
+                            title: listing.displayTitle, marketplace: marketplace, priceLabel: price, ebayPromotion: adRate
+                        )
+                    } catch {
+                        sheetListError = error.localizedDescription
+                    }
+                }
             }
         )
     }

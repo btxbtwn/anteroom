@@ -529,7 +529,7 @@ def test_relist_continues_after_one_marketplace_fails_without_retrying(db, monke
         calls.append(("delist", tuple(marketplaces), confirm))
         return {name: {"state": "deleted"} for name in marketplaces}
 
-    async def fake_list(_conv_id, name, _body):
+    async def fake_list(_conv_id, name, _body, **_kwargs):
         calls.append(("list", name))
         if name == "ebay":
             raise NativeMarketplaceError(502, "ebay refused")
@@ -564,7 +564,7 @@ def test_a_failed_relist_requires_a_new_seller_request_before_another_attempt(db
     async def fake_delist(_conv_id, marketplaces, _confirm):
         return {name: {"state": "deleted"} for name in marketplaces}
 
-    async def fake_list(_conv_id, name, _body):
+    async def fake_list(_conv_id, name, _body, **_kwargs):
         if name == "ebay":
             attempts["ebay"] += 1
             if attempts["ebay"] == 1:
@@ -622,7 +622,7 @@ def test_a_mid_run_failure_stays_down_in_history_and_errors_and_the_run_continue
     async def fake_delist(_conv_id, marketplaces, _confirm):
         return {name: {"state": "deleted"} for name in marketplaces}
 
-    async def fake_list(conv_id, name, _body):
+    async def fake_list(conv_id, name, _body, **_kwargs):
         calls.append((conv_id, name))
         if conv_id == first.id and name == "ebay":
             raise NativeMarketplaceError(502, "ebay refused")
@@ -675,7 +675,7 @@ def test_regenerate_waits_for_approval_and_approve_publishes(db, client, monkeyp
         published.append("delist")
         return {"ok": True}
 
-    async def fake_list(_conv_id, name, body):
+    async def fake_list(_conv_id, name, body, **_kwargs):
         published.append(("list", name, body.confirm))
         return {"ok": True, "state": "published"}
 
@@ -721,7 +721,7 @@ def test_approval_cannot_be_turned_off(db, client, monkeypatch):
     async def fake_regenerate(_conv_id):
         return {"ok": True}
 
-    async def fake_list(_conv_id, name, body):
+    async def fake_list(_conv_id, name, body, **_kwargs):
         published.append((name, body.confirm))
         return {"ok": True, "state": "published"}
 
@@ -783,7 +783,7 @@ def test_publishing_a_live_listing_requires_explicit_relist_instead_of_delisting
         calls.append(("delist", tuple(marketplaces), confirm))
         return {name: {"state": "deleted"} for name in marketplaces}
 
-    async def fake_list(_conv_id, name, body):
+    async def fake_list(_conv_id, name, body, **_kwargs):
         calls.append(("list", name, body.confirm))
         return {"ok": True, "state": "published"}
 
@@ -944,11 +944,13 @@ def test_failed_delete_response_cannot_start_republication(db, monkeypatch, part
     from anteroom.services import automation_actions
     async def remove(*_args):
         return {"ebay": {"state": "failed", "error": "Delete refused"}, "poshmark": {"state": "deleted" if partial else "failed"}}
-    async def publish(*_args):
+    async def publish(*_args, **_kwargs):
         pytest.fail("No publish after an unconfirmed delete")
     monkeypatch.setattr("anteroom.services.marketplace_delist.delist", remove)
     monkeypatch.setattr("anteroom.services.native_marketplaces.list_now", publish)
-    result = asyncio.run(automation_actions._relist("item", ["ebay", "poshmark"], "revision"))
+    conv = _item(db, title="Coat", price=40, department="Men", category="Coats", marketplace="ebay", days=70)
+    revision = ListingRepo(db).get_current(conv.id).current_revision_id
+    result = asyncio.run(automation_actions._relist(conv.id, ["ebay", "poshmark"], revision))
     assert result["ok"] is False and "Delete refused" in result["error"]
     assert result.get("down", []) == (["poshmark"] if partial else [])
 
@@ -960,7 +962,7 @@ def test_failed_background_publish_is_not_reported_as_a_success(db, monkeypatch)
     job = Job(conversation_id=conv.id, approved_revision_id=revision, status="failed", listing_snapshot={}, last_error="Marketplace refused")
     db.add(job)
     db.commit()
-    async def publish(*_args):
+    async def publish(*_args, **_kwargs):
         return {"job_id": job.id, "state": "publishing", "running": True}
     monkeypatch.setattr("anteroom.services.native_marketplaces.list_now", publish)
     result = asyncio.run(automation_actions._list_remaining(conv.id, ["ebay"], revision))

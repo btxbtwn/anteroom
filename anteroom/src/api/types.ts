@@ -558,6 +558,8 @@ export interface MarketplaceFormField {
   width?: "half" | "third" | "quarter";
   /** The control is half the content column and still starts its own row. */
   control_width?: "half";
+  choices_loading?: boolean;
+  suggested_ad_rate?: string;
   /** Department, then category, then subcategory. The closed category reads "Women Jeans". */
   cascade?: { id: string; label: string; items: unknown[] }[];
   /** A marketplace list that is the same for every listing, downloaded once (`/catalog/choice-lists`). */

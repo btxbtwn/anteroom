@@ -101,7 +101,8 @@ TOOLS: list[dict[str, Any]] = [
             "asked for it: requires confirm=true and the Marketplaces permission set to Publish, update and "
             "delist. Publishing now returns once each listing has started; it is not live until "
             "get_action_status reports it published. publish_at schedules it with Scheduled Draft Publishing "
-            "instead (marks it Ready to list); editing the listing later unschedules it."
+            "instead (marks it Ready to list); editing the listing later unschedules it. "
+            "For enabled eBay promotion, show the saved rate to the seller and pass confirmed_ebay_ad_rate."
         ),
         "annotations": _annotations(destructive=True),
         "inputSchema": {
@@ -111,6 +112,7 @@ TOOLS: list[dict[str, Any]] = [
                 "marketplaces": _MARKETPLACES_SCHEMA,
                 "expected_revision_id": _REVISION_SCHEMA,
                 "confirm": _CONFIRM_SCHEMA,
+                "confirmed_ebay_ad_rate": {"type": "string", "description": "The exact saved eBay percentage the seller confirmed, without a percent sign."},
                 "publish_at": {
                     "type": "string",
                     "format": "date-time",
@@ -128,7 +130,8 @@ TOOLS: list[dict[str, Any]] = [
             "Write the listing saved in Anteroom onto its live listing on each named marketplace. Only when the "
             "seller asked for it: requires confirm=true and the Marketplaces permission set to Publish, update "
             "and delist. Never lists again or creates a second listing. Returns once each update has started; "
-            "call get_action_status for the result."
+            "call get_action_status for the result. For enabled eBay promotion, show the saved rate to the seller "
+            "and pass confirmed_ebay_ad_rate."
         ),
         "annotations": _annotations(destructive=True),
         "inputSchema": {
@@ -138,6 +141,7 @@ TOOLS: list[dict[str, Any]] = [
                 "marketplaces": _MARKETPLACES_SCHEMA,
                 "expected_revision_id": _REVISION_SCHEMA,
                 "confirm": _CONFIRM_SCHEMA,
+                "confirmed_ebay_ad_rate": {"type": "string", "description": "The exact saved eBay percentage the seller confirmed, without a percent sign."},
             },
             "required": ["conversation_id", "marketplaces", "expected_revision_id", "confirm"],
             "additionalProperties": False,
@@ -283,6 +287,23 @@ def _pending(kind: str, conv_id: str, names: list[str], agent: str | None, revis
                           "revision_id": revision_id, "agent": agent}}
 
 
+def _ebay_confirmation(db: Session, names: list[str], revision_id: str, args: dict) -> str | None:
+    if "ebay" not in names:
+        return None
+    from anteroom.services.ebay_listing_promotion import confirmed_selection
+    from anteroom.services.listing_result import ListingProblem
+
+    revision = ListingRepo(db).get_revision(revision_id)
+    rate = args.get("confirmed_ebay_ad_rate")
+    if rate is not None and not isinstance(rate, str):
+        raise MarketplaceToolError("confirmed_ebay_ad_rate must be a percentage string.")
+    try:
+        selected = confirmed_selection(revision.listing_json if revision else {}, rate)
+    except ListingProblem as exc:
+        raise MarketplaceToolError(f"{exc} Pass the rate as confirmed_ebay_ad_rate after the seller confirms it.") from exc
+    return str(selected[1]) if selected else None
+
+
 # --- handlers -------------------------------------------------------------------
 
 def _save_marketplace_draft(db: Session, args: dict[str, Any], *, agent: str | None) -> dict[str, Any]:
@@ -299,10 +320,13 @@ def _publish_listing(db: Session, args: dict[str, Any], *, agent: str | None) ->
     _require_confirm(args, "publish this listing")
     conv = _conversation(db, conv_id)
     revision_id = _require_revision(db, conv_id, args)
+    rate = _ebay_confirmation(db, names, revision_id, args)
     publish_at = args.get("publish_at")
     if publish_at is None:
         _refuse_in_sandbox()
-        return _pending("list", conv_id, names, agent, revision_id)
+        pending = _pending("list", conv_id, names, agent, revision_id)
+        pending[PENDING_KEY]["confirmed_ebay_ad_rate"] = rate
+        return pending
     if not isinstance(publish_at, str) or not publish_at.strip():
         raise MarketplaceToolError("publish_at must be an ISO 8601 date and time, e.g. 2026-12-01T09:00:00-05:00.")
     from anteroom.services import draft_scheduling
@@ -316,6 +340,7 @@ def _publish_listing(db: Session, args: dict[str, Any], *, agent: str | None) ->
     try:
         view = draft_scheduling.schedule_draft(
             db, conv_id, publish_at=when, marketplaces=names, confirm=True, requested_by=agent,
+            confirmed_ebay_ad_rate=rate,
         )
     except draft_scheduling.SchedulePublishError as exc:
         raise MarketplaceToolError(f"{exc.detail} Nothing was scheduled.") from exc
@@ -328,6 +353,7 @@ def _publish_listing(db: Session, args: dict[str, Any], *, agent: str | None) ->
             "yet. Editing the listing before then unschedules it; call get_action_status to follow it."
         ),
         "schedule": view,
+        **({"confirmed_ebay_ad_rate": rate} if rate is not None else {}),
     }
 
 
@@ -338,7 +364,9 @@ def _send_unsent_edits(db: Session, args: dict[str, Any], *, agent: str | None) 
     _conversation(db, conv_id)
     revision_id = _require_revision(db, conv_id, args)
     _refuse_in_sandbox()
-    return _pending("update", conv_id, names, agent, revision_id)
+    pending = _pending("update", conv_id, names, agent, revision_id)
+    pending[PENDING_KEY]["confirmed_ebay_ad_rate"] = _ebay_confirmation(db, names, revision_id, args)
+    return pending
 
 
 def _delist_listing(db: Session, args: dict[str, Any], *, agent: str | None) -> dict[str, Any]:
@@ -527,13 +555,15 @@ async def _run_native(spec: dict[str, Any], deadline: float) -> tuple[dict[str, 
     from anteroom.services.streaming import spawn
 
     kind, conv_id, agent = spec["kind"], spec["conversation_id"], spec["agent"]
-    body = native.ListRequest(revision_id=spec["revision_id"], confirm=kind != "save_draft")
+    rate = spec.get("confirmed_ebay_ad_rate")
 
     def start(name: str):
         # Checked against MARKETPLACES when the call came in.
         marketplace = cast(native.Marketplace, name)
         if kind == "save_draft":
             return native.save_draft(conv_id, marketplace, spec["revision_id"], requested_by=agent)
+        body = native.ListRequest(revision_id=spec["revision_id"], confirm=True,
+                                  confirmed_ebay_ad_rate=rate if name == "ebay" else None)
         if kind == "update":
             return native.update_live(conv_id, marketplace, body, requested_by=agent)
         return native.list_now(conv_id, marketplace, body, requested_by=agent)
@@ -563,6 +593,8 @@ async def _run_native(spec: dict[str, Any], deadline: float) -> tuple[dict[str, 
             record = task.result()
             outcomes[marketplace] = {"status": "started", "state": record.get("state"), "job_id": record.get("job_id"),
                                      "message": _STARTED[kind].format(name=name)}
+            if marketplace == "ebay" and rate is not None:
+                outcomes[marketplace]["confirmed_ebay_ad_rate"] = rate
     started = any(outcome["status"] in {"started", "unconfirmed"} for outcome in outcomes.values())
     return {"ok": started, "conversation_id": conv_id, "action": kind, "marketplaces": outcomes}, started
 

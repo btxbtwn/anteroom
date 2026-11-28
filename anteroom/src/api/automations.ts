@@ -151,7 +151,8 @@ export interface AutomationApproval {
   marketplaces: string[];
   status: string;
   state: string;
-  result?: { ok?: boolean; state?: string | null; error?: string | null; down?: string[] };
+  result?: { ok?: boolean; state?: string | null; error?: string | null; down?: string[];
+    detail?: Array<{ detail?: { warning?: string } }> };
 }
 
 /** A marketplace a relist left offline. */

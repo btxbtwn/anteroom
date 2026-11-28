@@ -99,6 +99,13 @@ def _save_price(db: Session, conv_id: str, body: SetPriceBody) -> dict:
         assert current is not None and current.current_revision_id
         result["current_revision_id"] = current.current_revision_id
         result["live"] = live_listings(db, conv_id)
+        if market == "ebay":
+            from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
+            from anteroom.services.ebay_listing_promotion import has_disabled_live_ad
+
+            result["ebay_promotion_still_on"] = has_disabled_live_ad(
+                listing, MarketplaceListingRepo(db).get(conv_id, "ebay"),
+            )
     return result
 
 
@@ -124,7 +131,13 @@ async def set_price(conv_id: str, body: SetPriceBody):
             waiting.append(f"{market}: not live")
         else:
             try:
-                await native.update_live(conv_id, cast(native.Marketplace, market), native.ListRequest(revision_id=saved["current_revision_id"], confirm=True))
+                request = native.ListRequest(revision_id=saved["current_revision_id"], confirm=True)
+                if market == "ebay":
+                    await native.update_live(conv_id, "ebay", request, promotion_mode="leave")
+                    if saved.get("ebay_promotion_still_on"):
+                        waiting.append("Promotion is still on at eBay; use Update on eBay to remove it.")
+                else:
+                    await native.update_live(conv_id, cast(native.Marketplace, market), request)
                 pushed.append(market)
             except native.NativeMarketplaceError as exc:
                 waiting.append(f"{market}: {exc}")

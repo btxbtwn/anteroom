@@ -113,6 +113,13 @@ async def _ebay_client(client):
     from anteroom.services.ebay_client import EbayClient
 
     return await EbayClient.connect()
+
+
+async def shared_ebay_client():
+    """The eBay client this form build shares, or a new one outside a ``schema_session``."""
+    return await _ebay_client(None)
+
+
 class _TaxonomyCache(TypedDict):
     at: float
     leaves: tuple[dict[str, str], ...]

@@ -38,6 +38,34 @@ def _note_saved_listings(db, _flush_context, _instances):
     saved |= {row.conversation_id for row in db.dirty if isinstance(row, Listing)}
     if saved:
         db.info.setdefault("saved_listings", set()).update(saved)
+    for row in db.new:
+        if isinstance(row, ListingRevision) and row.source not in {"user_form", "restore"}:
+            _keep_seller_promotion(db, row)
+
+
+def _keep_seller_promotion(db: Session, revision: ListingRevision) -> None:
+    """An agent, template or copied item cannot opt into an eBay advertising fee."""
+    if not isinstance(revision.listing_json, dict):
+        return
+    previous = (db.query(ListingRevision.listing_json)
+                .join(Listing, Listing.current_revision_id == ListingRevision.id)
+                .filter(Listing.conversation_id == revision.conversation_id,
+                        ListingRevision.conversation_id == revision.conversation_id)
+                .scalar()) or {}
+    revision.listing_json = preserve_ebay_promotion(previous, revision.listing_json)
+
+
+def preserve_ebay_promotion(previous: dict, submitted: dict) -> dict:
+    old = previous.get("ebay_specifics") if isinstance(previous, dict) else None
+    new = submitted.get("ebay_specifics")
+    if not ((isinstance(old, dict) and "promotion" in old) or (isinstance(new, dict) and "promotion" in new)):
+        return submitted
+    updated = dict(new) if isinstance(new, dict) else {}
+    if isinstance(old, dict) and "promotion" in old:
+        updated["promotion"] = copy.deepcopy(old["promotion"])
+    else:
+        updated.pop("promotion", None)
+    return {**submitted, "ebay_specifics": updated}
 
 
 @event.listens_for(Session, "after_soft_rollback")

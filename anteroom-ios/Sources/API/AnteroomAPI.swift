@@ -242,17 +242,17 @@ final class AnteroomAPI: Sendable {
     /// Lists the saved revision on one marketplace the seller named and confirmed.
     func listOnMarketplace(_ id: String, marketplace: String, revisionID: String, confirmation: SellerConfirmation) async throws {
         try Self.require(confirmation, .list, [marketplace])
-        struct Body: Encodable { let revision_id: String; let confirm: Bool }
         _ = try await send(request("POST", "api/conversations/\(id)/native-marketplaces/\(marketplace)/list",
-                                   json: Body(revision_id: revisionID, confirm: true)))
+                                   json: ListRequest(revisionID: revisionID, confirm: true,
+                                                     confirmedEbayAdRate: marketplace == "ebay" ? confirmation.ebayAdRate : nil)))
     }
 
     /// Sends the saved revision to the live listing on one marketplace the seller named and confirmed.
     func updateOnMarketplace(_ id: String, marketplace: String, revisionID: String, confirmation: SellerConfirmation) async throws {
         try Self.require(confirmation, .update, [marketplace])
-        struct Body: Encodable { let revision_id: String; let confirm: Bool }
         _ = try await send(request("POST", "api/conversations/\(id)/native-marketplaces/\(marketplace)/update",
-                                   json: Body(revision_id: revisionID, confirm: true)))
+                                   json: ListRequest(revisionID: revisionID, confirm: true,
+                                                     confirmedEbayAdRate: marketplace == "ebay" ? confirmation.ebayAdRate : nil)))
     }
 
     /// Saves the revision as an unpublished draft on the marketplace; buyers cannot see it.

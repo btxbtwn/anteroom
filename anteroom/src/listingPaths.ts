@@ -239,3 +239,14 @@ export function setListingEditorValue(
   }
   return setNestedValue(listing, path, value);
 }
+export function ebayPromotionRate(listing: unknown): string | undefined {
+  if (getNestedValue(listing, "ebay_specifics.promotion.enabled") !== true) return undefined;
+  const rate = getNestedValue(listing, "ebay_specifics.promotion.adRate");
+  if (typeof rate !== "number" && typeof rate !== "string") return undefined;
+  return Number(rate) >= 2 && Number(rate) <= 100 ? String(rate) : undefined;
+}
+
+export function ebayPromotionMessage(listing: unknown): string {
+  const rate = ebayPromotionRate(listing);
+  return rate ? `Promote this listing on eBay at ${rate}% of attributed sales.` : "";
+}

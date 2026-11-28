@@ -85,6 +85,8 @@ interface Props {
 }
 
 interface EditorField {
+  warning?: string;
+  suggestedAdRate?: string;
   key: string;
   label: string;
   type?: string;
@@ -290,6 +292,7 @@ export function ListingEditor({
           </AlertDescription>
         </Alert> :
       <Layout key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle}
+        savedListing={data?.listing}
         disabled={writing || unsaved} etsyEligible={etsyEligible} onAskChat={askChat} onEditField={openBlocker} ids={tabs}
         onPrepare={(tab) => {
           if (vendoo) return;
@@ -1241,7 +1244,7 @@ export function StructuredEditor({
                 const source = !nativeTab && f.optionsSource && f.optionsSource !== "saved"
                   ? f.optionsSource === "marketplace" ? "Marketplace choices" : f.optionsSource === "vendoo" ? "Imported category choices" : "Reference choices"
                   : null;
-                const ask = onAskChat && !f.locked ? () => onAskChat(
+                const ask = onAskChat && !f.locked && !f.key.startsWith("ebay_specifics.promotion.") ? () => onAskChat(
                   `Fill or correct only ${marketplaceName(tab)} / ${f.label}${f.section ? ` (${f.section})` : ""} using the photos and seller evidence. Preserve all other fields.`,
                 ) : undefined;
                 const tools = source || ask ? <FieldTools label={f.label} source={source} onAsk={ask} /> : null;
@@ -1302,6 +1305,7 @@ export function StructuredEditor({
                   </p>}
                   {!labelRow && !(f.type === "boolean" && f.presentation === "checkbox") && tools && <div className="mt-1 flex">{tools}</div>}
                   {f.help && f.type !== "photos" && !multiSelectControl(f) && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
+                  {f.warning && <p role="status" className="mt-1 text-xs text-warning-foreground">{f.warning}</p>}
                   {uniqueMarketplaceMessages(f.type === "photos" ? [] : fieldWarnings.get(f.key) ?? [], shownMessages).map((message) =>
                     <p key={message} role="alert" className="mt-1 text-xs text-warning-foreground">{message}</p>)}
                   {f.maxLength != null && (f.multi ? formFieldValues(local[f.key], f.options) : [formFieldText(local[f.key])]).some((value) => value.length > f.maxLength!) &&
@@ -1698,6 +1702,7 @@ function schemaFieldsForTab(
     ...(field.option_groups ? { optionGroups: field.option_groups } : {}),
     ...(field.width ? { width: field.width } : {}),
     ...(field.control_width ? { controlWidth: field.control_width } : {}),
+    ...(field.suggested_ad_rate ? { suggestedAdRate: field.suggested_ad_rate } : {}),
     ...(field.cascade ? { cascade: field.cascade as EditorField["cascade"] } : {}),
     ...(field.option_amounts ? { optionAmounts: field.option_amounts } : {}),
     ...(field.group ? { group: field.group, groupHelp: field.group_help } : {}),

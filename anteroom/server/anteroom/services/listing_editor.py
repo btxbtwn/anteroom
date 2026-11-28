@@ -83,7 +83,7 @@ def prepared_listing(previous: dict, listing: dict, *, notes: dict | None = None
     return updated
 
 
-def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: str = "user_form", expected_revision_id: str | None = None, commit: bool = True, depop_notes: dict | None = None, verbatim: bool = False):
+def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: str = "user_form", expected_revision_id: str | None = None, commit: bool = True, depop_notes: dict | None = None, verbatim: bool = False, seller_form: bool = False):
     """Save the seller's edit as the listing's new current revision.
 
     ``verbatim`` stores ``listing_data`` exactly as given, for an earlier
@@ -111,6 +111,18 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
 
     previous = listing_repo.get_revision(current.current_revision_id) if current and current.current_revision_id else None
     previous_json = previous.listing_json if previous and isinstance(previous.listing_json, dict) else {}
+    if seller_form:
+        from anteroom.services.ebay_listing_promotion import selection
+        from anteroom.services.listing_result import ListingProblem
+
+        try:
+            selection(listing_data)
+        except ListingProblem as exc:
+            raise HTTPException(422, str(exc)) from exc
+    if not seller_form and source != "restore":
+        from anteroom.services.listing_persistence import preserve_ebay_promotion
+
+        listing_data = preserve_ebay_promotion(previous_json, listing_data)
     changes = explicit_changes(previous_json, listing_data)
     from anteroom.services import activity
 

@@ -10,6 +10,8 @@ import type { ListingData, ListingSheetRow, MarketplaceFormField } from "../api/
 import { useWorkspaceRuntime } from "../app/runtime";
 import {
   cloneListing,
+  ebayPromotionMessage,
+  ebayPromotionRate,
   expandJoinedChoices,
   formFieldText,
   marketplaceDisplayValue,
@@ -683,8 +685,10 @@ export function useSheetListMutation(marketplace: NativeMarketplace) {
   const queryClient = useQueryClient();
   const marketLabel = marketplaceName(marketplace);
   return useMutation({
-    mutationFn: async ({ convId, revisionId }: { convId: string; revisionId: string }) => {
-      return api.nativeMarketplaces.list(convId, marketplace, revisionId);
+    mutationFn: async ({ convId, revisionId, confirmedEbayAdRate }: {
+      convId: string; revisionId: string; confirmedEbayAdRate?: string;
+    }) => {
+      return api.nativeMarketplaces.list(convId, marketplace, revisionId, confirmedEbayAdRate);
     },
     retry: false,
     onSuccess: (_draft, { convId }) => {
@@ -925,6 +929,9 @@ export function MarketplaceQuickEditSheet({
                       <> for <span className="font-medium tabular-nums">{confirmSnapshot.priceLabel}</span></>
                     ) : null}?
                   </p>
+                  {marketplace === "ebay" && ebayPromotionMessage(docQuery.data?.listing) && (
+                    <p className="text-xs">{ebayPromotionMessage(docQuery.data?.listing)}</p>
+                  )}
                   <div className="flex items-center gap-2">
                     <Button
                       type="button"
@@ -943,7 +950,8 @@ export function MarketplaceQuickEditSheet({
                         const submittedKey = confirmSnapshot.key;
                         const submittedRev = confirmSnapshot.revisionId;
                         listMutation.mutate(
-                          { convId: listing.id, revisionId: submittedRev },
+                          { convId: listing.id, revisionId: submittedRev,
+                            confirmedEbayAdRate: marketplace === "ebay" ? ebayPromotionRate(docQuery.data?.listing) : undefined },
                           {
                             onSuccess: () =>
                               setConfirmSnapshot((cur) =>

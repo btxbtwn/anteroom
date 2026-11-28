@@ -1640,6 +1640,44 @@
         "title": "ErrorDetail",
         "type": "object"
       },
+      "EtsyPackage": {
+        "properties": {
+          "item_dimensions_unit": {
+            "title": "Item Dimensions Unit",
+            "type": "string"
+          },
+          "item_height": {
+            "title": "Item Height",
+            "type": "number"
+          },
+          "item_length": {
+            "title": "Item Length",
+            "type": "number"
+          },
+          "item_weight": {
+            "title": "Item Weight",
+            "type": "number"
+          },
+          "item_weight_unit": {
+            "title": "Item Weight Unit",
+            "type": "string"
+          },
+          "item_width": {
+            "title": "Item Width",
+            "type": "number"
+          }
+        },
+        "required": [
+          "item_weight",
+          "item_length",
+          "item_width",
+          "item_height",
+          "item_weight_unit",
+          "item_dimensions_unit"
+        ],
+        "title": "EtsyPackage",
+        "type": "object"
+      },
       "Expense": {
         "properties": {
           "accounting_type": {
@@ -2071,6 +2109,78 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ListRequest": {
+        "properties": {
+          "confirm": {
+            "default": false,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "confirmed_ebay_ad_rate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed Ebay Ad Rate"
+          },
+          "etsy_package": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EtsyPackage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "readiness_state_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Readiness State Id"
+          },
+          "return_policy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Policy Id"
+          },
+          "revision_id": {
+            "title": "Revision Id",
+            "type": "string"
+          },
+          "shipping_profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shipping Profile Id"
+          }
+        },
+        "required": [
+          "revision_id"
+        ],
+        "title": "ListRequest",
         "type": "object"
       },
       "ListingDocument": {
@@ -4684,6 +4794,130 @@
           }
         },
         "summary": "Create Conversation"
+      }
+    },
+    "/api/conversations/{conv_id}/native-marketplaces/{marketplace}/list": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conv_id",
+            "required": true,
+            "schema": {
+              "title": "Conv Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "marketplace",
+            "required": true,
+            "schema": {
+              "enum": [
+                "ebay",
+                "etsy",
+                "poshmark",
+                "mercari",
+                "depop"
+              ],
+              "title": "Marketplace",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Now"
+      }
+    },
+    "/api/conversations/{conv_id}/native-marketplaces/{marketplace}/update": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conv_id",
+            "required": true,
+            "schema": {
+              "title": "Conv Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "marketplace",
+            "required": true,
+            "schema": {
+              "enum": [
+                "ebay",
+                "etsy",
+                "poshmark",
+                "mercari",
+                "depop"
+              ],
+              "title": "Marketplace",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Live"
       }
     },
     "/api/conversations/{conv_id}/photos/studio": {

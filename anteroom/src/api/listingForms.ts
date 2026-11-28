@@ -149,6 +149,7 @@ export function nativeFormOptions(convId: string, tab: string, listing: ListingD
     queryKey: ["native-editor-form", convId, tab, nativeFormStructureKey(listing, tab), savedFormKey(saved)],
     queryFn: async ({ signal }) => withChoiceLists(await api.nativeMarketplaces.form(convId, tab, revisionId, { signal })),
     staleTime: Infinity,
+    refetchInterval: (query) => query.state.data?.fields.some((field) => field.choices_loading) ? 2_000 : false,
     refetchOnWindowFocus: false,
     retry: (failureCount, error) =>
       failureCount < 1

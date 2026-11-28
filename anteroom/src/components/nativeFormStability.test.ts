@@ -102,6 +102,19 @@ describe("native form structure", () => {
 });
 
 describe("native form values", () => {
+  it("warns about high eBay ad rates without locking the rate", () => {
+    const field: NativeFormRow = { key: "ebay_specifics.promotion.adRate", suggestedAdRate: "8" };
+    const context: NativeFieldContext = {
+      tab: "ebay", listing: {}, local: { [field.key]: "16" }, fields: [field], categoryStale: false,
+    };
+    expect(presentNativeField(field, context).warning).toContain("16%");
+    expect(presentNativeField(field, context).locked).toBeFalsy();
+    expect(presentNativeField(field, { ...context, local: { [field.key]: "15" } }).warning).toBeUndefined();
+    expect(presentNativeField({ ...field, suggestedAdRate: undefined }, {
+      ...context, local: { [field.key]: "100" },
+    }).warning).toContain("100%");
+  });
+
   it("shows the saved value instead of the form's stale copy", () => {
     expect(resolvedEditorValue(
       { key: "price", defaultValue: 24 },

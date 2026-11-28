@@ -1158,6 +1158,16 @@ def _reserve_relist_attempt(
             return {"reserved": False, "outcome": _record_pause(db, entry, paused, moment)}
 
         preflight_error = readiness_error or price_error
+        if marketplace == "ebay" and not preflight_error:
+            from anteroom.services.ebay_listing_promotion import selection
+            from anteroom.services.listing_result import ListingProblem
+
+            saved = db.get(ListingRevision, current_revision_id) if current_revision_id else None
+            if saved is not None:
+                try:
+                    selection(saved.listing_json)
+                except ListingProblem as exc:
+                    preflight_error = str(exc)
         revision_id = None if preflight_error else _prepare_price_revision(
             db, conv_id, marketplace, new_price, current_revision_id,
         )
@@ -1365,13 +1375,17 @@ async def run_auto_relist(
                 res = await wait_for_native_result(conv_id, marketplace, res)
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": str(exc)}
-        ok = res.get("state") in LIVE_STATES and not res.get("error")
+        from anteroom.services.ebay_listing_promotion import WARNING_CODE
+
+        error = None if res.get("error_code") == WARNING_CODE else res.get("error")
+        ok = res.get("state") in LIVE_STATES and not error
         new_id_val = res.get("listing_id") or extract_listing_id(marketplace, res.get("listing_url"))
         return {
             "ok": ok,
             "listing_id": new_id_val,
             "listing_url": res.get("listing_url"),
-            "error": res.get("error"),
+            "error": error,
+            "warning": res.get("error") if res.get("error_code") == WARNING_CODE else None,
             "timed_out": bool(res.get("timed_out")),
             "native_job_id": res.get("job_id"),
         }
@@ -1508,7 +1522,7 @@ async def run_auto_relist(
             "old_price": entry["price"],
             "new_price": entry["new_price"],
             "status": "completed",
-            "reason": None,
+            "reason": list_res.get("warning"),
             "moment": moment if now is not None else _now(),
             "new_listing_url": list_res.get("listing_url"),
         }))

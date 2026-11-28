@@ -537,17 +537,45 @@ def test_submit_returns_the_task_id_for_streaming(monkeypatch):
 def test_native_editor_form_releases_the_connection_before_marketplace_waits(single_connection, monkeypatch):
     """eBay/Chrome form refreshes must not pin the hosted pool during network I/O."""
     from anteroom.models.conversation import Conversation
-    from anteroom.services import native_editor
+    from anteroom.services import ebay_listing_promotion, marketplace_accounts, native_editor, saved_choices
 
     released = []
+    pending = []
 
-    async def ebay_form(snapshot):
+    def check_pool(step):
         with single_connection() as other:
             assert other.scalar(__import__('sqlalchemy').text('SELECT 1')) == 1
-        released.append(snapshot.get('title'))
+        released.append(step)
+
+    async def campaigns():
+        check_pool('campaigns')
+        return []
+
+    async def suggested_rate(listing_id):
+        assert listing_id == '123456789012'
+        check_pool('suggestion')
+        return '5.5'
+
+    async def account_id(marketplace):
+        assert marketplace == 'ebay'
+        check_pool('account')
+        return 'test-ebay-account'
+
+    async def ebay_form(snapshot, *, refresh_promotion):
+        check_pool(snapshot.get('title'))
+        await native_editor._ebay_promotion_fields(
+            {**snapshot, '_promotion_listing_id': '123456789012'}, fresh=refresh_promotion,
+        )
+        await asyncio.gather(*pending)
         return {'marketplace': 'ebay', 'fields': []}
 
     monkeypatch.setattr(native_editor, 'ebay_form', ebay_form)
+    monkeypatch.setattr(marketplace_accounts, 'account_id', account_id)
+    monkeypatch.setattr(ebay_listing_promotion, 'campaigns', campaigns)
+    monkeypatch.setattr(ebay_listing_promotion, 'suggested_rate', suggested_rate)
+    monkeypatch.setattr(saved_choices, 'on_this_loop', lambda work: pending.append(asyncio.create_task(work())))
+    monkeypatch.setattr(saved_choices, '_entry', lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(saved_choices, '_save', lambda *_args: None)
     monkeypatch.setattr(native_editor.direct_preflight, 'prepare',
                         lambda db, conv, listing_json, marketplace: {'title': conv.title})
     with single_connection() as db:
@@ -556,7 +584,7 @@ def test_native_editor_form_releases_the_connection_before_marketplace_waits(sin
     monkeypatch.setattr('anteroom.database.SessionLocal', single_connection)
     form = asyncio.run(native_editor.editor_form('form-tee', 'ebay', None, refresh=True))
     assert form['marketplace'] == 'ebay'
-    assert released == ['Cotton tee']
+    assert sorted(released) == ['Cotton tee', 'account', 'campaigns', 'suggestion']
 
 
 def test_inventory_list_closes_the_seller_session_before_returning(monkeypatch):

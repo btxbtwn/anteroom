@@ -29,6 +29,7 @@ import { DraftScheduleControl } from "./DraftScheduleControl";
 import { isEbayInventoryLocationEdit } from "./listingChanges";
 import { MarketplaceMessagesContext, uniqueMarketplaceMessages } from "./marketplaceMessages";
 import { rowForField } from "./nativeFieldWarnings";
+import { ebayPromotionMessage, ebayPromotionRate } from "../listingPaths";
 
 type Marketplace = DelistMarketplace;
 const ORDER: Marketplace[] = ["ebay", "etsy", "poshmark", "mercari", "depop"];
@@ -262,6 +263,7 @@ const MANAGED = new Set<string>(ORDER);
 
 type MarketplaceProps = {
   convId: string; revisionId: string | null; title: string; disabled: boolean; etsyEligible: boolean;
+  savedListing?: Record<string, unknown>;
   /** Send a prompt to the listing's chat; absent while chat is busy. */
   onAskChat?: (text: string) => void;
   /**
@@ -283,7 +285,7 @@ export function useReportFixTargets(marketplace: string, fields: readonly FixTar
 }
 
 export function MarketplacesLayout({
-  convId, revisionId, title, disabled, etsyEligible, onAskChat, onEditField,
+  convId, revisionId, title, disabled, etsyEligible, onAskChat, onEditField, savedListing,
   ids, selected, onSelect, onPrepare, railActions, railMenu, railStatus, children,
 }: MarketplaceProps & {
   ids: readonly string[];
@@ -414,7 +416,9 @@ export function MarketplacesLayout({
   const waitingOn = (marketplace: Marketplace) => waitingHere.find((item) => item.marketplace === marketplace);
   const queuedOn = (marketplace: Marketplace) => { const item = waitingOn(marketplace); return item && !item.error ? item : undefined; };
   const action = useMutation({
-    mutationFn: async ({ marketplace, kind, draftUrl }: { marketplace: NativeMarketplace; kind: ActionKind; draftUrl?: string }) => {
+    mutationFn: async ({ marketplace, kind, draftUrl, confirmedEbayAdRate }: {
+      marketplace: NativeMarketplace; kind: ActionKind; draftUrl?: string; confirmedEbayAdRate?: string;
+    }) => {
       if (kind === "check") return api.nativeMarketplaces.check(convId, marketplace, draftUrl);
       if (kind === "cancel") return api.nativeMarketplaces.cancel(convId, marketplace);
       if (kind === "reset") return api.nativeMarketplaces.reset(convId, marketplace);
@@ -438,8 +442,8 @@ export function MarketplacesLayout({
       }
       if (!revisionId) throw new Error("Fill in the listing first.");
       if (kind === "save_draft") return api.nativeMarketplaces.saveDraft(convId, marketplace, revisionId);
-      if (kind === "update") return api.nativeMarketplaces.update(convId, marketplace, revisionId);
-      return api.nativeMarketplaces.list(convId, marketplace, revisionId);
+      if (kind === "update") return api.nativeMarketplaces.update(convId, marketplace, revisionId, confirmedEbayAdRate);
+      return api.nativeMarketplaces.list(convId, marketplace, revisionId, confirmedEbayAdRate);
     },
     retry: false,
     onMutate: ({ marketplace, kind }) => {
@@ -450,10 +454,10 @@ export function MarketplacesLayout({
       // The revision the seller confirmed, so a wait never sends a later one.
       return { revision: revisionId };
     },
-    onError: (error, { marketplace, kind }, context) => {
+    onError: (error, { marketplace, kind, confirmedEbayAdRate }, context) => {
       // The marketplace is busy with another action: this one waits its turn.
       if (isBusyRefusal(error) && context?.revision && (kind === "list" || kind === "update" || kind === "save_draft")) {
-        waitlist.add({ convId, title, marketplace, kind, revisionId: context.revision });
+        waitlist.add({ convId, title, marketplace, kind, revisionId: context.revision, confirmedEbayAdRate });
         return;
       }
       setActionErrors((current) => ({ ...current, [marketplace]: error.message }));
@@ -528,13 +532,17 @@ export function MarketplacesLayout({
 
   async function updateNow(marketplace: NativeMarketplace) {
     const name = marketplaceName(marketplace);
-    if (await confirmDialog(`Update the live ${name} listing for “${title}” with what's saved in Anteroom?\nThis changes the listing that is already up.`,
-      { confirmLabel: `Update on ${name}` })) action.mutate({ marketplace, kind: "update" });
+    const promotion = marketplace === "ebay" ? ebayPromotionMessage(savedListing) : "";
+    const confirmedEbayAdRate = marketplace === "ebay" ? ebayPromotionRate(savedListing) : undefined;
+    if (await confirmDialog(`${promotion ? `${promotion}\n\n` : ""}Update the live ${name} listing for “${title}” with what's saved in Anteroom?\nThis changes the listing that is already up.`,
+      { confirmLabel: `Update on ${name}` })) action.mutate({ marketplace, kind: "update", confirmedEbayAdRate });
   }
   async function listNow(marketplace: NativeMarketplace) {
     const name = marketplaceName(marketplace);
-    if (await confirmDialog(`List “${title}” on ${name}?\nThis creates a live ${name} listing from the listing saved in Anteroom.`,
-      { confirmLabel: `List on ${name}` })) action.mutate({ marketplace, kind: "list" });
+    const promotion = marketplace === "ebay" ? ebayPromotionMessage(savedListing) : "";
+    const confirmedEbayAdRate = marketplace === "ebay" ? ebayPromotionRate(savedListing) : undefined;
+    if (await confirmDialog(`${promotion ? `${promotion}\n\n` : ""}List “${title}” on ${name}?\nThis creates a live ${name} listing from the listing saved in Anteroom.`,
+      { confirmLabel: `List on ${name}` })) action.mutate({ marketplace, kind: "list", confirmedEbayAdRate });
   }
   // List everywhere's picker; List starts only on the marketplaces the seller picks there.
   const [picking, setPicking] = useState(false);
@@ -858,7 +866,11 @@ export function MarketplacesLayout({
 
   const pane = <div className="flex min-h-0 min-w-0 flex-1 flex-col">
     {picking && <ListEverywhereDialog title={title} choices={choices} onClose={() => setPicking(false)}
-      onConfirm={(marketplaces) => { for (const marketplace of marketplaces) action.mutate({ marketplace, kind: "list" }); }}
+      ebayPromotion={ebayPromotionMessage(savedListing)}
+      onConfirm={(marketplaces) => {
+        for (const marketplace of marketplaces) action.mutate({ marketplace, kind: "list",
+          confirmedEbayAdRate: marketplace === "ebay" ? ebayPromotionRate(savedListing) : undefined });
+      }}
       onEditField={onEditField} />}
     {selectedMarketplace && <HeldWhileChecking checking={rechecking} holdKey={selectedMarketplace}>
       {preflightNotice(selectedMarketplace, selectedGaps)}
@@ -935,7 +947,7 @@ export function MarketplacesLayout({
       )}
       {!soldSomewhere && !selectedMarketplace && Boolean(selected) ? (
         <div className="mb-3">
-          <DraftScheduleControl convId={convId} />
+          <DraftScheduleControl convId={convId} ebayAdRate={ebayPromotionRate(savedListing)} />
         </div>
       ) : null}
       <FixTargetsContext.Provider value={reportFields}>

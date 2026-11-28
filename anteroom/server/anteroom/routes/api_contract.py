@@ -57,6 +57,8 @@ CONTRACT_OPERATIONS: tuple[tuple[str, str], ...] = (
     ("put", "/api/conversations/{identity}/favorite"),
     ("get", "/api/conversations/{identity}/listing"),
     ("put", "/api/conversations/{identity}/listing"),
+    ("post", "/api/conversations/{conv_id}/native-marketplaces/{marketplace}/list"),
+    ("post", "/api/conversations/{conv_id}/native-marketplaces/{marketplace}/update"),
     ("get", "/api/conversations/{identity}/photos"),
     ("get", "/api/listing-sheet"),
     ("post", "/api/conversations/{conv_id}/photos/studio"),
