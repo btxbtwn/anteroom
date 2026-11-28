@@ -29,6 +29,7 @@ for path, handler, methods in (
     ('/native-marketplaces', native_marketplaces.status, ['GET']),
     ('/marketplace-listings', marketplace_listings.listings, ['GET']),
     ('/marketplace-listings/{marketplace}/mark', marketplace_listings.mark, ['POST']),
+    ('/marketplace-listings/{marketplace}/check-removal', marketplace_listings.check_removal, ['POST']),
     ('/marketplace-listings/sold', marketplace_listings.record_sale, ['POST']),
     ('/marketplace-listings/check-sales', marketplace_listings.check_sales, ['POST']),
 ):

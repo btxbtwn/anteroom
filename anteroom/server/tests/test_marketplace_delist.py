@@ -140,6 +140,30 @@ class MarketplaceDelistTest(unittest.TestCase):
         self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["poshmark"], "confirm": True}).status_code, 409)
         self.bridge.assert_not_called()
 
+    def test_lost_delist_reply_is_verified_later_without_another_delete(self):
+        from datetime import datetime
+
+        from anteroom.models.marketplace_listing import MarketplaceListing
+        from anteroom.services import marketplace_delist
+        from anteroom.services.browser_bridge import BrowserBridgeError
+
+        item = listing_id("depop", URLS["depop"])
+        self.bridge.side_effect = [BrowserBridgeError("Disconnected"), {"finished": True, "result": {
+            "ok": True, "listing_id": item, "state": "deleted"}}]
+        reply = self.client.post(f"{self.base}/delist", json={"marketplaces": ["depop"], "confirm": True})
+        self.assertEqual(reply.json()["depop"]["verification"], "checking")
+        row = self.db.query(MarketplaceListing).filter_by(conversation_id=self.conv.id, marketplace="depop").one()
+        row.removal_check_at = datetime(2020, 1, 1)
+        self.db.commit()
+        asyncio.run(marketplace_delist.reconcile_removals())
+        self.db.expire_all()
+        verified = self.client.get(self.base).json()["depop"]
+        self.assertTrue(verified["already_gone"])
+        self.assertEqual(verified["state"], "deleted")
+        self.assertEqual([call.args[1] for call in self.bridge.await_args_list],
+                         ["marketplace.delete", "marketplace.result"])
+        self.assertNotIn("confirm", self.bridge.await_args.args[2])
+
     def test_a_failure_is_recorded_and_others_still_run(self):
         self.bridge.side_effect = [{"ok": False, "error": "Poshmark rejected the delete (HTTP 500)."}, {"ok": True, "state": "deleted"}]
         body = self.client.post(f"{self.base}/delist", json={"marketplaces": ["poshmark", "mercari"], "confirm": True}).json()

@@ -29,6 +29,7 @@ def unsettled_owners(engine) -> list[str]:
 async def sweep_owner(owner: str, *, reconcile_all: bool) -> list[str]:
     """Fail this seller's dead jobs; read results a restart or a failure left unconfirmed."""
     from anteroom.database import SessionLocal
+    from anteroom.services.marketplace_delist import reconcile_removals
     from anteroom.services.native_marketplaces import reconcile
 
     with use(for_seller(owner)):
@@ -37,25 +38,32 @@ async def sweep_owner(owner: str, *, reconcile_all: bool) -> list[str]:
                 return fail_stalled_jobs(db)
 
         failed = await asyncio.to_thread(fail_in_session)
-        if failed or reconcile_all:
-            await reconcile(chrome=False)
+        await asyncio.gather(reconcile(chrome=True, periodic=not (failed or reconcile_all)), reconcile_removals())
     return failed
 
 
 async def serve(engine) -> None:
     first = True
-    while True:
+    active: set[str] = set()
+
+    async def run(owner: str, startup: bool) -> None:
         try:
-            owners = await asyncio.to_thread(unsettled_owners, engine)
-        except SQLAlchemyError:
-            log.warning('Job watchdog database is temporarily unavailable')
-            owners = []
-        for owner in owners:
+            await sweep_owner(owner, reconcile_all=startup)
+        except Exception:  # noqa: BLE001 - one seller's failure must not stop the others
+            log.exception('Job watchdog pass failed for one seller')
+        finally:
+            active.discard(owner)
+
+    async with asyncio.TaskGroup() as tasks:
+        while True:
             try:
-                await sweep_owner(owner, reconcile_all=first)
-            except asyncio.CancelledError:
-                raise
-            except Exception:  # noqa: BLE001 - one seller's failure must not stop the others
-                log.exception('Job watchdog pass failed for one seller')
-        first = False
-        await asyncio.sleep(SWEEP_INTERVAL_SEC)
+                owners = await asyncio.to_thread(unsettled_owners, engine)
+            except SQLAlchemyError:
+                log.warning('Job watchdog database is temporarily unavailable')
+                owners = []
+            for owner in owners:
+                if owner not in active:
+                    active.add(owner)
+                    tasks.create_task(run(owner, first))
+            first = False
+            await asyncio.sleep(SWEEP_INTERVAL_SEC)

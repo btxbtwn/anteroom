@@ -95,10 +95,9 @@ test("checking an unconfirmed Depop publish keeps List blocked after a 404", asy
     await openListing(page, phone, title);
     if (phone) await page.getByRole("tab", { name: "Listing", exact: true }).click();
     await openForm(page, phone, "Depop");
-    const check = page.getByRole("button", { name: "Check result", exact: true });
-    await check.click();
+    await page.getByRole("button", { name: "Depop actions", exact: true }).last().click();
+    await page.getByRole("menuitem", { name: "Check now", exact: true }).click();
     await expect(page.getByText(checked.error, { exact: true })).toBeVisible();
-    await expect(check).toBeEnabled();
     await expect(page.getByRole("button", { name: "List…", exact: true })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "View listing", exact: true })).toHaveCount(0);
     expect(posts).toEqual([`${api}/depop/check`]);

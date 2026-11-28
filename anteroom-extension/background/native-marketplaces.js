@@ -231,6 +231,10 @@ async function handleNativeMarketplaceMessage(msg, reply = result => sendBrowser
     return;
   }
   const key = `${NATIVE_OPERATION_JOURNAL_PREFIX}${operationId}`;
+  if (msg.type === 'marketplace.result' && msg.payload.context?.action === 'check_removal') {
+    reply(await checkMarketplaceRemoval(msg.payload.context));
+    return;
+  }
   let stored = (await chrome.storage.local.get(key))[key];
   if (msg.type === 'marketplace.result') {
     if (!stored && msg.payload.context?.draft_url) stored = { finished: false, context: msg.payload.context };

@@ -154,6 +154,7 @@ async def sweep() -> list[str]:
 
 
 async def _watch() -> None:
+    from anteroom.services.marketplace_delist import reconcile_removals
     from anteroom.services.native_marketplaces import reconcile
 
     try:
@@ -166,7 +167,9 @@ async def _watch() -> None:
     while True:
         await asyncio.sleep(SWEEP_INTERVAL_SEC)
         try:
-            await sweep()
+            if not await sweep():
+                await reconcile(chrome=True, periodic=True)
+            await reconcile_removals()
         except Exception:  # noqa: BLE001 - one bad pass must not stop the watchdog
             log.exception("Job watchdog pass failed")
 

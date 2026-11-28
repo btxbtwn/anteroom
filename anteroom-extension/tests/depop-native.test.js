@@ -617,6 +617,23 @@ test('a Depop publish whose status read answers 404 stays unconfirmed while its 
   assert.equal(publishPosts(requests), 1);
 });
 
+test('two new matches ask the seller which listing was theirs', async () => {
+  const { c, payload } = page();
+  const { requests, run } = depopPublishFixture(c, payload, {
+    draftAfterPost: () => reply(404, {}),
+    shopRows: (sent, posted) => (posted ? ['old', 'one', 'two'] : ['old']).map(slug => ({
+      slug, description: c.depopDescription(sent), price_amount: String(sent.price), user_id: 42,
+      pictures: [{ url: `https://media-photos.depop.com/${slug}.jpg` }],
+    })),
+  });
+  const result = await run();
+  assert.equal(result.ok, false);
+  assert.equal(result.safe_to_retry, false);
+  assert.deepEqual(Array.from(result.candidates, item => item.photo),
+    ['https://media-photos.depop.com/one.jpg', 'https://media-photos.depop.com/two.jpg']);
+  assert.equal(publishPosts(requests), 1);
+});
+
 test('a Depop publish with a missing status surfaces a duplicate SKU on List and Check without reposting', async () => {
   const { c, payload } = page();
   const reason = 'SKU is invalid: SKU must be unique';

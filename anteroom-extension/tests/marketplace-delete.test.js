@@ -37,6 +37,19 @@ function worker(routes) {
 const posh = `poshmark.com/vm-rest/posts/${POST}`;
 const livePost = { data: { creator_id: USER, status: 'published', inventory: { status: 'available', size_quantities: [{ quantity_sold: 0 }] } } };
 
+test('checking an interrupted removal only reads the original listing', async () => {
+  const url = 'webapi.depop.com/presentation/api/v1/products/by-slug/shop-tee/';
+  for (const [response, expected] of [[[200, { status: 'ONSALE', id: 123 }], 'present'], [[404, {}], 'deleted'],
+    [[200, {}], undefined], [[503, {}], undefined]]) {
+    const { c, requests } = worker({ [`GET ${url}`]: response });
+    let checked;
+    await c.handleNativeMarketplaceMessage({ type: 'marketplace.result', payload: { operation_id: 'abc',
+      context: { action: 'check_removal', marketplace: 'depop', listing_id: 'shop-tee' } } }, value => { checked = value; });
+    assert.equal(checked.result?.state, expected);
+    assert.ok(requests.length > 0 && requests.every(request => request === `GET ${url}`));
+  }
+});
+
 test('Poshmark delete reads, deletes once, and confirms it is gone', async () => {
   const { c, requests } = worker({
     [`GET ${posh}`]: n => [200, n === 1 ? livePost : { error: { errorType: 'PostRemovedError' } }],

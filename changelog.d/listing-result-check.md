@@ -1,0 +1,1 @@
+- Anteroom checks unconfirmed listing actions in the background and shows when it needs Chrome or your help. A lost delist reply triggers a read of the original listing.

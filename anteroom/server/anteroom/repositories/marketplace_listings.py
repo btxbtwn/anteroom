@@ -157,7 +157,11 @@ class MarketplaceListingRepo:
 
     def unsettled(self) -> list[MarketplaceListing]:
         """Records whose last action is still running or unconfirmed, on every item."""
-        return (self.db.query(MarketplaceListing).filter(MarketplaceListing.state.in_(UNSETTLED_STATES))
+        # _read_state presents these historical rows as unknown. A saved job lets Chrome recover the link.
+        missing_depop_link = ((MarketplaceListing.marketplace == "depop") & (MarketplaceListing.state == "published")
+                              & MarketplaceListing.job_id.isnot(None)
+                              & (MarketplaceListing.listing_url.is_(None) | (MarketplaceListing.listing_url == "")))
+        return (self.db.query(MarketplaceListing).filter(MarketplaceListing.state.in_(UNSETTLED_STATES) | missing_depop_link)
                 .order_by(MarketplaceListing.updated_at.asc()).all())
 
     def job_ids(self, conv_id: str) -> set[str]:

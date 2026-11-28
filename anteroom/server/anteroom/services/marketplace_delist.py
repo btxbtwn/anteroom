@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from uuid import uuid4
 from urllib.parse import urlsplit
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from sqlalchemy import update
@@ -29,7 +30,7 @@ from sqlalchemy.orm import Session
 
 from anteroom.models.automation import MarketplaceRelistRule
 from anteroom.models.conversation import Conversation
-from anteroom.models.marketplace_listing import UNSETTLED_STATES
+from anteroom.models.marketplace_listing import MarketplaceListing, UNSETTLED_STATES
 from anteroom.models.marketplace_sale import MarketplaceSale, PAID_STATUSES
 from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
 from anteroom.repositories.queries import ConversationRepo, JobRepo, ListingRepo
@@ -250,6 +251,10 @@ def known_listings(notes: dict, native: dict, sold: dict) -> dict:
                                "marketplace_message": record.get("marketplace_message"),
                                "at": record.get("at"), "attempts": record.get("attempts"),
                                "already_gone": record.get("already") is True}
+        if record.get("verification") == "removed" and record.get("state") == "deleted":
+            result[marketplace]["verification"] = "removed"
+        elif record.get("check_job") and record.get("state") == "failed":
+            result[marketplace]["verification"] = record.get("verification") or "checking"
     return result
 
 
@@ -278,8 +283,16 @@ def _store(db: Session, conv_id: str, key: str, marketplace: str, value: dict | 
     db.commit()
 
 
-def _record(db: Session, conv_id: str, marketplace: str, value: dict) -> None:
-    _store(db, conv_id, "marketplaceDelists", marketplace, value)
+def _owns_removal(db: Session, conv_id: str, name: str, job_id: str, item_id: str) -> bool:
+    conv = _locked_conversation(db, conv_id)
+    receipt = _notes_dict(parse_notes(conv.notes), "marketplaceDelists").get(name) or {}
+    current = listings(db, conv_id, conv=conv).get(name) or {}
+    return receipt.get("check_job") == job_id and current.get("listing_id") == item_id and not current.get("sold_here")
+
+
+def _record(db: Session, conv_id: str, marketplace: str, value: dict, job_id: str | None = None) -> None:
+    if job_id is None or _owns_removal(db, conv_id, marketplace, job_id, value["listing_id"]):
+        _record_delete(db, conv_id, marketplace, value)
 
 
 # A delist that recorded a failure on some marketplace, in ``marketplaceDelists``.
@@ -341,10 +354,17 @@ MARKS = ("listed", "sold", "not_listed")
 
 
 def mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | None = None,
-         relink_deleted: bool = False) -> dict:
+         relink_deleted: bool = False, *, expected_job_id: str | None = None) -> dict:
     # Serialise duplicate validation and the local write with other seller
     # marks and direct action starts in this process.
     with start_gate():
+        if expected_job_id:
+            record = MarketplaceListingRepo(db).get(conv_id, marketplace)
+            event = JobRepo(db).latest_event(expected_job_id, "native_result")
+            candidates = (event.payload or {}).get("candidates", []) if event else []
+            if (record.get("job_id") != expected_job_id or record.get("state") not in UNSETTLED_STATES
+                    or state != "listed" or not any(item.get("url") == url for item in candidates)):
+                raise DelistError(409, "The listing result changed. Refresh this item to see its current status.")
         return _mark(db, conv_id, marketplace, state, url, relink_deleted)
 
 
@@ -479,8 +499,151 @@ def _failure_text(marketplace: str, exc: Exception) -> str:
     if marketplace == "etsy":
         return _error_text(exc)
     if isinstance(exc, browser_bridge.BrowserBridgeError):
-        return "Chrome did not confirm the delete. Delist again to check; it is safe to repeat."
-    return str(exc) or "The marketplace did not confirm the delete. Delist again to check; it is safe to repeat."
+        return "Chrome did not confirm the removal."
+    return str(exc) or "The marketplace did not confirm the removal."
+
+
+async def _check_removal(job, name: str, payload: dict, cloud: bool) -> str | None:
+    """Read only the original listing. Accept absence evidence tied to the exact ID."""
+    item_id = payload["listing_id"]
+    try:
+        async with asyncio.timeout(70):
+            if name == "ebay":
+                from anteroom.services.marketplace_inventory import _ebay
+
+                state = (await _ebay(item_id)).get("state")
+                return "deleted" if state in {"ended", "completed"} else "present" if state == "active" else None
+            elif name == "etsy":
+                try:
+                    remote = await marketplace_accounts.etsy_api("GET", f"listings/{item_id}")
+                    if str(remote.get("listing_id")) == item_id and remote.get("state") == "active":
+                        return "present"
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code == 404:
+                        return "deleted"
+            else:
+                operation = str(uuid4())
+                read = {"marketplace": name, "operation_id": operation,
+                        "context": {"marketplace": name, "action": "check_removal", "listing_id": item_id,
+                                    "seller_region": payload.get("seller_region")}}
+                if cloud:
+                    from anteroom.services import cloud_marketplace
+
+                    reply = await cloud_marketplace.execute(name, {
+                        "type": "marketplace.result", "job_id": job.id, "message_id": operation, "payload": read,
+                    }, timeout=65)
+                else:
+                    reply = await browser_bridge.request(job, "marketplace.result", read, timeout=65)
+                result = reply.get("result") or {}
+                if (reply.get("finished") is True and result.get("ok") is True
+                        and result.get("state") in {"deleted", "present"} and result.get("listing_id") == item_id):
+                    return result["state"]
+    except Exception:  # An inconclusive read preserves the original failure.
+        logging.getLogger(__name__).info("Could not verify %s listing removal", name)
+    return None
+
+
+def _due_removals(db: Session):
+    now = datetime.now(UTC).replace(tzinfo=None)
+    return [(cid, name) for cid, name in db.query(MarketplaceListing.conversation_id, MarketplaceListing.marketplace)
+            .filter(MarketplaceListing.removal_check_at <= now)]
+
+
+def request_removal_check(db: Session, conv_id: str, name: str) -> dict:
+    current = listings(db, conv_id)
+    if not (current.get(name) or {}).get("verification"):
+        raise DelistError(409, "There is no unresolved removal to check.")
+    conv = _locked_conversation(db, conv_id)
+    receipt = _notes_dict(parse_notes(conv.notes), "marketplaceDelists").get(name) or {}
+    if receipt.get("state") != "failed" or not receipt.get("check_job") or receipt.get("listing_id") != current[name]["listing_id"]:
+        raise DelistError(409, "The marketplace listing changed before the check started.")
+    _record_delete(db, conv_id, name, {**receipt, "verification": "checking", "reads": 0}, commit=False)
+    row = MarketplaceListingRepo(db).row(conv_id, name)
+    assert row is not None
+    row.removal_check_at = datetime.now(UTC).replace(tzinfo=None)
+    db.commit()
+    return listings(db, conv_id)
+
+
+def _pending_removal(db: Session, conv_id: str, name: str):
+    conv = _locked_conversation(db, conv_id)
+    row = MarketplaceListingRepo(db).row(conv_id, name)
+    receipt = _notes_dict(parse_notes(conv.notes), "marketplaceDelists").get(name) or {}
+    current = listings(db, conv_id, conv=conv).get(name) or {}
+    if (not row or not row.removal_check_at or not receipt.get("check_job")
+            or receipt.get("state") not in {"deleting", "failed"} or current.get("sold_here")
+            or current.get("listing_id") != receipt.get("listing_id")):
+        if row and row.removal_check_at:
+            row.removal_check_at = None
+            db.commit()
+        return None
+    return row, receipt
+
+
+def _claim_removal(db: Session, conv_id: str, name: str) -> dict | None:
+    from anteroom.services import cloud_sessions
+    from anteroom.services.extension_connection import current_extension
+
+    pending = _pending_removal(db, conv_id, name)
+    now = datetime.now(UTC).replace(tzinfo=None)
+    if not pending:
+        return None
+    row, receipt = pending
+    if row.removal_check_at is None or row.removal_check_at > now or job_is_live(db, receipt["check_job"]):
+        return None
+    available = name not in BROWSER_MARKETPLACES or (
+        cloud_sessions.has_active_session(name, db) if receipt.get("cloud") else current_extension().connected)
+    if not available:
+        state = "reconnect" if receipt.get("cloud") else "waiting_for_chrome"
+        _record_delete(db, conv_id, name, {**receipt, "state": "failed", "verification": state}, commit=False)
+        row.removal_check_at = now + timedelta(seconds=30)
+        db.commit()
+        return None
+    # Longer than the read deadline. A process exit leaves this read recoverable.
+    row.removal_check_at = now + timedelta(seconds=90)
+    db.commit()
+    return receipt
+
+
+def _finish_removal_read(db: Session, conv_id: str, name: str, receipt: dict, result: str | None) -> None:
+    pending = _pending_removal(db, conv_id, name)
+    if not pending or pending[1] != receipt:
+        return
+    if result == "deleted":
+        _deleted(db, conv_id, name, {**receipt, "already": True, "verification": "removed", "error_code": None})
+        job_id = receipt["check_job"]
+        job = JobRepo(db).get(job_id)
+        if job and job.status == "failed":
+            notes = _notes_dict(parse_notes(_locked_conversation(db, conv_id).notes), "marketplaceDelists")
+            names = (job.listing_snapshot or {}).get("delist") or []
+            if names and all(isinstance(notes.get(m), dict) and notes[m].get("check_job") == job_id
+                             and notes[m].get("state") == "deleted" for m in names):
+                job.status, job.last_error = "completed", None
+                db.commit()
+        return
+    row, _ = pending
+    reads = int(receipt.get("reads", 0)) + 1
+    verification = "still_present" if result == "present" else "needs_review" if reads >= 3 else "checking"
+    _record_delete(db, conv_id, name, {**receipt, "state": "failed", "verification": verification,
+                                       "reads": reads}, commit=False)
+    row.removal_check_at = (datetime.now(UTC).replace(tzinfo=None) + timedelta(minutes=reads)
+                            if verification == "checking" else None)
+    db.commit()
+
+
+async def reconcile_removals() -> None:
+    from types import SimpleNamespace
+
+    from anteroom.database import in_worker_session
+
+    for conv_id, name in await in_worker_session(_due_removals):
+        receipt = await in_worker_session(_claim_removal, conv_id, name)
+        if not receipt:
+            continue
+        region = "CA" if urlsplit(receipt["url"]).hostname in {"poshmark.ca", "www.poshmark.ca"} else "US"
+        result = await _check_removal(SimpleNamespace(id=receipt["check_job"]), name,
+                                      {"listing_id": receipt["listing_id"], "seller_region": region}, bool(receipt.get("cloud")))
+        await in_worker_session(_finish_removal_read, conv_id, name, receipt, result)
 
 
 async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expected: dict[str, str] | None = None,
@@ -520,7 +683,7 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
                 break
             entry = known[name]
             base = {"listing_id": entry["listing_id"], "url": entry["url"], "at": _now(),
-                    "attempts": _attempt(entry)}
+                    "attempts": _attempt(entry), "check_job": job_id, "cloud": name in cloud_names}
             try:
                 if sale_id is None:
                     ebay_record = await in_worker_session(
@@ -572,17 +735,21 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
                     } if already else base)
                 else:
                     failed = True
+                    if result.get("error_code") not in {"network", "uncertain"}:
+                        base.pop("check_job", None)
                     await in_worker_session(_record, conv_id, name, {
                         **base, "state": "failed", "at": _now(),
                         "error": str(result.get("error") or "The marketplace did not confirm the delete.")[:300],
                         "error_code": scrub(result.get("error_code")),
-                        "marketplace_message": scrub(result.get("marketplace_message"))})
+                        "marketplace_message": scrub(result.get("marketplace_message"))}, job_id)
             except Exception as exc:  # noqa: BLE001 - recorded per marketplace for the seller
+                if not isinstance(exc, (browser_bridge.BrowserBridgeError, TimeoutError, httpx.TransportError)):
+                    base.pop("check_job", None)
                 failed = True
                 await in_worker_session(_record, conv_id, name, {
                     **base, "state": "failed", "at": _now(), "error": _failure_text(name, exc)[:300],
                     "error_code": "chrome_unavailable" if isinstance(exc, browser_bridge.BrowserBridgeError) else None,
-                    "marketplace_message": _marketplace_message(name, exc)})
+                    "marketplace_message": _marketplace_message(name, exc)}, job_id)
         await in_worker_session(lambda db: JobRepo(db).update_status(
             job_id, "failed" if failed else "completed", "native_delist",
             error=DELIST_INCOMPLETE if failed else None,
@@ -746,10 +913,20 @@ def _record_delete(db: Session, conv_id: str, name: str, value: dict, *, commit:
     if isinstance(mark, dict) and mark.get("state") == "listed" and listing_id(name, mark.get("url")) != value.get("listing_id"):
         updates["marketplaceMarks"] = {key: entry for key, entry in marks.items() if key != name}
     conv.notes = merge_notes(conv.notes, updates)
+    row = MarketplaceListingRepo(db).row(conv_id, name)
+    pending = value.get("check_job") and value.get("state") in {"deleting", "failed"}
+    if pending and row is None:
+        row = MarketplaceListing(conversation_id=conv_id, marketplace=name)
+        db.add(row)
+    if row is not None:
+        row.removal_check_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=15) if pending else None
     if commit:
         db.commit()
 
 
 def _deleted(db: Session, conv_id: str, name: str, base: dict) -> None:
-    _record_delete(db, conv_id, name, {**base, "state": "deleted", "error": None, "at": _now()})
+    if base.get("check_job") and not _owns_removal(db, conv_id, name, base["check_job"], base["listing_id"]):
+        return
+    _record_delete(db, conv_id, name, {**base, "state": "deleted", "error": None, "at": _now()}, commit=False)
     _forget_deleted_listing(db, conv_id, name, base.get("listing_id"))
+    db.commit()
