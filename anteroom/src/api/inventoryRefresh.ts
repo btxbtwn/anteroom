@@ -27,6 +27,15 @@ export const INVENTORY_REFRESH_MS = 5000;
 
 const schedules = new WeakMap<QueryClient, { readAt: number; timer?: ReturnType<typeof setTimeout> }>();
 
+/**
+ * Re-reads the inventory list immediately, waiting for any read already in
+ * flight (including the initial load, which React Query will not cancel before
+ * data exists) so a just-created or just-discarded listing is not missed.
+ */
+export function refreshInventoryNow(queryClient: QueryClient): Promise<void> {
+  return refreshMatching(queryClient, (queryKey) => queryKey[0] === INVENTORY_KEY);
+}
+
 /** Re-reads the inventory list now, or once the interval since the last read has passed. */
 export function refreshInventory(queryClient: QueryClient): void {
   let schedule = schedules.get(queryClient);
@@ -38,7 +47,7 @@ export function refreshInventory(queryClient: QueryClient): void {
   const read = () => {
     schedule.timer = undefined;
     schedule.readAt = Date.now();
-    void refreshMatching(queryClient, (queryKey) => queryKey[0] === INVENTORY_KEY).catch(() => {});
+    void refreshInventoryNow(queryClient).catch(() => {});
   };
   const wait = schedule.readAt + INVENTORY_REFRESH_MS - Date.now();
   if (wait <= 0) read();

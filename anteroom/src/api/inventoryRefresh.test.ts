@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
-import { INVENTORY_REFRESH_MS, refreshInventory } from "./inventoryRefresh";
+import { INVENTORY_REFRESH_MS, refreshInventory, refreshInventoryNow } from "./inventoryRefresh";
 import { refreshListingQueries } from "../components/chat/liveChatStore";
 
 afterEach(() => { vi.useRealTimers(); });
@@ -59,6 +59,30 @@ it("coalesces inventory reloads when 25 drafts finish close together", async () 
   expect(read).toHaveBeenCalledTimes(2);
   await vi.advanceTimersByTimeAsync(INVENTORY_REFRESH_MS);
   expect(read).toHaveBeenCalledTimes(3);
+  stop();
+  client.clear();
+});
+
+it("re-reads after a stale initial inventory fetch finishes instead of dropping a new listing", async () => {
+  const client = new QueryClient();
+  let releaseInitial!: (rows: { id: string }[]) => void;
+  const initialRead = new Promise<{ id: string }[]>((resolve) => { releaseInitial = resolve; });
+  const read = vi.fn()
+    .mockImplementationOnce(() => initialRead)
+    .mockResolvedValueOnce([{ id: "existing" }, { id: "fresh" }]);
+  const observer = new QueryObserver(client, { queryKey: ["conversations"], queryFn: read, staleTime: Infinity });
+  const stop = observer.subscribe(() => {});
+
+  expect(read).toHaveBeenCalledTimes(1);
+  expect(client.getQueryData(["conversations"])).toBeUndefined();
+
+  // Triggered while the first load has no data yet; plain invalidateQueries would reuse initialRead.
+  const refreshed = refreshInventoryNow(client);
+  releaseInitial([{ id: "existing" }]);
+  await refreshed;
+
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(client.getQueryData(["conversations"])).toEqual([{ id: "existing" }, { id: "fresh" }]);
   stop();
   client.clear();
 });
