@@ -18,5 +18,7 @@ class DraftFields(BaseModel):
     zipCode: str = Field(default='', max_length=200)
     category_path: str = Field(default='', max_length=1000)
     department: str = Field(default='', max_length=200)
+    # The package weight is whole pounds plus ounces, as eBay and Mercari ask for it (#2304).
+    weight_lb: float | None = Field(default=None, ge=0, le=1000000)
     weight_oz: float | None = Field(default=None, ge=0, le=1000000)
     package_dimensions_in: str = Field(default='', max_length=200)

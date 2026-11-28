@@ -208,6 +208,7 @@ private struct RevisionPreviewView: View {
         ("zipCode", "Inventory location"),
         ("category_path", "Category *"),
         ("department", "Department"),
+        ("weight_lb", "Package Weight (lb)"),
         ("weight_oz", "Package Weight (oz)"),
         ("package_dimensions_in", "Package Dimensions (LxWxH in)")
     ]
