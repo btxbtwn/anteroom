@@ -14,12 +14,18 @@ const CATCH_UP_MS = 180;
 const MIN_CHARS_PER_SECOND = 60;
 /** The least time between two steps: 25 a second, each one a markdown render. */
 const STEP_MS = 40;
+/** Longest slow visible-frame gap treated as one pacing step, so slow paints never dump a whole chunk. */
+const MAX_STEP_MS = 60;
+/** A gap at least this long means the tab was away, so reveal what arrived while hidden. */
+const BACKGROUND_GAP_MS = 1000;
 
 /** How many characters to show after `elapsedMs`, given `shown` of `total` so far. */
 export function revealStep(shown: number, total: number, elapsedMs: number): number {
   if (shown >= total) return total;
-  const charsPerMs = Math.max(MIN_CHARS_PER_SECOND / 1000, (total - shown) / CATCH_UP_MS);
-  return Math.min(total, shown + Math.max(1, Math.round(charsPerMs * elapsedMs)));
+  const elapsed = Math.max(0, elapsedMs);
+  const catchUp = (total - shown) * (1 - Math.exp(-elapsed / CATCH_UP_MS));
+  const floor = (MIN_CHARS_PER_SECOND / 1000) * elapsed;
+  return Math.min(total, shown + Math.max(1, Math.round(Math.max(floor, catchUp))));
 }
 
 function reducedMotion(): boolean {
@@ -56,8 +62,10 @@ export function useSmoothText(text: string): string {
         return;
       }
       lastStepAt.current = now;
-      // A tab left in the background comes back with a long gap, and so with everything.
-      setShown((current) => revealStep(current, total, elapsed));
+      // A slow visible frame still paces the chunk instead of dumping it at once;
+      // a tab left in the background comes back with a long gap, and so with everything.
+      const stepMs = elapsed < BACKGROUND_GAP_MS ? Math.min(elapsed, MAX_STEP_MS) : elapsed;
+      setShown((current) => revealStep(current, total, stepMs));
     });
     return () => cancelAnimationFrame(frame);
   }, [shown, total]);

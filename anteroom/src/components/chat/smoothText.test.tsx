@@ -36,6 +36,11 @@ describe("revealStep", () => {
   it("falls back to the text's length when the text got shorter", () => {
     expect(revealStep(50, 20, 32)).toBe(20);
   });
+
+  it("does not dump an entire large chunk on a single slow frame", () => {
+    expect(revealStep(0, 300, 180)).toBeLessThan(300);
+    expect(revealStep(0, 300, 250)).toBeLessThan(300);
+  });
 });
 
 describe("useSmoothText", () => {
@@ -137,5 +142,47 @@ describe("useSmoothText", () => {
     render("A long first answer that is replaced.");
     render("New");
     expect(host.textContent).toBe("New");
+  });
+
+  it("paces a first large chunk across slow visible frames without dumping it at once", () => {
+    let now = 0;
+    const queued: FrameRequestCallback[] = [];
+    vi.stubGlobal("performance", { now: () => now });
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      queued.push(cb);
+      return queued.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {
+      queued.length = 0;
+    });
+    const runFrame = (deltaMs: number) => {
+      now += deltaMs;
+      const callbacks = queued.splice(0);
+      act(() => {
+        for (const cb of callbacks) cb(now);
+      });
+    };
+
+    render("");
+    const chunk = "Each chunk carries several sentences. ".repeat(8);
+    render(chunk);
+    expect(host.textContent).toBe("");
+
+    // Three slow 150ms frames: each should advance incrementally, never dumping the whole chunk.
+    const steps: number[] = [];
+    for (let frame = 0; frame < 3; frame++) {
+      runFrame(150);
+      steps.push((host.textContent ?? "").length);
+    }
+    expect(steps[0]).toBeGreaterThan(0);
+    expect(steps[0]).toBeLessThan(chunk.length * 0.4);
+    expect(steps[1]).toBeGreaterThan(steps[0]);
+    expect(steps[2]).toBeGreaterThan(steps[1]);
+    expect(steps[2]).toBeLessThan(chunk.length);
+    expect(chunk.startsWith(host.textContent ?? "")).toBe(true);
+
+    // A backgrounded tab returning after a long gap catches up at once.
+    runFrame(5000);
+    expect(host.textContent).toBe(chunk);
   });
 });

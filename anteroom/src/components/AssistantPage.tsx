@@ -1042,7 +1042,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
                   tailLabel={visible ? "" : liveTail}
                 />
               ) : null}
-              {visible ? <StreamingAssistantRow received={live.parts.content} complete={live.ended} /> : null}
+              {drawn.answer ? <StreamingAssistantRow received={live.parts.content} complete={live.ended} /> : null}
             </>
           ) : null}
           <QueuedMessages

@@ -20,12 +20,15 @@ recorded with a "Deployed commit" notice. Without one, only the nearest merge
 is checked. It exits 1 if a check fails, is cancelled, never appears or does
 not finish in time.
 
-When recorded and live production are still on 23f8ab01 (0.1.1211), the
-push CI failures caused by split Alembic history (fixed in #2045, #2059 and
-#2065) may be superseded only after all other commits in the span pass push CI
-and an exact Descendant verification receipt
-is live-verified against GitHub and local Git. Once Deploy hosted succeeds
-and records a newer Deployed commit, the checkpoint never matches again.
+When recorded and live production are still on 2334fe2f (0.1.1286), the
+push CI failure on #2257 (cc22db3f, phone-webkit e2e/chatStreaming.e2e.ts;
+fixed in #2291 / 9c5df2f6) may be superseded only after all other commits in
+the span pass push CI and the exact schema-2 Descendant verification receipt
+for be0144a0 (run 46093755351, attempt 1, artifact 15243004283) proving the
+unchanged phone-webkit chatStreaming test passed is live-verified against
+GitHub and local Git. Once Deploy hosted succeeds and records a newer Deployed
+commit, this checkpoint never matches again and ordinary gating applies
+unchanged.
 """
 
 from __future__ import annotations
@@ -78,44 +81,38 @@ PRE_RENAME_PREFIXES = (
     ("vendoo-ios/", "anteroom-ios/"),
 )
 
-# The checkpoint must follow all three migration repairs on main.
+# Push CI 46036588227 on #2257 failed Studio browser tests (sandbox) on
+# phone-webkit e2e/chatStreaming.e2e.ts:158. #2291 (9c5df2f6) fixed WebKit
+# streaming pacing without changing the test assertion.
 HISTORICAL_RECOVERY_FAILURES = frozenset({
-    # e3b7a1c9d402 / e4b7c2a9d6f1, joined by #2045 (afc3c2db).
-    "99c3b7003d1d79cfc20cea283bebde7e54572081",  # CI 45390465842
-    "08b97e99edaa02f021bc7bcf876d2fd2ade83c69",  # CI 45391561313
-    "fb7d5c076cce6021b48240014ba6fb0e71256300",  # CI 45394131194
-    # e3a7c91d5b20 / f2a8d5c3e917, joined by #2059 (f9319bf9).
-    "1e3756a043eb56aed73ff72b9401da5076533f64",  # CI 45410255121
-    "7d9b51611d4923565d817e172170bb70d7d05f8b",  # CI 45411548213
-    "55c4ceaf7b767cd9094881f2730013a62d33e29c",  # CI 45413851357
-    "8e9a08803af54e159495ed80f3ca0c2735fde36e",  # CI 45414095450
-    "8265f86e3639860a9560088b7d50fe212a186cc4",  # CI 45415988182
-    # b0731d829c7b / e4b8c2f17a93, joined by #2065 (684c73b7).
-    "ab40d2ef7120f16747246c6ee20aa52a32fd92ba",  # CI 45422373463
+    "cc22db3fae820d52c3e1b61af209e19221fa9502",  # CI 46036588227
 })
-HISTORICAL_RECOVERY_CORRECTION = "684c73b7618390a92555666589d7b0c8f6efec8b"
+HISTORICAL_RECOVERY_CORRECTION = "9c5df2f6d655f46313ba7218036deca1a75bf0c4"
 
-# The receipt records the first repaired pair. The deploy gate also requires
-# the verified target to include the last migration repair.
+# Single-base schema-2 recovery checkpoint for historical cc22db3f (fixed in
+# #2291). Inert once Deploy hosted records a commit after 2334fe2f (or after
+# artifact 15243004283 expires ~30 days from 2026-11-28); remove this pin in a
+# cleanup PR once production is verified past 2334fe2f.
 HISTORICAL_RECOVERY_CHECKPOINT: recovery_evidence.EvidencePin | None = recovery_evidence.EvidencePin(
     repository="btxbtwn/anteroom",
     repository_id=1183824317,
     workflow_id=422931456,
-    target="7d6331d23315e32edbc5f575d74bbf2b8f48c938",
-    tree="6ef80b0b7f5ab8847a0613635bb5a3d130c1816b",
-    production_base="23f8ab0110c1ef359949462996c321acdbc92c49",
-    historical_failure="99c3b7003d1d79cfc20cea283bebde7e54572081",
-    correcting_merge="afc3c2dbde647b59203c0b761c8c0dfb2b697264",
-    workflow_blob="a0a097906554252a26f35c957169ec6d0e3c93db",
-    ci_blob="7509b686e52d63b8751bd2fbd416c3a0fb5e2c49",
-    run_id=45456408146,
+    target="be0144a0f218d359c73ed33281f7ff9e5ef32a70",
+    tree="513a02d462217033f72b262b9df47263b8cf549b",
+    production_base="2334fe2f33b97ff6a9ec8aba6e256d71c86743c9",
+    historical_failure="cc22db3fae820d52c3e1b61af209e19221fa9502",
+    correcting_merge="9c5df2f6d655f46313ba7218036deca1a75bf0c4",
+    workflow_blob="cc4a53b95a23bc4f02e3e1cb1c50ea672679ae94",
+    ci_blob="be450a74d6fdeb4d309b1156337e0d10397c4406",
+    run_id=46093755351,
     attempt=1,
-    receipt_artifact_id=14951178773,
-    receipt_digest="sha256:b24dcf6ad427cb6e9fe60a0ac4bea7b790b018e0e8cd794d524df81da83dfeea",
+    receipt_artifact_id=15243004283,
+    receipt_digest="sha256:2a98eb5e6a9efd67a9c1ca20a5925b134c84390f0bce1415109d4d19762a095d",
+    browser_regression_blob="0f040c3572c8c5a9c1e024c70be72dc11fcbc5f9",
 )
 HISTORICAL_BASE_FLY_APP = "peaceful-meadowstone-6944"
-HISTORICAL_BASE_IMAGE_DIGEST = "sha256:22df137ee877807504d7223d6aff53e8cee6777cf2ddfd70838a14a822641591"
-HISTORICAL_BASE_DB_REVISION = "e3b7a1c9d402"
+HISTORICAL_BASE_IMAGE_DIGEST = "sha256:169925b25de2919256f7bb23e7dec2495b727daecb6b60417929cb69de4d241c"
+HISTORICAL_BASE_DB_REVISION = "f1b4c8d2e930"
 HISTORICAL_BASE_FLY_GROUPS = ("app", "worker")
 ALEMBIC_CURRENT_RE = re.compile(r"([0-9a-f]{12})(?: \(head\))?")
 FLY_APP_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
@@ -268,6 +265,13 @@ def checkpoint_eligible(
         return False, "Recorded production commit does not match the pinned recovery base."
     if failed_sha not in HISTORICAL_RECOVERY_FAILURES:
         return False, f"Commit {failed_sha[:8]} is outside the diagnosed historical failures."
+    if (
+        pin.historical_failure != verification_evidence.HISTORICAL
+        or pin.correcting_merge != verification_evidence.CORRECTED
+    ):
+        return False, "Recovery checkpoint pair does not match the active historical failure and correcting merge."
+    if pin.browser_regression_blob != verification_evidence.BROWSER_REGRESSION_BLOB:
+        return False, "Recovery checkpoint must bind the unchanged sandbox browser regression test blob."
     run_git = git_fn or _read_git
     resolved_head = run_git("rev-parse", head)
     main_line = run_git("rev-list", "--first-parent", "origin/main").splitlines()
@@ -338,6 +342,7 @@ def verify_historical_checkpoint(
         )
 
     report = recovery_evidence.verify(pin, fetch or default_fetch, download or default_download, run_git)
+    browser_reg = report.get("browser_inventory", {}).get("regression", {})
     if (
         report.get("target") != pin.target
         or report.get("production_base") != pin.production_base
@@ -345,6 +350,13 @@ def verify_historical_checkpoint(
         or report.get("attempt") != pin.attempt
         or report.get("receipt_artifact_id") != pin.receipt_artifact_id
         or report.get("receipt_digest") != pin.receipt_digest
+        or browser_reg.get("passed") is not True
+        or type(browser_reg.get("attempts")) is not int
+        or browser_reg.get("attempts") != 1
+        or browser_reg.get("project") != verification_evidence.BROWSER_REGRESSION_PROJECT
+        or browser_reg.get("file") != verification_evidence.BROWSER_REGRESSION_FILE
+        or browser_reg.get("file_blob") != verification_evidence.BROWSER_REGRESSION_BLOB
+        or browser_reg.get("key_sha256") != verification_evidence.digest(verification_evidence.BROWSER_REGRESSION_KEY)
     ):
         raise ValueError("Verified receipt report did not match the pinned checkpoint.")
     return {**report, "live_base_version": live_version}

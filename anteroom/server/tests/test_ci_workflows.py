@@ -462,3 +462,28 @@ def test_deploy_to_fly_retries_transient_errors() -> None:
     assert "for attempt in 1 2 3" in deploy_step["run"]
     assert "flyctl deploy . --config deploy/fly/fly.toml --ha=false --image" in deploy_step["run"]
 
+
+def test_ci_artifact_upload_steps_have_bounded_timeouts() -> None:
+    """Hung artifact uploads must fail promptly instead of stalling for GitHub's 6-hour limit (#2342)."""
+    jobs = workflow("ci.yml")["jobs"]
+    upload_steps = [
+        (job_name, step)
+        for job_name, job in jobs.items()
+        for step in job.get("steps", [])
+        if str(step.get("uses", "")).split("@", 1)[0] == "actions/upload-artifact"
+    ]
+    assert upload_steps, "expected actions/upload-artifact steps in ci.yml"
+    continue_on_error_steps: list[tuple[str, str]] = []
+    for job_name, step in upload_steps:
+        label = f"{job_name} / {step.get('name', step.get('uses'))}"
+        raw_timeout = step.get("timeout-minutes")
+        assert isinstance(raw_timeout, str) and raw_timeout.isascii() and raw_timeout.isdigit(), (
+            f"{label} must set an integer timeout-minutes (got {raw_timeout!r})"
+        )
+        timeout = int(raw_timeout)
+        assert 1 <= timeout <= 15, f"{label} timeout-minutes must be between 1 and 15 (got {timeout})"
+        if "continue-on-error" in step and str(step["continue-on-error"]).lower() != "false":
+            continue_on_error_steps.append((job_name, str(step.get("name", ""))))
+    assert continue_on_error_steps == [
+        ("studio-browser", "Upload verified sandbox browser profile"),
+    ]

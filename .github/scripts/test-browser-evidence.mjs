@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import BrowserEvidenceReporter from "./browser-evidence-reporter.mjs";
-import { verifyCollections } from "./verify-browser-evidence.mjs";
+import {
+  BROWSER_REGRESSION,
+  buildVerificationInventory,
+  verifyCollections,
+} from "./verify-browser-evidence.mjs";
 
 const full = ["desktop", "phone", "phone-webkit"].map((project, index) => ({
   id: String(index).repeat(64), file: "a".repeat(64), project, expected: "passed", attempts: [],
@@ -59,8 +64,12 @@ test("reporter includes only hashes and approved attempt metadata", (t) => {
   const reporter = new BrowserEvidenceReporter();
   const sentinel = "private-value-sentinel";
   reporter.onBegin({ rootDir: directory }, { allTests: () => [{
-    id: sentinel, parent: { project: () => ({ name: "phone" }) },
-    location: { file: join(directory, sentinel) }, expectedStatus: "passed",
+    id: sentinel,
+    title: sentinel,
+    titlePath: () => ["", "phone", sentinel, sentinel],
+    parent: { project: () => ({ name: "phone" }) },
+    location: { file: join(directory, sentinel) },
+    expectedStatus: "passed",
     results: [{ ...attempt("passed"), error: sentinel, stdout: [sentinel] }],
   }] });
   const key = join(directory, "identity-key");
@@ -72,15 +81,93 @@ test("reporter includes only hashes and approved attempt metadata", (t) => {
   reporter.onEnd({ status: "passed" });
   const evidence = readFileSync(output, "utf8");
   assert.ok(!evidence.includes(sentinel));
-  const first = JSON.parse(evidence)[0];
-  assert.deepEqual(first.attempts, [attempt("passed")]);
+  const recorded = JSON.parse(evidence)[0];
+  assert.deepEqual(recorded.attempts, [attempt("passed")]);
+  assert.match(recorded.spec, /^[0-9a-f]{64}$/);
   for (const byte of [1, 2]) {
     writeFileSync(key, Buffer.alloc(32, byte));
     const nextOutput = join(directory, `probe-${byte}.json`);
     process.env.SANDBOX_BROWSER_EVIDENCE_FILE = nextOutput;
     reporter.onEnd({ status: "passed" });
     const next = JSON.parse(readFileSync(nextOutput))[0];
-    assert.equal(next.id === first.id, byte === 1);
-    assert.equal(next.file === first.file, byte === 1);
+    assert.equal(next.id === recorded.id, byte === 1);
+    assert.equal(next.file === recorded.file, byte === 1);
+    assert.equal(next.spec === recorded.spec, byte === 1);
   }
+});
+
+test("verification inventory proves phone-webkit chatStreaming regression passed and fails closed on skip/mismatch", () => {
+  const key = Buffer.alloc(32, 7);
+  const hash = (kind, value) => createHmac("sha256", key).update(kind + "\0" + value).digest("hex");
+  const makeCase = (project, relFile, title, idSeed) => ({
+    id: hash("case", idSeed),
+    project,
+    file: hash("file", relFile),
+    spec: hash("spec", `${project}\0${relFile}\0${title}`),
+    expected: "passed",
+    attempts: [],
+  });
+  const baseFull = [
+    makeCase("desktop", "chatStreaming.e2e.ts", BROWSER_REGRESSION.title, "d-1"),
+    makeCase("phone", "chatStreaming.e2e.ts", BROWSER_REGRESSION.title, "p-1"),
+    makeCase("phone-webkit", BROWSER_REGRESSION.relativeFile, BROWSER_REGRESSION.title, "pw-1"),
+  ];
+  const baseFirst = [
+    { ...baseFull[0], attempts: [attempt("passed")] },
+    { ...baseFull[1], expected: "skipped", attempts: [attempt("skipped")] },
+  ];
+  const baseSecond = [
+    { ...baseFull[2], attempts: [attempt("passed")] },
+  ];
+  const meta = {
+    key,
+    target: "a".repeat(40),
+    tree: "b".repeat(40),
+    ciBlob: "c".repeat(40),
+    runId: "42",
+    attempt: "1",
+    regressionFileBlob: "0f040c3572c8c5a9c1e024c70be72dc11fcbc5f9",
+  };
+
+  const payload = buildVerificationInventory(baseFull, baseFirst, baseSecond, meta);
+  assert.equal(payload.schema, 1);
+  assert.equal(payload.regression_case_id, baseFull[2].id);
+  assert.equal(payload.regression_file, BROWSER_REGRESSION.repoFile);
+  assert.equal(payload.cases.length, 3);
+  assert.ok(!JSON.stringify(payload).includes(BROWSER_REGRESSION.title));
+
+  // Retried pass (failed attempt 0 then passed retry 1) must fail closed.
+  assert.throws(() => buildVerificationInventory(
+    baseFull,
+    baseFirst,
+    [{ ...baseFull[2], attempts: [attempt("failed"), attempt("passed", 1)] }],
+    meta,
+  ), /first attempt/);
+
+  // Skipped regression case must be rejected even when full collection passed.
+  assert.throws(() => buildVerificationInventory(
+    baseFull,
+    baseFirst,
+    [{ ...baseFull[2], expected: "skipped", attempts: [attempt("skipped")] }],
+    meta,
+  ), /first attempt/);
+
+  // Missing regression case (e.g., different title on phone-webkit) must be rejected.
+  const wrongTitle = makeCase("phone-webkit", BROWSER_REGRESSION.relativeFile, "other test", "pw-1");
+  assert.throws(() => buildVerificationInventory(
+    [baseFull[0], baseFull[1], wrongTitle],
+    baseFirst,
+    [{ ...wrongTitle, attempts: [attempt("passed")] }],
+    meta,
+  ));
+
+  // Missing spec hash or tampered provenance must be rejected.
+  assert.throws(() => buildVerificationInventory(
+    baseFull.map(({ spec: _s, ...rest }) => rest),
+    baseFirst.map(({ spec: _s, ...rest }) => rest),
+    baseSecond.map(({ spec: _s, ...rest }) => rest),
+    meta,
+  ));
+  assert.throws(() => buildVerificationInventory(baseFull, baseFirst, baseSecond, { ...meta, key: Buffer.alloc(16, 1) }));
+  assert.throws(() => buildVerificationInventory(baseFull, baseFirst, baseSecond, { ...meta, regressionFileBlob: "short" }));
 });
