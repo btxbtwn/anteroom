@@ -884,6 +884,73 @@ final class CoreFlowSandboxTests: XCTestCase {
     }
 }
 
+/// The camera stays open between shots. On the sandbox the simulator has no
+/// camera, so Debug builds stand in a generated photo for each shot.
+@MainActor
+final class CameraSandboxTests: XCTestCase {
+    func testCameraKeepsShootingAndAddsTheKeptShotsInOrder() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        launchSandbox(app)
+        openNewListing(app)
+        open(app.buttons["Take listing photos"].firstMatch, until: app.buttons["camera-shutter"])
+        shoot(3, app: app)
+        keep(app, "Camera tray with three shots")
+        app.buttons["Discard photo 2"].tap()
+        XCTAssertTrue(app.staticTexts["2 photos"].waitForExistence(timeout: 5), "Discarding a shot updates the count")
+        let done = app.buttons["camera-done"]
+        XCTAssertEqual(done.label, "Add 2 photos")
+        done.tap()
+        // Both kept shots upload to the draft.
+        XCTAssertTrue(app.staticTexts["2 of 20 photos"].waitForExistence(timeout: 30), "Done adds every kept shot")
+        keep(app, "Listing photos after the camera")
+    }
+
+    func testBulkListingTakesPhotosAndOpensFiles() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        launchSandbox(app)
+        open(app.buttons["Bulk listing"].firstMatch, until: app.buttons["bulk-camera"])
+        XCTAssertTrue(app.buttons["bulk-choose-files"].exists, "Bulk listing offers Files")
+        keep(app, "Bulk listing photo sources")
+        open(app.buttons["bulk-camera"], until: app.buttons["camera-shutter"])
+        shoot(2, app: app)
+        app.buttons["camera-done"].tap()
+        XCTAssertTrue(app.staticTexts["0 items · 2 photos to group"].waitForExistence(timeout: 15),
+                      "Camera shots join the photos to group")
+        keep(app, "Bulk listing after the camera")
+    }
+
+    /// A tap on a busy simulator can be dropped; tap until the next screen shows.
+    private func open(_ button: XCUIElement, until shown: XCUIElement) {
+        XCTAssertTrue(button.waitForExistence(timeout: 30))
+        for _ in 0..<3 where !shown.exists {
+            if button.exists && button.isHittable { button.tap() }
+            _ = shown.waitForExistence(timeout: 20)
+        }
+        XCTAssertTrue(shown.exists, "\(button.label) opens")
+    }
+
+    private func shoot(_ count: Int, app: XCUIApplication) {
+        let shutter = app.buttons["camera-shutter"]
+        XCTAssertTrue(shutter.waitForExistence(timeout: 10))
+        for number in 1...count {
+            shutter.tap()
+            let label = number == 1 ? "1 photo" : "\(number) photos"
+            XCTAssertTrue(app.staticTexts[label].waitForExistence(timeout: 10), "The camera stays open after shot \(number)")
+        }
+    }
+
+    private func keep(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}
+
 /// Opening history (like the assistant and marketplaces) with unsaved edits
 /// saves them first instead of asking the seller to.
 @MainActor
