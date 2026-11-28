@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createListing, expect, openListing, test } from "./fixtures";
+import { createListing, expect, openListing, showStatusTab, test } from "./fixtures";
 
 test("bulk sizes are read from tags, checked by the seller and saved with their own drafts", async ({ page, phone, request }, info) => {
   test.setTimeout(90_000);
@@ -64,6 +64,70 @@ test("bulk sizes are read from tags, checked by the seller and saved with their 
     }
   } finally {
     for (const draftID of [id, ...created]) await request.delete(`/api/conversations/${draftID}`);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("bulk upload and regenerate review dialogs trap focus and close on Escape", async ({ page, phone, request }, info) => {
+  test.setTimeout(90_000);
+  const title = `Bulk dialog ${info.project.name} ${Date.now()}`;
+  const id = await createListing(request, title);
+  const directory = await mkdtemp(join(tmpdir(), "bulk-dialog-"));
+  const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC", "base64");
+  try {
+    await mkdir(join(directory, "Jacket"));
+    await writeFile(join(directory, "Jacket", "front.png"), pixel);
+
+    await openListing(page, phone, title);
+    if (phone) await page.getByRole("tab", { name: "Listing" }).click();
+    await page.locator("input[webkitdirectory]").setInputFiles(directory);
+
+    const bulkDialog = page.getByRole("dialog", { name: "Set details for 1 listings" });
+    await expect(bulkDialog).toBeVisible();
+    await expect(bulkDialog.getByLabel("Cost of goods", { exact: true })).toBeVisible();
+    await expect(bulkDialog).not.toContainText("Cost of goods (COG)");
+
+    // Tabbing forward and backward keeps focus trapped inside BulkUploadDialog.
+    for (let step = 0; step < 16; step += 1) {
+      await page.keyboard.press("Tab");
+      await expect.poll(() => bulkDialog.evaluate((el) => el.contains(document.activeElement))).toBe(true);
+    }
+    await page.keyboard.press("Shift+Tab");
+    await expect.poll(() => bulkDialog.evaluate((el) => el.contains(document.activeElement))).toBe(true);
+
+    // Pressing Escape closes BulkUploadDialog.
+    await page.keyboard.press("Escape");
+    await expect(bulkDialog).toBeHidden();
+
+    // Now open RegenerateReviewDialog via Select listings → More → Regenerate….
+    if (phone) {
+      await page.goto("/");
+      await page.getByRole("button", { name: "Open navigation" }).click();
+      await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
+    }
+    await showStatusTab(page, "Draft");
+    await page.getByRole("searchbox", { name: /^Search listings/ }).fill(title);
+    await page.getByRole("button", { name: "Select listings", exact: true }).click();
+    await page.getByRole("list", { name: "Listings" }).getByRole("checkbox", { name: `Select ${title}`, exact: true }).click();
+    const bar = page.getByRole("region", { name: "Bulk listing actions" });
+    await bar.getByRole("button", { name: "More", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Regenerate…", exact: true }).click();
+
+    const regenDialog = page.getByRole("dialog", { name: "Review 1 listing before rewriting" });
+    await expect(regenDialog).toBeVisible();
+    await expect(regenDialog.getByLabel("Cost of goods", { exact: true })).toBeVisible();
+    await expect(regenDialog).not.toContainText("Cost of goods (COG)");
+
+    for (let step = 0; step < 16; step += 1) {
+      await page.keyboard.press("Tab");
+      await expect.poll(() => regenDialog.evaluate((el) => el.contains(document.activeElement))).toBe(true);
+    }
+    await page.keyboard.press("Shift+Tab");
+    await expect.poll(() => regenDialog.evaluate((el) => el.contains(document.activeElement))).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(regenDialog).toBeHidden();
+  } finally {
+    await request.delete(`/api/conversations/${id}`);
     await rm(directory, { recursive: true, force: true });
   }
 });

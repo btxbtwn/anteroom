@@ -1,0 +1,1 @@
+- Bulk upload and regenerate review dialogs now trap keyboard focus, close with Escape (dismissing enlarged photos first), use shared buttons and inputs, and label the cost field **Cost of goods**.

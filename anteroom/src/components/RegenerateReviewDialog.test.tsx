@@ -12,6 +12,18 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({}),
 }));
 
+// Dialogs render into a portal, which static markup leaves empty.
+vi.mock("./ui/dialog", () => ({
+  Dialog: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogClose: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
+  DialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogPanel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogPopup: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
+}));
+
 const { ReviewPhotos } = await import("./RegenerateReviewDialog");
 const { PhotoZoom } = await import("./BulkUploadDialog");
 
