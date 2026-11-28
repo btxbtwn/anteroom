@@ -29,8 +29,10 @@ test("records an expense and exports profit and loss", async ({ page, phone }, i
   await page.getByRole("tab", { name: "Expenses", exact: true }).click();
   const row = expenses.getByText(description, { exact: true }).locator("xpath=../..");
   await row.getByRole("button", { name: "Edit", exact: true }).click();
-  page.once("dialog", (dialog) => dialog.accept());
   await expenses.getByRole("button", { name: "Delete expense" }).click();
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Delete expense" }).click();
   await expect(expenses.getByText(description, { exact: true })).toHaveCount(0);
 });
 

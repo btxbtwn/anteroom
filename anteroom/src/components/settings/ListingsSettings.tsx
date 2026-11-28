@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { SimilarItemsButton } from "../SimilarItemsButton";
+import { marketplaceName } from "../marketplaceNames";
 import { MarketplaceLogo } from "../MarketplaceLogo";
 import { EyeIcon, RotateCcwIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
@@ -291,8 +292,8 @@ function HiddenFieldsSection() {
             {always.map((item) => (
               <li key={`${item.marketplace}:${item.field}`} className="flex min-w-0 items-center gap-3 py-1.5 pr-1.5 pl-3">
                 <span className="min-w-0 flex-1 truncate text-sm text-foreground">{item.label || item.field}</span>
-                <span className="shrink-0 text-xs capitalize text-muted-foreground">
-                  {item.marketplace === "general" ? "General" : item.marketplace}
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {marketplaceName(item.marketplace)}
                 </span>
                 <Button
                   size="xs"

@@ -90,13 +90,6 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     targetId: "listing-mode",
     searchTerms: ["listing workflow", "experimental"],
   },
-  {
-    id: "hosted-marketplace-browser",
-    title: "Hosted marketplace browser",
-    section: "experimental",
-    targetId: "hosted-marketplace-browser",
-    searchTerms: ["cloud browser", "without an extension", "experimental"],
-  },
   {id:"listing-templates",title:"Saved templates",section:"listings",targetId:"listing-templates",searchTerms:["template","preset","reusable fields","saved defaults"]},
   {
     id: "preferred-name",

@@ -24,6 +24,7 @@ import { Input } from "../ui/input";
 import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
+import { showUndoToast } from "../ui/toastHelpers";
 import { SettingsNote, SettingsRow, SettingsSection, SettingsSelect } from "./SettingsLayout";
 
 const ROUNDING_OPTIONS: { value: PriceRounding; label: string }[] = [
@@ -225,7 +226,21 @@ export function ShippingPresetsSection() {
       id ? api.settings.updateShippingPreset(id, preset) : api.settings.createShippingPreset(preset),
     onSuccess: done,
   });
-  const remove = useMutation({ mutationFn: api.settings.deleteShippingPreset, onSuccess: done });
+  const remove = useMutation({
+    mutationFn: (preset: ShippingPreset) => api.settings.deleteShippingPreset(preset.id),
+    onSuccess: (payload, preset) => {
+      done(payload);
+      const { id: _id, ...restoreInput } = preset;
+      showUndoToast({
+        title: `Removed “${preset.name}”`,
+        onUndo: async () => {
+          const restored = await api.settings.createShippingPreset(restoreInput);
+          queryClient.setQueryData(["settings-shipping-presets"], restored);
+        },
+        undoErrorTitle: "Could not restore shipping preset",
+      });
+    },
+  });
   const busy = save.isPending || remove.isPending;
   const presets = data?.presets || [];
   return (
@@ -256,7 +271,7 @@ export function ShippingPresetsSection() {
             <Button size="icon-sm" variant="ghost-muted" aria-label={`Edit ${preset.name}`} disabled={busy || editing !== null}
               onClick={() => { save.reset(); setEditing(preset); }}><PencilIcon /></Button>
             <Button size="icon-sm" variant="ghost-muted" aria-label={`Delete ${preset.name}`} disabled={busy || editing !== null}
-              onClick={() => remove.mutate(preset.id)}><Trash2Icon /></Button>
+              onClick={() => remove.mutate(preset)}><Trash2Icon /></Button>
           </div>
         )))}
         {data && !presets.length && editing === null ? <SettingsNote>No shipping presets yet.</SettingsNote> : null}

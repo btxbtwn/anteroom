@@ -36,8 +36,8 @@ it.each([false, true])("opens Experimental with the saved Vendoo choice (hosted:
   );
   expect(html).toContain("Use Vendoo");
   expect(html).toContain('aria-checked="true"');
-  expect(html).toContain("Hosted marketplace browser");
-  expect(html).toContain("Coming soon");
+  expect(html).not.toContain("Hosted marketplace browser");
+  expect(html).not.toContain("Coming soon");
   expect(client.getQueryData(["settings-ui"])).toEqual({ listing_mode: "vendoo" });
 });
 

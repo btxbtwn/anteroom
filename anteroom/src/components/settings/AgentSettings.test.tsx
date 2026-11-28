@@ -101,9 +101,15 @@ beforeEach(() => {
 });
 
 describe("Agent settings", () => {
-  it("shows the command, addresses, remote MCP setup, and copy-ready client snippets", () => {
+  it("shows seller-first copy, permissions before endpoint, command, addresses, and client snippets", () => {
     const html = renderToStaticMarkup(<AgentSettings />);
-    expect(html).toContain("Remote MCP server");
+    expect(html).toContain("Let an AI app work in Anteroom");
+    expect(html).not.toContain("Remote MCP server");
+    expect(html).not.toContain("Streamable HTTP endpoint");
+    expect(html).not.toContain("HTTP client setup");
+    expect(html).toContain("App setup");
+    expect(html).toContain("Server address");
+    expect(html.indexOf("Access tokens")).toBeLessThan(html.indexOf("Server address"));
     expect(html).toContain("http://127.0.0.1:4318/api/mcp");
     expect(html).toContain("Claude");
     expect(html).toContain("ChatGPT");
@@ -204,7 +210,8 @@ describe("Agent settings", () => {
     const trigger = html.split('aria-label="New token Marketplaces access"')[1] ?? "";
     expect(trigger.slice(0, trigger.indexOf("</button>"))).toContain("No access");
     expect(html).not.toContain("Publish, update and delist</span>");
-    expect(html).toContain("Save drafts lets them save private marketplace drafts");
+    expect(html).toContain("saves private marketplace drafts");
+    expect(html).toContain("lists, sends saved edits to live listings and delists");
     expect(html).not.toContain("can never publish");
   });
 });

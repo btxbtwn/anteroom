@@ -51,6 +51,8 @@ test("a new MCP token cannot act on marketplaces until the seller chooses it", a
   if (phone) await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Agents" }).click();
+  await expect(page.getByRole("heading", { name: "Let an AI app work in Anteroom" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "App setup" })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "New token Marketplaces access" })).toHaveText(/No access/);
   const select = page.getByRole("combobox", { name: `${name} Marketplaces access` });
   await expect(select).toHaveText(/No access/);
@@ -63,5 +65,11 @@ test("a new MCP token cannot act on marketplaces until the seller chooses it", a
   const listed = await (await request.get("/api/settings/mcp-tokens")).json();
   const saved = listed.tokens.find((row: { id: string }) => row.id === token.id);
   expect(saved.permissions.marketplaces).toBe("publish");
-  await request.delete(`/api/settings/mcp-tokens/${token.id}`);
+
+  // Revoking a token requires confirmation via confirmDialog.
+  await page.getByRole("button", { name: `Revoke ${name}`, exact: true }).click();
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Revoke token", exact: true }).click();
+  await expect(page.getByRole("button", { name: `Revoke ${name}`, exact: true })).toHaveCount(0);
 });

@@ -5,7 +5,7 @@ test.beforeEach(async ({ page }) => {
   await page.route(/\/api\/updates(?:\/progress)?$/, route => route.fulfill({ json: { available: false, status: "idle" } }));
 });
 
-test("Experimental preserves saved settings and keeps hosted browsing unavailable", async ({ page, request, phone }, info) => {
+test("Experimental preserves saved settings and omits the disabled hosted browser placeholder", async ({ page, request, phone }, info) => {
   const original = await (await request.get("/api/settings/ui")).json();
   const writes: string[] = [];
   page.on("request", request => {
@@ -27,17 +27,14 @@ test("Experimental preserves saved settings and keeps hosted browsing unavailabl
       const vendoo = page.getByRole("switch", { name: "Use Vendoo" });
       await expect(vendoo).toBeEnabled();
       await expect(vendoo).toHaveAttribute("aria-checked", String(saved.listing_mode === "vendoo"));
-      const hosted = page.getByRole("switch", { name: "Hosted marketplace browser" });
-      await expect(hosted).toBeDisabled();
-      await expect(hosted).not.toBeChecked();
-      await expect(page.getByText("Coming soon", { exact: true })).toBeVisible();
+      await expect(page.getByRole("switch", { name: "Hosted marketplace browser" })).toHaveCount(0);
+      await expect(page.getByText("Coming soon", { exact: true })).toHaveCount(0);
       expect(await (await request.get("/api/settings/ui")).json()).toEqual(saved);
       await page.screenshot({ path: info.outputPath(`experimental-${theme}.png`) });
     }
     if (phone) await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("combobox", { name: "Search settings" }).fill("hosted marketplace browser");
-    await page.getByRole("option", { name: "Hosted marketplace browser Experimental" }).click();
-    await expect(page.locator("#hosted-marketplace-browser")).toBeFocused();
+    await expect(page.getByRole("option", { name: "Hosted marketplace browser Experimental" })).toHaveCount(0);
     expect(writes).toEqual([]);
   } finally {
     await page.goto("about:blank");

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { ASSISTANT_MEMORY_KEY, ASSISTANT_NAME_KEY, ASSISTANT_NOTE_KEY } from "../../api/assistant";
+import { confirmDialog } from "../../ui/confirmDialog";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
@@ -148,7 +149,13 @@ function MemorySection() {
               size="xs"
               variant="ghost-muted"
               disabled={forget.isPending}
-              onClick={() => forget.mutate(fact.id)}
+              onClick={async () => {
+                const confirmed = await confirmDialog(
+                  `Forget this memory?\nThe assistant will stop keeping “${fact.text}” in mind for future chats.`,
+                  { variant: "destructive", confirmLabel: "Remove" },
+                );
+                if (confirmed) forget.mutate(fact.id);
+              }}
             >
               Remove
             </Button>
