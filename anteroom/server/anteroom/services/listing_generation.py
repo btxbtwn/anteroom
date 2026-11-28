@@ -388,6 +388,8 @@ async def run_listing_generation(
                 conv_id,
                 listing,
                 evidence=evidence_text,
+                review_evidence="\n\n".join(part for part in (prompt_analysis, item_details) if part),
+                review_notes=notes_fingerprint(notes),
                 provider=provider,
                 repaired=needed_repair,
                 timing_id=timing_id,
@@ -483,6 +485,8 @@ async def _finish_generation_background(
     *,
     evidence: str,
     provider,
+    review_evidence: str = "",
+    review_notes: str = "",
     repaired: bool = False,
     timing_id: str | None = None,
     run_started: float | None = None,
@@ -518,11 +522,10 @@ async def _finish_generation_background(
         if fingerprint is None:
             return
         current = dict(listing) if isinstance(listing, dict) else {}
-        if expected_photo_fingerprint is None:
-            expected_photo_fingerprint = fingerprint
+        photos: str = fingerprint if expected_photo_fingerprint is None else expected_photo_fingerprint
 
         async def check_photos() -> None:
-            if await in_worker_session(_photos_fingerprint, conv_id) != expected_photo_fingerprint:
+            if await in_worker_session(_photos_fingerprint, conv_id) != photos:
                 raise RevisionConflict("Photos changed while preparing marketplace fields")
 
         await check_photos()
@@ -535,12 +538,12 @@ async def _finish_generation_background(
             fill_provider = await asyncio.to_thread(managed_task_provider, "field_edit") or provider
             async with live_trace.agent("native-fields", "Marketplace category fields") as agent, model_slots.slot():
                 filled = await fill_native_fields(conv_id, fill_provider, evidence=evidence,
-                                                  expected_photo_fingerprint=expected_photo_fingerprint)
+                                                  expected_photo_fingerprint=photos)
                 selected = await asyncio.to_thread(get_selected_marketplaces)
                 await check_photos()
                 if "etsy" in selected:
                     filled = await fill_etsy_attributes(conv_id, fill_provider, evidence=evidence,
-                                                          photos=expected_photo_fingerprint) or filled
+                                                          photos=photos) or filled
                 agent.result("Filled category fields" if filled else "No category fields to fill")
                 return filled
 
@@ -548,13 +551,18 @@ async def _finish_generation_background(
         native = await timed("native_fields", fill_native())
         if native is not None:
             current = native
+        from anteroom.services.jev_review import review_generation
+
+        reviewed = await review_generation(conv_id, review_evidence, photos, current, review_notes)
+        if reviewed is not None:
+            current = reviewed
         from anteroom.services.listing_generate import _validation_blockers
 
         outcome = "incomplete" if _validation_blockers(copy.deepcopy(current)) else "done"
         # Posted only now: said before the fill, it reported fields as empty
         # and "Send when ready" while chat was still filling them.
         await in_worker_session(
-            _finish_summary, conv_id, copy.deepcopy(current), repaired, expected_photo_fingerprint,
+            _finish_summary, conv_id, copy.deepcopy(current), repaired, photos,
         )
     except RevisionConflict:
         outcome = "superseded"

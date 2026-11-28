@@ -28,6 +28,9 @@ test("Experimental preserves saved settings and keeps hosted browsing unavailabl
       await expect(vendoo).toBeEnabled();
       await expect(vendoo).toHaveAttribute("aria-checked", String(saved.listing_mode === "vendoo"));
       const hosted = page.getByRole("switch", { name: "Hosted marketplace browser" });
+      const jev = page.getByRole("switch", { name: "Check draft fields with Jev" });
+      await expect(jev).toBeEnabled();
+      await expect(jev).toHaveAttribute("aria-checked", String(saved.jev_field_review));
       await expect(hosted).toBeDisabled();
       await expect(hosted).not.toBeChecked();
       await expect(page.getByText("Coming soon", { exact: true })).toBeVisible();
@@ -39,8 +42,14 @@ test("Experimental preserves saved settings and keeps hosted browsing unavailabl
     await page.getByRole("option", { name: "Hosted marketplace browser Experimental" }).click();
     await expect(page.locator("#hosted-marketplace-browser")).toBeFocused();
     expect(writes).toEqual([]);
+    const jev = page.getByRole("switch", { name: "Check draft fields with Jev" });
+    await jev.click();
+    await expect(jev).toHaveAttribute("aria-checked", String(!original.jev_field_review));
+    expect((await (await request.get("/api/settings/ui")).json()).jev_field_review).toBe(!original.jev_field_review);
   } finally {
     await page.goto("about:blank");
-    expect((await request.put("/api/settings/ui", { data: { theme: original.theme } })).ok()).toBe(true);
+    expect((await request.put("/api/settings/ui", {
+      data: { theme: original.theme, jev_field_review: original.jev_field_review },
+    })).ok()).toBe(true);
   }
 });

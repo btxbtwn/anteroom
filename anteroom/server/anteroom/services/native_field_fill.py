@@ -460,7 +460,7 @@ def _record_forms(db: Session, conv_id: str, revision_id: str, saved: dict, form
     return listing[native_contract.KEY]
 
 
-def _fill_inputs(db: Session, conv_id: str):
+def fill_inputs(db: Session, conv_id: str):
     """The photos' fingerprint and the current revision, or None when there is nothing to fill."""
     from anteroom.services.listing_generate import photo_fingerprint
 
@@ -482,7 +482,7 @@ async def _fill_native_fields(conv_id: str, provider, *, evidence: str,
 
     if provider is None:
         return None
-    inputs = await in_worker_session(_fill_inputs, conv_id)
+    inputs = await in_worker_session(fill_inputs, conv_id)
     if inputs is None:
         return None
     fingerprint, revision_id, listing = inputs
@@ -508,7 +508,7 @@ async def _fill_native_fields(conv_id: str, provider, *, evidence: str,
                 _record_forms, conv_id, revision_id, listing, loaded, loaded.keys())
             if not recorded:
                 return None
-            refreshed = await in_worker_session(_fill_inputs, conv_id)
+            refreshed = await in_worker_session(fill_inputs, conv_id)
             if refreshed is None or refreshed[0] != fingerprint:
                 return None
             fingerprint, revision_id, listing = refreshed
@@ -736,7 +736,7 @@ async def fill_etsy_attributes(conv_id: str, provider, *, evidence: str, photos:
 
     if provider is None:
         return None
-    inputs = await in_worker_session(_fill_inputs, conv_id)
+    inputs = await in_worker_session(fill_inputs, conv_id)
     if inputs is None:
         return None
     fingerprint, revision_id, listing = inputs

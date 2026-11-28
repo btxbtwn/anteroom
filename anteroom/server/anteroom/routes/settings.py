@@ -1079,6 +1079,7 @@ class UiPrefsConfig(BaseModel):
     stale_listing_days: int | None = None
     label_colors: dict[str, str] | None = None
     listing_mode: Literal["direct", "vendoo"] | None = None
+    jev_field_review: bool | None = None
 
 
 @router.get("/ui")
@@ -1108,6 +1109,7 @@ def put_ui_prefs(config: UiPrefsConfig, db: Session = Depends(get_db)):
             model_favorites=config.model_favorites,
             stale_listing_days=config.stale_listing_days,
             label_colors=config.label_colors,
+            jev_field_review=config.jev_field_review,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

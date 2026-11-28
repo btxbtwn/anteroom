@@ -8,9 +8,10 @@ export function ExperimentalSettings() {
   const client = useQueryClient();
   const prefs = useQuery(settingsUiQuery);
   const save = useMutation({
-    mutationFn: (enabled: boolean) => api.settings.setUi({ listing_mode: enabled ? "vendoo" : "direct" }),
-    onSuccess: result => {
+    mutationFn: api.settings.setUi,
+    onSuccess: (result, change) => {
       client.setQueryData(["settings-ui"], result);
+      if (!change.listing_mode) return;
       void client.invalidateQueries({ queryKey: ["listing-fields"] });
       void client.invalidateQueries({ queryKey: ["native-editor-form"] });
     },
@@ -27,11 +28,26 @@ export function ExperimentalSettings() {
             aria-label="Use Vendoo"
             checked={prefs.data?.listing_mode === "vendoo"}
             disabled={prefs.isPending || prefs.isError || save.isPending}
-            onCheckedChange={value => save.mutate(value)}
+            onCheckedChange={value => save.mutate({ listing_mode: value ? "vendoo" : "direct" })}
           />
         }
       >
-        {prefs.error || save.error ? <SettingsNote tone="error">{prefs.error?.message || save.error?.message}</SettingsNote> : null}
+        {prefs.error || (save.error && save.variables?.listing_mode) ? <SettingsNote tone="error">{prefs.error?.message || save.error?.message}</SettingsNote> : null}
+      </SettingsRow>
+      <SettingsRow
+        id="jev-field-review"
+        title="Check draft fields with Jev"
+        description="After generation, Jev checks selected garment details against the photo notes and corrects clear mistakes. Uses managed AI or your connected OpenRouter account."
+        control={
+          <Switch
+            aria-label="Check draft fields with Jev"
+            checked={prefs.data?.jev_field_review ?? false}
+            disabled={prefs.isPending || prefs.isError || save.isPending}
+            onCheckedChange={value => save.mutate({ jev_field_review: value })}
+          />
+        }
+      >
+        {save.error && save.variables?.jev_field_review !== undefined ? <SettingsNote tone="error">{save.error.message}</SettingsNote> : null}
       </SettingsRow>
       <SettingsRow
         id="hosted-marketplace-browser"

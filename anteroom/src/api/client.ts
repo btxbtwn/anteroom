@@ -1664,6 +1664,7 @@ export const api = {
         hidden_vendoo_labels: string[];
         theme: "dark" | "light" | "system";
         listing_mode: "direct" | "vendoo";
+        jev_field_review: boolean;
         listing_names: ListingNames;
         model_favorites: ModelFavorite[];
         stale_listing_days: number;
@@ -1674,6 +1675,7 @@ export const api = {
       settled_shelf_expanded?: boolean;
       theme?: "dark" | "light" | "system";
       listing_mode?: "direct" | "vendoo";
+      jev_field_review?: boolean;
       listing_names?: ListingNames;
       remember_labels?: string | string[];
       restore_labels?: string[];
@@ -1689,6 +1691,7 @@ export const api = {
         hidden_vendoo_labels: string[];
         theme: "dark" | "light" | "system";
         listing_mode: "direct" | "vendoo";
+        jev_field_review: boolean;
         listing_names: ListingNames;
         model_favorites: ModelFavorite[];
         stale_listing_days: number;
