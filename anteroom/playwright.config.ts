@@ -16,6 +16,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [
     ["list"],
+    ...(process.env.GITHUB_ACTIONS === "true" ? [["github"] as [string]] : []),
     ["html", { open: "never", outputFolder: process.env.PLAYWRIGHT_HTML_OUTPUT_DIR || "e2e/report" }],
     ...(process.env.SANDBOX_BROWSER_EVIDENCE_FILE
       ? [["../.github/scripts/browser-evidence-reporter.mjs"] as [string]]

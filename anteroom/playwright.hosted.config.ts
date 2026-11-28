@@ -8,7 +8,11 @@ export default defineConfig({
   workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? [["list"], ["html", { open: "never", outputFolder: "e2e/report" }]] : "list",
+  reporter: process.env.CI ? [
+    ["list"],
+    ...(process.env.GITHUB_ACTIONS === "true" ? [["github"] as [string]] : []),
+    ["html", { open: "never", outputFolder: "e2e/report" }],
+  ] : "list",
   outputDir: "e2e/results/hosted",
   use: { baseURL: `http://127.0.0.1:${webPort}`, trace: "retain-on-failure", screenshot: "only-on-failure" },
   projects: [
