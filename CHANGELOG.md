@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1291 — 2026-11-28
+
+- Stop a stuck test-report upload from holding up new Anteroom releases for hours.
+
 ## 0.1.1290 — 2026-11-28
 
 - Starting a new listing while inventory is still loading now opens on Draft and appears in the inventory list right away.
