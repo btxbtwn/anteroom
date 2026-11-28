@@ -82,8 +82,9 @@ def apparel_leaves() -> tuple[str, ...]:
 
 @lru_cache(maxsize=1)
 def etsy_leaves() -> tuple[dict, ...]:
+    """Etsy's leaves as ``marketplace_schemas.etsy_taxonomy`` reads them: only nodes without children."""
     return tuple({"id": node["category_id"], "path": node["path"]} for node in _seed()["category_tree_nodes"]
-                 if node["marketplace"] == "etsy" and node.get("is_leaf"))
+                 if node["marketplace"] == "etsy" and node.get("is_leaf") and not node.get("has_children"))
 
 
 def compare_gaps(found: dict[str, str], known: dict[str, str], what: str) -> None:
@@ -157,6 +158,59 @@ def test_etsy_category_for_each_family_stays_in_apparel(family, request):
         request.applymarker(pytest.mark.xfail(strict=True, reason=f"Etsy picks {ETSY_FAMILY_GAPS[name]}"))
     hit = pick_etsy_leaf(list(etsy_leaves()), family["general"])
     assert hit is None or hit["path"].split(" > ")[0] in ETSY_ROOTS, hit
+
+
+# #2302: an adult Men's or Women's item lands under that department on Etsy (or in a
+# department-free branch such as Accessories), never Kids', Baby or the other one.
+ETSY_ADULT_DEPARTMENT_GAPS: dict[str, str] = {}
+
+
+def test_every_adult_apparel_category_stays_in_its_etsy_department():
+    leaves = list(etsy_leaves())
+    found = {}
+    for path in apparel_leaves():
+        parts = path.split(" > ")
+        if parts[1] not in ("Men", "Women"):
+            continue
+        hit = pick_etsy_leaf(leaves, path)
+        if hit is None:
+            continue
+        own = f"{parts[1]}'s "
+        departments = [part for part in hit["path"].split(" > ")
+                       if re.search(r"\b(men's|women's|kids'|boys'|girls'|baby|gender-neutral)", part, re.I)]
+        if departments and not all(part.startswith(own) for part in departments):
+            found[path.split(" > ", 1)[1]] = hit["path"]
+    compare_gaps(found, ETSY_ADULT_DEPARTMENT_GAPS, "Etsy department")
+
+
+@pytest.mark.parametrize(("general", "etsy"), [
+    ("Men > Men's Clothing > Shirts > Casual Button-Down Shirts",
+     "Clothing > Men's Clothing > Shirts & Tees > Oxfords & Button Downs"),
+    ("Men > Men's Clothing > Shirts > Dress Shirts", "Clothing > Men's Clothing > Shirts & Tees > Dress Shirts"),
+    ("Men > Men's Clothing > Activewear > Hoodies & Sweatshirts", "Clothing > Men's Clothing > Hoodies & Sweatshirts > "),
+    ("Men > Men's Clothing > Sweats & Hoodies", "Clothing > Men's Clothing > Hoodies & Sweatshirts > "),
+    ("Women > Women's Clothing > Sweats & Hoodies", "Clothing > Women's Clothing > Hoodies & Sweatshirts > "),
+    ("Men > Men's Clothing > Pants", "Clothing > Men's Clothing > Pants"),
+    ("Women > Women's Clothing > Pants", "Clothing > Women's Clothing > Pants & Capris > Pants"),
+    ("Men > Men's Clothing > Shirts > T-Shirts", "Clothing > Men's Clothing > Shirts & Tees > T-shirts"),
+    ("Women > Women's Clothing > Tops", "Clothing > Women's Clothing > Tops & Tees > "),
+])
+def test_etsy_adult_shirts_sweatshirts_pants_and_tees(general, etsy):
+    # #2302: button-downs went to Kids', sweatshirts to Baby, chinos to Pajamas, a tee to Swimwear.
+    hit = pick_etsy_leaf(list(etsy_leaves()), f"{APPAREL} > {general}")
+    assert hit["path"] == etsy or (etsy.endswith("> ") and hit["path"].startswith(etsy)), hit["path"]
+
+
+def test_etsy_narrow_branches_still_match_when_asked_for():
+    leaves = list(etsy_leaves())
+    for general, branch in (("Men > Men's Clothing > Sleepwear & Robes", "Pajamas & Robes"),
+                            ("Women > Women's Clothing > Swimwear", "Swimwear"),
+                            ("Women > Women's Clothing > Intimates & Sleep > Panties", "Lingerie"),
+                            # Bridal garters keep Etsy's exact wedding match.
+                            ("Specialty > Wedding & Formal Occasion > Bridal Accessories > Garters",
+                             "Weddings > Clothing > Lingerie & Garters > Wedding Garters")):
+        hit = pick_etsy_leaf(leaves, f"{APPAREL} > {general}")
+        assert hit and branch in hit["path"], (general, hit)
 
 
 def test_category_regressions():

@@ -68,10 +68,41 @@ def _tokens(text: str) -> list[str]:
 
 # Branches for a narrower kind of buyer. A leaf in one needs the category or title to say so.
 _NICHE = {"pet", "dog", "cat", "wedding", "bridal", "bride"}
+# Branches for a narrower kind of garment, and the words that ask for each. Without one,
+# a pair of chinos is not sleep pants and a tee is not a swim top.
+_NARROW = {
+    "pajama": {"pajama", "sleep", "sleepwear", "nightgown", "robe"},
+    "swimwear": {"swimwear", "swim", "swimsuit", "bikini"},
+    "lingerie": {"lingerie", "intimate", "bra", "pantie", "panty", "garter"},
+    "costume": {"costume"},
+}
 # General roots that hold clothing. A category from any other root never lands in
 # Etsy's Clothing or Shoes because of a shared word: a boiler's "Expansion Tanks" are not tank tops.
 _APPAREL_ROOTS = {"clothing, shoes & accessories", "baby", "clothing", "shoes"}
 _ETSY_APPAREL = {"clothing", "shoes"}
+
+
+def _department(text: str) -> str:
+    """Men or women when the text names an adult department, else empty."""
+    words = set(re.findall(r"[a-z]+", text.lower()))
+    if words & {"kids", "kid", "boys", "boy", "girls", "girl", "baby", "toddler", "infants", "children"}:
+        return ""
+    return "women" if words & {"women", "womens"} else "men" if words & {"men", "mens"} else ""
+
+
+def _etsy_department(path: str) -> str:
+    """The Etsy department a leaf sits under: men, women, kids, adult (gender-neutral) or none."""
+    for part in path.split(">"):
+        name = part.strip().casefold()
+        if name.startswith("women's"):
+            return "women"
+        if name.startswith("men's"):
+            return "men"
+        if re.search(r"\b(kids|boys|girls|baby)\b", name):
+            return "kids"
+        if name.startswith("gender-neutral adult"):
+            return "adult"
+    return ""
 
 
 def pick_etsy_leaf(leaves: list[dict], query: str) -> dict[str, str] | None:
@@ -85,6 +116,8 @@ def pick_etsy_leaf(leaves: list[dict], query: str) -> dict[str, str] | None:
     if not tokens:
         return None
     product_tokens = {word.rstrip("s") for word in _tokens(query.split(">")[-1])}
+    # An adult Men's or Women's item stays in that department on Etsy, never Kids' or Baby.
+    department = _department(query)
     ranked: list[tuple[int, int, int, int, int, dict]] = []
     for leaf in leaves:
         path = str(leaf.get("path") or "")
@@ -93,6 +126,10 @@ def pick_etsy_leaf(leaves: list[dict], query: str) -> dict[str, str] | None:
         if (words & _NICHE) - tokens:
             continue
         if outside_apparel and path.split(">")[0].strip().casefold() in _ETSY_APPAREL:
+            continue
+        if any(word in words and not tokens & asks for word, asks in _NARROW.items()):
+            continue
+        if department and _etsy_department(path) not in ("", department):
             continue
         leaf_words = {word.rstrip("s") for word in _tokens(path.split(">")[-1])}
         score = len(tokens & words)
