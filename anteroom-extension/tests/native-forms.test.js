@@ -321,6 +321,36 @@ test('Mercari shows the seller’s brand and offers a category with subcategorie
   assert.equal(call(c, 'mercariCategory', { form: { overrides: { categoryV2: { id: '3', displayPath: ['Kids'], hasChildren: true } } } }), null);
 });
 
+test('Mercari Smart pricing suggests a minimum at least $1 under the price', () => {
+  const c = loadWorker();
+  const smart = price => {
+    const rows = Object.fromEntries(clean(call(c, 'mercariEditorForm', { direct_category_ids: { mercari: 1 }, title: 'A tee', price }, MERCARI))
+      .fields.map(row => [row.path, row]));
+    const minimum = rows['mercari_specifics.smartPricing.minimumPrice'];
+    return [rows['mercari_specifics.smartPricing.enabled'].value, minimum.value, /Recommended: \$\d+\./.exec(minimum.help)?.[0] || ''];
+  };
+  assert.deepEqual(smart(1), [false, '', '']);
+  assert.deepEqual(smart(2), [true, 1, 'Recommended: $1.']);
+  assert.deepEqual(smart(3), [true, 2, 'Recommended: $2.']);
+  assert.deepEqual(smart(20), [true, 17, 'Recommended: $17.']);
+
+  // Mercari-specific price overrides General price, and a disabled floor stays off with its saved minimum intact.
+  const overridden = Object.fromEntries(clean(call(c, 'mercariEditorForm', {
+    direct_category_ids: { mercari: 1 }, title: 'A tee', price: 13,
+    mercari_specifics: { price: 1 },
+  }, MERCARI)).fields.map(row => [row.path, row]));
+  assert.equal(overridden['mercari_specifics.smartPricing.enabled'].value, false);
+  assert.equal(overridden['mercari_specifics.smartPricing.minimumPrice'].value, '');
+
+  const disabledAtFloor = Object.fromEntries(clean(call(c, 'mercariEditorForm', {
+    direct_category_ids: { mercari: 1 }, title: 'A tee', price: 11,
+    mercari_specifics: { price: 11, smartPricing: { enabled: false, minimumPrice: 11 } },
+  }, MERCARI)).fields.map(row => [row.path, row]));
+  assert.equal(disabledAtFloor['mercari_specifics.smartPricing.enabled'].value, false);
+  assert.equal(disabledAtFloor['mercari_specifics.smartPricing.minimumPrice'].value, 11);
+  assert.equal(disabledAtFloor['mercari_specifics.smartPricing.minimumPrice'].required, false);
+});
+
 // Mercari's sell page, read 2026-10-27: its sections, field names and order, and the size group headings.
 test('Mercari form follows the sell page sections and order', () => {
   const c = loadWorker();

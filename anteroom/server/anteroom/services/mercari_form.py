@@ -335,13 +335,17 @@ def form(listing: dict, shipping_classes: list[dict] | None = None, *, notes: li
     fields["mercari_specifics.shipsFrom"]["value"] = next((str(value).strip() for value in (
         specifics.get("shipsFrom"), get_path(listing, "form.ships_from_zip"), listing.get("zipCode"),
         get_path(listing, "form.specifics.shipping.location")) if re.fullmatch(r"\d{5}", str(value or "").strip())), "")
+    price_dollars = math.floor(_number(price) + 0.5) if _number(price) > 0 else 0
     smart = specifics.get("smartPricing")
     if isinstance(smart, dict):
         enabled = smart.get("enabled") is True
     else:
-        enabled = smart if isinstance(smart, bool) else _number(price) >= 1
+        enabled = smart if isinstance(smart, bool) else price_dollars >= 2
         smart = {}
-    suggested_minimum = math.floor(_number(price) * 0.85 + 0.5) if enabled else ""
+    if enabled and price_dollars >= 2:
+        suggested_minimum: int | str = max(1, min(price_dollars - 1, math.floor(_number(price) * 0.85 + 0.5)))
+    else:
+        suggested_minimum = ""
     minimum = smart.get("minimumPrice", suggested_minimum)
     fields["mercari_specifics.smartPricing.enabled"]["value"] = enabled
     fields["mercari_specifics.smartPricing.minimumPrice"].update(

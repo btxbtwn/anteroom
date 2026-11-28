@@ -694,3 +694,85 @@ test('mercariPhotoBlob closes ImageBitmap even when canvas drawing throws', asyn
   );
   assert.equal(closed, true);
 });
+
+test('a safe Mercari read retries a temporary GraphQL error; writes never do', async () => {
+  const transient = { errors: [{ message: 'Oops, an error has occurred. Please try again.' }] };
+
+  // Safe read (like offerToLikerable) recovers when the retry succeeds.
+  let readCalls = 0;
+  const recovered = worker({
+    respond: op => {
+      if (op !== 'offerToLikerable') return undefined;
+      readCalls += 1;
+      return readCalls === 1 ? transient : { offer: { offerToLikerable: true } };
+    },
+  });
+  recovered.c.marketplaceSleep = async () => {};
+  const data = await recovered.c.mercariRequest(
+    { operationName: 'offerToLikerable', variables: { itemId: 'm13472742763' } },
+    { deadline: Date.now() + 30000, retry: true },
+  );
+  assert.equal(data.offer.offerToLikerable, true);
+  assert.equal(readCalls, 2);
+
+  // Repeated temporary errors stop after two retries and surface as a retryable network error.
+  let exhaustedCalls = 0;
+  const exhausted = worker({
+    respond: op => {
+      if (op !== 'offerToLikerable') return undefined;
+      exhaustedCalls += 1;
+      return transient;
+    },
+  });
+  exhausted.c.marketplaceSleep = async () => {};
+  await assert.rejects(
+    exhausted.c.mercariRequest(
+      { operationName: 'offerToLikerable', variables: { itemId: 'm13472742763' } },
+      { deadline: Date.now() + 30000, retry: true },
+    ),
+    err => err.code === 'network' && err.rejected === true
+      && err.marketplace_message === 'Oops, an error has occurred. Please try again.',
+  );
+  assert.equal(exhaustedCalls, 3);
+
+  // Writes and upload mutations are sent once and never retried on the same temporary message.
+  for (const [operationName, opts] of [
+    ['addDraftItemMutation', { deadline: Date.now() + 30000 }],
+    ['createOfferToLikers', { deadline: Date.now() + 30000, resend: false }],
+    ['editListing', { deadline: Date.now() + 30000, retry: true }],
+    ['uploadDraftItemImageMutation', { multipart: new FormData(), deadline: Date.now() + 30000, operationName: 'uploadDraftItemImageMutation', retry: true }],
+  ]) {
+    let calls = 0;
+    const w = worker({
+      respond: op => {
+        if (op !== operationName) return undefined;
+        calls += 1;
+        return transient;
+      },
+    });
+    w.c.marketplaceSleep = async () => {};
+    if (opts.multipart) {
+      opts.multipart.append('operations', JSON.stringify({ operationName }));
+    }
+    await assert.rejects(
+      w.c.mercariRequest(
+        opts.multipart ? null : { operationName, variables: { input: {} } },
+        opts,
+      ),
+      err => err.code === 'rejected'
+        && err.marketplace_message === 'Oops, an error has occurred. Please try again.',
+    );
+    assert.equal(calls, 1, `${operationName} must not retry temporary read errors`);
+  }
+
+  // Disabled Smart Pricing after a floor-crossing relist sends isAutoPriceDrop: false and omits minimumPrice.
+  const c = loadWorker();
+  const disabledCommon = c.mercariCommon({
+    ...listing,
+    price: 11,
+    mercari_specifics: { price: 11, smartPricing: { enabled: false, minimumPrice: 11 } },
+  });
+  assert.equal(disabledCommon.isAutoPriceDrop, false);
+  assert.equal('minPriceForAutoPriceDrop' in disabledCommon, false);
+});
+
