@@ -54,7 +54,6 @@ struct AutomationsView: View {
         Group {
             List {
                 Group {
-                    OfferActivitySection(api: api, refreshToken: offerRefreshToken)
                     if !approvals.isEmpty {
                         Section {
                             ForEach(approvals) { row in
@@ -63,11 +62,11 @@ struct AutomationsView: View {
                                         Text(row.title ?? row.conversationID)
                                     }
                                     Text(([row.action == "publish" ? "List" : row.action == "delist" ? "Delist" : "Relist",
-                                           row.marketplaces.map(Marketplaces.name).joined(separator: ", "), row.state])
+                                           row.marketplaces.map(Marketplaces.name).joined(separator: ", "), "Awaiting approval"])
                                         .filter { !$0.isEmpty }.joined(separator: " · "))
                                         .font(.caption).foregroundStyle(.secondary)
                                     if !canApprove {
-                                        Text("Marketplace actions are not available on iPhone yet. This approval stays waiting.")
+                                        Text("Approving marketplace actions isn't available in your account yet. This item stays waiting.")
                                             .font(.caption).foregroundStyle(.secondary)
                                     }
                                 }
@@ -79,12 +78,12 @@ struct AutomationsView: View {
                         }
                     }
                     if !gaps.isEmpty {
-                        Section("Down, needs relist") {
+                        Section("Taken down, not relisted yet") {
                             ForEach(gaps) { gap in
                                 NavigationLink(value: ConversationSummary(id: gap.conversationID, title: gap.title)) {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(gap.title ?? gap.conversationID)
-                                        Text(([Marketplaces.name(gap.marketplace), gap.state] + (gap.error.map { [$0] } ?? [])).joined(separator: " · "))
+                                        Text(([Marketplaces.name(gap.marketplace)] + (gap.error.map { [$0] } ?? [])).joined(separator: " · "))
                                             .font(.caption).foregroundStyle(.secondary)
                                     }
                                 }
@@ -113,6 +112,7 @@ struct AutomationsView: View {
                              ? "Nothing lists or delists until you approve each item."
                              : "Nothing lists or delists until you approve each item. Sharing and offers to likers run in Chrome on your computer, in an open Anteroom tab with Bridge connected.")
                     }
+                    OfferActivitySection(api: api, refreshToken: offerRefreshToken)
                 }
                 .listRowBackground(WorkspaceStyle.surface)
             }

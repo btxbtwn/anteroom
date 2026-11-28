@@ -10,7 +10,7 @@ struct OfferActivitySection: View {
     @State private var data: OfferAnalyticsResponse?
     @State private var error: String?
 
-    private var dates: (String, String) {
+    private var dateRange: (Date, Date) {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .current
         calendar.firstWeekday = 2
@@ -23,11 +23,13 @@ struct OfferActivitySection: View {
         } else {
             first = period == "custom" ? start : today
         }
-        return (OfferActivityDates.day(first, calendar: calendar),
-                OfferActivityDates.day(period == "custom" ? end : today, calendar: calendar))
+        return (first, period == "custom" ? end : today)
     }
 
     var body: some View {
+        let (first, last) = dateRange
+        let dates = (OfferActivityDates.day(first, calendar: .current), OfferActivityDates.day(last, calendar: .current))
+        let format = Date.FormatStyle.dateTime.month(.abbreviated).day().year()
         Section {
             Picker("Period", selection: $period) {
                 Text("Today").tag("today")
@@ -40,7 +42,7 @@ struct OfferActivitySection: View {
                 DatePicker("From", selection: $start, displayedComponents: .date)
                 DatePicker("Through", selection: $end, displayedComponents: .date)
             }
-            Text("\(dates.0) – \(dates.1) · \(TimeZone.current.identifier) · Weeks start Monday.")
+            Text(dates.0 == dates.1 ? first.formatted(format) : "\(first.formatted(format)) – \(last.formatted(format))")
                 .font(.caption).foregroundStyle(.secondary)
             if let error {
                 Text("Could not read offer activity: \(error)").font(.footnote).foregroundStyle(.secondary)
@@ -60,12 +62,10 @@ struct OfferActivitySection: View {
             } else {
                 ProgressView("Reading offer activity…")
             }
-            Text("Sales from offers aren't counted: marketplaces don't say which offer led to a sale.")
-                .font(.footnote).foregroundStyle(.secondary)
         } header: {
             Text("Offer activity")
         } footer: {
-            Text("Each offer is one listing's offer to its likers or watchers, so one buyer can count more than once. Listings that were checked and skipped aren't counted, and neither are offers sent on eBay before Anteroom recorded send dates.")
+            Text("Counts include sent offers with a recorded send date, one per listing each time. A buyer can receive more than one. Marketplaces don’t report which offers led to sales.")
         }
         .task(id: "\(dates.0)/\(dates.1)/\(TimeZone.current.identifier)/\(refreshToken)") {
             data = nil

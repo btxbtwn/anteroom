@@ -73,6 +73,7 @@ with SessionLocal() as db:
 
 for (const theme of ["light", "dark"]) {
   test(`offer activity is usable in ${theme}`, async ({ page, request, phone }, testInfo) => {
+    test.setTimeout(90_000);
     expect((await request.put("/api/settings/ui", { data: { theme } })).ok()).toBe(true);
     await page.addInitScript((value) => localStorage.setItem("anteroom:theme", value), theme);
     await page.goto("/");
@@ -81,6 +82,12 @@ for (const theme of ["light", "dark"]) {
       await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Automations", exact: true }).click();
     } else await page.getByRole("button", { name: "Automations", exact: true }).click();
     const section = page.getByRole("region", { name: "Offer activity" });
+    const automations = page.getByRole("region", { name: "Your automations" });
+    await expect(automations).toBeVisible({ timeout: 45_000 });
+    expect(await section.evaluate((node) => Boolean(node.compareDocumentPosition(
+      document.querySelector('[aria-label="Your automations"]')!,
+    ) & Node.DOCUMENT_POSITION_PRECEDING))).toBe(true);
+    await expect(section.getByText(/Weeks start Monday/)).toHaveCount(0);
     await expect(section.getByRole("combobox")).toHaveText("Today");
     const group = (name: string) => section.getByRole("group", { name: `${name} offer activity`, exact: true });
     await expect(group("eBay").getByText("2 offers sent", { exact: true })).toBeVisible();
@@ -93,7 +100,7 @@ for (const theme of ["light", "dark"]) {
     await expect(group("Poshmark").getByText(`Poshmark accepted ${acceptedRequests === 1 ? "it" : `all ${acceptedRequests}`} but doesn't say how many likers got each offer`, { exact: true })).toBeVisible();
     await expect(group("Depop").getByText("Depop finished it but doesn't say how many likers got each offer", { exact: true })).toBeVisible();
     await expect(section.getByText("Not available")).toHaveCount(0);
-    await expect(section.getByText(/Sales from offers aren't counted/)).toBeVisible();
+    await expect(section.getByText(/Marketplaces don’t report which offers led to sales/)).toBeVisible();
     await expect(page.locator("html")).toHaveCSS("color-scheme", theme);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`offer-analytics-${testInfo.project.name}-${theme}.png`), fullPage: true });
@@ -118,8 +125,14 @@ for (const theme of ["light", "dark"]) {
     await expect(section.getByLabel("From", { exact: true })).toBeVisible();
     await section.getByLabel("From", { exact: true }).fill("2025-01-01");
     await section.getByLabel("Through", { exact: true }).fill("2025-01-01");
+    const formattedDay = await page.evaluate(() => new Date(2025, 0, 1).toLocaleDateString(undefined, {
+      month: "short", day: "numeric", year: "numeric",
+    }));
+    await expect(section.getByText(formattedDay, { exact: true })).toBeVisible();
     await expect(section.getByText("0 offers sent", { exact: true })).toHaveCount(4);
     await section.getByLabel("From", { exact: true }).fill("2025-01-02");
     await expect(section.getByText("Choose a start on or before the end.")).toBeVisible();
+    await section.getByLabel("From", { exact: true }).fill("");
+    await expect(section.getByRole("combobox")).toHaveText("Custom dates");
   });
 }

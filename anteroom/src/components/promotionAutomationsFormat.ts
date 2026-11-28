@@ -157,14 +157,14 @@ function parseWaterfall(steps: WaterfallStepDraft[]): { steps: WaterfallStep[] }
   for (let i = 0; i < steps.length; i++) {
     const raw = steps[i]!;
     const discount = whole(raw.discount, 1, 99);
-    if (discount === null) return { error: `Waterfall step ${i + 1}: enter a discount between 1% and 99%.` };
+    if (discount === null) return { error: `Offer step ${i + 1}: enter a discount between 1% and 99%.` };
     const delay = whole(raw.delayMinutes, 0, 60 * 24 * 30);
-    if (delay === null) return { error: `Waterfall step ${i + 1}: enter a non-negative delay in minutes.` };
+    if (delay === null) return { error: `Offer step ${i + 1}: enter a non-negative delay in minutes.` };
     if (i > 0 && discount <= parsed[i - 1]!.discount_percent) {
-      return { error: `Waterfall step ${i + 1}: discount must increase from step ${i} (${parsed[i - 1]!.discount_percent}%).` };
+      return { error: `Offer step ${i + 1}: discount must increase from step ${i} (${parsed[i - 1]!.discount_percent}%).` };
     }
     if (i > 0 && delay <= parsed[i - 1]!.delay_minutes) {
-      return { error: `Waterfall step ${i + 1}: delay must be greater than step ${i}.` };
+      return { error: `Offer step ${i + 1}: delay must be greater than step ${i}.` };
     }
     parsed.push({
       discount_percent: discount,
@@ -332,7 +332,7 @@ export function describePromotionAutomation(row: PromotionAutomation): string {
     return `Poshmark automatic follows at ${row.times.join(", ")} (${row.timezone}) · ${parts.join(" · ") || "default caps"}`;
   }
   const waterfallText = describeWaterfall(row.waterfall_steps);
-  const discountText = waterfallText ? `Waterfall (${waterfallText})` : `${row.discount_percent}% off`;
+  const discountText = waterfallText ? `Offer sequence (${waterfallText})` : `${row.discount_percent}% off`;
   const shipping = row.marketplace === "poshmark" ? ` · ${row.shipping_label ? `shipping discount “${row.shipping_label}”` : "no shipping discount"}` : "";
   if (row.action === "bundle_offer") {
     return `Private bundle offers · ${discountText} on ${scope}${excluded}${age} · waits ${row.bundle_pause_minutes ?? 5}m after like activity · `
