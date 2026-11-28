@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1290 — 2026-11-28
+
+- Starting a new listing while inventory is still loading now opens on Draft and appears in the inventory list right away.
+
 ## 0.1.1289 — 2026-11-27
 
 - Mercari saves no longer fail with "Mercari changed its listing form" when Mercari briefly misses a request; Anteroom sends it once more.

@@ -1,1 +1,0 @@
-- Starting a new listing while inventory is still loading now opens on Draft and appears in the inventory list right away.
