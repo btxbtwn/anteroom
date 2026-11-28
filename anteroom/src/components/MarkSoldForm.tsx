@@ -35,22 +35,27 @@ export function saleBody(fields: { marketplace: SaleMarketplace; soldOn: string;
 /**
  * Mark as sold: where it sold, when, and what it brought in. Saving records
  * the sale only; any delist is offered afterwards and needs its own confirm.
+ * From the listing's own menu nothing is picked yet (`initial` null), so a sale
+ * is never credited to the wrong place by default; Save waits for a choice.
  */
 export function MarkSoldForm({ initial, pending, error, onSubmit, onCancel }: {
-  initial: SaleMarketplace;
+  initial: SaleMarketplace | null;
   pending: boolean;
   error?: string | null;
   onSubmit: (sale: SellerSale) => void;
   onCancel: () => void;
 }) {
   const [requestId] = useState(newRequestId);
-  const [fields, setFields] = useState({ marketplace: initial, soldOn: today(), quantity: "1", price: "", shippingCharged: "", fees: "", shippingCost: "" });
+  const [fields, setFields] = useState<{ marketplace: SaleMarketplace | null; soldOn: string; quantity: string; price: string;
+    shippingCharged: string; fees: string; shippingCost: string }>({ marketplace: initial, soldOn: today(), quantity: "1", price: "", shippingCharged: "", fees: "", shippingCost: "" });
   const [problem, setProblem] = useState<string | null>(null);
   const set = (key: keyof typeof fields) => (event: { target: { value: string } }) => setFields({ ...fields, [key]: event.target.value });
   return (
     <form aria-label="Mark as sold" className="flex flex-col gap-2 rounded-lg bg-muted/40 px-2.5 py-2 text-xs" onSubmit={(event) => {
       event.preventDefault();
-      const body = saleBody(fields, requestId);
+      const { marketplace } = fields;
+      if (!marketplace) { setProblem("Choose where it sold."); return; }
+      const body = saleBody({ ...fields, marketplace }, requestId);
       if (typeof body === "string") { setProblem(body); return; }
       setProblem(null);
       onSubmit(body);
@@ -59,7 +64,9 @@ export function MarkSoldForm({ initial, pending, error, onSubmit, onCancel }: {
       <div className="grid grid-cols-2 gap-2">
         <label className="flex flex-col gap-1">Sold on
           <Select value={fields.marketplace} onValueChange={(value) => { if (value) setFields({ ...fields, marketplace: value as SaleMarketplace }); }}>
-            <SelectTrigger aria-label="Where it sold" size="compact"><SelectValue>{marketplaceName(fields.marketplace)}</SelectValue></SelectTrigger>
+            <SelectTrigger aria-label="Where it sold" size="compact"><SelectValue placeholder="Choose…">
+              {(value: SaleMarketplace | null) => value ? marketplaceName(value) : "Choose…"}
+            </SelectValue></SelectTrigger>
             <SelectPopup>{SALE_MARKETPLACES.map((market) => <SelectItem key={market} value={market}>{marketplaceName(market)}</SelectItem>)}</SelectPopup>
           </Select>
         </label>
@@ -85,7 +92,7 @@ export function MarkSoldForm({ initial, pending, error, onSubmit, onCancel }: {
       <p className="text-muted-foreground">Leave an amount blank if you don't know it. Nothing changes on any marketplace.</p>
       {(problem || error) && <p role="alert" className="text-destructive-foreground">{problem || error}</p>}
       <div className="flex items-center gap-2">
-        <Button type="submit" size="xs" variant="outline" disabled={pending}>{pending ? "Saving…" : "Save sale"}</Button>
+        <Button type="submit" size="xs" variant="outline" disabled={pending || !fields.marketplace}>{pending ? "Saving…" : "Save sale"}</Button>
         <Button type="button" size="xs" variant="ghost" disabled={pending} onClick={onCancel}>Cancel</Button>
       </div>
     </form>

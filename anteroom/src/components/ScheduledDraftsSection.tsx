@@ -162,7 +162,7 @@ export function ScheduledDraftsSection({ onOpenListing }: { onOpenListing: (id: 
         </Panel>
       ) : !drafts.length ? (
         <EmptyRow>
-          No drafts marked Ready to list yet. Open a draft and toggle Ready to list under Marketplaces to schedule it.
+          No drafts marked Ready to list yet. Open a draft and choose Schedule… above its form.
         </EmptyRow>
       ) : (
         <Panel divided={false}>

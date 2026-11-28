@@ -123,11 +123,13 @@ export function RegenerateListingButton({
   convId,
   className,
   variant = "outline",
+  size = "xs",
   onRegenerated,
 }: {
   convId: string;
   className?: string;
   variant?: "outline" | "ghost-muted";
+  size?: "xs" | "sm";
   onRegenerated?: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -246,7 +248,7 @@ export function RegenerateListingButton({
     <>
       <Button
         variant={variant}
-        size="xs"
+        size={size}
         className={className}
         disabled={preparing || regenerate.isPending || busy || !hasPhotos}
         title={!hasPhotos

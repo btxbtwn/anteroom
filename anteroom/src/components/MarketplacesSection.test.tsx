@@ -17,6 +17,28 @@ vi.mock("@tanstack/react-query", async original => ({
   useQuery, useMutation, useQueryClient: () => ({ invalidateQueries: vi.fn(), setQueryData: vi.fn() }),
 }));
 
+// Menus stay closed in static markup. A test that reads what a menu offers, and
+// in what order, sets menus.open to render every menu's items inline.
+const menus = vi.hoisted(() => ({ open: false }));
+vi.mock("./ui/menu", async () => {
+  const { cloneElement, isValidElement } = await import("react");
+  type Props = { children?: React.ReactNode; render?: React.ReactElement; variant?: string; disabled?: boolean };
+  return {
+    Menu: ({ children }: Props) => <>{children}</>,
+    MenuTrigger: ({ render, children }: Props) => isValidElement(render) ? cloneElement(render, {}, children) : <button type="button">{children}</button>,
+    MenuPopup: ({ children }: Props) => menus.open ? <div role="menu">{children}</div> : null,
+    MenuItem: ({ children, variant, disabled }: Props) => <div role="menuitem" data-variant={variant} aria-disabled={disabled || undefined}>{children}</div>,
+    MenuSeparator: () => <hr />,
+    MenuGroup: ({ children }: Props) => <div role="group">{children}</div>,
+    MenuGroupLabel: ({ children }: Props) => <div data-group-label="">{children}</div>,
+  };
+});
+
+function withMenus(draw: () => string): string {
+  menus.open = true;
+  try { return draw(); } finally { menus.open = false; }
+}
+
 const live = { url: "https://www.mercari.com/us/item/m70565754838", listing_id: "m70565754838", source: "vendoo", sold_here: false, state: "live" } as const;
 
 /** The server always sends ``missing``; fixtures about other things leave it out. */
@@ -31,12 +53,14 @@ function render(drafts: NativeDrafts, listings: MarketplaceListings = {}, { erro
   preflight = { marketplaces: {} } as { marketplaces: Record<string, { ready: boolean; gaps: PreflightGap[]; missing?: MissingField[] }> } | undefined,
   preflightMissing = false, preflightPlaceholder = false, preflightError = false, preflightFetching = undefined as boolean | undefined,
   nativeFields = [] as { key: string; path: string; label: string; value: string; required: boolean; options: string[] }[],
-  listing = {} as ListingData, agentLocks = [] as string[], revisionId = "current" as string | null } = {}) {
+  listing = {} as ListingData, agentLocks = [] as string[], revisionId = "current" as string | null,
+  schedule = undefined as { ready_to_list: boolean; scheduled_publish_at: string | null } | undefined } = {}) {
   useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) =>
     queryKey[0] === "native-marketplaces" ? { data: drafts, error, isError: Boolean(error), isPending: false }
     : queryKey[0] === "native-editor-form" ? { data: { marketplace: selected, native: true, fields: nativeFields, notes: notes ?? [] } }
     : queryKey[0] === "marketplace-listings" ? { data: listings, error: null, isPending: false }
     : queryKey[0] === "etsy-listing-defaults" ? { data: etsyReady ? { shipping_profile_id: "1", readiness_state_id: "2", return_policy_id: "3" } : {}, isSuccess: true, isPending: false }
+    : queryKey[0] === "draft-schedule" ? { data: schedule, isLoading: false }
     : queryKey[0] === "native-preflight" ? { data: preflightMissing ? undefined : withMissing(preflight), isPending: preflightMissing, isPlaceholderData: preflightPlaceholder, isFetching: preflightFetching ?? preflightPlaceholder, isError: preflightError }
     : { data: { shipping: [], processing: [] }, isPending: false, error: null });
   useMutation.mockReturnValue({ mutate: vi.fn(), isPending: pending, error: null, variables: { marketplace: "depop", kind: "draft" } });
@@ -477,8 +501,8 @@ describe("marketplaces section", () => {
     expect(row(html, "Mercari")).toContain("Listed");
     expect(row(html, "eBay")).toContain("Sold here");
     for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop"]) expect(row(html, name)).toContain(`aria-label="${name} actions"`);
-    expect(html).not.toContain("Delist everywhere…");
-    expect(render({}, { mercari: live, depop: { ...live, url: "https://www.depop.com/products/x/", listing_id: "x" } })).toContain("Delist everywhere…");
+    expect(withMenus(() => render({}, { mercari: live, ebay: { ...live, url: "https://www.ebay.com/itm/1", listing_id: "1", sold_here: true } }))).not.toContain("Delist everywhere…");
+    expect(withMenus(() => render({}, { mercari: live, depop: { ...live, url: "https://www.depop.com/products/x/", listing_id: "x" } }))).toContain("Delist everywhere…");
   });
 
   it("offers List everywhere for the marketplaces that are ready, and names them", () => {
@@ -491,17 +515,44 @@ describe("marketplaces section", () => {
     expect(render({}, sold)).not.toContain("List everywhere…");
   });
 
-  it("makes List everywhere the rail's one primary action and keeps Delist everywhere apart from it, last", () => {
+  it("makes List everywhere the toolbar's one primary action and keeps Delist everywhere in the menu, last, behind a divider", () => {
     // Two live listings and three ready marketplaces: both listing-wide actions show.
+    menus.open = true;
     const html = render({}, { mercari: live, depop: { ...live, url: "https://www.depop.com/products/x/", listing_id: "x" } }, { etsyReady: true });
-    const button = (label: string) => html.match(new RegExp(`<button[^>]*>(?:(?!</button>).)*${label}(?:(?!</button>).)*</button>`))?.[0] ?? "";
+    menus.open = false;
+    const toolbar = html.slice(html.indexOf('role="toolbar" aria-label="Listing actions"'));
+    const buttons = toolbar.slice(0, toolbar.indexOf('aria-label="More listing actions"'));
+    const button = (label: string) => toolbar.match(new RegExp(`<button[^>]*>(?:(?!</button>).)*${label}(?:(?!</button>).)*</button>`))?.[0] ?? "";
     expect(button("List everywhere…")).toContain("bg-primary");
-    for (const label of ["Record a sale…", "Delist everywhere…"]) expect(button(label)).not.toContain("bg-primary");
-    const order = ["List everywhere…", "Record a sale…", "Delist everywhere…"].map((label) => html.indexOf(label));
-    expect(order).toEqual([...order].sort((a, b) => a - b));
-    // A divider stands between the other actions and Delist.
-    const between = html.slice(html.indexOf("Record a sale…"), html.indexOf("Delist everywhere…"));
-    expect(between).toMatch(/<div class="[^"]*border-t/);
+    expect(buttons.match(/<button[^>]*\bbg-primary\b/g)).toHaveLength(1);
+    const menu = toolbar.slice(toolbar.indexOf('aria-label="More listing actions"'));
+    const items = [...menu.matchAll(/<div role="menuitem"[^>]*>(?:<svg\b[^>]*>.*?<\/svg>)?([^<]*)<\/div>|<hr\/>/g)].map((match) => match[1] ?? "—");
+    expect(items).toEqual(["Mark as sold…", "—", "Delist everywhere…"]);
+    expect(html).not.toContain("Record a sale");
+  });
+
+  it("offers scheduling only on a draft that isn't live, or one already scheduled", () => {
+    const draft = { ready_to_list: false, scheduled_publish_at: null };
+    const toolbar = (html: string) => html.slice(html.indexOf('aria-label="Listing actions"'), html.indexOf('aria-label="More listing actions"'));
+    expect(toolbar(render({}, {}, { schedule: draft }))).toContain("Schedule…");
+    expect(render({}, { mercari: live }, { schedule: draft })).not.toContain("Schedule…");
+    expect(render({}, { mercari: { ...live, sold_here: true } }, { schedule: draft })).not.toContain("Schedule…");
+    // A schedule already set stays reachable so it can be cancelled.
+    expect(toolbar(render({}, { mercari: live }, { schedule: { ready_to_list: true, scheduled_publish_at: "2026-12-01T17:00:00Z" } })))
+      .toContain("Scheduled · ");
+    // It never sits above the form any more.
+    expect(render({}, {}, { schedule: draft })).not.toContain("Ready to list &amp; schedule publish");
+  });
+
+  it("groups each marketplace's bookkeeping under Tracking, after its marketplace actions", () => {
+    menus.open = true;
+    const html = render({}, { mercari: live });
+    menus.open = false;
+    const menu = row(html, "Mercari");
+    const tracking = menu.slice(menu.indexOf("Tracking"));
+    expect(menu.indexOf("Delist…")).toBeLessThan(menu.indexOf("Tracking"));
+    for (const label of ["Mark as listed…", "Mark as sold…", "Mark as not listed"]) expect(tracking).toContain(label);
+    expect(menu.slice(0, menu.indexOf("Tracking"))).not.toContain("Mark as");
   });
 
   it("says on every tab not listed yet whether it is ready, or how many fields the server says it needs", () => {
@@ -606,8 +657,8 @@ describe("marketplaces section", () => {
     const gone = rowStatus("mercari", { ...live, state: "deleted", already_gone: true, marketplace_message: "Item is no longer available" }, undefined, "current", true);
     expect(gone).toMatchObject({ tone: "neutral", label: "Already gone", detail: "Mercari no longer had this listing when Anteroom went to delist it." });
     expect(gone.said).toBe("Mercari said: Item is no longer available");
-    expect(render({}, { depop: { ...live, url: "https://www.depop.com/products/x/", listing_id: "x" } })).not.toContain("Delist everywhere…");
-    expect(render({}, { mercari: live, depop: { ...live, url: "https://www.depop.com/products/y/", listing_id: "y" } })).toContain("Delist everywhere…");
+    expect(withMenus(() => render({}, { depop: { ...live, url: "https://www.depop.com/products/x/", listing_id: "x" } }))).not.toContain("Delist everywhere…");
+    expect(withMenus(() => render({}, { mercari: live, depop: { ...live, url: "https://www.depop.com/products/y/", listing_id: "y" } }))).toContain("Delist everywhere…");
     expect(deletable({ ...live, state: "failed" })).toBe(true);
     expect(deletable({ ...live, sold_here: true })).toBe(false);
   });
@@ -635,8 +686,32 @@ it("disables only the agent's target row and labels it while other fields stay e
       label, value: "", required: true, options: ["36", "Blue"] })), onAskChat: vi.fn() });
   expect(html).toContain('fieldset disabled="" data-listing-row="ebay_specifics.Size"');
   expect(html).toContain('fieldset data-listing-row="ebay_specifics.Color"');
-  expect(html.match(/Agent editing/g)).toHaveLength(1);
+  expect(html.match(/Ant is editing this field…/g)).toHaveLength(1);
   expect(html).toContain("Fill Color with Ant");
+});
+
+describe("field messages in the seller's words", () => {
+  beforeEach(() => vi.clearAllMocks());
+  type Field = Parameters<typeof render>[2] extends infer O ? O extends { nativeFields?: infer F } ? F : never : never;
+
+  it("offers Reload on a required pick-list whose choices did not load", () => {
+    const html = render({}, {}, { selected: "mercari", notes: [], nativeFields: [{ key: "mercari_specifics.brand",
+      path: "mercari_specifics.brand", label: "Brand", value: "", required: true, options: [], selection_only: true }] as unknown as Field });
+    expect(html).toContain("Mercari&#x27;s choices for this field didn&#x27;t load.");
+    expect(html).toMatch(/<button[^>]*aria-label="Reload Brand choices"[^>]*>Reload<\/button>/);
+    expect(html).not.toContain("Reopen the listing");
+  });
+
+  it("shows Smart Sell as a labelled switch beside Poshmark's price", () => {
+    const html = render({}, {}, { selected: "poshmark", notes: [], nativeFields: [
+      { key: "poshmark_specifics.poshmarkPrice", path: "poshmark_specifics.poshmarkPrice", label: "Listing Price", value: "40", required: true, options: [] },
+      { key: "poshmark_specifics.smartSell.enabled", path: "poshmark_specifics.smartSell.enabled", label: "Smart Sell", value: "true",
+        required: false, options: [], input_type: "badge" },
+    ] as unknown as Field });
+    expect(html).toMatch(/<label[^>]*><span[^>]*role="switch"[^>]*aria-checked="true"/);
+    expect(html).toContain("Smart Sell</label>");
+    expect(html).not.toMatch(/Smart Sell (ON|OFF)/);
+  });
 });
 
 

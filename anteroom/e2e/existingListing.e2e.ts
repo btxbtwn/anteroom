@@ -1,4 +1,4 @@
-import { createListing, expect, openListing, test } from "./fixtures";
+import { createListing, expect, openAnt, openListing, test } from "./fixtures";
 
 // A listing that already has copy invites questions and edits; Generate would
 // overwrite it. A draft that only has photos still leads with Generate.
@@ -20,7 +20,12 @@ test("a listing with saved copy opens on the listing and its chat invites edits"
       await info.attach("existing-listing-opens-on-form.png", { body: await page.screenshot(), contentType: "image/png" });
       await page.getByRole("tab", { name: "Ant", exact: true }).click();
     }
-    const chat = phone ? page.locator("main") : page.getByRole("region", { name: "Listing chat" });
+    if (!phone) {
+      // With no chat yet, Ant waits as a launcher so the form has the room.
+      await expect(page.locator("main").getByRole("button", { name: /^Ask Ant/ })).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("region", { name: "Listing chat" })).toBeHidden();
+    }
+    const chat = phone ? page.locator("main") : await openAnt(page);
     await expect(chat.getByText("Ask Ant about this listing")).toBeVisible({ timeout: 30_000 });
     await page.screenshot({ path: info.outputPath("ant-listing-assistant.png") });
     await info.attach("existing-listing-chat.png", { body: await page.screenshot(), contentType: "image/png" });

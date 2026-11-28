@@ -34,15 +34,18 @@ test("List everywhere lists only the marketplaces the seller picks, after they c
 
     const rail = page.getByRole("navigation", { name: "Marketplaces" });
     if (phone) {
-      // A phone picks forms and listing-wide actions from the picker above the form.
+      // A phone picks forms from the picker above the form, and listing-wide actions from the "…" beside it.
       await rail.getByRole("button", { name: /^Form, / }).click();
       await expect(page.getByRole("menuitem", { name: /^eBay/ })).toContainText("Ready", { timeout: 20_000 });
       await expect(page.getByRole("menuitem", { name: /^Depop/ })).toContainText("1 to fill");
+      await expect(page.getByRole("menuitem", { name: /everywhere/ })).toHaveCount(0);
+      await page.keyboard.press("Escape");
+      await rail.getByRole("button", { name: "More listing actions" }).click();
       await page.getByRole("menuitem", { name: "List everywhere…" }).click();
     } else {
       await expect(rail.getByRole("listitem", { name: "eBay" })).toContainText("Ready", { timeout: 20_000 });
       await expect(rail.getByRole("listitem", { name: "Depop" })).toContainText("1 to fill");
-      await rail.getByRole("button", { name: "List everywhere…" }).click();
+      await page.getByRole("toolbar", { name: "Listing actions" }).getByRole("button", { name: "List everywhere…" }).click();
     }
     const dialog = page.getByRole("dialog");
     const confirm = dialog.getByRole("button", { name: /^List/ });
@@ -103,10 +106,12 @@ test("List everywhere names each missing field in full and opens it on its form"
     if (phone) {
       await rail.getByRole("button", { name: /^Form, / }).click();
       await expect(page.getByRole("menuitem", { name: /^Mercari/ })).toContainText("2 to fill", { timeout: 20_000 });
+      await page.keyboard.press("Escape");
+      await rail.getByRole("button", { name: "More listing actions" }).click();
       await page.getByRole("menuitem", { name: "List everywhere…" }).click();
     } else {
       await expect(rail.getByRole("listitem", { name: "Mercari" })).toContainText("2 to fill", { timeout: 20_000 });
-      await rail.getByRole("button", { name: "List everywhere…" }).click();
+      await page.getByRole("toolbar", { name: "Listing actions" }).getByRole("button", { name: "List everywhere…" }).click();
     }
     const dialog = page.getByRole("dialog");
     const needs = dialog.getByRole("list", { name: "Mercari needs" });
@@ -134,6 +139,7 @@ test("the listing chat is a column beside a wide form and floats over a narrow o
   try {
     await openListing(page, phone, title);
     const chat = page.getByRole("region", { name: "Listing chat" });
+    // A draft waiting for Generate opens Ant, where Generate is.
     await expect(chat).toBeVisible({ timeout: 20_000 });
     await expect(page.getByRole("separator", { name: "Resize chat" })).toHaveCount(1);
     await expect(chat.getByRole("button", { name: "Make chat larger" })).toHaveCount(0);

@@ -1,6 +1,6 @@
 import { useWorkspaceRuntime } from "../app/runtime";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangleIcon, BadgeDollarSignIcon, CheckCircle2Icon, CheckIcon, ChevronDownIcon, ChevronRightIcon, CircleIcon, ClockIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, SendIcon, SparklesIcon, SquarePenIcon, Trash2Icon, XCircleIcon } from "lucide-react";
+import { AlertTriangleIcon, BadgeDollarSignIcon, CalendarClockIcon, CheckCircle2Icon, CheckIcon, ChevronDownIcon, ChevronRightIcon, CircleIcon, ClockIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, SendIcon, SparklesIcon, SquarePenIcon, Trash2Icon, XCircleIcon } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { ApiRequestError } from "../api/transport";
@@ -23,9 +23,9 @@ import { missingDetail, needsText } from "./readiness";
 import { Button } from "./ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsible";
 import { Input } from "./ui/input";
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu";
+import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu";
 import { Spinner } from "./ui/spinner";
-import { DraftScheduleControl } from "./DraftScheduleControl";
+import { useDraftScheduleEntry } from "./DraftScheduleControl";
 import { isEbayInventoryLocationEdit } from "./listingChanges";
 import { MarketplaceMessagesContext, uniqueMarketplaceMessages } from "./marketplaceMessages";
 import { rowForField } from "./nativeFieldWarnings";
@@ -284,14 +284,19 @@ export function useReportFixTargets(marketplace: string, fields: readonly FixTar
 
 export function MarketplacesLayout({
   convId, revisionId, title, disabled, etsyEligible, onAskChat, onEditField,
-  ids, selected, onSelect, onPrepare, railActions, railMenu, railStatus, children,
+  ids, selected, onSelect, onPrepare, railActions, railFavorite, railMenuItems, railStatus, children,
 }: MarketplaceProps & {
   ids: readonly string[];
-  /** Listing-wide actions pinned above the rail's own, e.g. Regenerate. */
+  /** Listing-wide actions in the listing toolbar, before List everywhere, e.g. Regenerate. */
   railActions?: ReactNode;
-  /** The listing's overflow menu, on the right of the first action row. */
+  /** The listing's favorite toggle, after the toolbar's buttons. */
+  railFavorite?: ReactNode;
+  /** The listing's overflow menu as one node. Only the Vendoo layout reads it;
+      this layout builds its own menu from `railMenuItems`. */
   railMenu?: ReactNode;
-  /** The listing's sync state, floated above the actions so it never moves them. */
+  /** Editor-owned items for the listing's "…" menu, e.g. Clear listing. */
+  railMenuItems?: ReactNode;
+  /** The listing's sync state, at the start of the toolbar. */
   railStatus?: ReactNode;
   selected: string;
   onSelect: (id: string) => void;
@@ -387,7 +392,7 @@ export function MarketplacesLayout({
   const [reconnected, setReconnected] = useState<Partial<Record<Marketplace, ExtensionSessionConnect>>>({});
   const [linking, setLinking] = useState<{ marketplace: Marketplace; url: string } | null>(null);
   // Mark as sold opens a sale form; the number remounts it with a fresh request id.
-  const [selling, setSelling] = useState<{ marketplace: SaleMarketplace; key: number } | null>(null);
+  const [selling, setSelling] = useState<{ marketplace: SaleMarketplace | null; key: number } | null>(null);
 
   const etsyCreating = !listings.etsy?.listing_id && !drafts.etsy?.draft_url;
   const etsyDefaults = useQuery({ queryKey: ["etsy-listing-defaults"], queryFn: () => api.etsy.listingDefaults(),
@@ -521,7 +526,8 @@ export function MarketplacesLayout({
       void queryClient.invalidateQueries({ queryKey: ["analytics"] });
     },
   });
-  function startSale(marketplace: SaleMarketplace) {
+  /** A marketplace's own Mark as sold picks it; the listing's leaves Where it sold for the seller. */
+  function startSale(marketplace: SaleMarketplace | null) {
     recordSale.reset();
     setSelling((current) => ({ marketplace, key: (current?.key ?? 0) + 1 }));
   }
@@ -654,12 +660,16 @@ export function MarketplacesLayout({
           {canUpdate && <MenuItem disabled={noRevision} onClick={() => void updateNow(m)}>Update…</MenuItem>}
           {canDelist && <MenuItem variant="destructive" onClick={() => void runDelist([marketplace])}>Delist…</MenuItem>}
           {(canList || canUpdate || canDelist) && <MenuSeparator />}
-          <MenuItem disabled={running(marketplace)}
-            onClick={() => setLinking({ marketplace, url: markListedPrefill(entry, unconfirmed(marketplace)) })}>Mark as listed…</MenuItem>
-          {!entry?.sold_here && <MenuItem disabled={running(marketplace)} onClick={() => startSale(marketplace)}>Mark as sold…</MenuItem>}
-          {(entry || status.tone === "live" || unconfirmed(marketplace)) && (
-            <MenuItem disabled={running(marketplace)} onClick={() => mark.mutate({ marketplace, state: "not_listed" })}>Mark as not listed</MenuItem>
-          )}
+          {/* Bookkeeping: these record what happened on the marketplace and change nothing there. */}
+          <MenuGroup>
+            <MenuGroupLabel>Tracking</MenuGroupLabel>
+            <MenuItem disabled={running(marketplace)}
+              onClick={() => setLinking({ marketplace, url: markListedPrefill(entry, unconfirmed(marketplace)) })}>Mark as listed…</MenuItem>
+            {!entry?.sold_here && <MenuItem disabled={running(marketplace)} onClick={() => startSale(marketplace)}>Mark as sold…</MenuItem>}
+            {(entry || status.tone === "live" || unconfirmed(marketplace)) && (
+              <MenuItem disabled={running(marketplace)} onClick={() => mark.mutate({ marketplace, state: "not_listed" })}>Mark as not listed</MenuItem>
+            )}
+          </MenuGroup>
         </MenuPopup>
       </Menu>
     );
@@ -855,8 +865,56 @@ export function MarketplacesLayout({
     : <SquarePenIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />;
   const showListEverywhere = readyToList.length > 1;
   const showDelistEverywhere = removable.length > 1;
+  // Scheduling is for a draft: nothing live, in review or sold anywhere.
+  const liveSomewhere = statuses.some((status) => status.tone === "live" || status.label === "In review");
+  const scheduling = useDraftScheduleEntry(convId, !soldSomewhere && !liveSomewhere);
+
+  // The listing's own menu. Delist everywhere, the destructive one, stands last
+  // behind its own divider, away from List. A phone has no toolbar, so List
+  // everywhere and Schedule join it there.
+  const listingMenu = (
+    <Menu>
+      <MenuTrigger render={<Button variant="ghost" size={phone ? "icon" : "icon-sm"} aria-label="More listing actions" />}>
+        <EllipsisIcon />
+      </MenuTrigger>
+      <MenuPopup align="end" width="content">
+        {phone && showListEverywhere && <MenuItem disabled={busy || noRevision} onClick={() => setPicking(true)}><SendIcon />List everywhere…</MenuItem>}
+        {phone && scheduling.available && <MenuItem onClick={scheduling.open}><CalendarClockIcon />{scheduling.label}</MenuItem>}
+        {phone && (showListEverywhere || scheduling.available) && <MenuSeparator />}
+        {/* One way to record a sale: the same form as a marketplace's Mark as sold, with "where" left to pick. */}
+        {!soldSomewhere && <MenuItem disabled={busy} onClick={() => startSale(null)}><ReceiptIcon />Mark as sold…</MenuItem>}
+        {railMenuItems && !soldSomewhere && <MenuSeparator />}
+        {railMenuItems}
+        {showDelistEverywhere && <MenuSeparator />}
+        {showDelistEverywhere && <MenuItem variant="destructive" disabled={busy} onClick={() => void runDelist(removable)}>
+          <Trash2Icon />{delist.isPending ? "Delisting…" : "Delist everywhere…"}
+        </MenuItem>}
+      </MenuPopup>
+    </Menu>
+  );
+  // Desktop: the listing's actions in one row above its form. List everywhere is
+  // the one primary button; the rest are outline or quiet, at a readable size.
+  const toolbar = !phone && (
+    <div role="toolbar" aria-label="Listing actions" className="flex min-h-12 shrink-0 flex-wrap items-center justify-end gap-1.5 border-b px-3 py-2">
+      {railStatus && <span className="me-auto flex min-w-0 items-center">{railStatus}</span>}
+      {scheduling.available && (
+        <Button size="sm" variant={scheduling.scheduled ? "outline" : "ghost"} onClick={scheduling.open}>
+          <CalendarClockIcon />{scheduling.label}
+        </Button>
+      )}
+      {railActions}
+      {showListEverywhere && (
+        <Button size="sm" variant="default" disabled={busy || noRevision} title={`List on ${readyToList.map(marketplaceName).join(", ")}`}
+          onClick={() => setPicking(true)}><SendIcon />List everywhere…</Button>
+      )}
+      {railFavorite}
+      {listingMenu}
+    </div>
+  );
 
   const pane = <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+    {toolbar}
+    {scheduling.dialog}
     {picking && <ListEverywhereDialog title={title} choices={choices} onClose={() => setPicking(false)}
       onConfirm={(marketplaces) => { for (const marketplace of marketplaces) action.mutate({ marketplace, kind: "list" }); }}
       onEditField={onEditField} />}
@@ -933,11 +991,6 @@ export function MarketplacesLayout({
           })()}
         </section>
       )}
-      {!soldSomewhere && !selectedMarketplace && Boolean(selected) ? (
-        <div className="mb-3">
-          <DraftScheduleControl convId={convId} />
-        </div>
-      ) : null}
       <FixTargetsContext.Provider value={reportFields}>
         <MarketplaceMessagesContext value={shownMessages}>{children}</MarketplaceMessagesContext>
       </FixTargetsContext.Provider>
@@ -976,19 +1029,13 @@ export function MarketplacesLayout({
                   </MenuItem>
                 );
               })}
-              <MenuSeparator />
-              {showListEverywhere && <MenuItem disabled={busy || noRevision} onClick={() => setPicking(true)}><SendIcon />List everywhere…</MenuItem>}
-              {!soldSomewhere && <MenuItem disabled={busy} onClick={() => startSale("other")}><ReceiptIcon />Record a sale…</MenuItem>}
-              {showDelistEverywhere && <MenuSeparator />}
-              {showDelistEverywhere && <MenuItem variant="destructive" disabled={busy} onClick={() => void runDelist(removable)}>
-                <Trash2Icon />{delist.isPending ? "Delisting…" : "Delist everywhere…"}
-              </MenuItem>}
             </MenuPopup>
           </Menu>
           <span className="ms-auto flex shrink-0 items-center gap-1">
             {railStatus}
             {railActions}
-            {railMenu}
+            {railFavorite}
+            {listingMenu}
           </span>
         </nav>
         {pane}
@@ -1029,33 +1076,6 @@ export function MarketplacesLayout({
             );
           })}
         </ul>
-        {/* Listing-wide actions sit apart from the marketplaces, pinned to the
-            rail's foot. List everywhere is the one primary action. Quiet rows
-            follow, with the overflow menu on the first. Delist, the destructive
-            one, stands last behind its own divider, away from List. */}
-        <div className="relative mt-auto flex flex-col gap-0.5 border-t pt-1.5 [&_[data-slot=button]]:justify-start">
-          {railStatus && <div className="pointer-events-none absolute bottom-full end-1 mb-1 flex items-center gap-1.5">{railStatus}</div>}
-          {showListEverywhere && (
-            <Button size="xs" variant="default" disabled={busy || noRevision} className="mb-1 w-full" title={`List on ${readyToList.map(marketplaceName).join(", ")}`}
-              onClick={() => setPicking(true)}><SendIcon />List everywhere…</Button>
-          )}
-          {(railActions || railMenu) && (
-            <div className="flex min-w-0 items-center gap-0.5 [&>[data-slot=button]:not([aria-haspopup])]:min-w-0 [&>[data-slot=button]:not([aria-haspopup])]:flex-1">
-              {railActions}
-              {railMenu && <span className="ms-auto shrink-0">{railMenu}</span>}
-            </div>
-          )}
-          {/* A sold item's sale is already recorded; change its amounts in Sales records. */}
-          {!soldSomewhere && <Button size="xs" variant="ghost-muted" className="w-full" disabled={busy} title="A sale in person or anywhere off these marketplaces"
-            onClick={() => startSale("other")}><ReceiptIcon />Record a sale…</Button>}
-          {showDelistEverywhere && (
-            <div className="mt-1 border-t pt-1.5">
-              <Button size="xs" variant="ghost-destructive" className="w-full text-destructive-foreground" disabled={busy} onClick={() => void runDelist(removable)}>
-                <Trash2Icon />{delist.isPending ? "Delisting…" : "Delist everywhere…"}
-              </Button>
-            </div>
-          )}
-        </div>
       </nav>
       {pane}
     </div>

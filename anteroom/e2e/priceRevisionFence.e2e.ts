@@ -1,4 +1,4 @@
-import { createListing, expect, openListing, test } from "./fixtures";
+import { createListing, expect, openAnt, openListing, test } from "./fixtures";
 
 test("a reviewed markdown cannot overwrite a newer price", async ({ page, phone, request }, info) => {
   test.setTimeout(120_000);
@@ -11,7 +11,7 @@ test("a reviewed markdown cannot overwrite a newer price", async ({ page, phone,
     expect(saved.ok(), await saved.text()).toBe(true);
     await openListing(page, phone, title);
     if (phone) await page.getByRole("tab", { name: "Ant", exact: true }).click();
-    const chat = phone ? page.locator("main") : page.getByRole("region", { name: "Listing chat" });
+    const chat = phone ? page.locator("main") : await openAnt(page);
     await chat.getByRole("button", { name: "Regenerate…", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Regenerate", exact: true });
     const confirm = dialog.getByRole("button", { name: "Confirm", exact: true });

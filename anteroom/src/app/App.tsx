@@ -7,7 +7,6 @@ import { api } from "../api/client";
 import { refreshInventory, refreshInventoryNow } from "../api/inventoryRefresh";
 import { BUSY_POLL_MS, IDLE_POLL_MS, hasOpenJob, inventoryPollMs, pollMs } from "../api/polling";
 import { useReloadStaleFrontend } from "../components/BuildVersion";
-import { isChatToggleShortcut } from "../components/ListingChatPopup";
 import { AntAvatar } from "../components/AntAvatar";
 import { ListingSession } from "../components/listingSession";
 import { HostedSetupChecklist, SetupChecklist } from "../components/SetupChecklist";
@@ -147,6 +146,7 @@ export function App() {
   const [threadsWidth, setThreadsWidth] = usePanelWidth("threads");
   const [sidebarCollapsed, setSidebarCollapsed] = usePanelCollapsed("sidebar");
   // On desktop the listing's chat is a column beside the form, or a pop-up over it when narrow; minimized, it is a pill.
+  // Minimizing is remembered; ListingPanes decides per listing whether it opens (and handles ⌘J).
   const [chatMinimized, setChatMinimized] = usePanelCollapsed("listing-chat");
   const setChatOpen = useCallback((open: boolean) => setChatMinimized(!open), [setChatMinimized]);
   // Chat history opens from the History button and starts closed, as a side sheet does.
@@ -512,17 +512,6 @@ export function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [activeView, isMobile, mobileSidebarOpen]);
-
-  useEffect(() => {
-    if (isMobile || activeView !== "listings" || !selectedConvId) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!isChatToggleShortcut(event) || isConfirmDialogOpen()) return;
-      event.preventDefault();
-      setChatMinimized(!chatMinimized);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isMobile, activeView, selectedConvId, chatMinimized, setChatMinimized]);
 
   const showMailToolbar = activeView === "listings" && mobileListOpen;
 

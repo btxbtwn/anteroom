@@ -475,10 +475,11 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
   const messageCount = messages?.length ?? 0;
   const loaded = messages !== undefined;
   const empty = loaded && !hasMessages && !busy && !streamFailed;
+  const generate = empty && hasPhotos && !hasListingJson;
   const statusLabel = busy ? localLabel || activityDetail : "";
   useEffect(() => {
-    if (loaded) onStatusChange?.({ convId, busy, label: statusLabel, messageCount, empty });
-  }, [onStatusChange, convId, loaded, busy, statusLabel, messageCount, empty]);
+    if (loaded) onStatusChange?.({ convId, busy, label: statusLabel, messageCount, empty, generate });
+  }, [onStatusChange, convId, loaded, busy, statusLabel, messageCount, empty, generate]);
 
   const allMessages = messages ?? [];
   const foldPositions = placeTurnFolds(allMessages, foldedTurns);
