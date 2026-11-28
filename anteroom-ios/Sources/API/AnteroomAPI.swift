@@ -282,6 +282,36 @@ final class AnteroomAPI: Sendable {
         return listings.compactMapValues { $0 }
     }
 
+    /// Mark as sold: records the sale and its amounts. Never touches a
+    /// marketplace; the answer names live listings the seller may then delist
+    /// through the confirmed Delist.
+    func recordSale(_ id: String, _ sale: SellerSaleInput) async throws -> SellerSaleResult {
+        try await decode(request("POST", "api/conversations/\(id)/marketplace-listings/sold", json: sale))
+    }
+
+    // MARK: Scheduled Draft Publishing
+
+    func draftSchedule(_ id: String) async throws -> DraftSchedule {
+        try await decode(request("GET", "api/conversations/\(id)/schedule"))
+    }
+
+    /// Ready to list; turning it off also clears a pending schedule.
+    func setReadyToList(_ id: String, _ ready: Bool) async throws -> DraftSchedule {
+        try await decode(request("PUT", "api/conversations/\(id)/schedule/ready", json: ReadyToListInput(readyToList: ready)))
+    }
+
+    /// Schedules the saved draft to publish at `at` on the marketplaces the
+    /// seller named and confirmed; the server records that confirmation.
+    func scheduleDraft(_ id: String, at: Date, marketplaces: [String], confirmation: SellerConfirmation) async throws -> DraftSchedule {
+        try Self.require(confirmation, .schedule, marketplaces)
+        return try await decode(request("POST", "api/conversations/\(id)/schedule", json: DraftScheduleInput(
+            publishAt: DraftScheduling.wire(at), marketplaces: marketplaces, confirm: true)))
+    }
+
+    func unscheduleDraft(_ id: String) async throws -> DraftSchedule {
+        try await decode(request("DELETE", "api/conversations/\(id)/schedule"))
+    }
+
     /// Refuses before anything is sent unless the seller confirmed this action on these marketplaces.
     private static func require(_ confirmation: SellerConfirmation, _ action: SellerConfirmation.Action, _ marketplaces: [String]) throws {
         guard confirmation.covers(action, marketplaces) else {

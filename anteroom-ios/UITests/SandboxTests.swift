@@ -884,6 +884,105 @@ final class CoreFlowSandboxTests: XCTestCase {
     }
 }
 
+/// Mark as sold records the sale only and offers Delist for the rest behind
+/// its own confirmation; a draft shows Ready to list and scheduled publishing.
+@MainActor
+final class SoldAndScheduleSandboxTests: XCTestCase {
+    func testMarkAsSoldOffersDelistOnlyAfterConfirming() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        launchSandbox(app)
+        // The sample dress is live on Poshmark and Etsy.
+        openMarketplaces("Free People S Pink Floral Midi Dress", app: app)
+        app.buttons["marketplaces-mark-sold"].tap()
+        XCTAssertTrue(app.navigationBars["Mark as sold"].waitForExistence(timeout: 10))
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Sold on'")).firstMatch.tap()
+        let poshmark = app.buttons["Poshmark"].firstMatch
+        XCTAssertTrue(poshmark.waitForExistence(timeout: 10))
+        poshmark.tap()
+        let price = app.textFields["sale-price"]
+        XCTAssertTrue(price.waitForExistence(timeout: 10))
+        // A tap while the menu closes can miss focus; tap until the field has it.
+        for _ in 0..<3 where (price.value(forKey: "hasKeyboardFocus") as? Bool) != true {
+            price.tap()
+            _ = app.keyboards.firstMatch.waitForExistence(timeout: 3)
+        }
+        price.typeText("42.50")
+        keep(app, "Mark as sold")
+        app.buttons["Save sale"].tap()
+        // Recording the sale never delists: the rest is offered behind a confirmation naming Etsy.
+        let offer = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Etsy'")).firstMatch
+        XCTAssertTrue(offer.waitForExistence(timeout: 30), "Delist of the other marketplaces is offered")
+        keep(app, "Delist offered after the sale")
+        let delist = app.buttons["Delist from Etsy"]
+        XCTAssertTrue(delist.exists, "The confirmation names only Etsy")
+        // The popover has no Cancel button on iOS 26: tapping outside dismisses it without delisting.
+        let outside = app.otherElements["PopoverDismissRegion"].firstMatch
+        if outside.exists { outside.tap() } else { app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.08)).tap() }
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: delist)
+        waitForExpectations(timeout: 10)
+        // Dismissing the offer delisted nothing: Etsy is still listed.
+        let etsy = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Etsy, Listed'")).firstMatch
+        XCTAssertTrue(etsy.waitForExistence(timeout: 30), "Etsy stays listed")
+        keep(app, "Marketplaces after the sale")
+    }
+
+    func testDraftShowsReadyToListAndSchedule() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        launchSandbox(app)
+        openNewListing(app)
+        openManage(app)
+        let ready = app.switches["schedule-ready"]
+        for _ in 0..<5 where !ready.isHittable { app.swipeUp() }
+        XCTAssertTrue(ready.exists, "A draft offers Ready to list")
+        keep(app, "Ready to list and schedule publish")
+    }
+
+    private func openMarketplaces(_ title: String, app: XCUIApplication) {
+        let listing = app.staticTexts[title].firstMatch
+        XCTAssertTrue(listing.waitForExistence(timeout: 30))
+        for _ in 0..<4 where !listing.isHittable { app.collectionViews.firstMatch.swipeUp() }
+        let actions = app.buttons["Listing actions"]
+        for _ in 0..<4 where !actions.exists {
+            if listing.exists && listing.isHittable { listing.tap() }
+            _ = actions.waitForExistence(timeout: 20)
+        }
+        XCTAssertTrue(actions.exists, "The listing opens")
+        openManage(app)
+    }
+
+    private func openManage(_ app: XCUIApplication) {
+        let actions = app.buttons["Listing actions"]
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: actions)
+        waitForExpectations(timeout: 30)
+        let manage = app.buttons["Manage marketplaces"]
+        for _ in 0..<3 where !manage.exists {
+            actions.tap()
+            _ = manage.waitForExistence(timeout: 5)
+        }
+        manage.tap()
+        XCTAssertTrue(app.navigationBars["Marketplaces"].waitForExistence(timeout: 15))
+        // The sheet's list is lazy: Mark as sold sits below the marketplace rows.
+        XCTAssertTrue(app.staticTexts["Poshmark"].firstMatch.waitForExistence(timeout: 60), "The marketplaces load")
+        let markSold = app.buttons["marketplaces-mark-sold"]
+        for _ in 0..<6 where !markSold.isHittable {
+            app.swipeUp()
+            _ = markSold.waitForExistence(timeout: 2)
+        }
+        XCTAssertTrue(markSold.isHittable, "Mark as sold is offered")
+    }
+
+    private func keep(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}
+
 /// Opening history (like the assistant and marketplaces) with unsaved edits
 /// saves them first instead of asking the seller to.
 @MainActor

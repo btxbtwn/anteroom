@@ -1,12 +1,13 @@
 import SwiftUI
 
-/// Proof that the seller just confirmed one List, Update or Delist naming these
-/// marketplaces. Only the confirmation dialog in this file can make one, so the
-/// API calls that require it (`listOnMarketplace`, `updateOnMarketplace`,
-/// `delist`) cannot be reached from any other code path.
+/// Proof that the seller just confirmed one List, Update, Delist or scheduled
+/// publish naming these marketplaces. Only the confirmation dialog in this file
+/// can make one, so the API calls that require it (`listOnMarketplace`,
+/// `updateOnMarketplace`, `delist`, `scheduleDraft`) cannot be reached from
+/// any other code path.
 struct SellerConfirmation: Sendable, Equatable {
     enum Action: String, Sendable {
-        case list, update, delist
+        case list, update, delist, schedule
     }
 
     let action: Action
@@ -54,6 +55,12 @@ struct SellerConfirmationRequest: Identifiable, Equatable {
     static func update(title: String, marketplace: String) -> Self {
         let question = MarketplaceActions.updateQuestion(title: title, marketplace: marketplace)
         return Self(action: .update, marketplaces: [marketplace], title: question.title, message: question.message, button: question.button)
+    }
+
+    /// Publishing later, at `at`, on the named marketplaces (Scheduled Draft Publishing).
+    static func schedule(title: String, marketplaces: [String], at: String) -> Self {
+        let question = DraftScheduling.question(title: title, marketplaces: marketplaces, at: at)
+        return Self(action: .schedule, marketplaces: marketplaces, title: question.title, message: question.message, button: question.button)
     }
 
     static func delist(title: String, marketplaces: [String]) -> Self {

@@ -1626,6 +1626,141 @@
         "title": "DirectRecord",
         "type": "object"
       },
+      "DraftSchedule": {
+        "description": "A draft's Ready to list switch and its scheduled publish (Scheduled Draft Publishing).\n\nThe scheduler publishes only the revision the seller confirmed, only to the\nmarketplaces named here; saving any edit unschedules it.",
+        "properties": {
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "ready_to_list": {
+            "title": "Ready To List",
+            "type": "boolean"
+          },
+          "scheduled_confirmed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the seller confirmed the marketplaces and time.",
+            "title": "Scheduled Confirmed At"
+          },
+          "scheduled_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the last scheduled publish failed or was cancelled.",
+            "title": "Scheduled Error"
+          },
+          "scheduled_marketplaces": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Scheduled Marketplaces",
+            "type": "array"
+          },
+          "scheduled_publish_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the publish is due, in UTC; null when nothing is scheduled.",
+            "title": "Scheduled Publish At"
+          },
+          "scheduled_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled Revision Id"
+          },
+          "scheduled_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled Status"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "ready_to_list"
+        ],
+        "title": "DraftSchedule",
+        "type": "object"
+      },
+      "DraftScheduleInput": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm": {
+            "default": false,
+            "description": "True only after the seller confirmed these marketplaces and this time.",
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "marketplaces": {
+            "description": "Named marketplaces only; never \"all\".",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 7,
+            "minItems": 1,
+            "title": "Marketplaces",
+            "type": "array"
+          },
+          "publish_at": {
+            "description": "A future time, ISO 8601 with its offset.",
+            "minLength": 1,
+            "title": "Publish At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "publish_at",
+          "marketplaces"
+        ],
+        "title": "DraftScheduleInput",
+        "type": "object"
+      },
       "ErrorDetail": {
         "description": "What a refused request answers: one sentence for the seller.",
         "properties": {
@@ -3368,6 +3503,20 @@
         "title": "PriceDrift",
         "type": "object"
       },
+      "ReadyToListInput": {
+        "additionalProperties": false,
+        "properties": {
+          "ready_to_list": {
+            "title": "Ready To List",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ready_to_list"
+        ],
+        "title": "ReadyToListInput",
+        "type": "object"
+      },
       "Redaction": {
         "additionalProperties": false,
         "description": "A region hidden on the finished frame, such as a name, address or barcode.",
@@ -4773,6 +4922,298 @@
           }
         },
         "summary": "Photo Studio"
+      }
+    },
+    "/api/conversations/{conv_id}/schedule": {
+      "delete": {
+        "description": "Unschedule a pending draft publish.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conv_id",
+            "required": true,
+            "schema": {
+              "title": "Conv Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftSchedule"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The schedule was refused, such as a past time, no confirmation or a draft that isn't ready."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The draft does not exist for this seller."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The draft is publishing now."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unschedule Draft Publish"
+      },
+      "get": {
+        "description": "Return this draft's ready-to-list toggle and scheduled publish state.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conv_id",
+            "required": true,
+            "schema": {
+              "title": "Conv Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftSchedule"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The schedule was refused, such as a past time, no confirmation or a draft that isn't ready."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The draft does not exist for this seller."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The draft is publishing now."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Draft Schedule"
+      },
+      "post": {
+        "description": "Schedule a validated draft for future publishing to named marketplaces.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conv_id",
+            "required": true,
+            "schema": {
+              "title": "Conv Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftScheduleInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftSchedule"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The schedule was refused, such as a past time, no confirmation or a draft that isn't ready."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The draft does not exist for this seller."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The draft is publishing now."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Schedule Draft Publish"
+      }
+    },
+    "/api/conversations/{conv_id}/schedule/ready": {
+      "put": {
+        "description": "Mark a validated draft ready to list (or turn it off, which clears any pending schedule).",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conv_id",
+            "required": true,
+            "schema": {
+              "title": "Conv Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReadyToListInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftSchedule"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The schedule was refused, such as a past time, no confirmation or a draft that isn't ready."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The draft does not exist for this seller."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The draft is publishing now."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Draft Ready To List"
       }
     },
     "/api/conversations/{identity}": {

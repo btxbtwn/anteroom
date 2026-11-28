@@ -73,4 +73,10 @@ def save_draft(draft_id: str, body: DraftSave, db=Depends(get_seller_db, scope="
     draft = drafts.save(db, draft_id, body.title, body.notes, body.expected_updated_at, body.fields)
     if draft is None:
         raise HTTPException(409, 'This draft changed on another device. Reload it before saving again.')
+    if body.fields is not None:
+        # The save made a new revision; a scheduled publish of the old one is
+        # cancelled (the scheduler also refuses a revision that changed).
+        from anteroom.services.draft_scheduling import unschedule_on_edit
+        if unschedule_on_edit(db, draft_id):
+            db.commit()
     return detail(db, draft)

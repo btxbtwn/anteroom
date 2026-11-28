@@ -647,6 +647,75 @@ extension DirectRecord {
     }
 }
 
+/// A draft's Ready to list switch and its scheduled publish (Scheduled Draft Publishing).
+///
+/// The scheduler publishes only the revision the seller confirmed, only to the
+/// marketplaces named here; saving any edit unschedules it.
+struct DraftSchedule: Codable, Hashable, Sendable {
+    var conversationID: String?
+    var title: String?
+    var readyToList: Bool
+    /// When the publish is due, in UTC; null when nothing is scheduled.
+    var scheduledPublishAt: String?
+    var scheduledMarketplaces: [String] = []
+    var scheduledRevisionID: String?
+    /// When the seller confirmed the marketplaces and time.
+    var scheduledConfirmedAt: String?
+    var scheduledStatus: String?
+    /// Why the last scheduled publish failed or was cancelled.
+    var scheduledError: String?
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case conversationID = "conversation_id"
+        case readyToList = "ready_to_list"
+        case scheduledPublishAt = "scheduled_publish_at"
+        case scheduledMarketplaces = "scheduled_marketplaces"
+        case scheduledRevisionID = "scheduled_revision_id"
+        case scheduledConfirmedAt = "scheduled_confirmed_at"
+        case scheduledStatus = "scheduled_status"
+        case scheduledError = "scheduled_error"
+    }
+}
+
+extension DraftSchedule {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        conversationID = try values.decodeIfPresent(String.self, forKey: .conversationID)
+        title = try values.decodeIfPresent(String.self, forKey: .title)
+        readyToList = try values.decode(Bool.self, forKey: .readyToList)
+        scheduledPublishAt = try values.decodeIfPresent(String.self, forKey: .scheduledPublishAt)
+        scheduledMarketplaces = try values.decodeIfPresent([String].self, forKey: .scheduledMarketplaces) ?? []
+        scheduledRevisionID = try values.decodeIfPresent(String.self, forKey: .scheduledRevisionID)
+        scheduledConfirmedAt = try values.decodeIfPresent(String.self, forKey: .scheduledConfirmedAt)
+        scheduledStatus = try values.decodeIfPresent(String.self, forKey: .scheduledStatus)
+        scheduledError = try values.decodeIfPresent(String.self, forKey: .scheduledError)
+    }
+}
+
+struct DraftScheduleInput: Codable, Hashable, Sendable {
+    /// A future time, ISO 8601 with its offset.
+    var publishAt: String
+    /// Named marketplaces only; never "all".
+    var marketplaces: [String]
+    /// True only after the seller confirmed these marketplaces and this time.
+    var confirm: Bool = false
+
+    enum CodingKeys: String, CodingKey {
+        case marketplaces, confirm
+        case publishAt = "publish_at"
+    }
+}
+
+extension DraftScheduleInput {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        publishAt = try values.decode(String.self, forKey: .publishAt)
+        marketplaces = try values.decode([String].self, forKey: .marketplaces)
+        confirm = try values.decodeIfPresent(Bool.self, forKey: .confirm) ?? false
+    }
+}
+
 /// What a refused request answers: one sentence for the seller.
 struct ErrorDetail: Codable, Hashable, Sendable {
     var detail: String
@@ -1318,6 +1387,14 @@ struct PriceDrift: Codable, Hashable, Sendable {
     var price: Double
     /// ``override``: a price typed on that marketplace's form. ``live``: the live listing's known price.
     var source: String
+}
+
+struct ReadyToListInput: Codable, Hashable, Sendable {
+    var readyToList: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case readyToList = "ready_to_list"
+    }
 }
 
 /// A region hidden on the finished frame, such as a name, address or barcode.
