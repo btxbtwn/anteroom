@@ -58,6 +58,9 @@ def _serialize_tree_nodes(db: Session, marketplace: str) -> tuple[bytes, str, _T
         .order_by(CategoryTreeNode.path)
         .all()
     )
+    # The query returned scalar rows. Release the connection before building
+    # and encoding a response that can contain tens of thousands of nodes.
+    db.rollback()
     # A single statement binds the cache version to the nodes' snapshot, even
     # under READ COMMITTED and when a seed is imported and then restored.
     status, updated_at, source, content_hash = rows[0][6:] if rows else (None, None, None, None)

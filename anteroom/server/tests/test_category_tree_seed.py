@@ -121,6 +121,26 @@ class CategoryTreeSeedTest(unittest.TestCase):
         )
         con.close()
 
+    def test_category_tree_releases_connection_before_encoding(self):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session
+
+        from anteroom.routes import catalog
+
+        engine = create_engine(f"sqlite:///{self.source}")
+        encode = json.dumps
+        try:
+            with Session(engine) as db:
+                def encode_after_read(*args, **kwargs):
+                    self.assertFalse(db.in_transaction(), "category encoding held the read transaction")
+                    return encode(*args, **kwargs)
+
+                with patch.object(catalog.json, "dumps", side_effect=encode_after_read):
+                    response = catalog.categories("general", None, db)
+                self.assertEqual(json.loads(response.body)["nodes"][0]["label"], "General")
+        finally:
+            engine.dispose()
+
     def test_changed_nodes_invalidate_response_with_unchanged_seed_metadata(self):
         from sqlalchemy import create_engine
         from sqlalchemy.orm import Session
