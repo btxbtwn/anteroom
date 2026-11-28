@@ -80,7 +80,7 @@ describe("Wave 2 Track C automation and sale-sync UI components", () => {
     expect(html).toContain("Scheduled publish history (1)");
   });
 
-  it("renders AutoRelistSection with per-marketplace controls OFF by default and eBay GTC mode", () => {
+  it("renders AutoRelistSection with per-marketplace controls OFF by default and eBay renewal timing", () => {
     useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) => {
       if (queryKey[0] === "auto-relist-rules") {
         return {
@@ -124,10 +124,25 @@ describe("Wave 2 Track C automation and sale-sync UI components", () => {
 
     const html = renderToStaticMarkup(<AutoRelistSection />);
     expect(html).toContain("Auto-relist and eBay auto-recreate");
-    expect(html).toContain("Minimum 30-day age cycle");
-    expect(html).toContain("Recreates ~30 min before 30-day GTC renewal");
+    expect(html).toContain("Listings at least 30 days old");
+    expect(html).toContain("Recreates about 30 min before eBay renews the listing");
     expect(html).toContain("Drop 10% (floor $20)");
-    expect(html).toContain("Cap 2/50 today");
+    expect(html).toContain("2 of 50 relisted today");
+  });
+
+  it("labels a paused rule's saved preference separately from active relisting", () => {
+    useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) => ({
+      data: queryKey[0] === "auto-relist-rules" ? [{
+        marketplace: "mercari", enabled: true, filters: {}, min_age_days: 30,
+        daily_cap: 25, relisted_today: 0, paused_reason: "Mercari can refuse the replacement listing.",
+      }] : [],
+    }));
+
+    const html = renderToStaticMarkup(<AutoRelistSection />);
+    expect(html).toContain(">Paused<");
+    expect(html).toContain("Mercari can refuse the replacement listing.");
+    expect(html).toContain("Resume Mercari Auto-Relist when available");
+    expect(html).not.toContain("Enable auto-relist for Mercari");
   });
 
   it("renders SaleDetectionTracker with 60-day summary, SKU, error details, and one-click Retry", () => {

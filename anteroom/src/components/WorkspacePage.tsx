@@ -200,13 +200,24 @@ export function FormField({
   label,
   className,
   children,
+  htmlFor,
 }: {
   label: ReactNode;
   className?: string;
   children: ReactNode;
+  htmlFor?: string;
 }) {
+  const styles = cn("flex min-w-0 flex-col gap-1.5 text-xs font-medium text-muted-foreground", className);
+  if (htmlFor) {
+    return (
+      <div className={styles}>
+        <label htmlFor={htmlFor}>{label}</label>
+        {children}
+      </div>
+    );
+  }
   return (
-    <label className={cn("flex min-w-0 flex-col gap-1.5 text-xs font-medium text-muted-foreground", className)}>
+    <label className={styles}>
       {label}
       {children}
     </label>
