@@ -6,14 +6,15 @@
  *   spreadsheet (desktop/iPad) and scan-first list + Quick Edit sheet (phone),
  *   editing the same saved marketplace forms with explicit 2-step List confirmation.
  */
-import { useDeferredValue, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Tabs } from "@base-ui/react/tabs";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ExternalLinkIcon, SearchIcon } from "lucide-react";
+import { CircleAlertIcon, ExternalLinkIcon, SearchIcon } from "lucide-react";
 import { api } from "../api/client";
 import type { MissingField, NativeMarketplace } from "../api/nativeMarketplaces";
 import { useWorkspaceRuntime } from "../app/runtime";
+import { usePhoneLayout } from "../lib/usePhoneLayout";
 import { cn } from "../lib/utils";
 import { editorTabs } from "./editorTabs";
 import { formatMoney } from "./analyticsFormat";
@@ -22,11 +23,12 @@ import { marketplacePrice, marketplacePriceDescription } from "./inventoryPrices
 import { inventoryRows, listedCounts, marketplaceCell, type MarketplaceCellKind } from "./inventoryTable";
 import { MarketplaceLogo } from "./MarketplaceLogo";
 import { marketplaceName } from "./marketplaceNames";
-import { MarketplaceSheetView } from "./MarketplaceSheetView";
+import { InventoryLoadError, MarketplaceSheetView } from "./MarketplaceSheetView";
 import { DraftScheduleTag, ListingThumb } from "./sidebar/ListingBits";
 import { displayCoverUrl } from "./sidebar/coverSrc";
 import type { Listing } from "./sidebar/listingShelves";
 import { Badge } from "./ui/badge";
+import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Skeleton } from "./ui/skeleton";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "./ui/input-group";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
@@ -43,8 +45,9 @@ const NATIVE_MARKETPLACES: ReadonlySet<string> = new Set<NativeMarketplace>(["eb
 type InventoryTab = "overview" | NativeMarketplace;
 
 const ROW_HEIGHT = 56;
-// Narrow enough on a phone that the first marketplace column shows beside it.
-const ITEM_MIN = "min(13rem, 42vw)";
+const PHONE_OVERVIEW_ROW_HEIGHT = 112;
+const NARROW_BREAKPOINT_PX = 580;
+const ITEM_MIN = "13rem";
 // Room for a status badge and the live price beside it. Marketplace columns
 // stay this wide; the item column takes whatever the page has left.
 const CELL_WIDTH = "9.5rem";
@@ -62,6 +65,9 @@ const BADGE_VARIANT: Record<MarketplaceCellKind, "success" | "info" | "warning" 
 export function InventoryTablePage({
   conversations,
   loadFailed = false,
+  loadError,
+  retrying = false,
+  onRetry,
   onOpenListing,
   sidebarSearch = false,
   initialTab = "overview",
@@ -71,13 +77,36 @@ export function InventoryTablePage({
   sidebarSearch?: boolean;
   /** The inventory could not be read yet. */
   loadFailed?: boolean;
+  /** Why the inventory load failed, shown in the error banner when available. */
+  loadError?: string | null;
+  /** A manual or automatic retry is currently in flight. */
+  retrying?: boolean;
+  /** Re-requests the inventory list after a load failure. */
+  onRetry?: () => void;
   /** Opens the listing's editor, on a marketplace's tab when one is named. */
   onOpenListing: (id: string, tab?: string) => void;
   /** Optional initial tab (defaults to Overview). */
   initialTab?: InventoryTab;
 }) {
+  const queryClient = useQueryClient();
+  const handleRetry = onRetry ?? (() => { void queryClient.refetchQueries({ queryKey: ["conversations"] }); });
   const query = useListingSearch();
   const runtime = useWorkspaceRuntime();
+  const isPhone = usePhoneLayout();
+  const overviewContainerRef = useRef<HTMLDivElement>(null);
+  const [overviewWidth, setOverviewWidth] = useState(0);
+
+  useEffect(() => {
+    const el = overviewContainerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const update = () => setOverviewWidth(el.clientWidth);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const narrow = isPhone || (overviewWidth > 0 && overviewWidth < NARROW_BREAKPOINT_PX);
   const [activeTab, setActiveTab] = useState<InventoryTab>(initialTab);
   const [status, setStatus] = useState<ListingStatusFilter>("active");
   const [sort, setSort] = useState<ListingSortId>("recent");
@@ -115,10 +144,13 @@ export function InventoryTablePage({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
     getItemKey: (index) => rows[index].id,
-    estimateSize: () => ROW_HEIGHT,
+    estimateSize: () => (narrow ? PHONE_OVERVIEW_ROW_HEIGHT : ROW_HEIGHT),
     overscan: 8,
     initialRect: { width: 1000, height: 800 },
   });
+  useEffect(() => {
+    virtualizer.measure();
+  }, [narrow, virtualizer]);
   const visible = virtualizer.getVirtualItems();
   const readiness = useInventoryReadiness(rows, visible[0]?.index ?? 0, visible[visible.length - 1]?.index ?? -1, isOverview);
   const columns = { gridTemplateColumns: `minmax(${ITEM_MIN}, 1fr) 5.5rem repeat(${marketplaces.length}, ${CELL_WIDTH})` } as CSSProperties;
@@ -196,82 +228,157 @@ export function InventoryTablePage({
           </Select>
         </div>
 
-        <Tabs.Panel value={currentTab} className="flex min-h-0 flex-1 flex-col">
+        <Tabs.Panel ref={overviewContainerRef} value={currentTab} className="flex min-h-0 flex-1 flex-col">
           {isOverview ? (
             <Panel divided={false} className="flex min-h-0 flex-1 flex-col bg-background">
-              <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto overscroll-contain" role="table" aria-label="Inventory" aria-rowcount={rows.length + 1}>
-                <div style={tableWidth}>
-                  <div role="row" className="sticky top-0 z-20 grid border-b border-border/60 bg-background text-xs font-medium text-muted-foreground" style={columns}>
-                    <div role="columnheader" className="sticky left-0 z-10 bg-background px-4 py-2.5">Item</div>
-                    <div role="columnheader" className="px-3 py-2.5 text-right">Price</div>
-                    {marketplaces.map((id) => (
-                      <div key={id} role="columnheader" className="flex items-center gap-1.5 px-3 py-2.5">
-                        <MarketplaceLogo id={id} label="" size={16} />
-                        <span className="truncate text-foreground">{marketplaceName(id)}</span>
-                        {loading ? null : <span className="tabular-nums" aria-label={`${listed[id]} listed`}>{listed[id]}</span>}
-                      </div>
-                    ))}
-                  </div>
-                  {loading && loadFailed ? (
-                    <EmptyRow>Could not load listings. Retrying…</EmptyRow>
-                  ) : loading ? (
-                    <InventoryRowsSkeleton columns={columns} marketplaces={marketplaces.length} />
+              {loading && loadFailed ? (
+                <InventoryLoadError error={loadError} retrying={retrying} onRetry={handleRetry} />
+              ) : narrow ? (
+                <div ref={scrollRef} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain" role="list" aria-label="Inventory">
+                  {loading ? (
+                    <PhoneOverviewSkeleton />
                   ) : rows.length === 0 ? (
-                    <EmptyRow>{!all.length ? "No listings yet" : needle ? "No matching listings" : emptyTabLabel(status)}</EmptyRow>
+                    <div className="p-4">
+                      <EmptyRow>{!all.length ? "No listings yet" : needle ? "No matching listings" : emptyTabLabel(status)}</EmptyRow>
+                    </div>
                   ) : (
                     <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
                       {visible.map((item) => {
                         const listing = rows[item.index];
                         const title = listing.title || "Untitled";
                         const name = (nameBySku && listing.sku?.trim()) || title;
+                        const warnings = hasRowWarnings(listing, warnMissingSku);
                         return (
                           <div
                             key={item.key}
                             ref={virtualizer.measureElement}
                             data-index={item.index}
-                            role="row"
-                            aria-rowindex={item.index + 2}
-                            className="group/row absolute inset-x-0 grid border-b border-border/40"
-                            style={{ ...columns, minHeight: ROW_HEIGHT, transform: `translateY(${item.start}px)` }}
+                            role="listitem"
+                            className="absolute inset-x-0 flex flex-col gap-2 border-b border-border/40 px-3 py-3"
+                            style={{ transform: `translateY(${item.start}px)` }}
                           >
-                            <div role="rowheader" className="sticky left-0 z-10 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] bg-background group-hover/row:bg-accent">
+                            <div className="flex items-start gap-2">
                               <button
                                 type="button"
-                                className="flex min-h-12 min-w-0 cursor-pointer items-center gap-3 ps-4 pe-2 text-left outline-none focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                                className="flex min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                 title={name === title ? title : `${name} · ${title}`}
                                 onClick={() => onOpenListing(listing.id)}
                               >
-                                <ListingThumb src={displayCoverUrl(listing.cover_photo_url || listing.vendoo_cover_url)} className="size-9" />
-                                <span className="flex min-w-0 flex-col gap-0.5">
-                                  {/* Two lines fit the row; the button's tooltip has the whole title. */}
-                                  <span className={cn("text-sm font-medium text-foreground", listing.sku && !nameBySku ? "truncate" : "line-clamp-2 leading-tight")}>{name}</span>
+                                <ListingThumb src={displayCoverUrl(listing.cover_photo_url || listing.vendoo_cover_url)} className="size-10 shrink-0" />
+                                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                                  <span className="flex items-baseline justify-between gap-2">
+                                    <span className={cn("text-sm font-medium text-foreground", listing.sku && !nameBySku ? "truncate" : "line-clamp-2 leading-tight")}>{name}</span>
+                                    <span className="shrink-0 text-sm font-medium text-foreground tabular-nums">
+                                      {listing.price != null ? formatMoney(listing.price) : <span className="text-muted-foreground">—</span>}
+                                    </span>
+                                  </span>
                                   {listing.sku && !nameBySku ? <span className="truncate font-mono text-2xs text-muted-foreground">{listing.sku}</span> : null}
-                                  <RowWarnings listing={listing} warnMissingSku={warnMissingSku} />
                                 </span>
                               </button>
-                              {/* A favorite keeps its star in view; the others offer one on hover, as Gmail's rows do. */}
-                              <FavoriteToggle id={listing.id} title={title} favorite={Boolean(listing.favorite)}
-                                className={cn("me-2 self-center", !listing.favorite && "opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100")} />
-                              {listing.scheduled_publish_at ? (
-                                <div className="col-span-2 ps-4 pe-2 pb-2">
-                                  <DraftScheduleTag publishAt={listing.scheduled_publish_at} />
-                                </div>
-                              ) : null}
+                              <FavoriteToggle id={listing.id} title={title} favorite={Boolean(listing.favorite)} className="shrink-0 self-center" />
                             </div>
-                            <div role="cell" className="flex items-center justify-end px-3 text-sm text-foreground tabular-nums group-hover/row:bg-accent">
-                              {listing.price != null ? formatMoney(listing.price) : <span className="text-muted-foreground">—</span>}
+                            {warnings || listing.scheduled_publish_at ? (
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 ps-[3.25rem]">
+                                <RowWarnings listing={listing} warnMissingSku={warnMissingSku} />
+                                {listing.scheduled_publish_at ? <DraftScheduleTag publishAt={listing.scheduled_publish_at} /> : null}
+                              </div>
+                            ) : null}
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {marketplaces.map((id) => (
+                                <MarketplaceChipView
+                                  key={id}
+                                  listing={listing}
+                                  marketplace={id}
+                                  title={title}
+                                  onOpen={() => onOpenListing(listing.id, id)}
+                                  missing={readiness[listing.id]?.marketplaces[id as NativeMarketplace]?.missing}
+                                />
+                              ))}
                             </div>
-                            {marketplaces.map((id) => (
-                              <MarketplaceCellView key={id} listing={listing} marketplace={id} title={title} onOpen={() => onOpenListing(listing.id, id)}
-                                missing={readiness[listing.id]?.marketplaces[id as NativeMarketplace]?.missing} />
-                            ))}
                           </div>
                         );
                       })}
                     </div>
                   )}
                 </div>
-              </div>
+              ) : (
+                <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto overscroll-contain" role="table" aria-label="Inventory" aria-rowcount={rows.length + 1}>
+                  <div style={tableWidth}>
+                    <div role="row" className="sticky top-0 z-20 grid border-b border-border/60 bg-background text-xs font-medium text-muted-foreground" style={columns}>
+                      <div role="columnheader" className="sticky left-0 z-10 bg-background px-4 py-2.5">Item</div>
+                      <div role="columnheader" className="px-3 py-2.5 text-right">Price</div>
+                      {marketplaces.map((id) => (
+                        <div key={id} role="columnheader" className="flex items-center gap-1.5 px-3 py-2.5">
+                          <MarketplaceLogo id={id} label="" size={16} />
+                          <span className="truncate text-foreground">{marketplaceName(id)}</span>
+                          {loading ? null : <span className="tabular-nums" aria-label={`${listed[id]} listed`}>{listed[id]}</span>}
+                        </div>
+                      ))}
+                    </div>
+                    {loading ? (
+                      <InventoryRowsSkeleton columns={columns} marketplaces={marketplaces.length} />
+                    ) : rows.length === 0 ? (
+                      <EmptyRow>{!all.length ? "No listings yet" : needle ? "No matching listings" : emptyTabLabel(status)}</EmptyRow>
+                    ) : (
+                      <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
+                        {visible.map((item) => {
+                          const listing = rows[item.index];
+                          const title = listing.title || "Untitled";
+                          const name = (nameBySku && listing.sku?.trim()) || title;
+                          const warnings = hasRowWarnings(listing, warnMissingSku);
+                          return (
+                            <div
+                              key={item.key}
+                              ref={virtualizer.measureElement}
+                              data-index={item.index}
+                              role="row"
+                              aria-rowindex={item.index + 2}
+                              className="group/row absolute inset-x-0 grid border-b border-border/40"
+                              style={{ ...columns, minHeight: ROW_HEIGHT, transform: `translateY(${item.start}px)` }}
+                            >
+                              <div role="rowheader" className="sticky left-0 z-10 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] bg-background group-hover/row:bg-accent">
+                                <button
+                                  type="button"
+                                  className="flex min-h-12 min-w-0 cursor-pointer items-center gap-3 ps-4 pe-2 text-left outline-none focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                                  title={name === title ? title : `${name} · ${title}`}
+                                  onClick={() => onOpenListing(listing.id)}
+                                >
+                                  <ListingThumb src={displayCoverUrl(listing.cover_photo_url || listing.vendoo_cover_url)} className="size-9" />
+                                  <span className="flex min-w-0 flex-col gap-0.5">
+                                    {/* Two lines fit the row; the button's tooltip has the whole title. */}
+                                    <span className={cn("text-sm font-medium text-foreground", listing.sku && !nameBySku ? "truncate" : "line-clamp-2 leading-tight")}>{name}</span>
+                                    {listing.sku && !nameBySku ? <span className="truncate font-mono text-2xs text-muted-foreground">{listing.sku}</span> : null}
+                                  </span>
+                                </button>
+                                {/* A favorite keeps its star in view; the others offer one on hover, as Gmail's rows do. */}
+                                <FavoriteToggle id={listing.id} title={title} favorite={Boolean(listing.favorite)}
+                                  className={cn("me-2 self-center", !listing.favorite && "opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100")} />
+                                {warnings ? (
+                                  <div className="col-span-2 ps-16 pe-2 pb-1.5">
+                                    <RowWarnings listing={listing} warnMissingSku={warnMissingSku} />
+                                  </div>
+                                ) : null}
+                                {listing.scheduled_publish_at ? (
+                                  <div className="col-span-2 ps-4 pe-2 pb-2">
+                                    <DraftScheduleTag publishAt={listing.scheduled_publish_at} />
+                                  </div>
+                                ) : null}
+                              </div>
+                              <div role="cell" className="flex items-center justify-end px-3 text-sm text-foreground tabular-nums group-hover/row:bg-accent">
+                                {listing.price != null ? formatMoney(listing.price) : <span className="text-muted-foreground">—</span>}
+                              </div>
+                              {marketplaces.map((id) => (
+                                <MarketplaceCellView key={id} listing={listing} marketplace={id} title={title} onOpen={() => onOpenListing(listing.id, id)}
+                                  missing={readiness[listing.id]?.marketplaces[id as NativeMarketplace]?.missing} />
+                              ))}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </Panel>
           ) : (
             <MarketplaceSheetView
@@ -283,6 +390,9 @@ export function InventoryTablePage({
               emptyLabel={emptyTabLabel(status)}
               loading={loading}
               loadFailed={loadFailed}
+              loadError={loadError}
+              retrying={retrying}
+              onRetry={handleRetry}
               nameBySku={nameBySku}
               onOpenListing={onOpenListing}
             />
@@ -293,18 +403,100 @@ export function InventoryTablePage({
   );
 }
 
+function hasRowWarnings(listing: Listing, warnMissingSku: boolean): boolean {
+  const hasDrift = Boolean(listing.price_drift?.length);
+  const noSku = warnMissingSku && listing.status !== "sold" && !listing.sku?.trim();
+  return hasDrift || noSku;
+}
+
 /** Guardrail warnings under the item's name: no SKU, prices off the pricing rules. */
 function RowWarnings({ listing, warnMissingSku }: { listing: Listing; warnMissingSku: boolean }) {
   const drift = listing.price_drift || [];
   const noSku = warnMissingSku && listing.status !== "sold" && !listing.sku?.trim();
   if (!drift.length && !noSku) return null;
   return (
-    <span className="flex min-w-0 gap-2 truncate text-2xs font-medium text-warning-foreground">
+    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-2xs font-medium text-warning-foreground">
       {noSku ? <span>No SKU</span> : null}
       {drift.length ? (
-        <span title={drift.map((row) => `${marketplaceName(row.marketplace)}: ${formatMoney(row.price)} (rules say ${formatMoney(row.expected)})`).join(" · ")}>
-          Price inconsistency
-        </span>
+        <Popover>
+          <PopoverTrigger
+            type="button"
+            className="inline-flex cursor-pointer items-center gap-1 rounded-sm underline decoration-dotted underline-offset-2 outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:min-h-8 pointer-coarse:px-1 pointer-coarse:-mx-1"
+          >
+            <CircleAlertIcon className="size-3 shrink-0" aria-hidden="true" />
+            Price inconsistency
+          </PopoverTrigger>
+          <PopoverPopup side="bottom" align="start" touchBackdrop padding="compact" className="max-w-72">
+            <div className="flex flex-col gap-1.5 text-xs">
+              <p className="font-medium text-foreground">Price inconsistency</p>
+              <ul className="flex flex-col gap-1 text-muted-foreground">
+                {drift.map((row) => (
+                  <li key={row.marketplace} className="flex items-baseline justify-between gap-3 tabular-nums">
+                    <span className="font-medium text-foreground">{marketplaceName(row.marketplace)}</span>
+                    <span>
+                      {formatMoney(row.price)} (rules say {formatMoney(row.expected)})
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </PopoverPopup>
+        </Popover>
+      ) : null}
+    </div>
+  );
+}
+
+function MarketplaceChipView({ listing, marketplace, title, onOpen, missing }: {
+  listing: Listing;
+  marketplace: string;
+  title: string;
+  onOpen: () => void;
+  missing?: readonly MissingField[];
+}) {
+  const cell = marketplaceCell(listing, marketplace, missing);
+  const variant = cell.inactive ? "outline" : BADGE_VARIANT[cell.kind];
+  const name = marketplaceName(marketplace);
+  const price = marketplacePrice(listing, marketplace);
+  const priceText = price ? marketplacePriceDescription(price, name, listing.price) : null;
+  return (
+    <span className="inline-flex max-w-full items-center gap-0.5">
+      <button
+        type="button"
+        className="inline-flex min-h-8 max-w-full cursor-pointer items-center gap-1.5 rounded-lg border border-border/60 bg-card/60 px-2 py-1 text-left text-xs outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+        aria-label={`${title} on ${name}: ${cell.detail ?? cell.label}${priceText ? `, ${priceText}` : ""}. Open the ${name} form`}
+        onClick={onOpen}
+      >
+        <MarketplaceLogo id={marketplace} label="" size={14} />
+        {variant ? (
+          <Badge variant={variant} size="sm" className="truncate">{cell.label}</Badge>
+        ) : (
+          <span className={cn("truncate text-xs text-muted-foreground", cell.kind === "not_listed" && "text-muted-foreground/70")}>{cell.label}</span>
+        )}
+        {price ? (
+          <span
+            className={cn(
+              "shrink-0 text-xs tabular-nums",
+              price.differs ? "font-medium text-foreground" : "text-muted-foreground",
+              price.amount == null && "text-muted-foreground/70",
+            )}
+            data-differs={price.differs || undefined}
+          >
+            {price.label}
+          </span>
+        ) : null}
+      </button>
+      {cell.url ? (
+        <a
+          href={cell.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={`View ${title} on ${name}`}
+          title={`View on ${name}`}
+        >
+          <ExternalLinkIcon className="size-3.5" />
+        </a>
       ) : null}
     </span>
   );
@@ -362,6 +554,31 @@ function MarketplaceCellView({ listing, marketplace, title, onOpen, missing }: {
           <ExternalLinkIcon className="size-3.5" />
         </a>
       ) : null}
+    </div>
+  );
+}
+
+/** Stacked rows while the inventory loads on phones. */
+function PhoneOverviewSkeleton() {
+  return (
+    <div role="status" aria-label="Loading listings" aria-busy="true">
+      {Array.from({ length: 5 }, (_, index) => (
+        <div key={index} aria-hidden="true" className="flex flex-col gap-2.5 border-b border-border/40 px-3 py-3">
+          <div className="flex items-center gap-3">
+            <Skeleton className="size-10 flex-none rounded-md" />
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <Skeleton className={cn("h-4", index % 2 ? "w-3/5" : "w-3/4")} />
+              <Skeleton className="h-3 w-16" />
+            </div>
+            <Skeleton className="h-4 w-10" />
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <Skeleton shape="pill" className="h-7 w-20" />
+            <Skeleton shape="pill" className="h-7 w-24" />
+            <Skeleton shape="pill" className="h-7 w-20" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

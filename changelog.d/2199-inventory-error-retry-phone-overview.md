@@ -1,0 +1,1 @@
+- Inventory: show the load failure reason and a Retry button when listings fail to load, stack the Overview list cleanly on phones without horizontal scrolling, and open Price inconsistency details in a tap-accessible popover.

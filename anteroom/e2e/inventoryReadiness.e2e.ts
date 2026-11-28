@@ -22,8 +22,10 @@ test("the inventory table counts required fields a listing has not filled yet, b
     // The table opens on Active; a new listing is a draft.
     await page.getByRole("group", { name: "Listing status" }).getByRole("button", { name: /^Draft\b/ }).click();
     await page.getByRole("searchbox", { name: "Search listings by title, SKU or label" }).fill(title);
-    const table = page.getByRole("table", { name: "Inventory" });
-    const cell = table.getByRole("button", { name: new RegExp(`on Depop: Needs ${depop.length} fields?: .*Item price`) });
+    const inventory = phone
+      ? page.getByRole("list", { name: "Inventory" })
+      : page.getByRole("table", { name: "Inventory" });
+    const cell = inventory.getByRole("button", { name: new RegExp(`on Depop: Needs ${depop.length} fields?: .*Item price`) });
     await expect(cell).toBeVisible({ timeout: 20_000 });
     await expect(cell).toContainText(`Needs ${depop.length} field`);
     await page.screenshot({ path: info.outputPath("inventory-readiness.png") });

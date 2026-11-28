@@ -174,6 +174,11 @@ export function App() {
   });
   const conversations = inventory.data;
   const inventoryFailed = inventory.isError && conversations === undefined;
+  const inventoryError = inventory.error instanceof Error
+    ? inventory.error.message
+    : inventory.error
+      ? String(inventory.error)
+      : null;
   const assistantThreads = useQuery({
     queryKey: ["assistant", "threads"],
     queryFn: ({ signal }) => api.assistant.threads({ signal }),
@@ -1008,6 +1013,9 @@ export function App() {
                     <InventoryTablePage
                       conversations={conversations}
                       loadFailed={inventoryFailed}
+                      loadError={inventoryError}
+                      retrying={inventory.isFetching}
+                      onRetry={() => { void inventory.refetch(); }}
                       onOpenListing={openListing}
                       sidebarSearch={!isMobile && !sidebarHidden}
                     />
