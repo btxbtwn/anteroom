@@ -163,3 +163,38 @@ test("historical sales can be corrected entirely in Anteroom", async ({ page, re
   }
   await expect(row.getByText("Profit: $22.00", { exact: true })).toBeVisible();
 });
+
+test("keeps the Sales records filter bar on one row at 1280px and up, and exposes an Analytics h1", async ({ page, phone }) => {
+  await page.goto("/");
+  if (phone) {
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Analytics", exact: true }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Analytics" })).toHaveCount(1);
+    await expect(page.getByRole("button", { name: /^Filters/ })).toBeVisible();
+    return;
+  }
+
+  await page.getByRole("button", { name: "Analytics", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Analytics" })).toHaveCount(1);
+
+  for (const width of [1280, 1440]) {
+    await page.setViewportSize({ width, height: 800 });
+    const controls = [
+      page.getByRole("combobox", { name: "Sales period" }),
+      page.getByRole("searchbox", { name: "Search sales" }),
+      page.getByRole("combobox", { name: "Sales marketplace" }),
+      page.getByRole("combobox", { name: "Sales completeness" }),
+      page.getByRole("combobox", { name: "Sort sales" }),
+      page.getByRole("button", { name: "Refresh sales" }),
+      page.getByRole("button", { name: "Export CSV" }),
+    ];
+    for (const control of controls) await expect(control).toBeVisible();
+    const boxes = await Promise.all(controls.map((control) => control.boundingBox()));
+    const centers = boxes.map((box) => {
+      expect(box).not.toBeNull();
+      return box!.y + box!.height / 2;
+    });
+    const spread = Math.max(...centers) - Math.min(...centers);
+    expect(spread, `filter bar controls wrapped onto multiple rows at ${width}px`).toBeLessThan(8);
+  }
+});
