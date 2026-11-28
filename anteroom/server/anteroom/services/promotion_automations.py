@@ -19,7 +19,8 @@ import asyncio
 import logging
 import random
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from functools import lru_cache
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import cast
@@ -430,13 +431,18 @@ def pause(db: Session, automation_id: str | None = None, reason: str | None = No
 
 
 def listing(db: Session) -> dict:
-    report_overdue(db)
     labels = set()
     for (options,) in db.query(ListingPromotion.shipping_options).filter(
             ListingPromotion.marketplace == "poshmark", ListingPromotion.action.in_(("offer", "bundle_offer"))).order_by(
             ListingPromotion.created_at.desc()).limit(200).all():
         labels.update(option.get("label") for option in options or [] if option.get("label"))
     rows = db.query(PromotionAutomation).order_by(PromotionAutomation.created_at).all()
+    # Before a disconnected seller has been seen by this Machine's scheduler,
+    # preserve the settings observation without attributing a cause.
+    if all(tick_history(lane).last_success is None for lane in ("chrome", "cloud", "desktop")):
+        unseen = {(row.id, row.next_run_at, row.marketplace, row.action): "scheduler_not_observed_here"
+                  for row in rows if row.enabled and row.next_run_at is not None}
+        tick_history("settings").observe_reasons(unseen, _now())
     return {
         "automations": [out(db, row) for row in rows],
         "supported": {name: sorted(actions) for name, actions in promotions.SUPPORTED.items()},
@@ -1057,14 +1063,45 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
     return finished
 
 
-def report_overdue(db: Session) -> None:
-    """Report missed rounds without running them or changing their approval."""
-    cutoff = _now() - timedelta(minutes=30)
-    for row in db.query(PromotionAutomation).filter(
-        PromotionAutomation.enabled.is_(True), PromotionAutomation.next_run_at < cutoff,
-    ).all():
-        log.error("%s %s automation %s is overdue (seller %s, due %s, last run %s). Check the scheduler and Chrome connection.",
-                  row.marketplace, row.action, row.id, row.user_id, row.next_run_at, row.last_run_at)
+@dataclass
+class PromotionTickHistory:
+    last_success: datetime | None = None
+    blocked: dict[str, tuple[datetime, str]] = field(default_factory=dict)
+
+    def observe_reasons(self, reasons, moment: datetime):
+        overdue = {}
+        for (identity, due, market, action), reason in reasons.items():
+            if due >= moment - timedelta(minutes=30):
+                continue
+            overdue[identity] = (due, reason)
+            if self.blocked.get(identity) != (due, reason):
+                log.error("%s %s automation is overdue: blocker=%s due=%s last_successful_tick=%s",
+                          market, action, reason, _iso(due), _iso(self.last_success) or "unknown")
+        self.blocked = overdue
+
+
+@lru_cache(maxsize=2048)
+def _tick_history(owner: str, lane: str) -> PromotionTickHistory:
+    # Diagnostic memory only. Restart or eviction makes the next observation a first one.
+    return PromotionTickHistory()
+
+
+def tick_history(lane: str) -> PromotionTickHistory:
+    from anteroom.services.service_context import current
+    context = current()
+    return _tick_history(context.seller_id if context else "local", lane)
+
+
+def log_pass_failure(owner: str, lane: str):
+    previous = _tick_history(owner, lane).last_success
+    log.exception("Promotion scheduler pass failed: lane=%s last_successful_tick=%s",
+                  lane, _iso(previous) or "unknown")
+
+
+def report_overdue(db: Session, *, history: PromotionTickHistory, reason: str, skip_cloud: bool = False) -> None:
+    moment = _now()
+    rows = _due_automations(db, moment, marketplaces=None, skip_cloud=skip_cloud)
+    history.observe_reasons({row: reason for row in rows}, moment)
 
 
 def _shipping_choice_for(marketplace: str, shipping_label: str | None, send: ListingPromotion) -> str | None:
@@ -1094,7 +1131,7 @@ def _due_automations(
     *,
     marketplaces: tuple[str, ...] | None = None,
     skip_cloud: bool = False,
-) -> list[tuple[str, datetime | None, str]]:
+) -> list[tuple[str, datetime, str, str]]:
     from anteroom.services import cloud_sessions
     from anteroom.services.listing_mode import read
     if read(db) == "vendoo":
@@ -1107,7 +1144,7 @@ def _due_automations(
     rows = query.order_by(PromotionAutomation.next_run_at).all()
     if skip_cloud:
         rows = [row for row in rows if not cloud_sessions.has_active_write_session(row.marketplace, db)]
-    return [(row.id, row.next_run_at, row.marketplace) for row in rows]
+    return [(row.id, row.next_run_at, row.marketplace, row.action) for row in rows if row.next_run_at is not None]
 
 
 def _has_active_job(db: Session) -> bool:
@@ -1126,14 +1163,32 @@ async def tick(
     due = await in_worker_session(
         lambda db: _due_automations(db, moment, marketplaces=marketplaces, skip_cloud=skip_cloud)
     )
+    lane = "cloud" if marketplaces is not None else "chrome" if skip_cloud else "desktop"
+    history = tick_history(lane)
     ran = 0
-    for automation_id, next_run_at, marketplace in due:
-        if await in_worker_session(_has_active_job):
-            break
-        if await run_worker_db_step(_awaiting_chrome_at, next_run_at, moment, marketplace):
-            continue
-        if await run_round(automation_id, expected_next_run_at=next_run_at, sleep=sleep) is not None:
-            ran += 1
+    blocked = {}
+    for index, row in enumerate(due):
+        automation_id, next_run_at, marketplace, action = row
+        try:
+            if await in_worker_session(_has_active_job):
+                for pending in due[index:]:
+                    blocked[pending] = "active_job"
+                break
+            if await run_worker_db_step(_awaiting_chrome_at, next_run_at, moment, marketplace):
+                blocked[row] = "chrome_disconnected"
+                continue
+            if await run_round(automation_id, expected_next_run_at=next_run_at, sleep=sleep) is not None:
+                ran += 1
+                blocked[row] = "started_late"
+            else:
+                blocked[row] = "round_not_claimed"
+        except Exception:
+            for pending in due[index:]:
+                blocked[pending] = "scheduler_pass_failed"
+            history.observe_reasons(blocked, moment)
+            raise
+    history.observe_reasons(blocked, moment)
+    history.last_success = _now()
     return ran
 
 
@@ -1327,7 +1382,7 @@ async def _timer() -> None:
             await check_new_likes()
             await tick()
         except Exception:  # noqa: BLE001 - one bad round must not stop the clock
-            log.exception("promotion automation tick failed; unconfirmed sends are never retried")
+            log_pass_failure("local", "desktop")
 
 
 def start() -> None:

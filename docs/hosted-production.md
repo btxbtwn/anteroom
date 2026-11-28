@@ -752,6 +752,13 @@ abrupt termination before persistence or a full queue can omit an email report.
 Original application logs remain the diagnostic source; the status includes
 the process's queue-drop count.
 
+Promotion schedulers record a reason when a round is over 30 minutes late and
+the observed reason changes. A busy job, a disconnected Chrome route, an
+unclaimed round, a failed scheduler pass and a late start have separate labels.
+The previous successful tick is scoped to this seller and scheduling process.
+A restart or diagnostic-cache eviction resets that history. A settings read
+before a known tick can report an overdue round with an unknown cause.
+
 **Operator triage.** Complete the
 [two-phase lifecycle rollout](error-email-storage.md#lifecycle-rollout)
 before enabling triage. Use the operator's Supabase access token for the group API.

@@ -1,0 +1,1 @@
+- Overdue promotion rounds report the observed blocker and last successful scheduler tick when the blocker changes.
