@@ -415,8 +415,12 @@ function depopSize(listing, category, attributes) {
   if (!set) return { problem: 'a size Depop offers for this category' };
   const sizes = set.sizes || [];
   if (Object.hasOwn(listing.depop_specifics || {}, 'size')) {
-    const wanted = marketplaceNameKey(listing.depop_specifics.size);
-    const matches = sizes.filter(size => marketplaceNameKey(depopName(size)) === wanted);
+    const wanted = sizeKey(listing.depop_specifics.size);
+    if (!wanted) return { problem: 'a size' };
+    // Depop can offer both a plain number and an inch size in the same set.
+    const exact = sizes.filter(size => sizeKey(depopName(size)) === wanted);
+    const key = marketplaceNameKey(wanted);
+    const matches = exact.length || !key ? exact : sizes.filter(size => marketplaceNameKey(depopName(size)) === key);
     return matches.length === 1 ? { set: Number(set.id), id: Number(matches[0].id) }
       : { problem: 'a size Depop offers for this category' };
   }
@@ -538,6 +542,7 @@ async function depopResolvedFields(payload) {
   const attributes = await depopAttributes(payload.deadline);
   const category = depopCategory(listing, attributes);
   const fields = depopFormFields(listing, attributes);
+  payload.depop_size_problem = null;
   if (category) {
     // The listing site stores product type, kids, and gender. Department and
     // group are how the catalog is organised, not fields on the draft.
@@ -549,6 +554,7 @@ async function depopResolvedFields(payload) {
     const size = depopSize(listing, category, attributes);
     if (!size.problem && !size.none) Object.assign(fields, { variant_set: size.set, variants: { [size.id]: quantity } });
     else if (size.none) Object.assign(fields, { variant_set: null, variants: {}, quantity });
+    else payload.depop_size_problem = size.problem;
     const extra = depopAttributeValues(listing, category, attributes);
     fields.attributes = extra.values;
   }
@@ -1345,6 +1351,9 @@ async function depopApiAction(action, payload) {
     }
     if (action === 'prepare_publish' || action === 'publish') {
       if (payload.action !== 'publish' || payload.confirm !== true) throw marketplaceError('Confirm listing on Depop.');
+      if (payload.depop_size_problem) {
+        throw marketplaceMissing('depop', [{ field: 'depop_specifics.size', needs: payload.depop_size_problem }]);
+      }
       let draft = await request('GET', path);
       // Depop's missing list is what it computed at the last write, so a draft saved
       // before its shipping was complete keeps saying so after the fix. A shipping

@@ -1337,6 +1337,35 @@ test('Depop clothing Size edits replace a cleared label and serialize the select
   assert.deepEqual(JSON.parse(JSON.stringify(recovered.variants)), { 80: 1 });
 });
 
+test('Depop writes both distinct women’s jeans sizes and blocks publishing with an unresolved size', async () => {
+  const { c, requests, payload } = page();
+  const attributes = { ...ATTRIBUTES,
+    category_size_mapping: [{ department: 'womenswear', product_type: 'jeans', size_set_by_region: { US: 41 } }],
+    size_sets: [{ id: 41, sizes: [{ id: 80, name: '30' }, { id: 81, name: '30"' }] }] };
+  const draft = { description: 'Private draft', price_amount: '12', pictures: [{ id: 9 }], missing_fields: [] };
+  c.fetch = async (url, options) => {
+    requests.push({ url, ...options });
+    return reply(200, options.method === 'GET' ? draft : { id: 'publish-job' });
+  };
+  withCatalog(c, { attributes: [200, attributes] });
+  const item = { ...FULL, size: '30"', direct_category_ids: { depop: 'womenswear_jeans' } };
+  const resolved = { ...payload, listing: item, action: 'publish', confirm: true };
+  for (const [label, id] of [['30', 80], ['30"', 81]]) {
+    item.depop_specifics = { ...FULL.depop_specifics, size: label };
+    const fields = await c.depopResolvedFields(resolved);
+    const body = c.depopDraftWriteBody(item, fields, [9]);
+    assert.equal(body.variant_set, 41);
+    assert.deepEqual(JSON.parse(JSON.stringify(body.variants)), { [id]: 1 });
+  }
+
+  item.depop_specifics = { ...FULL.depop_specifics, size: '31' };
+  resolved.depop_fields = await c.depopResolvedFields(resolved);
+  const result = await c.depopApiAction('publish', resolved);
+  assert.equal(result.error_code, 'missing_fields');
+  assert.match(result.error, /size Depop offers for this category/);
+  assert.ok(!requests.some(request => request.method === 'POST'));
+});
+
 test('Depop publish refuses a draft whose size or type is not the one sent', async () => {
   const { c, requests, payload } = page();
   const fields = { product_type: 'jackets', variant_set: 100, variants: { 23: 1 }, attributes: { 'jacket-type': ['windbreaker'] } };
