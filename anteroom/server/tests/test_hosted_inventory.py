@@ -13,6 +13,7 @@ from test_seller_ownership import migration_engine  # noqa: F401
 from test_seller_sessions import USER_ID, jwks, signing_keys  # noqa: F401
 from anteroom.models.conversation import Photo
 from anteroom.models.listing import Listing, ListingRevision
+from anteroom.routes import api_contract as contract
 from anteroom.services import hosted_photos, schema_migrations
 
 
@@ -76,7 +77,9 @@ def test_photo_lifecycle_checks_owner_and_never_uses_local_files(cloud, signing_
     uploaded = client.post(path, headers=alice, content=image_bytes())
     assert uploaded.status_code == 201
     photo = uploaded.json()
-    assert set(photo) == {'id', 'width', 'height', 'size_bytes'}
+    # The shared contract's ListingPhoto, the same shape the editor's photo list reads.
+    assert set(photo) == set(contract.ListingPhoto.model_fields)
+    assert photo['conversation_id'] == draft['id'] and 'stored_filename' not in photo
     assert photo['width'] == 40 and photo['height'] == 30
     assert client.get(path, headers=alice).json() == [photo]
     photo_path = path + '/' + photo['id']

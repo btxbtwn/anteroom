@@ -1,0 +1,1 @@
+- On iPhone, photos you add no longer say they didn't upload when they did.

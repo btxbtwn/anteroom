@@ -4,24 +4,17 @@ import hashlib
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from typing import Literal
-from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
 
 from anteroom.models.conversation import Conversation, Photo
+from anteroom.routes import api_contract as contract
+from anteroom.routes.hosted_workspace import photo_response
 from anteroom.services import hosted_photos as photos
 from anteroom.services.hosted_database import get_seller_db, in_seller_session
 from anteroom.services.hosted_limits import hold_upload_slot, read_bounded_body
 
 router = APIRouter(prefix='/api/drafts/{draft_id}/photos')
 log = logging.getLogger(__name__)
-
-
-class PhotoResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: str
-    width: int | None
-    height: int | None
-    size_bytes: int
 
 
 def require_draft(db, draft_id, *, lock=False):
@@ -46,11 +39,11 @@ def get_photo(db, draft_id, photo_id):
     return photo
 
 
-@router.get('', response_model=list[PhotoResponse])
+@router.get('', response_model=list[contract.ListingPhoto])
 def list_photos(draft_id: str, db=Depends(get_seller_db, scope="function")):
     require_draft(db, draft_id)
-    return db.scalars(select(Photo).where(Photo.conversation_id == draft_id)
-                      .order_by(Photo.display_order, Photo.id)).all()
+    return [photo_response(row) for row in db.scalars(select(Photo).where(Photo.conversation_id == draft_id)
+                                                      .order_by(Photo.display_order, Photo.id)).all()]
 
 
 def save_photo(db, draft_id, key, data, width, height, marketplace=None):
@@ -69,11 +62,18 @@ def save_photo(db, draft_id, key, data, width, height, marketplace=None):
                   width=width, height=height, display_order=0 if highest is None else highest + 1,
                   marketplace=marketplace)
     db.add(photo)
+    db.flush()
+    # The photo as the photo list shows it (stored values, so the same
+    # created_at), so a client adds it without reading the list again. Built
+    # before the commit: nothing may touch the database after the row is
+    # committed, or a failed read would make the caller delete saved bytes.
+    db.refresh(photo)
+    response = photo_response(photo)
     db.commit()
-    return PhotoResponse.model_validate(photo)
+    return response
 
 
-@router.post('', response_model=PhotoResponse, status_code=201)
+@router.post('', response_model=contract.ListingPhoto, status_code=201)
 async def upload_photo(draft_id: str, request: Request, marketplace: Literal['poshmark', 'mercari', 'depop', 'ebay', 'etsy'] | None = None):
     # Check ownership before reading bytes. Hold one per-seller upload slot
     # across body receive and Pillow normalization so concurrent uploads cannot
