@@ -41,7 +41,9 @@ def _ci_nodes() -> set[str]:
     for job in workflow['jobs'].values():
         for step in job.get('steps', []):
             if 'setup-node' in str(step.get('uses', '')):
-                found.add(str(step['with']['node-version']))
+                # Docker declares a Node major; browser execution additionally
+                # pins its vetted patch in browser-project-evidence.mjs.
+                found.add(str(step['with']['node-version']).split('.')[0])
     return found
 
 
