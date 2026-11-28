@@ -1,0 +1,44 @@
+<section id="candidate-browser-timing" data-viz-composition>
+  <div data-viz-container></div>
+  <script type="application/json" data-viz-chart>
+    {
+      "charts": [
+        {
+          "id": "sandbox-elapsed",
+          "title": "Sandbox elapsed time",
+          "description": "Seconds, including queue, setup and final evidence validation.",
+          "height": 200,
+          "spec": {
+            "type": "horizontalBar",
+            "x": "seconds",
+            "y": "run",
+            "xLabel": "Seconds",
+            "showValues": true
+          },
+          "columns": ["run", "seconds"],
+          "rows": [["Baseline", 1282], ["Earlier trial", 659], ["Candidate", 932]]
+        },
+        {
+          "id": "sandbox-runner-time",
+          "title": "Total runner time",
+          "description": "Job seconds, including aggregate validation; not invoiced billing.",
+          "height": 200,
+          "spec": {
+            "type": "horizontalBar",
+            "x": "seconds",
+            "y": "run",
+            "xLabel": "Seconds",
+            "showValues": true
+          },
+          "columns": ["run", "seconds"],
+          "rows": [["Baseline", 1270], ["Earlier trial", 1727], ["Candidate", 2236]]
+        }
+      ]
+    }
+  </script>
+</section>
+<script type="module">
+  import { mountChart } from "https://persistent.oaistatic.com/plugins/visualize/charts/1.2.3/element.js";
+  const root = document.getElementById("candidate-browser-timing");
+  mountChart(root.querySelector("[data-viz-container]"), JSON.parse(root.querySelector("[data-viz-chart]").textContent));
+</script>
