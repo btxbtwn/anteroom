@@ -64,20 +64,6 @@ DELIST_BLOCKERS = ("signed_out", "challenge", "chrome_unavailable", "rate_limite
 RULE_DISABLED_AFTER_DELETE = "The relist rule was turned off after deletion. Review the listing before recreating it."
 # How long a relist cancelled mid-delete waits to put its price back.
 RESTORE_PRICE_DEADLINE_S = 30.0
-# Marketplaces whose replacement is first saved as a native draft, which the marketplace
-# can refuse. Relisting deletes the old listing first, so a refused draft left the item
-# down (production 2026-11-25: Mercari refused native_mercari_save_draft after the delete).
-# A replacement draft cannot be saved and verified before that delete: the item's one
-# marketplace_listings row holds the live listing, and a draft is refused while it is live.
-# Until it can, Auto-Relist leaves these listings up rather than delete one first.
-REPLACEMENT_UNVERIFIED = {
-    "mercari": ("Mercari Auto-Relist is paused: Mercari can refuse the replacement after the old listing is "
-                "deleted, so Anteroom leaves Mercari listings up with their price unchanged."),
-}
-# A paused marketplace logs why at most once a day. The row neither counts toward the
-# daily cap nor starts the retry wait, since nothing was tried.
-PAUSED_STATUS = "skipped_paused"
-PAUSED_LOG_INTERVAL = timedelta(hours=24)
 
 
 class AutoRelistError(ValueError):
@@ -146,7 +132,7 @@ def _default_rule_view(marketplace: str, relisted_today: int = 0) -> dict[str, A
         "relisted_today": relisted_today,
         "remaining_today": max(DEFAULT_DAILY_CAP - relisted_today, 0),
         "last_run_at": None,
-        "paused_reason": REPLACEMENT_UNVERIFIED.get(marketplace),
+        "paused_reason": None,
     }
 
 
@@ -167,7 +153,7 @@ def rule_view(db: Session, row: MarketplaceRelistRule, moment: datetime | None =
         "relisted_today": done,
         "remaining_today": max(int(row.daily_cap) - done, 0),
         "last_run_at": _iso(row.last_run_at),
-        "paused_reason": REPLACEMENT_UNVERIFIED.get(row.marketplace),
+        "paused_reason": None,
     }
 
 
@@ -891,7 +877,9 @@ def _reconcile_pending_relists(
                 changed = True
                 continue
             row.status = "down_needs_relist"
-            if ml is not None and ml.error:
+            if row.marketplace == "mercari":
+                row.reason = _mercari_recovery_reason(ml.error if ml is not None else None)
+            elif ml is not None and ml.error:
                 row.reason = str(ml.error)[:500]
             changed = True
             continue
@@ -1068,6 +1056,11 @@ def _record_log(
     }
 
 
+def _mercari_recovery_reason(error: str | None) -> str:
+    return ("The original Mercari listing was removed. Check your live listings first. If the replacement is absent, "
+            "open the saved Mercari draft, review its photos and publish it manually. " + (error or ""))[:500].rstrip()
+
+
 def _rule_enabled(db: Session, rule_id: str) -> bool:
     rule = db.get(MarketplaceRelistRule, rule_id)
     return bool(rule and rule.enabled)
@@ -1154,9 +1147,6 @@ def _reserve_relist_attempt(
             return {"reserved": False, "outcome": None}
 
         price_error = poshmark_fractional_price_error(new_price) if marketplace == "poshmark" else None
-        if (paused := REPLACEMENT_UNVERIFIED.get(marketplace)) is not None:
-            return {"reserved": False, "outcome": _record_pause(db, entry, paused, moment)}
-
         preflight_error = readiness_error or price_error
         revision_id = None if preflight_error else _prepare_price_revision(
             db, conv_id, marketplace, new_price, current_revision_id,
@@ -1194,32 +1184,6 @@ def _reserve_relist_attempt(
         )
         return {"reserved": True, "attempt_id": attempt_id, "revision_id": revision_id,
                 "original_revision_id": current_revision_id}
-
-
-def _record_pause(db: Session, entry: dict[str, Any], reason: str, moment: datetime) -> dict[str, Any]:
-    """Log that a paused marketplace left this listing up, at most once a day.
-
-    Nothing is deleted, priced or sent. A pass within the interval reports the
-    reason without writing another row.
-    """
-    marketplace = entry["marketplace"]
-    outcome = {
-        "conversation_id": entry["conversation_id"], "marketplace": marketplace,
-        "old_listing_id": entry["listing_id"], "new_listing_id": None, "status": PAUSED_STATUS, "reason": reason,
-    }
-    logged = (
-        db.query(MarketplaceRelistLog.id)
-        .filter(MarketplaceRelistLog.marketplace == marketplace, MarketplaceRelistLog.status == PAUSED_STATUS,
-                MarketplaceRelistLog.created_at > moment - PAUSED_LOG_INTERVAL)
-        .first()
-    )
-    if logged is not None:
-        return outcome
-    return _record_log(
-        db, conv_id=entry["conversation_id"], marketplace=marketplace, old_listing_id=entry["listing_id"],
-        new_listing_id=None, old_price=entry["price"], new_price=entry["price"], status=PAUSED_STATUS,
-        reason=reason, moment=moment,
-    )
 
 
 def _update_attempt_stage(
@@ -1279,7 +1243,7 @@ async def run_auto_relist(
                 "old_price": entry["price"],
                 "new_price": entry["new_price"],
                 "status": "dry_run",
-                "reason": REPLACEMENT_UNVERIFIED.get(entry["marketplace"]),
+                "reason": None,
             }
             for entry in plan
         ]
@@ -1287,8 +1251,6 @@ async def run_auto_relist(
     async def _run_delist(
         conv_id: str, marketplace: str, expected_listing_id: str, rule_id: str, revision_id: str
     ) -> dict[str, Any]:
-        if marketplace in REPLACEMENT_UNVERIFIED:
-            return {"ok": False, "error": REPLACEMENT_UNVERIFIED[marketplace]}
         if not await in_worker_session(_rule_enabled, rule_id):
             return {
                 "ok": False,
@@ -1306,13 +1268,16 @@ async def run_auto_relist(
                 confirm=True,
                 expected={marketplace: expected_listing_id},
                 relist_rule_id=rule_id,
-                expected_revision_id=revision_id if marketplace == "depop" else None,
+                expected_revision_id=revision_id if marketplace in {"depop", "mercari"} else None,
             )
         except DelistError as exc:
             if exc.reason == "relist_rule_disabled":
                 return {"ok": False, "skipped": True, "error": str(exc)}
             return {"ok": False, "error": str(exc), "error_code": exc.reason}
         entry_res = res.get(marketplace) or {}
+        if marketplace == "mercari" and entry_res.get("state") == "deleted" and entry_res.get("already_gone"):
+            return {"ok": False, "already_gone": True,
+                    "error": "The original Mercari listing was already absent. Check why it was removed before using the saved draft."}
         return {
             "ok": entry_res.get("state") == "deleted",
             "error": entry_res.get("error"),
@@ -1418,9 +1383,6 @@ async def run_auto_relist(
         if not reservation["reserved"]:
             if reservation.get("outcome") is not None:
                 outcomes.append(reservation["outcome"])
-                if market in REPLACEMENT_UNVERIFIED:
-                    # One refusal per pass says why; the rest of this marketplace waits.
-                    blocked_markets.add(market)
             continue
 
         attempt_id = reservation["attempt_id"]
@@ -1448,6 +1410,8 @@ async def run_auto_relist(
                 log.warning("Auto-relist could not put back the prices of %s after a failed delist", conv_id,
                             exc_info=True)
             delist_status = "skipped_rule_disabled" if delist_res.get("skipped") else "failed"
+            if delist_res.get("already_gone"):
+                delist_status = "down_needs_relist"
             outcomes.append(await in_worker_session(_record_log_payload, {
                 "attempt_id": attempt_id, "conv_id": conv_id,
                 "marketplace": market,
@@ -1480,6 +1444,8 @@ async def run_auto_relist(
                 status = "relist_pending"
             else:
                 status = "down_needs_relist"
+                if market == "mercari":
+                    error_msg = _mercari_recovery_reason(error_msg)
             outcomes.append(await in_worker_session(_record_log_payload, {
                 "attempt_id": attempt_id, "conv_id": conv_id,
                 "marketplace": market,

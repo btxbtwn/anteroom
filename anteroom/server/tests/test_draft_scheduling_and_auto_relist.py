@@ -2085,106 +2085,166 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.db.commit()
         return conv.id, rev.id
 
-    def _assert_mercari_left_up(self, conv_id: str, revision_id: str, old_id: str) -> None:
+    def _connect_mercari_bridge(self, respond):
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+
+        from anteroom.services.photo_store import LocalPhotoStore
+
+        store = LocalPhotoStore(self.enterContext(TemporaryDirectory()))
+        store.put("photo1.jpg", b"test photo")
+        self.enterContext(patch("anteroom.services.photo_store._store", store))
+        manager = SimpleNamespace(connected=True, capabilities={"marketplace.actions"})
+        self.enterContext(patch("anteroom.services.extension_connection.extension_manager", manager))
+        self.enterContext(patch("anteroom.services.browser_bridge.request", side_effect=respond))
+
+    def test_mercari_relist_keeps_refused_item_up_and_publishes_next_ready_draft(self):
+        first, _ = self._mercari_due("Coat", "m123456781", age_days=50)
+        second, _ = self._mercari_due("Vest", "m123456782")
+        auto_relist.save_rule(self.db, "mercari", {"enabled": True, "price_adjust_mode": "percent",
+                                                    "price_adjust_value": 10}, confirm=True)
+        actions = []
+        draft_url = "https://www.mercari.com/sell/draft/ready123/"
+        new_url = "https://www.mercari.com/us/item/m123456789/"
+
+        async def respond(job, message, payload, **kwargs):
+            action = payload.get("action", message)
+            actions.append(action)
+            if action == "prepare_relist":
+                self.assertFalse(payload["confirm"])
+                self.assertIsNone(payload["draft_url"])
+                self.assertEqual(payload["listing"]["mercari_specifics"]["price"], 52)
+                if len(actions) == 1:
+                    return {"ok": False, "error_code": "rejected", "error": "Mercari refused the draft."}
+                return {"ok": True, "state": "draft", "draft_url": draft_url, "photo_ids": ["uploaded1"]}
+            self.assertEqual(message, "marketplace.execute")
+            self.assertEqual(payload["draft_url"], draft_url)
+            self.assertEqual(payload["expected_photo_ids"], ["uploaded1"])
+            if action == "delete_for_relist":
+                self.assertTrue(payload["confirm"])
+                self.assertEqual(payload["listing_id"], "m123456782")
+                return {"ok": True, "state": "deleted"}
+            self.assertEqual((action, payload["confirm"]), ("publish_relist", True))
+            return {"ok": True, "state": "published", "draft_url": draft_url, "listing_url": new_url}
+
+        self._connect_mercari_bridge(respond)
+        outcomes = asyncio.run(auto_relist.run_auto_relist(now=_now(), scheduled=True))
+        self.assertEqual([(r["conversation_id"], r["status"]) for r in outcomes],
+                         [(first, "failed"), (second, "completed")], outcomes)
+        self.assertEqual(actions, ["prepare_relist", "prepare_relist", "delete_for_relist", "publish_relist"])
         self.db.expire_all()
-        live = self.db.query(MarketplaceListing).filter_by(conversation_id=conv_id, marketplace="mercari").one()
-        self.assertEqual((live.state, live.listing_id, live.listed_price), ("published", old_id, 58.0))
-        current = self.db.query(Listing).filter_by(conversation_id=conv_id).one()
-        self.assertEqual(current.current_revision_id, revision_id)
-        prices = self.db.get(ListingRevision, current.current_revision_id)
-        assert prices is not None
-        self.assertEqual(auto_relist.price_for(prices.listing_json, "mercari"), 58.0)
+        live = self.db.query(MarketplaceListing).filter_by(conversation_id=first).one()
+        self.assertEqual((live.state, live.listing_id, live.listed_price), ("published", "m123456781", 58))
+        current = self.db.query(Listing).filter_by(conversation_id=first).one()
+        rev = self.db.get(ListingRevision, current.current_revision_id)
+        self.assertEqual(auto_relist.price_for(rev.listing_json, "mercari"), 58)
+        replacement = self.db.query(MarketplaceListing).filter_by(conversation_id=second).one()
+        self.assertEqual((replacement.state, replacement.listing_id, replacement.listed_price),
+                         ("published", "m123456789", 52))
+        self.assertTrue(self.db.query(MarketplaceRelistRule).one().enabled)
+        self.assertIsNone(auto_relist.rule_view(self.db, self.db.query(MarketplaceRelistRule).one())["paused_reason"])
 
-    def test_mercari_relist_never_deletes_before_mercari_accepts_a_replacement(self):
-        """Production 2026-11-25: the delete ran, then Mercari refused the replacement draft."""
-        first = self._mercari_due("Mercari coat", "m123456781", age_days=50)
-        second = self._mercari_due("Mercari vest", "m123456782", age_days=45)
-        auto_relist.save_rule(self.db, "mercari", {"enabled": True, "min_age_days": 30, "daily_cap": 10,
-                                                    "price_adjust_mode": "percent", "price_adjust_value": 10},
-                              confirm=True)
-        refused = {"state": "not_saved", "error": "Mercari could not save this listing.", "error_code": "rejected"}
-        with (
-            patch("anteroom.services.marketplace_delist.delist", AsyncMock(return_value={
-                "mercari": {"state": "deleted"},
-            })) as delete,
-            patch("anteroom.services.native_marketplaces.list_now", AsyncMock(return_value=refused)) as publish,
-            patch("anteroom.services.native_marketplaces.save_draft", AsyncMock(return_value=refused)) as draft,
-        ):
-            outcomes = asyncio.run(auto_relist.run_auto_relist(now=_now()))
-            again = asyncio.run(auto_relist.run_auto_relist(now=_now(), respect_backoff=False))
+    def test_mercari_count_only_bridge_stops_before_deletion(self):
+        conv, _ = self._mercari_due("Coat", "m123456781")
+        auto_relist.save_rule(self.db, "mercari", {"enabled": True}, confirm=True)
+        actions = []
 
-        delete.assert_not_awaited()
-        publish.assert_not_awaited()
-        draft.assert_not_awaited()
-        # One refusal per pass: the oldest listing says why and the rest of Mercari waits.
-        self.assertEqual([(row["conversation_id"], row["status"]) for row in outcomes], [(first[0], "skipped_paused")])
-        self.assertIn("leaves Mercari listings up", outcomes[0]["reason"])
-        self.assertEqual([row["status"] for row in again], ["skipped_paused"])
-        self._assert_mercari_left_up(*first, "m123456781")
-        self._assert_mercari_left_up(*second, "m123456782")
-        self.assertEqual(self.db.query(MarketplaceRelistLog).filter_by(status="relist_pending").count(), 0)
-        # The second pass reports the pause without logging it again.
-        logged = self.db.query(MarketplaceRelistLog).filter_by(marketplace="mercari").all()
-        self.assertEqual([(row.status, row.old_price, row.new_price, row.price_revision_id) for row in logged],
-                         [("skipped_paused", 58.0, 58.0, None)])
+        async def respond(job, message, payload, **kwargs):
+            actions.append(payload.get("action", message))
+            return {"ok": True, "state": "draft", "draft_url": "https://www.mercari.com/sell/draft/legacy/"}
 
-    def test_a_paused_mercari_rule_logs_once_a_day_and_uses_none_of_its_cap(self):
-        self._mercari_due("Mercari boots", "m123456785", age_days=50)
-        self._mercari_due("Mercari belt", "m123456786", age_days=45)
-        auto_relist.save_rule(self.db, "mercari", {"enabled": True, "min_age_days": 30, "daily_cap": 1}, confirm=True)
-        start = _now()
-        delete = AsyncMock(return_value={"mercari": {"state": "deleted"}})
-        with patch("anteroom.services.marketplace_delist.delist", delete):
-            for minutes in (0, 5, 10, 60 * 23):
-                asyncio.run(auto_relist.run_auto_relist(now=start + timedelta(minutes=minutes), scheduled=True))
-            self.assertEqual(self.db.query(MarketplaceRelistLog).count(), 1)
-            asyncio.run(auto_relist.run_auto_relist(now=start + timedelta(hours=24, minutes=5), scheduled=True))
-        delete.assert_not_awaited()
-        self.assertEqual(self.db.query(MarketplaceRelistLog).filter_by(status="skipped_paused").count(), 2)
-        rule = next(row for row in auto_relist.list_rules(self.db, now=start + timedelta(hours=24, minutes=6))
-                    if row["marketplace"] == "mercari")
-        self.assertEqual((rule["relisted_today"], rule["remaining_today"]), (0, 1))
-        self.assertIn("leaves Mercari listings up", rule["paused_reason"])
+        self._connect_mercari_bridge(respond)
+        outcomes = asyncio.run(auto_relist.run_auto_relist(now=_now()))
+        self.assertEqual(actions, ["prepare_relist"])
+        self.assertIn("Update Anteroom Bridge", outcomes[0]["reason"])
+        self.db.expire_all()
+        self.assertEqual(self.db.query(MarketplaceListing).filter_by(conversation_id=conv).one().listing_id, "m123456781")
 
-    def test_mercari_relist_refuses_even_an_injected_runner_and_other_marketplaces_still_relist(self):
-        mercari = self._mercari_due("Mercari scarf", "m123456783", age_days=60)
-        conv, _, _ = self._create_draft("Poshmark scarf", price=50.0)
-        posh_old = "5f00000000000000000000e1"
-        self.db.add(MarketplaceListing(
-            id=new_id(), conversation_id=conv.id, marketplace="poshmark", state="published",
-            listing_id=posh_old, listing_url=f"https://poshmark.com/listing/{posh_old}",
-            listed_price=50.0, listed_at=_now() - timedelta(days=40),
-        ))
-        self.db.commit()
-        for market in ("mercari", "poshmark"):
-            auto_relist.save_rule(self.db, market, {"enabled": True, "min_age_days": 30, "daily_cap": 10}, confirm=True)
-        delisted: list[str] = []
-        listed: list[str] = []
+    def test_mercari_already_absent_original_never_authorizes_replacement_publish(self):
+        conv, _ = self._mercari_due("Coat", "m123456781")
+        auto_relist.save_rule(self.db, "mercari", {"enabled": True}, confirm=True)
+        actions = []
+        link = "https://www.mercari.com/sell/draft/ready123/"
 
-        async def delister(conv_id: str, market: str) -> dict:
-            delisted.append(market)
-            return {"ok": True}
+        async def respond(job, message, payload, **kwargs):
+            actions.append(payload["action"])
+            if payload["action"] == "prepare_relist":
+                return {"ok": True, "state": "draft", "draft_url": link, "photo_ids": ["uploaded1"]}
+            return {"ok": True, "state": "deleted", "already": True}
 
-        async def lister(conv_id: str, market: str, rev_id: str) -> dict:
-            listed.append(market)
-            return {"ok": True, "listing_id": "5f00000000000000000000e2"}
+        self._connect_mercari_bridge(respond)
+        outcomes = asyncio.run(auto_relist.run_auto_relist(now=_now()))
+        self.assertEqual(actions, ["prepare_relist", "delete_for_relist"])
+        self.assertEqual(outcomes[0]["status"], "down_needs_relist")
+        self.assertIn("already absent", outcomes[0]["reason"])
+        self.db.expire_all()
+        self.assertEqual(self.db.query(MarketplaceListing).filter_by(conversation_id=conv).one().draft_url, link)
 
-        outcomes = asyncio.run(auto_relist.run_auto_relist(now=_now(), scheduled=True,
-                                                           delister=delister, lister=lister))
-        self.assertEqual((delisted, listed), (["poshmark"], ["poshmark"]))
-        self.assertEqual(sorted((row["marketplace"], row["status"]) for row in outcomes),
-                         [("mercari", "skipped_paused"), ("poshmark", "completed")])
-        self._assert_mercari_left_up(*mercari, "m123456783")
+    def test_mercari_rejected_photos_after_delete_preserves_recovery_draft(self):
+        conv, _ = self._mercari_due("Coat", "m123456781")
+        self._mercari_due("Boots", "m123456782", age_days=31)
+        auto_relist.save_rule(self.db, "mercari", {"enabled": True}, confirm=True)
+        actions = []
+        link = "https://www.mercari.com/sell/draft/ready123/"
 
-    def test_mercari_relist_pause_shows_in_the_preview_and_dry_run(self):
-        self._mercari_due("Mercari hat", "m123456784")
-        auto_relist.save_rule(self.db, "mercari", {"enabled": True, "min_age_days": 30}, confirm=True)
-        preview = auto_relist.preview_status(self.db, marketplace="mercari")
-        self.assertIn("leaves Mercari listings up", preview["rules"][0]["paused_reason"])
-        self.assertIsNone(auto_relist.preview_status(self.db, marketplace="poshmark")["rules"][0]["paused_reason"])
-        dry = asyncio.run(auto_relist.run_auto_relist(now=_now(), dry_run=True))
-        self.assertEqual([(row["marketplace"], row["status"]) for row in dry], [("mercari", "dry_run")])
-        self.assertIn("leaves Mercari listings up", dry[0]["reason"])
+        async def respond(job, message, payload, **kwargs):
+            action = payload.get("action", message)
+            actions.append(action)
+            if action == "prepare_relist":
+                return {"ok": True, "state": "draft", "draft_url": link, "photo_ids": ["uploaded1"]}
+            if action == "delete_for_relist":
+                return {"ok": True, "state": "deleted"}
+            return {"ok": False, "safe_to_retry": True, "error_code": "rejected", "error": "The saved draft photos changed."}
+
+        self._connect_mercari_bridge(respond)
+        outcomes = asyncio.run(auto_relist.run_auto_relist(now=_now()))
+        self.assertEqual(actions, ["prepare_relist", "delete_for_relist", "publish_relist"])
+        self.assertEqual(outcomes[0]["status"], "down_needs_relist")
+        self.assertIn("open the saved Mercari draft", outcomes[0]["reason"])
+        self.assertIn("photos changed", outcomes[0]["reason"])
+        self.db.expire_all()
+        record = self.db.query(MarketplaceListing).filter_by(conversation_id=conv).one()
+        self.assertEqual((record.state, record.draft_url, record.listing_id), ("draft", link, None))
+
+    def test_mercari_opt_out_while_preparing_draft_keeps_original_live(self):
+        conv, _ = self._mercari_due("Coat", "m123456781")
+        auto_relist.save_rule(self.db, "mercari", {"enabled": True}, confirm=True)
+        actions = []
+
+        async def respond(job, message, payload, **kwargs):
+            actions.append(payload.get("action", message))
+            with self.Session() as db:
+                auto_relist.save_rule(db, "mercari", {"enabled": False}, confirm=True)
+            return {"ok": True, "state": "draft", "draft_url": "https://www.mercari.com/sell/draft/ready123/", "photo_ids": ["uploaded1"]}
+
+        self._connect_mercari_bridge(respond)
+        outcomes = asyncio.run(auto_relist.run_auto_relist(now=_now()))
+        self.assertEqual([r["status"] for r in outcomes], ["skipped_rule_disabled"], outcomes)
+        self.assertEqual(actions, ["prepare_relist"])
+        self.db.expire_all()
+        live = self.db.query(MarketplaceListing).filter_by(conversation_id=conv).one()
+        self.assertEqual((live.state, live.listing_id), ("published", "m123456781"))
+
+    def test_mercari_photo_edit_during_draft_verification_keeps_original_live(self):
+        conv, _ = self._mercari_due("Boots", "m123456783")
+        auto_relist.save_rule(self.db, "mercari", {"enabled": True}, confirm=True)
+        actions = []
+
+        async def respond(job, message, payload, **kwargs):
+            actions.append(payload.get("action", message))
+            with self.Session() as db:
+                db.query(Photo).filter_by(conversation_id=conv).one().checksum = "changed-after-upload"
+                db.commit()
+            return {"ok": True, "state": "draft", "draft_url": "https://www.mercari.com/sell/draft/ready123/", "photo_ids": ["uploaded1"]}
+
+        self._connect_mercari_bridge(respond)
+        outcomes = asyncio.run(auto_relist.run_auto_relist(now=_now()))
+        self.assertEqual([r["status"] for r in outcomes], ["failed"], outcomes)
+        self.assertIn("listing changed", outcomes[0]["reason"])
+        self.assertEqual(actions, ["prepare_relist"])
+        self.db.expire_all()
+        live = self.db.query(MarketplaceListing).filter_by(conversation_id=conv).one()
+        self.assertEqual((live.state, live.listing_id), ("published", "m123456783"))
 
 
 if __name__ == "__main__":

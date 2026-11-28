@@ -1,0 +1,1 @@
+- Mercari Auto-Relist checks that each replacement draft is ready before taking down the original. If Mercari refuses a draft, the original stays up and other eligible listings can still relist.
