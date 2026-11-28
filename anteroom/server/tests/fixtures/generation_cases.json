@@ -147,5 +147,32 @@
         "poshmark": "poshmark-blouse"
       }
     }
+  },
+  {
+    "id": "photo_flaws_everywhere",
+    "evidence": "Photo analysis:\n- brand: Wrangler\nEvidence for brand: model confidence (not verified): high\n- size: XL (source: tag)\nEvidence for size: model confidence (not verified): high\n- color: Beige\nEvidence for color: model confidence (not verified): high\n- material: Cotton\nEvidence for material: model confidence (not verified): high\n- condition: Pre-owned\n- flaws seen in the photos (disclose every one in the description's Flaws block, one per line, keeping its location and count):\n  - brown spot \u2014 upper back, left shoulder (photo 7)\n  - small spot \u2014 back, just below the neck tag (photo 6)\n  - cracking seam tape \u2014 inside neck seam (photo 5)\n  - 3 \u00d7 small blue ink marks \u2014 lower front placket near the hem (photos 3, 4)\n- photos checked for flaws: 1 front; 2 front close-up; 3 placket; 4 hem; 5 inside collar / neck tag; 6 back neck; 7 back",
+    "expected_fields": {
+      "brand": "Wrangler",
+      "size": "XL"
+    },
+    "flaws_disclosed": [
+      [
+        "back",
+        "shoulder"
+      ],
+      [
+        "neck tag"
+      ],
+      [
+        "seam tape"
+      ],
+      [
+        "ink",
+        "3|three|several|multiple"
+      ]
+    ],
+    "seed_listing": {
+      "category_path": "Clothing, Shoes & Accessories > Men > Men's Clothing > Shirts > Casual Button-Down Shirts"
+    }
   }
 ]

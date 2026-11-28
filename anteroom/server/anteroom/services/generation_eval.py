@@ -26,6 +26,13 @@ def evaluate_outputs(cases: list[dict], outputs: dict[str, dict]) -> dict:
         checks["seller_details_preserved"] = [
             text in str(value.get("description") or "") for text in case.get("description_contains", [])
         ]
+        # Each photo flaw is a list of terms the description must all contain;
+        # "3|three" accepts either spelling of a count.
+        description = str(value.get("description") or "").casefold()
+        checks["photo_flaws_disclosed"] = [
+            all(any(option.casefold() in description for option in term.split("|")) for term in flaw)
+            for flaw in case.get("flaws_disclosed", [])
+        ]
         checks["allowed_options"] = []
         for field, allowed in case.get("allowed_options", {}).items():
             selected = get_path(value, field)

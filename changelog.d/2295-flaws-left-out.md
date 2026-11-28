@@ -1,0 +1,1 @@
+- New listings now check every photo for flaws, including back, inside and tag photos and the area around the buttons. Each stain, mark or fray goes on its own line in the description, with where it is and how many marks there are, instead of being skipped or merged into "one spot".

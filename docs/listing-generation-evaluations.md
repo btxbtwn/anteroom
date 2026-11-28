@@ -118,3 +118,36 @@ trials also found unsupported condition/material claims in structurally valid
 responses. Canonical listing rules now explicitly distinguish inferred descriptors
 from supported facts and leave unsupported required shell material as a blocker.
 No provider substitution or production setting change is included.
+
+### Per-photo flaw review (2026-11-27, issue #2295)
+
+A seller photo audit found flaws missing from generated descriptions. They
+included stains on the back and beside the neck tag, cracked seam tape seen only in
+a tag photo, and marks beside the front placket. Several ink marks were also
+reported as "one faint spot". The listing writer never sees the photos; it writes
+from the photo analysis. Before this change, that analysis returned a bare
+`visibleFlaws` list for unnumbered photos and joined it into one comma-separated line.
+
+The photo reading now numbers every photo. Its `condition` must hold a
+`photoReview` entry for each photo (its number, its view and the flaws it shows)
+and one `visibleFlaws` entry per distinct flaw, with a description, a location,
+a count and the photos that show it. The Chat Completions schema rejects a reply
+that is missing either. The analysis text then gives each flaw its own line. When
+the summary is empty but the per-photo review found damage, the review's flaws
+are used. The canonical description rule in `skills/list-this/SKILL.md` requires
+every listed flaw in the Flaws block, without merging or softening.
+
+The case `photo_flaws_everywhere` covers the copy stage: four flaws on the back,
+by the neck tag, inside the collar and three ink marks by the placket. The
+`photo_flaws_disclosed` metric requires each flaw's location terms and the count.
+The backend tests check that metric with labelled outputs and with a
+"one faint spot" corruption. Photo reading itself is not part of the offline
+corpus; the curated `evidence` skips the vision step.
+
+To check a vision model against the audit pattern, run photo analysis on a
+private set of photos with a known flaw on the back, one in a tag or inside
+photo, and several marks in one place. Keep the photos and outputs outside the
+repository. Record whether each flaw appears in `visibleFlaws` with the right
+photo number and count, and whether it reaches the generated Flaws block. No
+live model run is recorded for this change yet. Until one is, this is a prompt
+and contract change, not a measured improvement.

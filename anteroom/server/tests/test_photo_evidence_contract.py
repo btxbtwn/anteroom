@@ -10,7 +10,7 @@ def evidence():
         "brand", "size", "color", "material", "style", "graphic", "category", "department",
     )}
     result["size"]["source"] = "unreadable"
-    result.update(condition={"value": "unknown", "visibleFlaws": []}, measurements=[], uncertainties=[],
+    result.update(condition={"value": "unknown", "photoReview": [], "visibleFlaws": []}, measurements=[], uncertainties=[],
                   tag_text={"brand_label": "", "size_tag": "", "care_tag": "", "rn_number": ""})
     return result
 
