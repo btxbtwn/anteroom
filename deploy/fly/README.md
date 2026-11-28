@@ -65,6 +65,41 @@ The migration URI stays in GitHub; Fly never receives it. Revisions that need
 a drained database (see `docs/hosted-production.md`, section 4) still apply
 automatically, so check for active work before merging one.
 
+## Hosted release owner
+
+The repository owner owns routine hosted releases. To hand off, set the repository variable
+`HOSTED_RELEASE_OWNER` to the accepting operator's GitHub login before merging.
+The owner follows **Deploy hosted** through seller verification and the first 15 minutes
+of traffic. A failed deploy opens a GitHub issue mentioning that login with the candidate,
+failed step, run attempt and this runbook. Enable mention notifications for that account.
+The release repair bot can investigate separately.
+
+**Before merge.** Keep routine releases automatic. For a migration that may block seller
+writes, a scheduler handoff that may interrupt an external action, or a destructive schema
+change, record the release owner's approval on the PR before queuing. Rehearse the change in
+the hosted sandbox on disposable data from the previous schema. Exercise the previous web
+and worker versions during migration. For scheduler changes, interrupt an in-flight sandbox
+job and verify the resulting draft and job state, including that an uncertain marketplace
+write is never sent again. Record the recovery choice and the baseline for affected routes.
+
+**Seller verification.** Configure one confirmed, dedicated production seller with empty
+inventory, no marketplace connections, no paired Chrome and no automations enabled.
+Store its email, password and Supabase user UUID as the `HOSTED_SMOKE_ACCOUNT` JSON secret
+(keys `email`, `password`, `user_id`) in GitHub's production environment. Grant ordinary
+seller access. Each run verifies the account, reads inventory, saves a unique marker to
+the same internal draft and reopens it. Leave this one draft in place between releases.
+A failed readback after the traffic switch means the candidate may already be serving.
+Check live version, Machine images and schema before deciding how to recover.
+
+**After rollout.** In Fly metrics and application logs, compare the first 15 minutes with
+the preceding 15 minutes for HTTP 5xx, inventory and draft-save p95, database checkout
+timeouts, and age of the oldest waiting draft job in the worker. Record the request counts
+and both windows in the release issue or PR. Mark low-volume or unavailable measurements
+explicitly. Investigate failed saves, persistent errors or an increasing queue immediately.
+If sellers are affected, pause **Deploy hosted**, identify the previous compatible image,
+and follow the rollback procedure below. Keep the owner assigned until seller readback and
+worker progress recover. Re-enable deployments for the tested fix and verify that release.
+
 ## Rollback and expand/contract
 
 Migrations run before the new image starts, and the image before it keeps

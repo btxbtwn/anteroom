@@ -42,6 +42,9 @@ jobs:
     runs-on: ubuntu-latest
     # Secrets live in this environment, which only main may use.
     environment: production
+    outputs:
+      version: ${{ steps.gate.outputs.version }}
+      candidate: ${{ steps.gate.outputs.candidate }}
     timeout-minutes: 45
     steps:
       # All of main: the gate picks the newest tested commit from the trigger
@@ -62,7 +65,9 @@ jobs:
         # Checks out the newest first-parent commit from the trigger to main's
         # tip that passed CI and has no pending changelog.d/ notes (their
         # "Release Anteroom" commit ships that code). Skips when there is none.
-        run: python3 .github/scripts/deploy-gate.py --repo "$GITHUB_REPOSITORY" --trigger "$TRIGGER"
+        run: |
+          python3 .github/scripts/deploy-gate.py --repo "$GITHUB_REPOSITORY" --trigger "$TRIGGER"
+          echo "candidate=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Wait for CI on the code being shipped
         id: wait
@@ -77,12 +82,13 @@ jobs:
       - name: Check deploy secrets
         if: steps.gate.outputs.skip != 'true'
         env:
+          HOSTED_SMOKE_ACCOUNT: ${{ secrets.HOSTED_SMOKE_ACCOUNT }}
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           ANTEROOM_MIGRATION_DATABASE_URL: ${{ secrets.ANTEROOM_MIGRATION_DATABASE_URL }}
           SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
         run: |
           missing=0
-          for name in FLY_API_TOKEN ANTEROOM_MIGRATION_DATABASE_URL SUPABASE_PUBLISHABLE_KEY; do
+          for name in HOSTED_SMOKE_ACCOUNT FLY_API_TOKEN ANTEROOM_MIGRATION_DATABASE_URL SUPABASE_PUBLISHABLE_KEY; do
             if [ -z "${!name}" ]; then
               echo "::error::$name is not set for the production environment."
               missing=1
@@ -236,8 +242,47 @@ jobs:
           echo "::error::Not every Machine is running $LABEL."
           exit 1
 
+      - name: Verify seller inventory and draft save
+        if: steps.gate.outputs.skip != 'true'
+        timeout-minutes: 2
+        env:
+          HOSTED_SMOKE_ACCOUNT: ${{ secrets.HOSTED_SMOKE_ACCOUNT }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+        run: python deploy/fly/release_smoke.py
+
       # The next deploy reads this notice to find the commit production runs
       # (.github/scripts/wait-for-tested-code.py).
       - name: Record the deployed commit
         if: steps.gate.outputs.skip != 'true'
         run: echo "::notice title=Deployed commit::$(git rev-parse HEAD)"
+
+  notify:
+    name: Alert the hosted release owner
+    needs: deploy
+    if: always() && needs.deploy.result == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      actions: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OWNER: ${{ vars.HOSTED_RELEASE_OWNER || github.repository_owner }}
+      VERSION: ${{ needs.deploy.outputs.version }}
+      CANDIDATE: ${{ needs.deploy.outputs.candidate }}
+      TRIGGER: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - name: Notify owner with failed step and recovery instructions
+        run: |
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT"
+          api="repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs"
+          step=$(gh api "$api" --jq '[.jobs[] | select(.name=="Migrate and deploy") | .steps[] | select(.conclusion=="failure" or .conclusion=="cancelled" or .conclusion=="timed_out") | .name] | join(", ")') || step=""
+          cat > "$RUNNER_TEMP/alert.md" <<EOF
+          @$OWNER please check the [failed hosted deploy]($run_url).
+
+          Version: ${VERSION:-candidate not selected}. Candidate: ${CANDIDATE:-not selected}. Trigger: $TRIGGER.
+          Failed step: ${step:-see the deploy job in the linked attempt}.
+
+          Check seller impact and follow the [release and rollback runbook]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/main/deploy/fly/README.md#hosted-release-owner).
+          EOF
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "Hosted deploy failed (run $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT)" --body-file "$RUNNER_TEMP/alert.md"

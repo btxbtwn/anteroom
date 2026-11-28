@@ -411,6 +411,9 @@ jobs:
           # pytest-split (in the dev extra) divides the suite between the
           # shards; the full suite still runs, each test exactly once per database.
           ./scripts/install-locked.sh python dev
+      - name: Check hosted release seller verification
+        if: matrix.group == 1
+        run: python -m unittest discover -s ../deploy/fly -p test_release_smoke.py
       - name: Exercise verification collector with real xdist and split
         if: matrix.group == 1
         run: python ../.github/scripts/test-verification-inventory.py
