@@ -88,3 +88,35 @@ test("a Depop draft keeps its description measurements without an unsupported-fi
     expect(removed.ok()).toBe(true);
   }
 });
+
+
+test("a Depop draft shows jeans measurements and saves a centimeter edit", async ({ page, phone, request }, info) => {
+  const title = `Light wash jeans ${info.project.name} ${Date.now()}`;
+  const id = await createListing(request, title);
+  try {
+    const notes = JSON.stringify({ garment: "pants", measurements: { pants: { waist: "14", inseam: "28" } } });
+    expect((await request.patch(`/api/conversations/${id}`, { data: { notes } })).ok()).toBe(true);
+    const saved = await request.put(`/api/conversations/${id}/listing`, { data: { expected_revision_id: "", listing: {
+      title, description: "Light wash jeans.", brand: "Wild Fable", condition: "Good", size: "0", price: 10.8,
+      direct_category_ids: { depop: "womenswear_jeans" }, depop_specifics: { parcelSize: "Large" },
+    } } });
+    expect(saved.ok(), await saved.text()).toBe(true);
+    await openListing(page, phone, title);
+    if (phone) await page.getByRole("tab", { name: "Listing", exact: true }).click();
+    await openForm(page, phone, "Depop");
+    const waist = page.locator('input[data-listing-field="depop_specifics.measurementInputs.waist"]');
+    await expect(waist).toHaveValue("14 in");
+    await expect(page.locator('input[data-listing-field="depop_specifics.measurementInputs.inseam"]')).toHaveValue("28 in");
+    const outseam = page.locator('input[data-listing-field="depop_specifics.measurementInputs.outseam"]');
+    await outseam.fill("91.5 cm");
+    await outseam.blur();
+    await expect.poll(async () => {
+      const current = await (await request.get(`/api/conversations/${id}/listing`)).json();
+      return current.listing.depop_specifics?.measurementInputs?.outseam;
+    }).toBe("91.5 cm");
+    await waist.evaluate(element => element.scrollIntoView({ block: "center" }));
+    await page.screenshot({ path: info.outputPath("jeans-measurements.png") });
+  } finally {
+    expect((await request.delete(`/api/conversations/${id}`)).ok()).toBe(true);
+  }
+});

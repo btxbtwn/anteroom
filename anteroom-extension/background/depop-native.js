@@ -124,6 +124,18 @@ function depopShippingParams(category, region = 'US') {
   return params;
 }
 
+async function depopParcelQuote(listing, category, deadline, timeoutMs) {
+  const region = depopRegion(listing);
+  const params = depopShippingParams(category, region);
+  const price = Number(depopPrice(listing));
+  if (Number.isFinite(price) && price > 0) {
+    params.set('item_cost', price.toFixed(2));
+    params.set('item_currency', DEPOP_CURRENCIES[region]);
+  }
+  const providers = await depopAccountRead(`/presentation/api/v1/shipping/providers/depop/?${params}`, 'parcel sizes', deadline, timeoutMs);
+  return depopParcelRows(providers).filter(row => region === 'US' || row.providerId);
+}
+
 // One parcel row as the sell page lists it: the id it posts, the title in the
 // menu, the weight line under that title, and whether Depop suggested it.
 function depopParcelRows(payload) {
@@ -134,7 +146,7 @@ function depopParcelRows(payload) {
   const rows = [];
   for (const provider of listed) {
     const sizes = provider?.parcel_sizes || provider?.parcelSizes || [];
-    const suggestedId = String(provider?.suggested_parcel_size || provider?.recommended_parcel_size || provider?.suggestedParcelSize || '');
+    const suggestedId = String(provider?.estimated_parcel_size?.id || provider?.suggested_parcel_size || provider?.recommended_parcel_size || provider?.suggestedParcelSize || '');
     for (const size of sizes) {
       const title = String(size?.title || size?.name || '').trim();
       const id = String(size?.id ?? title).trim();
@@ -152,9 +164,9 @@ function depopParcelRows(payload) {
 // The parcel the draft posts. A saved title or id wins; otherwise Depop's suggestion.
 function depopParcelSize(sizes, listing) {
   const rows = depopParcelRows(sizes);
-  const wanted = String(listing?.depop_specifics?.parcelSize || listing?.depop_specifics?.parcel_size || '').trim().toLowerCase();
+  const wanted = String(listing?.depop_specifics?.parcelSize || listing?.depop_specifics?.parcel_size || '').trim();
   if (!wanted) return rows.find(size => size.suggested) || null;
-  const exact = rows.find(size => size.id.toLowerCase() === wanted || size.title.toLowerCase() === wanted);
+  const exact = rows.find(size => size.title === wanted) || rows.find(size => size.id === wanted);
   if (exact) return exact;
   const key = marketplaceNameKey(wanted);
   const matching = key ? rows.filter(size => marketplaceNameKey(size.title) === key) : [];
@@ -205,8 +217,9 @@ async function depopListingFields(request, listing, deadline) {
   try {
     Object.assign(fields, await depopCountryLocation(request, deadline));
   } catch { /* The publish check names a missing location. */ }
+  const catalogCategory = attributes ? depopCategory(listing, attributes) : null;
+  if (catalogCategory) Object.assign(fields, depopMeasurementFields(listing, catalogCategory));
   try {
-    const catalogCategory = attributes ? depopCategory(listing, attributes) : null;
     Object.assign(fields, (await depopShippingFields(listing, catalogCategory || category, deadline)).fields);
   } catch { /* The publish check names missing shipping. */ }
   // Depop's listing site leaves sku off when it is blank, and so does Anteroom.
@@ -258,13 +271,9 @@ async function depopShippingFields(listing, category, deadline) {
   }
   const query = region === 'US' ? '?providers=USPS' : '';
   const from = depopAddress(listing, await depopAccountRead('/api/v1/addresses/' + query, 'ship-from addresses', deadline));
-  const params = depopShippingParams(category, region);
-  params.set('item_cost', Number(depopPrice(listing)).toFixed(2));
-  params.set('item_currency', DEPOP_CURRENCIES[region]);
-  const providers = await depopAccountRead(`/presentation/api/v1/shipping/providers/depop/?${params}`, 'parcel sizes', deadline);
-  const rows = depopParcelRows(providers);
-  const parcel = depopParcelSize(region === 'US' ? rows : rows.filter(row => row.providerId), listing);
-  if (!from || !parcel?.id) return { from, parcel, fields: {}, problem: depopShippingProblem(from, parcel, listing) };
+  const rows = await depopParcelQuote(listing, category, deadline);
+  const parcel = depopParcelSize(rows, listing);
+  if (!from || !parcel?.id) return { from, parcel, fields: {}, problem: depopShippingProblem(from, parcel, listing, rows) };
   const fields = {
     shipping_methods: [{ payer: 'buyer', parcel_size: String(parcel.id),
       shipping_provider_id: region === 'US' ? 'USPS' : String(parcel.providerId), ship_from_address_id: from.id }],
@@ -277,13 +286,21 @@ async function depopShippingFields(listing, category, deadline) {
 
 // Why Anteroom could not give a draft shipping, said so the seller knows where to
 // fix it: a ship-from address lives in the Depop account, a package size in the form.
-function depopShippingProblem(from, parcel, listing) {
+function depopShippingProblem(from, parcel, listing, rows) {
   if (!from) {
     return { address: true, message: 'Depop has no ship-from address Anteroom can use. Add or choose a default '
       + 'shipping address in Depop (Settings → Shipping), then List again.' };
   }
   if (!parcel?.id) {
     const wanted = String(listing?.depop_specifics?.parcelSize || listing?.depop_specifics?.parcel_size || '').trim();
+    if (rows && !rows.length) return { needs: 'a shipping quote. Depop returned no package sizes for this item' };
+    const choices = rows?.map(row => row.title).join(', ');
+    const suggested = rows?.find(row => row.suggested)?.title;
+    if (choices) {
+      const reason = wanted ? ` (it does not offer ${wanted})` : '';
+      const hint = suggested ? `. Depop suggests ${suggested}` : '';
+      return { needs: `a package size it offers for this item${reason}. Choose from ${choices}${hint}` };
+    }
     return { needs: wanted ? `a package size it offers for this item (it does not offer ${wanted})` : 'a package size' };
   }
   return null;
@@ -395,7 +412,7 @@ function depopProduct(attributes, department, productType, leaf) {
     && (entry.product_types || []).some(type => type.id === productType));
   if (!group) return null;
   const type = group.product_types.find(entry => entry.id === productType);
-  return { leaf: leaf || `${department}_${productType}`, department, group: group.id, productType, attributeIds: type.attribute_ids || [] };
+  return { leaf: leaf || `${department}_${productType}`, department, group: group.id, productType, attributeIds: type.attribute_ids || [], measurementIds: type.measurements || [] };
 }
 
 // The leaf's department and product type: Depop's own id Anteroom stored,
@@ -494,6 +511,45 @@ function depopAttributeValues(listing, category, attributes) {
   return { values, missing };
 }
 
+// The catalog names measurements per product type. Depop stores flat widths in cm.
+function depopMeasurementInputs(specifics) {
+  const aliases = { pit_to_pit: 'pit-to-pit', sleeve: 'sleeve-length', leg_opening: 'leg-opening', hip: 'hips' };
+  const inputs = {};
+  const copied = specifics?.measurements?.values;
+  for (const row of Array.isArray(copied) ? copied : []) {
+    if (!row?.id || row.value == null) continue;
+    const value = String(row.value).trim();
+    inputs[aliases[row.id] || row.id] = /(?:cm|inches|inch|in\.?|["″])$/i.test(value)
+      ? value : `${value} ${row.unit || specifics.measurements.unit || 'in'}`;
+  }
+  return { ...inputs, ...specifics?.measurementInputs };
+}
+
+function depopMeasurementFields(listing, category) {
+  const inputs = depopMeasurementInputs(listing.depop_specifics);
+  const values = {};
+  let supplied = false;
+  for (const id of category.measurementIds) {
+    if (!Object.hasOwn(inputs, id)) continue;
+    supplied = true;
+    const text = String(inputs[id] ?? '').trim();
+    if (!text) continue;
+    const match = /^(?:(?:(\d+)[ -])?(\d+)\/(\d+)|(\d+(?:\.\d+)?|\.\d+))\s*(cm|inches|inch|in\.?|["″])?$/i.exec(text);
+    const amount = match?.[4] ? Number(match[4]) : Number(match?.[1] || 0) + Number(match?.[2]) / Number(match?.[3]);
+    const cm = amount * (match?.[5]?.toLowerCase() === 'cm' ? 1 : 2.54);
+    if (!Number.isFinite(cm) || cm <= 0) throw marketplaceMissing('depop', [{
+      field: `depop_specifics.measurementInputs.${id}`, needs: `a positive ${id} measurement in inches or cm`,
+    }]);
+    values[id] = Number(cm.toFixed(6));
+  }
+  return supplied ? { measurements: values } : {};
+}
+
+function depopMeasurementsDiffer(actual, expected) {
+  return Object.keys(actual || {}).length !== Object.keys(expected).length
+    || Object.entries(expected).some(([id, cm]) => actual?.[id] == null || !(Math.abs(Number(actual[id]) - cm) < 0.001));
+}
+
 // The seller's ship-from address row. Depop can store several at the same ZIP
 // and does not mark one as the default, so the most recently updated match is used.
 function depopAddress(listing, data) {
@@ -551,6 +607,7 @@ async function depopResolvedFields(payload) {
     else if (size.none) Object.assign(fields, { variant_set: null, variants: {}, quantity });
     const extra = depopAttributeValues(listing, category, attributes);
     fields.attributes = extra.values;
+    Object.assign(fields, depopMeasurementFields(listing, category));
   }
   fields.brand = depopBrand(listing, attributes);
   // Depop's listing site leaves sku off when it is blank, and so does Anteroom.
@@ -719,7 +776,7 @@ function depopDraftView(draft) {
     product_type: product && typeof product === 'object' ? depopFieldId(product) : String(product || ''),
     variant_set: set == null || set === '' ? '' : (typeof set === 'object' ? depopFieldId(set) : String(set)),
     variants: source.variants ?? source.sizes,
-    attributes: source.attributes,
+    attributes: source.attributes?.additional_attributes ?? source.attributes,
     age: source.age, source: source.source, style: source.style,
     colour: source.colour ?? source.color ?? source.colours ?? source.colors,
     condition: depopCondition(conditionId) || depopCondition(conditionName) || conditionId,
@@ -732,7 +789,7 @@ function depopDraftView(draft) {
     price: source.price_amount ?? source.priceAmount ?? source.price,
     price_currency: source.price_currency ?? source.priceCurrency ?? source.price?.currency,
     shipping_methods: source.shipping_methods,
-    measurements: source.measurements,
+    measurements: source.measurements ?? source.attributes?.measurements,
   };
 }
 
@@ -807,7 +864,7 @@ function depopDraftWriteBody(listing, fields, pictures, existing) {
   };
   for (const key of ['address', 'age', 'attributes', 'brand', 'colour', 'condition', 'country', 'country_code',
     'gender', 'geo_lat', 'geo_lng', 'international_shipping_cost', 'is_kids',
-    'national_shipping_cost', 'product_type', 'quantity', 'shipping_methods', 'source', 'style', 'variants']) {
+    'measurements', 'national_shipping_cost', 'product_type', 'quantity', 'shipping_methods', 'source', 'style', 'variants']) {
     if (Object.hasOwn(source, key) && source[key] != null) body[key] = source[key];
   }
   const sku = String(source.sku ?? '').trim();
@@ -890,10 +947,7 @@ function depopDraftMismatch(draft, listing, fields) {
     const parcel = methods => depopCleanShipping(methods).map(method => String(method?.parcel_size || '')).sort().join();
     if (Array.isArray(view.shipping_methods) && parcel(fields.shipping_methods) !== parcel(view.shipping_methods)) wrong.push('shipping');
   }
-  if (Array.isArray(fields.measurements) && Array.isArray(view.measurements)) {
-    const norm = rows => rows.map(row => `${row?.id}:${String(row?.value ?? '').trim()}`).sort().join();
-    if (norm(fields.measurements) !== norm(view.measurements)) wrong.push('measurements');
-  }
+  if (fields.measurements && depopMeasurementsDiffer(view.measurements, fields.measurements)) wrong.push('measurements');
   return wrong;
 }
 
@@ -965,7 +1019,7 @@ function depopReadDigest(body) {
 // PUT /products/by-slug/<slug>/ (its web bundle's product request builder):
 // picture_ids rather than picture objects, geo_position_lat/lng, the country
 // code as country, attributes as an object, and no department, size_set_id,
-// size_id, measurements or camelCase copies. Every field comes from the same
+// size_id or camelCase copies. Every field comes from the same
 // resolution a draft save uses, so a category move carries the new category's
 // size set. Only the photo ids are taken from the live product.
 function depopLiveWriteBody(product, listing, fields) {
@@ -983,6 +1037,7 @@ function depopLiveWriteBody(product, listing, fields) {
     geo_position_lat: fields.geo_lat,
     geo_position_lng: fields.geo_lng,
     is_kids: fields.is_kids,
+    ...(fields.measurements ? { measurements: fields.measurements } : {}),
     picture_ids: depopPictureIds(stored, null),
     price_amount: String(depopPrice(listing) ?? ''),
     price_currency: DEPOP_CURRENCIES[depopRegion(listing)],
@@ -1027,7 +1082,7 @@ function depopLiveWanted(listing, fields) {
   return { price: price == null || price === '' || !Number.isFinite(Number(price)) ? null : Number(price),
     product_type: fields.product_type ? String(fields.product_type) : '',
     variant_set: set == null || set === '' ? '' : String(set),
-    sizes: depopVariantIds(fields.variants || {}) };
+    measurements: fields.measurements, sizes: depopVariantIds(fields.variants || {}) };
 }
 
 // What fresh reads of a live product say, taking each field from the first
@@ -1036,6 +1091,7 @@ function depopLiveState(docs) {
   const state = { price: null, product_type: '', variant_set: '', sizes: null };
   for (const doc of docs) {
     const source = depopDraftDocument(doc);
+    state.measurements ??= source.measurements ?? source.attributes?.measurements;
     if (state.price == null) state.price = depopProductPrice(source);
     if (!state.product_type) state.product_type = depopProductType(source) || depopDraftView(doc).product_type;
     if (!state.variant_set) {
@@ -1059,6 +1115,7 @@ function depopLiveMismatch(state, wanted) {
   const setWrong = wanted.variant_set && state.variant_set && state.variant_set !== wanted.variant_set;
   const sizeWrong = wanted.sizes.length && state.sizes?.length && state.sizes.join(',') !== wanted.sizes.join(',');
   if (setWrong || sizeWrong) parts.push('size');
+  if (wanted.measurements && state.measurements != null && depopMeasurementsDiffer(state.measurements, wanted.measurements)) parts.push('measurements');
   return parts;
 }
 
@@ -1226,7 +1283,7 @@ async function depopApiAction(action, payload) {
       return { id: String(draft.id), description: draft.description, price: view.price, price_currency: view.price_currency,
         product_type: view.product_type, variant_set_id: view.variant_set, variants: view.variants,
         brand: view.brand, condition: view.condition, colour: view.colour, age: view.age, source: view.source, style: view.style,
-        attributes: view.attributes, sku: view.sku, quantity: view.quantity,
+        measurements: view.measurements, attributes: view.attributes, sku: view.sku, quantity: view.quantity,
         // The package size a draft cannot be published without, as the read saw it.
         shipping_methods: view.shipping_methods,
         national_shipping_cost: view.national_shipping_cost,
@@ -1356,6 +1413,7 @@ async function depopApiAction(action, payload) {
       }
       const missing = [...(Array.isArray(draft.missing_fields) ? draft.missing_fields : []).map(String),
         ...(!draft.pictures?.length ? ['photos'] : []), ...(!(Number(draft.price_amount) > 0) ? ['price'] : [])];
+      if (payload.depop_shipping_problem && !missing.some(field => DEPOP_SHIPPING_FIELDS.has(field))) missing.push('shipping');
       if (missing.length || !Array.isArray(draft.missing_fields)) {
         const named = Array.isArray(draft.missing_fields) ? draft.missing_fields.map(String).join(', ') : '';
         const problem = payload.depop_shipping_problem;
@@ -1370,7 +1428,8 @@ async function depopApiAction(action, payload) {
       // whether the package size is still there. Only a summary that does not report
       // it is read again.
       const reported = Array.isArray(depopDraftView(draft).shipping_methods);
-      const wrong = depopDraftMismatch(Array.isArray(payload.depop_fields?.shipping_methods) && !reported
+      const needsMeasurements = payload.depop_fields?.measurements && !depopDraftView(draft).measurements;
+      const wrong = depopDraftMismatch(needsMeasurements || (Array.isArray(payload.depop_fields?.shipping_methods) && !reported)
         ? await readDraft(null, draft) : draft, payload.listing, payload.depop_fields);
       if (wrong.length) throw marketplaceError(`Depop's draft has a different ${wrong.join(', ')} than this revision. List again.`,
         { code: 'rejected', marketplace_message: `fields: ${wrong.join(', ')}` });
@@ -1427,7 +1486,7 @@ async function depopApiAction(action, payload) {
         throw marketplaceError(`Depop did not keep this listing's ${wrong.join(', ')}. Check the live listing.`, { code: 'schema_drift', rejected: false,
           marketplace_message: `read back: ${depopLiveDigest(state)} | wanted: ${depopLiveDigest(wanted)} | ${depopSanitizedBody(read)}` });
       }
-      const unconfirmed = ['price', 'product_type'].filter(key => wanted[key] != null && wanted[key] !== '' && (state[key] == null || state[key] === ''));
+      const unconfirmed = ['price', 'product_type', 'measurements'].filter(key => wanted[key] != null && wanted[key] !== '' && (state[key] == null || state[key] === ''));
       return { ok: true, state: 'published', listing_url: `https://www.depop.com/products/${next}/`, previous_slug: slug, price: state.price ?? null,
         ...(unconfirmed.length ? { warning: `Depop's read did not show the ${unconfirmed.map(key => key === 'product_type' ? 'category' : key).join(' or ')}. Check the live listing.` } : {}) };
     }

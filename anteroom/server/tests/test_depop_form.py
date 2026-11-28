@@ -9,6 +9,36 @@ from anteroom.services import depop_form
 
 
 class DepopFormTest(unittest.TestCase):
+    def test_jeans_show_the_offered_parcels_and_flat_measurements(self):
+        listing = {"direct_category_ids": {"depop": "womenswear_jeans"}, "depop_specifics": {
+            "measurements": {"values": [{"id": "waist", "value": "14", "unit": "in"}]},
+            "measurementInputs": {"outseam": "90 cm"},
+        }}
+        rows = depop_form.form(listing)["fields"]
+        self.assertEqual([(row["label"], row["value"]) for row in rows if ".measurementInputs." in row["path"]],
+                         [("Waist", "14 in"), ("Inseam", ""), ("Outseam", "90 cm")])
+        parcel = next(row for row in rows if row["label"] == "Package size")
+        self.assertEqual(parcel["options"], ["Medium", "Large", "Extra large"])
+        self.assertIn("suggests Large", parcel["help"])
+
+        from anteroom.services import native_contract
+
+        seed = {**listing, native_contract.KEY: native_contract.capture(listing, {"depop": depop_form.form(listing)}, ["depop"])}
+        for parcel_id in ("under_1lb", "medium", "large"):
+            locked = {**seed, "depop_specifics": {"parcelSize": parcel_id}, "seller_fields": ["depop_specifics.parcelSize"]}
+            self.assertFalse(any(gap["field"] == "depop_specifics.parcelSize" for gap in native_contract.gaps(locked, "depop")))
+        generated = {**listing, "depop_specifics": {"parcelSize": "Extra small"}}
+        native_contract.constrain_generated(generated, seed)
+        self.assertEqual(generated["depop_specifics"]["parcelSize"], "Large")
+
+    def test_seller_package_choice_survives_weight_defaults(self):
+        from anteroom.services.depop_fields import ensure_depop_category_optionals
+
+        listing = {"weight_oz": 3, "seller_fields": ["depop_specifics.parcelSize"],
+                   "depop_specifics": {"parcelSize": "Large"}}
+        ensure_depop_category_optionals(listing)
+        self.assertEqual(listing["depop_specifics"]["parcelSize"], "Large")
+
     def test_unbranded_uses_depop_other_without_changing_general_brand(self):
         for brand in ("Unbranded", "No brand"):
             listing = {"brand": brand}

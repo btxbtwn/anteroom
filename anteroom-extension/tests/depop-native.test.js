@@ -46,7 +46,7 @@ const ATTRIBUTES = {
   department: [{ id: 'menswear' }, { id: 'womenswear' }, { id: 'kidswear' }, { id: 'everything-else' }],
   group: [{ id: 'tops', department: ['menswear', 'womenswear', 'kidswear'], product_types: [
     { id: 'tshirts', attribute_ids: ['material', 'occasion', 'body-fit'] }] },
-  { id: 'bottoms', department: ['menswear', 'womenswear', 'kidswear'], product_types: [{ id: 'jeans', attribute_ids: ['bottom-fit', 'material'] }] },
+  { id: 'bottoms', department: ['menswear', 'womenswear', 'kidswear'], product_types: [{ id: 'jeans', attribute_ids: ['bottom-fit', 'material'], measurements: ['waist', 'inseam', 'outseam'] }] },
   { id: 'dresses', department: ['womenswear'], product_types: [{ id: 'dresses', attribute_ids: [] }] }],
   generic_attributes: [
     { id: 'material', max_selection: 3, is_mandatory: false, attributes: [{ id: 'cotton', name_i18n: { 'en-US': 'Cotton' } }, { id: 'polyester', name_i18n: { 'en-US': 'Polyester' } }] },
@@ -134,6 +134,46 @@ test('Depop posts the parcel id the sell page uses for that title', async () => 
     deadline: Date.now() + 30000,
   });
   assert.equal(suggested.shipping_methods[0].parcel_size, 'under_1lb');
+});
+
+test('a saved package title wins when another parcel uses that word as its id', () => {
+  const { c } = newDraft();
+  const rows = [{ id: 'small', title: 'Extra small' }, { id: 'under_12oz', title: 'Small' }];
+  assert.equal(c.depopParcelSize(rows, { depop_specifics: { parcelSize: 'Small' } }).id, 'under_12oz');
+  assert.equal(c.depopParcelSize(rows, { depop_specifics: { parcelSize: 'small' } }).title, 'Extra small');
+  const form = c.depopEditorForm({ ...FULL, depop_specifics: { parcelSize: 'under_12oz' } }, {}, rows);
+  const parcel = form.fields.find(row => row.path === 'depop_specifics.parcelSize');
+  assert.equal(parcel.option_values.Small, 'under_12oz');
+  assert.equal(parcel.value, 'under_12oz');
+  assert.equal(c.depopParcelSize(rows.slice(0, 1), { depop_specifics: { parcelSize: 'Small' } }), null);
+});
+
+test('jeans carry flat measurements in centimeters and use the estimated USPS parcel', async () => {
+  const { c } = newDraft();
+  withCatalog(c, { providers: [200, [{ id: 'USPS', estimated_parcel_size: { id: 'medium' }, parcel_sizes: [
+    { id: 'under_1lb', title: 'Medium' }, { id: 'medium', title: 'Large' }, { id: 'large', title: 'Extra large' },
+  ] }]] });
+  const item = { ...FULL, direct_category_ids: { depop: 'womenswear_jeans' }, depop_specifics: {
+    measurements: { values: [{ id: 'waist', value: '14', unit: 'in' }, { id: 'rise', value: '9', unit: 'in' }] },
+    measurementInputs: { inseam: '22.86 cm', outseam: '37 1/2 in' },
+  } };
+  const fields = await c.depopResolvedFields({ listing: item, deadline: Date.now() + 30000 });
+  const body = c.depopDraftWriteBody(item, fields, [1]);
+  assert.deepEqual(JSON.parse(JSON.stringify(body.measurements)), { waist: 35.56, inseam: 22.86, outseam: 95.25 });
+  assert.equal(body.shipping_methods[0].parcel_size, 'medium');
+  const live = c.depopLiveWriteBody({ picture_ids: [1] }, item, fields);
+  assert.deepEqual(live.measurements, body.measurements);
+  const wanted = c.depopLiveWanted(item, fields);
+  const state = c.depopLiveState([{ attributes: { measurements: body.measurements } }]);
+  assert.ok(!c.depopLiveMismatch(state, wanted).includes('measurements'));
+  assert.ok(!c.depopLiveMismatch({}, wanted).includes('measurements'));
+  assert.ok(c.depopLiveMismatch({ measurements: {} }, wanted).includes('measurements'));
+  const check = draft => c.depopDraftMismatch(draft, item, fields).includes('measurements');
+  assert.equal(check({ ...body, measurements: { ...body.measurements, waist: 35.559999999999995 } }), false);
+  assert.equal(check({ ...body, measurements: undefined }), true);
+  assert.equal(check({ ...body, measurements: { waist: 14 } }), true);
+  item.depop_specifics.measurementInputs.waist = 'invalid';
+  await assert.rejects(c.depopResolvedFields({ listing: item }), /waist/);
 });
 
 test('Depop relist checks replacement shipping with the same quote as publish', async () => {
