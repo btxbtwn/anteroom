@@ -403,6 +403,12 @@ export function App() {
     closeMobileSidebar();
   };
   const openAutomations = () => togglePage("automations");
+  const openInventory = () => {
+    if (!runtime.views.has("listings")) return;
+    setMobilePane(runtime.hosted ? "editor" : "workspace");
+    closeMobileSidebar();
+    setActiveView("inventory");
+  };
   // The table is the inventory's other view; it returns to the list it came from.
   const toggleInventoryTable = () => {
     if (!runtime.views.has("listings")) return;
@@ -843,6 +849,7 @@ export function App() {
           <NavRail
             activeView={activeView}
             onOpenHome={openHome}
+            onOpenInventory={openInventory}
             onOpenAnalytics={openAnalytics}
             onOpenMarketplaces={openMarketplaces}
             onOpenAutomations={openAutomations}

@@ -1,0 +1,1 @@
+- Added **Inventory** to the desktop navigation rail in the same position as the phone menu, and named the update button when the rail is open.

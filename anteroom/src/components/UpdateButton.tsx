@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { pollMs } from "../api/polling";
+import { cn } from "../lib/utils";
 import { confirmDialog } from "../ui/confirmDialog";
 import { toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -191,6 +192,18 @@ export function useStudioUpdate() {
       ? updateHeadline(data) || "Update available."
       : "Current version of the application.";
 
+  const railLabel = restarting
+    ? "Restarting…"
+    : downloading
+      ? `Downloading ${Math.round(downloadPercent || 0)}%`
+      : downloaded
+        ? "Restart to update"
+        : checking
+          ? "Checking…"
+          : available
+            ? "Download update"
+            : "Check for updates";
+
   const iconTooltip = restarting
     ? "Restarting to install update…"
     : downloading
@@ -235,6 +248,7 @@ export function useStudioUpdate() {
     downloadPercent,
     description,
     iconTooltip,
+    railLabel,
     settingsLabel,
     onClick,
   };
@@ -349,37 +363,54 @@ function RestartIcon() {
   );
 }
 
-export function UpdateButton() {
-  const { available, busy, checking, downloaded, downloading, downloadPercent, iconTooltip, onClick } = useStudioUpdate();
+export function UpdateButton({
+  className,
+  labelClassName,
+  expanded = false,
+}: {
+  className?: string;
+  labelClassName?: string;
+  expanded?: boolean;
+} = {}) {
+  const { available, busy, checking, downloaded, downloading, downloadPercent, iconTooltip, railLabel, onClick } = useStudioUpdate();
   const showAvailable = available && !busy && !checking && !downloaded;
+  const active = showAvailable || busy || downloaded;
 
   return (
-    <Tooltip>
+    <Tooltip disabled={expanded && iconTooltip === railLabel}>
       <TooltipTrigger
         render={
           <button
             type="button"
             // Keep the control enabled while busy so the webview does not wash it out —
             // onClick already no-ops when busy, and aria-disabled carries the state.
-            className={`sidebar-update-btn${showAvailable || busy || downloaded ? " is-active" : ""}${busy ? " is-busy" : ""}`}
+            className={
+              className
+                ? cn(className, "group/rail-update", busy && "cursor-wait")
+                : `sidebar-update-btn${active ? " is-active" : ""}${busy ? " is-busy" : ""}`
+            }
+            data-active={active || undefined}
             onClick={onClick}
             aria-disabled={busy || undefined}
             aria-busy={busy || undefined}
-            aria-label={iconTooltip}
+            aria-label={railLabel}
           />
         }
       >
-        {downloading ? (
-          <DownloadProgressIcon percent={downloadPercent} />
-        ) : downloaded ? (
-          <RestartIcon />
-        ) : showAvailable ? (
-          <DownloadIcon />
-        ) : (
-          <RefreshIcon spinning={checking || busy} />
-        )}
+        <span className="flex size-4 shrink-0 items-center justify-center text-[var(--sidebar-icon-color)] group-hover/rail-update:text-sidebar-foreground group-data-[active=true]/rail-update:text-sidebar-foreground">
+          {downloading ? (
+            <DownloadProgressIcon percent={downloadPercent} />
+          ) : downloaded ? (
+            <RestartIcon />
+          ) : showAvailable ? (
+            <DownloadIcon />
+          ) : (
+            <RefreshIcon spinning={checking || busy} />
+          )}
+        </span>
+        <span className={labelClassName}>{railLabel}</span>
       </TooltipTrigger>
-      <TooltipPopup side="top">{iconTooltip}</TooltipPopup>
+      <TooltipPopup side="right">{iconTooltip}</TooltipPopup>
     </Tooltip>
   );
 }
