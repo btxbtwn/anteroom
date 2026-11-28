@@ -15,14 +15,14 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  SOURCE: 7f81013122e8e50636c3d3e516757536408e2dcc
+  SOURCE: 0b453698515e90c651707dd1f38bd498d9db95b9
 
 jobs:
   projects:
     name: Trial (${{ matrix.project }})
     if: github.repository == 'btxbtwn/anteroom' && github.ref == 'refs/heads/2348-browser-ci-comparison'
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 55
     strategy:
       fail-fast: false
       matrix:
@@ -73,10 +73,10 @@ jobs:
           PROJECT: ${{ matrix.project }}
           SANDBOX_BROWSER_EVIDENCE_FILE: ${{ runner.temp }}/trial/full.json
         run: |
-          node ../../.github/scripts/browser-ci-trial.mjs prepare "$RUNNER_TEMP/trial" "$PROJECT"
+          node ../../.github/scripts/browser-candidate-trial.mjs prepare "$RUNNER_TEMP/trial" "$PROJECT"
           npm run e2e -- --list --reporter=../.github/scripts/browser-evidence-reporter.mjs
       - name: Run one complete browser project
-        timeout-minutes: 30
+        timeout-minutes: 40
         env:
           CI: 'true'
           PROJECT: ${{ matrix.project }}
@@ -131,10 +131,14 @@ jobs:
           pattern: trial-evidence-*-${{ github.run_attempt }}
           path: inventories
       - name: Verify complete three-project union and exact inputs
-        run: node .github/scripts/browser-ci-trial.mjs verify inventories source
+        env:
+          PROJECTS_RESULT: ${{ needs.projects.result }}
+        run: node .github/scripts/browser-candidate-trial.mjs verify inventories source
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: trial-summary-${{ github.run_attempt }}
-          path: trial-summary.json
+          path: |
+            trial-summary.json
+            candidate-browser-inventory.json
           if-no-files-found: error
           retention-days: 7

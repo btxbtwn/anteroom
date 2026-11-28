@@ -60,7 +60,10 @@ test("trial workflow stays branch-only, read-only and separate from deploy/CI", 
   assert.match(workflow, /name: Browser topology trial/);
   assert.match(workflow, /branches: \[2348-browser-ci-comparison\]/);
   assert.match(workflow, /contents: read/);
-  assert.match(workflow, new RegExp(`SOURCE: ${source}`));
+  const candidate = readFileSync(new URL("./browser-candidate-trial.mjs", import.meta.url), "utf8");
+  const target = candidate.match(/const source = "([0-9a-f]{40})";/)[1];
+  assert.match(workflow, new RegExp(`SOURCE: ${target}`));
+  assert.doesNotMatch(workflow, /^\s*GITHUB_SHA:/m);
   assert.doesNotMatch(workflow, /^\s*(secrets|environment|workflow_call|workflow_run|pull_request|workflow_dispatch):/m);
   assert.doesNotMatch(workflow, /:\s*write\b|secrets\.|flyctl|gh pr|--admin/);
   assert.match(workflow, /PROJECTS_RESULT:.*needs\.projects\.result/);
