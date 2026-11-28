@@ -1,0 +1,1 @@
+- The privacy policy now says what happens to feedback your AI app sends to Anteroom: it is kept with your account, and on myanteroom.com it is also emailed to the Anteroom team.
