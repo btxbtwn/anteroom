@@ -1,0 +1,1 @@
+- Surface failed and retried automated browser checks on release runs so regressions are caught faster.
