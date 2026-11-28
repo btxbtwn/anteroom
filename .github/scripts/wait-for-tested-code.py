@@ -23,12 +23,12 @@ not finish in time.
 When recorded and live production are still on 2334fe2f (0.1.1286), the
 push CI failure on #2257 (cc22db3f, phone-webkit e2e/chatStreaming.e2e.ts;
 fixed in #2291 / 9c5df2f6) may be superseded only after all other commits in
-the span pass push CI and an exact schema-2 Descendant verification receipt
-proving the unchanged phone-webkit chatStreaming test passed is live-verified
-against GitHub and local Git. Until a real receipt is separately pinned in
-HISTORICAL_RECOVERY_CHECKPOINT, cc22db3f fails closed and blocks every deploy.
-Once Deploy hosted succeeds and records a newer Deployed commit, the checkpoint
-never matches again.
+the span pass push CI and the exact schema-2 Descendant verification receipt
+for be0144a0 (run 46093755351, attempt 1, artifact 15243004283) proving the
+unchanged phone-webkit chatStreaming test passed is live-verified against
+GitHub and local Git. Once Deploy hosted succeeds and records a newer Deployed
+commit, this checkpoint never matches again and ordinary gating applies
+unchanged.
 """
 
 from __future__ import annotations
@@ -83,18 +83,33 @@ PRE_RENAME_PREFIXES = (
 
 # Push CI 46036588227 on #2257 failed Studio browser tests (sandbox) on
 # phone-webkit e2e/chatStreaming.e2e.ts:158. #2291 (9c5df2f6) fixed WebKit
-# streaming pacing without changing the test assertion. Pin a real schema-2
-# Descendant verification receipt (production_base=2334fe2f) in a separate
-# follow-up PR before Deploy hosted can supersede cc22db3f; None fails closed.
+# streaming pacing without changing the test assertion.
 HISTORICAL_RECOVERY_FAILURES = frozenset({
     "cc22db3fae820d52c3e1b61af209e19221fa9502",  # CI 46036588227
 })
 HISTORICAL_RECOVERY_CORRECTION = "9c5df2f6d655f46313ba7218036deca1a75bf0c4"
 
-# Spent 23f8ab01 / 0.1.1211 pin removed after production reached 2334fe2f
-# (0.1.1286). Pin a real Descendant verification receipt here only after a
-# passing verify-corrected-descendant.yml run exists; None fails closed.
-HISTORICAL_RECOVERY_CHECKPOINT: recovery_evidence.EvidencePin | None = None
+# Single-base schema-2 recovery checkpoint for historical cc22db3f (fixed in
+# #2291). Inert once Deploy hosted records a commit after 2334fe2f (or after
+# artifact 15243004283 expires ~30 days from 2026-11-28); remove this pin in a
+# cleanup PR once production is verified past 2334fe2f.
+HISTORICAL_RECOVERY_CHECKPOINT: recovery_evidence.EvidencePin | None = recovery_evidence.EvidencePin(
+    repository="btxbtwn/anteroom",
+    repository_id=1183824317,
+    workflow_id=422931456,
+    target="be0144a0f218d359c73ed33281f7ff9e5ef32a70",
+    tree="513a02d462217033f72b262b9df47263b8cf549b",
+    production_base="2334fe2f33b97ff6a9ec8aba6e256d71c86743c9",
+    historical_failure="cc22db3fae820d52c3e1b61af209e19221fa9502",
+    correcting_merge="9c5df2f6d655f46313ba7218036deca1a75bf0c4",
+    workflow_blob="cc4a53b95a23bc4f02e3e1cb1c50ea672679ae94",
+    ci_blob="be450a74d6fdeb4d309b1156337e0d10397c4406",
+    run_id=46093755351,
+    attempt=1,
+    receipt_artifact_id=15243004283,
+    receipt_digest="sha256:2a98eb5e6a9efd67a9c1ca20a5925b134c84390f0bce1415109d4d19762a095d",
+    browser_regression_blob="0f040c3572c8c5a9c1e024c70be72dc11fcbc5f9",
+)
 HISTORICAL_BASE_FLY_APP = "peaceful-meadowstone-6944"
 HISTORICAL_BASE_IMAGE_DIGEST = "sha256:169925b25de2919256f7bb23e7dec2495b727daecb6b60417929cb69de4d241c"
 HISTORICAL_BASE_DB_REVISION = "f1b4c8d2e930"

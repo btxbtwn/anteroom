@@ -260,8 +260,28 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
             return {"total_count": len(self.artifacts), "artifacts": copy.deepcopy(self.artifacts)}
         raise AssertionError(f"Unexpected API path: {path}")
 
-    def test_committed_recovery_targets_2257_2291_and_fails_closed_until_pinned(self):
-        self.assertIsNone(self.gate.HISTORICAL_RECOVERY_CHECKPOINT)
+    def test_committed_pin_matches_exact_documented_receipt(self):
+        pin = self.gate.HISTORICAL_RECOVERY_CHECKPOINT
+        self.assertIsNotNone(pin)
+        assert pin is not None
+        self.assertEqual(pin.repository, "btxbtwn/anteroom")
+        self.assertEqual(pin.repository_id, 1183824317)
+        self.assertEqual(pin.workflow_id, 422931456)
+        self.assertEqual(pin.target, "be0144a0f218d359c73ed33281f7ff9e5ef32a70")
+        self.assertEqual(pin.tree, "513a02d462217033f72b262b9df47263b8cf549b")
+        self.assertEqual(pin.production_base, "2334fe2f33b97ff6a9ec8aba6e256d71c86743c9")
+        self.assertEqual(pin.historical_failure, verification.HISTORICAL)
+        self.assertEqual(pin.correcting_merge, verification.CORRECTED)
+        self.assertEqual(pin.workflow_blob, "cc4a53b95a23bc4f02e3e1cb1c50ea672679ae94")
+        self.assertEqual(pin.ci_blob, "be450a74d6fdeb4d309b1156337e0d10397c4406")
+        self.assertEqual(pin.run_id, 46093755351)
+        self.assertEqual(pin.attempt, 1)
+        self.assertEqual(pin.receipt_artifact_id, 15243004283)
+        self.assertEqual(
+            pin.receipt_digest,
+            "sha256:2a98eb5e6a9efd67a9c1ca20a5925b134c84390f0bce1415109d4d19762a095d",
+        )
+        self.assertEqual(pin.browser_regression_blob, verification.BROWSER_REGRESSION_BLOB)
         self.assertEqual(verification.HISTORICAL, "cc22db3fae820d52c3e1b61af209e19221fa9502")
         self.assertEqual(verification.CORRECTED, "9c5df2f6d655f46313ba7218036deca1a75bf0c4")
         self.assertEqual(self.committed_correction, "9c5df2f6d655f46313ba7218036deca1a75bf0c4")
