@@ -368,6 +368,30 @@ def test_reporter_ignores_its_own_logs_and_uvicorns_duplicate():
     h.close()
 
 
+def test_only_expected_disconnected_chrome_session_probe_is_filtered():
+    from anteroom.services.hosted_browser_relay import ChromeReadError
+
+    offline = "Open Anteroom in Chrome on your computer and connect Chrome first."
+    h = handler(lambda s, b: None)
+
+    def alerts(operation, error):
+        record = record_with_exception(error=error)
+        record.name = "anteroom.marketplaces"
+        record.marketplace_context = {"operation": operation}
+        return h.filter(record)
+
+    try:
+        assert not alerts("marketplace.sessions", ChromeReadError(offline))
+        assert alerts("marketplace.sessions", ChromeReadError("Chrome did not answer in time. Try again."))
+        assert alerts("marketplace.orders", ChromeReadError(offline))
+        assert alerts("marketplace.sessions", RuntimeError(offline))
+        routing_failure = ChromeReadError(offline)
+        routing_failure.__context__ = RuntimeError("route lookup unavailable")
+        assert alerts("marketplace.sessions", routing_failure)
+    finally:
+        h.close()
+
+
 def test_warnings_are_emailed():
     h = handler(lambda s, b: None)
     assert h.level == logging.WARNING

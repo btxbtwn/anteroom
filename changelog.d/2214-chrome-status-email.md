@@ -1,0 +1,1 @@
+- Checking marketplace connections with Chrome disconnected no longer sends an operator error email.
