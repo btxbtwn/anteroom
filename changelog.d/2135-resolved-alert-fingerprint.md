@@ -1,0 +1,1 @@
+- A failed-listing alert you resolve in Needs attention stays resolved after Anteroom's next inventory check, and comes back only when a new attempt fails.

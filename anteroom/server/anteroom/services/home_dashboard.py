@@ -529,7 +529,9 @@ def _collect_attention_items(db: Session, *, now_utc: datetime, dismissed_keys: 
             "action_label": "Fix listing",
             "target": {"view": "listings", "conversation_id": ml.conversation_id},
             "occurred_at": _iso(ml.updated_at),
-            "fingerprint": _fingerprint(ml.state, ml.error, _iso(ml.updated_at)),
+            # A new attempt runs as a new job; background saves (a price or
+            # inventory read) touch updated_at and must not undo a Resolve.
+            "fingerprint": _fingerprint(ml.state, ml.error, ml.job_id),
         })
 
     # 4. Listings with unsent live edits
