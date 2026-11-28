@@ -635,8 +635,32 @@ it("disables only the agent's target row and labels it while other fields stay e
       label, value: "", required: true, options: ["36", "Blue"] })), onAskChat: vi.fn() });
   expect(html).toContain('fieldset disabled="" data-listing-row="ebay_specifics.Size"');
   expect(html).toContain('fieldset data-listing-row="ebay_specifics.Color"');
-  expect(html.match(/Agent editing/g)).toHaveLength(1);
+  expect(html.match(/Ant is editing this field…/g)).toHaveLength(1);
   expect(html).toContain("Fill Color with Ant");
+});
+
+describe("field messages in the seller's words", () => {
+  beforeEach(() => vi.clearAllMocks());
+  type Field = Parameters<typeof render>[2] extends infer O ? O extends { nativeFields?: infer F } ? F : never : never;
+
+  it("offers Reload on a required pick-list whose choices did not load", () => {
+    const html = render({}, {}, { selected: "mercari", notes: [], nativeFields: [{ key: "mercari_specifics.brand",
+      path: "mercari_specifics.brand", label: "Brand", value: "", required: true, options: [], selection_only: true }] as unknown as Field });
+    expect(html).toContain("Mercari&#x27;s choices for this field didn&#x27;t load.");
+    expect(html).toMatch(/<button[^>]*aria-label="Reload Brand choices"[^>]*>Reload<\/button>/);
+    expect(html).not.toContain("Reopen the listing");
+  });
+
+  it("shows Smart Sell as a labelled switch beside Poshmark's price", () => {
+    const html = render({}, {}, { selected: "poshmark", notes: [], nativeFields: [
+      { key: "poshmark_specifics.poshmarkPrice", path: "poshmark_specifics.poshmarkPrice", label: "Listing Price", value: "40", required: true, options: [] },
+      { key: "poshmark_specifics.smartSell.enabled", path: "poshmark_specifics.smartSell.enabled", label: "Smart Sell", value: "true",
+        required: false, options: [], input_type: "badge" },
+    ] as unknown as Field });
+    expect(html).toMatch(/<label[^>]*><span[^>]*role="switch"[^>]*aria-checked="true"/);
+    expect(html).toContain("Smart Sell</label>");
+    expect(html).not.toMatch(/Smart Sell (ON|OFF)/);
+  });
 });
 
 

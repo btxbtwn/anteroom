@@ -1,0 +1,3 @@
+- Field messages in the listing editor are in plain words: "Ant is editing this field…", "Saving once Ant finishes…", and a category with no exact match says so.
+- A field whose choices didn't load has its own **Reload** button, and the "Reference choices" labels are gone.
+- Poshmark's Smart Sell is a switch beside Listing Price.

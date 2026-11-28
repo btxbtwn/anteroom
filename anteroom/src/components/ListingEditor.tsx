@@ -301,7 +301,7 @@ export function ListingEditor({
           {conversation ? <FavoriteToggle id={convId} title={String(listing.title || conversation.title || "Listing")} favorite={Boolean(conversation.favorite)} /> : null}
           <ListingActionsMenu convId={convId} onCleared={onCleared} />
         </span>}
-        railStatus={editState.saving ? <span role="status" className="text-xs text-muted-foreground">{generating ? "Edits kept. Waiting for chat to finish before saving…" : "Saving…"}</span> : undefined}
+        railStatus={editState.saving ? <span role="status" className="text-xs text-muted-foreground">{generating ? editorCopy(vendoo).savingAfterAnt : "Saving…"}</span> : undefined}
         onSelect={(id) => {
           setFieldTarget(null);
           setEditTab(id);
@@ -369,12 +369,34 @@ function fieldName(label: string): string {
 }
 
 /**
- * A field's secondary tools: where its choices come from and an Ant fill. They stay
+ * Field and status wording. The direct-marketplace editor says it in the seller's
+ * words; the Vendoo listing mode keeps main's wording, as the seller asked for
+ * that mode to stay as it is. Pinned by ListingEditor.vendoo.test.tsx.
+ */
+export function editorCopy(vendoo: boolean) {
+  return vendoo ? {
+    savingAfterAnt: "Edits kept. Waiting for chat to finish before saving…",
+    agentEditing: "Agent editing…",
+    noExactMatch: (name: string) => `Suggested: check it. No exact ${name} match.`,
+    categoryFormMissing: (_name: string) => "The full category form is unavailable. Reference choices are shown where available.",
+    choicesMissing: (_name: string) => "Choices unavailable. Reopen the listing to load this field.",
+  } : {
+    savingAfterAnt: "Saving once Ant finishes…",
+    agentEditing: "Ant is editing this field…",
+    noExactMatch: (name: string) => `${name} has no exact match. Check this category.`,
+    categoryFormMissing: (name: string) => `Some of ${name}'s fields for this category may be missing. Check the listing on ${name} before you publish.`,
+    choicesMissing: (name: string) => `${name}'s choices for this field didn't load.`,
+  };
+}
+
+/**
+ * A field's secondary tools: an Ant fill, and in the Vendoo listing mode where its
+ * choices come from. They stay
  * out of sight until the pointer is over the field or focus is in it, so the
  * form reads as fields first. The button stays in the tab order and shows on
  * focus; on touch it shows once the seller taps into the field.
  */
-function FieldTools({ label, source, onAsk }: { label: string; source: string | null; onAsk?: () => void }) {
+function FieldTools({ label, source = null, onAsk }: { label: string; source?: string | null; onAsk?: () => void }) {
   const action = `Fill ${fieldName(label)} with Ant`;
   return (
     <span className={cn("ms-auto flex shrink-0 items-center gap-1.5 opacity-0 transition-opacity",
@@ -958,6 +980,15 @@ export function StructuredEditor({
   // Only loading, errors and gaps get a line; a form that loaded fine needs none.
   const retryingThisTab = reloadFields.isPending && reloadFields.variables?.market === tab;
   const reloadingThisTab = nativeTab && (retryingThisTab || autoReloadingMarket === tab);
+  // A required pick-list with no choices reloads them on the field itself.
+  const reloadChoices = () => {
+    if (nativeTab) {
+      if (revisionId) reloadFields.mutate({ market: tab, revision: revisionId });
+      return;
+    }
+    void formsQuery.refetch();
+    void dropdownQuery.refetch();
+  };
   const formLoadError = nativeQuery.error instanceof ApiRequestError && nativeQuery.error.status === 0
     ? "Could not reach the server to load this form. Check your connection and try again."
     : nativeQuery.error instanceof Error
@@ -991,7 +1022,7 @@ export function StructuredEditor({
                 : !nativeTab && (formsQuery.isError || dropdownQuery.isError)
                   ? "Some choices could not be refreshed. Check each field's choices before listing."
                   : categoryForm?.known === false
-                    ? "The full category form is unavailable. Reference choices are shown where available."
+                    ? editorCopy(vendoo).categoryFormMissing(marketplaceName(tab))
                     : null;
   // Renders its own hint beside the selected count.
   const multiSelectControl = (f: EditorField) => Boolean(f.multi)
@@ -1238,12 +1269,13 @@ export function StructuredEditor({
               {visible.map((f, index) => {
                 const badge = section.fields.find((row) => row.type === "badge" && (f.key === "price" || f.key === "poshmark_specifics.poshmarkPrice"));
                 const badgeOn = badge ? formFieldText(local[badge.key] ?? badge.defaultValue) === "true" : false;
-                const source = !nativeTab && f.optionsSource && f.optionsSource !== "saved"
-                  ? f.optionsSource === "marketplace" ? "Marketplace choices" : f.optionsSource === "vendoo" ? "Imported category choices" : "Reference choices"
-                  : null;
                 const ask = onAskChat && !f.locked ? () => onAskChat(
                   `Fill or correct only ${marketplaceName(tab)} / ${f.label}${f.section ? ` (${f.section})` : ""} using the photos and seller evidence. Preserve all other fields.`,
                 ) : undefined;
+                // The Vendoo listing mode keeps naming where a field's choices came from, as it always has.
+                const source = vendoo && !nativeTab && f.optionsSource && f.optionsSource !== "saved"
+                  ? f.optionsSource === "marketplace" ? "Marketplace choices" : f.optionsSource === "vendoo" ? "Imported category choices" : "Reference choices"
+                  : null;
                 const tools = source || ask ? <FieldTools label={f.label} source={source} onAsk={ask} /> : null;
                 const labelRow = f.type !== "cascade" && f.presentation !== "button" && f.presentation !== "checkbox" && Boolean(f.label);
                 return (
@@ -1260,7 +1292,7 @@ export function StructuredEditor({
                   : fullWidth(f) && "col-span-full")} tabIndex={-1}
                   onFocus={event => event.currentTarget.classList.add("ring-2", "ring-ring", "rounded-lg")}
                   onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.classList.remove("ring-2", "ring-ring", "rounded-lg"); }}>
-                  {agentFieldLocked(f.key, agentLocks) && <span role="status" className="text-xs text-muted-foreground">Agent editing…</span>}
+                  {agentFieldLocked(f.key, agentLocks) && <span role="status" className="text-xs text-muted-foreground">{editorCopy(vendoo).agentEditing}</span>}
                   {labelRow && (f.hashtagMax != null ? (
                     <div className="mb-1.5 flex items-baseline justify-between gap-2">
                       <span className="flex min-w-0 items-center gap-1.5">
@@ -1286,14 +1318,17 @@ export function StructuredEditor({
                     <div className="mb-1.5 flex items-center gap-2">
                       <FieldLabel htmlFor={`listing-field-${f.key}`} className={cn("mb-0", f.labelHidden && "sr-only")}>{f.label}</FieldLabel>
                       {fieldDefault(f)}
-                      {badge && <button type="button" disabled={disabled || badge.locked} aria-pressed={badgeOn} className="rounded-full border px-2 py-0.5 text-xs font-medium"
-                        onClick={() => commitField(badge.key, !badgeOn)}>{badgeOn ? "Smart Sell ON" : "Smart Sell OFF"}</button>}
+                      {badge && <label className="ms-2 flex min-h-6 items-center gap-2 text-muted-foreground text-xs max-[900px]:min-h-11">
+                        <Switch size="sm" disabled={disabled || badge.locked} checked={badgeOn}
+                          onCheckedChange={(checked) => commitField(badge.key, checked)} />
+                        {badge.label || "Smart Sell"}
+                      </label>}
                       {tools}
                     </div>
                   ))}
                   <div data-listing-control className={cn(f.controlWidth === "half" && "@xl:w-1/2")}>{control(f, tools)}</div>
                   {suggestedCategory(listing, tab, f.key) && <p role="status" className="mt-1 flex flex-wrap items-baseline gap-x-2 text-xs text-warning-foreground">
-                    <span>Suggested: check it. No exact {marketplaceName(tab)} match.</span>
+                    <span>{editorCopy(vendoo).noExactMatch(marketplaceName(tab))}</span>
                     {!disabled && !f.locked && <InlineButton type="button" className="text-xs" onClick={() => {
                       const updated = cloneListing(listing);
                       setListingEditorValue(updated, `direct_category_ids.${tab}_suggested`, undefined);
@@ -1306,7 +1341,14 @@ export function StructuredEditor({
                     <p key={message} role="alert" className="mt-1 text-xs text-warning-foreground">{message}</p>)}
                   {f.maxLength != null && (f.multi ? formFieldValues(local[f.key], f.options) : [formFieldText(local[f.key])]).some((value) => value.length > f.maxLength!) &&
                     <p role="alert" className="mt-1 text-xs text-warning-foreground">Each value allows at most {f.maxLength} characters. Shorten the saved value.</p>}
-                  {f.required && f.selectionOnly && !f.options?.length && <p role="alert" className="mt-1 text-xs text-warning-foreground">Choices unavailable. Reopen the listing to load this field.</p>}
+                  {f.required && f.selectionOnly && !f.options?.length && (vendoo
+                    ? <p role="alert" className="mt-1 text-xs text-warning-foreground">{editorCopy(vendoo).choicesMissing(marketplaceName(tab))}</p>
+                    : <p role="alert" className="mt-1 flex flex-wrap items-baseline gap-x-2 text-xs text-warning-foreground">
+                    <span>{editorCopy(vendoo).choicesMissing(marketplaceName(tab))}</span>
+                    <InlineButton type="button" className="text-xs" aria-label={`Reload ${fieldName(f.label)} choices`}
+                      disabled={saving || hasDrafts || reloadFields.isPending || autoReloadingMarket !== null || (nativeTab && !revisionId)}
+                      onClick={reloadChoices}>{reloadingThisTab ? "Reloading…" : "Reload"}</InlineButton>
+                  </p>)}
                 </fieldset>
                 </React.Fragment>
                 );

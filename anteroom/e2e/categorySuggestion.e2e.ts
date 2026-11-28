@@ -22,7 +22,7 @@ test("a closest-match category is marked on its tab until the seller confirms it
     if (phone) await page.getByRole("tab", {name: "Listing"}).click();
     await openForm(page, phone, "Poshmark");
     const row = page.locator('[data-listing-row="direct_category_ids.poshmark"]');
-    const hint = row.getByRole("status").filter({hasText: "Suggested: check it."});
+    const hint = row.getByRole("status").filter({hasText: "Poshmark has no exact match. Check this category."});
     await expect(hint).toBeVisible({timeout: 30_000});
     await row.scrollIntoViewIfNeeded();
     await page.screenshot({path: info.outputPath("category-suggestion.png")});
