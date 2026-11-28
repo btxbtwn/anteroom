@@ -136,6 +136,14 @@ class VerificationEvidence(unittest.TestCase):
         self.assertEqual(result['projects']['phone']['skipped'], 1)
         self.assertEqual(result['projects']['phone-webkit']['passed'], 1)
 
+    def test_browser_inventory_retains_three_project_partitions(self):
+        payload = browser_inventory()
+        for index, row in enumerate(payload['cases'], 1):
+            row['shard'] = index
+        result = evidence.validate_browser_inventory(payload, MANIFEST)
+        self.assertEqual(result['regression']['shard'], 3)
+        self.assertEqual(result['projects']['phone-webkit']['shard_counts'], [0, 0, 1])
+
     def test_browser_inventory_rejects_skip_retry_wrong_provenance_altered_blob_and_parity_breaks(self):
         # Retried pass (failed retry=0 then passed retry=1) must fail closed.
         retried = browser_inventory()

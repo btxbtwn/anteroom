@@ -34,6 +34,9 @@ WORKFLOW = '.github/workflows/verify-corrected-descendant.yml'
 # Names are the real expanded reusable CI jobs, not merely its aggregate result.
 CHECKS = {'Changed components', 'Repo checks', 'Changelog', 'Studio frontend',
           'Studio code health', 'Studio browser tests (sandbox)', 'Studio browser tests (hosted)',
+          'Studio browser project (desktop)', 'Studio browser project (phone)',
+          'Studio browser project (phone-webkit)',
+          'Studio browser execution (hosted)',
           'Studio backend (1/2)', 'Studio backend (2/2)',
           'Studio backend Postgres (1/2)', 'Studio backend Postgres (2/2)',
           'Extension', 'CI', 'Audit locked Python dependencies', 'Webhook relay'}
@@ -193,7 +196,7 @@ def validate_browser_inventory(payload: dict, manifest: dict) -> dict:
         shard, expected, attempts = row.get('shard'), row.get('expected'), row.get('attempts')
         if (not isinstance(cid, str) or HEX64.fullmatch(cid) is None
                 or not isinstance(file_id, str) or HEX64.fullmatch(file_id) is None
-                or project not in BROWSER_PROJECTS or type(shard) is not int or shard not in (1, 2)
+                or project not in BROWSER_PROJECTS or type(shard) is not int or shard not in (1, 2, 3)
                 or expected not in ('passed', 'failed', 'skipped')
                 or not isinstance(attempts, list) or not attempts or cid in cases_map):
             raise ValueError('Invalid or duplicate sandbox browser executed entry.')
@@ -243,7 +246,8 @@ def validate_browser_inventory(payload: dict, manifest: dict) -> dict:
         rows = [c for c in cases_map.values() if c['project'] == project]
         projects_summary[project] = {
             'collected': len(rows),
-            'shard_counts': [sum(1 for c in rows if c['shard'] == s) for s in (1, 2)],
+            'shard_counts': [sum(1 for c in rows if c['shard'] == s)
+                             for s in sorted({c['shard'] for c in cases_map.values()})],
             'passed': sum(1 for c in rows if c['expected'] == 'passed'),
             'skipped': sum(1 for c in rows if c['expected'] == 'skipped'),
             'expected_failures': sum(1 for c in rows if c['expected'] == 'failed'),

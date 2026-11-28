@@ -323,21 +323,52 @@ durations fell from 152.6 to 81.5 seconds. The baseline also needed two retries,
 and the updated run passed on its first attempts. Compare job timestamps again
 on GitHub-hosted runners to measure the effect on CI.
 
-The two sandbox shards run on one GitHub machine with one browser worker and
-one disposable sandbox each. They share dependency installation and use
-distinct API ports, web ports, data folders, Vite caches and report paths.
-Each shard must pass. The combined executed inventory must cover the full
-collection exactly once across desktop Chromium, phone Chromium and phone
-WebKit. `check.sh` runs the same shards serially on the local machine.
-The local validation matched all 312 cases exactly once, with 276 passes,
-36 skips and zero retries. The two runs took 8.0 and 8.3 minutes on the Mac.
+Sandbox CI runs desktop Chromium, phone Chromium and phone WebKit as three
+independent one-worker jobs on the existing `ubuntu-latest` runner class.
+Each installs the same locked dependencies and uses a disposable sandbox,
+data folder, Vite cache and report paths. Hosted browser execution starts
+independently. The stable `Studio browser tests (sandbox)` and `(hosted)`
+checks gate their execution results; required `CI` still requires that matrix
+to succeed. No branch-protection or repository settings change is needed.
+
+Each sandbox runner records an unfiltered full collection and its project
+execution. The sandbox gate verifies all three projects against their exact
+expected cases and rejects missing, duplicate, foreign or incomplete cases,
+failed/cancelled/skipped project jobs, missing artifacts and mismatched source,
+workflow, lockfiles, runtime, runner image, run or attempt. Expected skips and
+every retry attempt remain visible. The existing one-retry policy, 40-minute
+test deadline, GitHub annotations, HTML reports, screenshots and failure traces
+remain in effect. Report artifacts are now named
+`studio-browser-report-sandbox-<project>`; profile and full-verification artifact
+names remain unchanged. Upload deadlines and seven-day diagnostic retention
+remain unchanged; full verification evidence retains its 30-day retention.
+
+`check.sh` continues to run the two local shards serially; it covers the same
+unfiltered collection and is not a substitute for exercising the CI matrix.
+The full-verification receipt also requires all four expanded execution jobs
+(three sandbox projects and hosted) and records the three project partitions.
+Source/tree/workflow/run/attempt and the historical WebKit regression binding
+remain required. No result reuse is enabled by this layout.
 
 The seven-day profile records keyed hashes of Playwright case and file identities,
 project names, retry outcomes, skips, expected failures, attempt durations and
-checkout, lock and runner provenance. The private key stays on the runner,
-and identities match within one job. Runtime-derived sensitive titles must stay
+checkout, lock and runner provenance. Each project keeps its private key on
+its own runner; its expected and executed identities match within that job.
+The aggregate combines the three disjoint project collections without sharing
+keys or exposing titles. Runtime-derived sensitive titles must stay
 out of public evidence even when hashed. Install steps expose Python, npm,
-browser OS dependencies and browser download timings separately for both jobs.
+browser OS dependencies and browser download timings separately for each execution job.
+
+The isolated three-project trial
+[46165858577](https://github.com/btxbtwn/anteroom/actions/runs/46165858577)
+matched baseline 46147855712's source, locks, Node, Playwright and runner image.
+It verified 360 cases (321 passes, 39 expected skips, zero retries), cut observed
+sandbox-path elapsed time from 21m22s to 10m59s, and increased runner time from
+21m10s to 28m47s. This is one historical baseline and one trial, not a p95
+benchmark or whole-CI measurement. The candidate's production evidence layout
+uses independent private keys and the stable gates; repeat comparable timing
+and full exact-candidate CI evidence are still needed before merge. The trial
+workflow is not included in this change and cannot supply release evidence.
 
 Postgres job medians in the same baseline were 13.0 and 6.9 minutes. The
 checked-in `pg-file-durations.json` contains per-file average case durations

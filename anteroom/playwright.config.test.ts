@@ -302,14 +302,16 @@ describe("Playwright GitHub Actions reporter configuration (#2343)", () => {
     }, 120_000);
   }
 
-  it("CI sandbox shard runner preserves config reporters on execution shards and isolates --list", () => {
+  it("local shards and CI projects preserve execution reporters and isolate --list", () => {
     const script = readFileSync(join(ANTEROOM_DIR, "scripts", "check-browser-shards.sh"), "utf8");
     expect(script).toMatch(/npm run e2e -- --list --reporter="\$reporter"/);
     expect(script).toMatch(/npm run e2e -- --shard="\$shard\/2" --output="\$output\/results-\$shard"/);
     expect(script).not.toMatch(/--shard="\$shard\/2"[^\n]*--reporter/);
 
     const ciWorkflow = readFileSync(join(REPO_ROOT, ".github", "workflows", "ci.yml"), "utf8");
-    expect(ciWorkflow).toContain('bash scripts/check-browser-shards.sh "$RUNNER_TEMP/sandbox-browser"');
+    expect(ciWorkflow).toContain('npm run e2e -- --project="$PROJECT" --workers=1 --output="$RUNNER_TEMP/sandbox-results"');
+    expect(ciWorkflow).toContain("npm run e2e -- --list --reporter=../.github/scripts/browser-evidence-reporter.mjs");
+    expect(ciWorkflow).not.toMatch(/--project="\$PROJECT"[^\n]*--reporter/);
     expect(ciWorkflow).toContain("npm run e2e:hosted");
   });
 });
