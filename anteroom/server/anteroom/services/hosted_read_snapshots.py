@@ -21,14 +21,24 @@ from anteroom.services.request_timing import note
 from anteroom.services.service_context import current
 
 
-def _version(context):
+# Other snapshots keep the complete feed. Both sidebar builds also depend on
+# worker-owned busy membership, which can change outside the ORM feed.
+_SIDEBAR_TOPICS = {
+    'inventory': ('listings', 'photos', 'settings', 'sales'),
+    'suggestions': ('listings', 'photos', 'settings'),
+}
+
+
+def _version(context, name):
     from anteroom.database import engine
 
     if engine.dialect.name != 'postgresql':
         raise HTTPException(503, 'The cloud database is not configured')
     with context.session_factory() as db:
-        changes = tuple(db.execute(select(SellerChange.topic, SellerChange.changed_at)
-                                   .order_by(SellerChange.topic)).all())
+        query = select(SellerChange.topic, SellerChange.changed_at).order_by(SellerChange.topic)
+        if name in _SIDEBAR_TOPICS:
+            query = query.where(SellerChange.topic.in_(_SIDEBAR_TOPICS[name]))
+        changes = tuple(db.execute(query).all())
         # Trusted worker SQL can change durable task state without publishing
         # a feed row. Busy membership must still invalidate suggestions. Lease
         # timestamps and queued -> running do not change that membership.
@@ -180,7 +190,7 @@ class SellerReadSnapshots:
                      for step in SUGGESTION_STEPS for metric in ('ms', 'orm_calls')} if name == 'suggestions' else {}))
 
         async def check():
-            version, queued, ran = await _in_thread(_version, context)
+            version, queued, ran = await _in_thread(_version, context, name)
             timing['checks'] += 1
             seconds['check'] += ran
             seconds['queue'] += queued
@@ -224,7 +234,7 @@ class SellerReadSnapshots:
                         rechecked = perf_counter()
                         # Never label a snapshot with changes committed during
                         # its build. The next read must rebuild in that case.
-                        cached = await asyncio.to_thread(_version, context) == snapshot_version
+                        cached = await asyncio.to_thread(_version, context, name) == snapshot_version
                         if cached:
                             self.completed[key] = snapshot_version, result, monotonic()
                             self.completed.move_to_end(key)
