@@ -253,12 +253,18 @@ production `0.1.1286` (`2334fe2f33b97ff6a9ec8aba6e256d71c86743c9`).
 without changing `anteroom/e2e/chatStreaming.e2e.ts` (Git blob
 `0f040c3572c8c5a9c1e024c70be72dc11fcbc5f9`).
 
-`HISTORICAL_RECOVERY_CHECKPOINT` in `.github/scripts/wait-for-tested-code.py`
-is cleared to `None` (the spent `23f8ab01` / `0.1.1211` pin is removed), so
-`cc22db3f` continues to fail closed until a real passing schema-2 **Descendant
-verification** receipt is produced and separately pinned in a follow-up PR.
-Once pinned, recovery requires all of the following inside `Deploy hosted`'s
-serialized `deploy-hosted` concurrency group:
+The pinned [Descendant verification run](https://github.com/btxbtwn/anteroom/actions/runs/46093755351)
+passed all 17 jobs on `be0144a0f218d359c73ed33281f7ff9e5ef32a70` (`0.1.1289`,
+tree `513a02d462217033f72b262b9df47263b8cf549b`). Its schema-2 attempt 1
+receipt (artifact `15243004283`,
+`sha256:2a98eb5e6a9efd67a9c1ca20a5925b134c84390f0bce1415109d4d19762a095d`) is
+pinned in `HISTORICAL_RECOVERY_CHECKPOINT` in
+`.github/scripts/wait-for-tested-code.py` (replacing the spent `23f8ab01` /
+`0.1.1211` pin) and covers the full source span from `2334fe2f` through
+`be0144a0`, proving the unchanged `phone-webkit` `chatStreaming` regression
+passed on its first attempt (`retry=0`, `attempts=1`). Recovery requires all
+of the following inside `Deploy hosted`'s serialized `deploy-hosted`
+concurrency group:
 
 - Recorded `production_commit` equals `2334fe2f33b97ff6a9ec8aba6e256d71c86743c9`,
   corroborated by HTTPS `HEALTH_URL` reporting `status: ok`,
