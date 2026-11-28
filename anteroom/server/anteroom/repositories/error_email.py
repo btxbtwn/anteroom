@@ -14,6 +14,7 @@ from typing import cast
 from sqlalchemy import JSON, Table, bindparam, cast as sql_cast, delete, func, select, type_coerce, update
 from sqlalchemy.dialects.postgresql import JSONB, aggregate_order_by
 
+from anteroom.repositories import error_impact
 from anteroom.models.error_email import OperatorEmailGroup, OperatorEmailState
 
 LIFECYCLE_ACTIVE = 'issue_lifecycle_active'
@@ -36,6 +37,9 @@ class EmailTransaction:
         self.connection, self.table, self.groups, self.state = connection, table, groups, state
         self.original = copy.deepcopy(state)
         self.dirty = False
+
+    def record_occurrences(self, reports, now):
+        error_impact.record_batch(self.connection, reports, report_release, now)
 
     def get_group(self, key):
         row = self.connection.execute(select(self.groups.c.payload, self.groups.c.last_sent).where(
@@ -195,6 +199,11 @@ class EmailStore:
                 _metadata(self.table, connection.dialect.name == 'postgresql'), pending).where(self.table.c.id == 1)).one()
             return state, int(count)
 
+    def prune_occurrences(self, now):
+        table = error_impact.occurrences
+        with self.engine.begin() as connection:
+            connection.execute(delete(table).where(table.c.occurred_at < now - error_impact.WEEK))
+
     def lifecycle_active(self) -> bool:
         with self.engine.connect() as connection:
             return bool(connection.scalar(select(
@@ -213,9 +222,12 @@ class EmailStore:
         query = query.order_by(groups.c.last_seen.desc(), groups.c.fingerprint).limit(limit).offset(offset)
         with self.engine.connect() as connection:
             rows = connection.execute(query).mappings().all()
+            impact = error_impact.summary(connection, [r['fingerprint'] for r in rows],
+                                          datetime.now(UTC).timestamp()) if rows else {}
         results = []
         for row in rows:
             issue = dict(row)
+            issue['impact_7d'] = impact.get(issue['fingerprint'])
             issue['severity'], issue['fingerprint'] = issue['fingerprint'].split(':', 1)
             for field in ('first_seen', 'last_seen', 'muted_until'):
                 if issue[field] is not None:

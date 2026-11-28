@@ -157,6 +157,8 @@ def test_operator_alert_may_use_the_budget_reserved_for_errors(tmp_path):
     store = EmailStore(engine)
     store.table.create(engine)
     store.groups.create(engine)
+    from anteroom.repositories.error_impact import occurrences
+    occurrences.create(engine)
     with engine.begin() as connection:
         connection.execute(store.table.insert().values(id=1, payload={"attempts": [1000.0] * 3}))
     assert reserve_direct_send(store, 4, clock=lambda: 1001.0) is False

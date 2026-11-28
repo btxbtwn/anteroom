@@ -25,6 +25,8 @@ def store(tmp_path):
     table = EmailStore(engine).table
     table.create(engine)
     EmailStore(engine).groups.create(engine)
+    from anteroom.repositories.error_impact import occurrences
+    occurrences.create(engine)
     with engine.begin() as connection:
         connection.execute(table.insert().values(id=1, payload={}))
     yield EmailStore(engine)

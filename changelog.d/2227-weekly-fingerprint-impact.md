@@ -1,0 +1,1 @@
+- Operator error groups now show observed seven-day occurrences, affected seller counts, releases and a code-only stack sample even after email delivery.

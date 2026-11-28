@@ -369,6 +369,7 @@ class AlertHandler(logging.Handler):
 
     def _run(self) -> None:
         batch: list[dict[str, Any]] = []
+        prune_after = 0.0
         while not (self.stopping.is_set() and not batch and not self._has_queued()):
             try:
                 if not batch:
@@ -377,6 +378,9 @@ class AlertHandler(logging.Handler):
                     self._store_batch(batch)
                 if not self.stopping.is_set():
                     self.delivery.tick()
+                    if time.monotonic() >= prune_after:
+                        self.delivery.store.prune_occurrences(self.delivery.clock())
+                        prune_after = time.monotonic() + 1800
             except Exception as exc:
                 # Retain the current batch and retry storage without reporting
                 # the reporter or killing its thread during a database outage.
