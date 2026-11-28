@@ -1,0 +1,140 @@
+name: Browser topology trial
+
+# Branch-only experiment. Not named CI, not a required check, no PR/main or
+# workflow_call trigger. Pushes here cannot enter the CI -> hosted deploy path.
+on:
+  push:
+    branches: [2348-browser-ci-comparison]
+    paths: [.github/workflows/browser-ci-trial.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-topology-trial
+  cancel-in-progress: false
+
+env:
+  SOURCE: 7f81013122e8e50636c3d3e516757536408e2dcc
+
+jobs:
+  projects:
+    name: Trial (${{ matrix.project }})
+    if: github.repository == 'btxbtwn/anteroom' && github.ref == 'refs/heads/2348-browser-ci-comparison'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [desktop, phone, phone-webkit]
+    defaults:
+      run:
+        working-directory: source/anteroom
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.SOURCE }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: source/anteroom/uv.lock
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22.23.5'
+          cache: npm
+          cache-dependency-path: source/anteroom/package-lock.json
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          version: '0.12.13'
+      - name: Install locked Python dependencies
+        run: |
+          python -m venv .venv
+          ./scripts/install-locked.sh .venv/bin/python dev
+      - name: Install locked npm dependencies
+        run: npm ci
+      # Same browser installation inputs as the baseline, even for Chromium.
+      - name: Install Playwright OS dependencies
+        run: npx playwright install-deps chromium webkit
+      - name: Install Playwright browser binaries
+        run: npx playwright install chromium webkit
+      - name: Compile Bridge network rules in Chromium
+        run: node scripts/check-bridge-network.mjs
+      - name: Verify remembered Bridge approval in Chromium
+        run: node scripts/check-bridge-connection.mjs
+      - name: Record exact source and complete case inventory
+        env:
+          CI: 'true'
+          PROJECT: ${{ matrix.project }}
+          SANDBOX_BROWSER_EVIDENCE_FILE: ${{ runner.temp }}/trial/full.json
+        run: |
+          node ../../.github/scripts/browser-ci-trial.mjs prepare "$RUNNER_TEMP/trial" "$PROJECT"
+          npm run e2e -- --list --reporter=../.github/scripts/browser-evidence-reporter.mjs
+      - name: Run one complete browser project
+        timeout-minutes: 30
+        env:
+          CI: 'true'
+          PROJECT: ${{ matrix.project }}
+          ANTEROOM_SANDBOX_DIR: ${{ runner.temp }}/trial-data
+          VITE_CACHE_DIR: ${{ runner.temp }}/trial-vite
+          PLAYWRIGHT_HTML_OUTPUT_DIR: ${{ runner.temp }}/trial-report
+          SANDBOX_BROWSER_EVIDENCE_FILE: ${{ runner.temp }}/trial/executed.json
+        run: npm run e2e -- --project="$PROJECT" --workers=1 --output="$RUNNER_TEMP/trial-results"
+      - name: Retain inventories and provenance
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: trial-evidence-${{ matrix.project }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/trial/*.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain reports, screenshots and traces
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: trial-report-${{ matrix.project }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/trial-report
+            ${{ runner.temp }}/trial-results
+          if-no-files-found: error
+          retention-days: 7
+
+  evidence:
+    name: Trial exact case union
+    needs: projects
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every project to succeed
+        env:
+          PROJECTS_RESULT: ${{ needs.projects.result }}
+        run: test "$PROJECTS_RESULT" = success
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.SOURCE }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22.23.5'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          pattern: trial-evidence-*-${{ github.run_attempt }}
+          path: inventories
+      - name: Verify complete three-project union and exact inputs
+        run: node .github/scripts/browser-ci-trial.mjs verify inventories source
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: trial-summary-${{ github.run_attempt }}
+          path: trial-summary.json
+          if-no-files-found: error
+          retention-days: 7
