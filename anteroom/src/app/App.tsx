@@ -4,7 +4,7 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { discardBlankDraft, discardBlankDraftOnExit } from "./blankDraft";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { refreshInventory } from "../api/inventoryRefresh";
+import { refreshInventory, refreshInventoryNow } from "../api/inventoryRefresh";
 import { BUSY_POLL_MS, IDLE_POLL_MS, hasOpenJob, inventoryPollMs, pollMs } from "../api/polling";
 import { useReloadStaleFrontend } from "../components/BuildVersion";
 import { isChatToggleShortcut } from "../components/ListingChatPopup";
@@ -561,7 +561,7 @@ export function App() {
       // Navigation can reopen this listing while its last save or upload settles.
       shouldDiscard: () => selectedConvIdRef.current !== id,
     }).then((discarded) => {
-      if (discarded) void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      if (discarded) void refreshInventoryNow(queryClient).catch(() => {});
     });
   }, [queryClient]);
   useEffect(() => {
@@ -586,7 +586,7 @@ export function App() {
   const createConv = useMutation({
     mutationFn: () => api.conversations.create({ title: "New Listing" }),
     onSuccess: (conv) => {
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      void refreshInventoryNow(queryClient).catch(() => {});
       const previous = freshDraftId.current;
       freshDraftId.current = conv.id;
       setSelectedConvId(conv.id);

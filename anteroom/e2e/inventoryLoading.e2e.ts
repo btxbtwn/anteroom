@@ -52,10 +52,11 @@ test("the inventory shows placeholder rows until it loads, and opens on Active",
 test("a new listing left without a photo or a word is not kept", async ({ page, phone, request }, info) => {
   const title = `Other ${info.project.name} ${Date.now()}`;
   const other = await createListing(request, title);
+  let fresh = "";
   try {
     await page.goto("/");
     await showInventory(page, phone);
-    const fresh = await newListing(page);
+    fresh = await newListing(page);
     expect((await request.get(`/api/conversations/${fresh}`)).status()).toBe(200);
     if (phone) await page.getByRole("button", { name: "Inventory", exact: true }).click();
     // A new listing opens its tab, Draft, where the other draft is too.
@@ -65,6 +66,46 @@ test("a new listing left without a photo or a word is not kept", async ({ page, 
     await expect.poll(async () => (await request.get(`/api/conversations/${fresh}`)).status(), { timeout: 15_000 }).toBe(404);
     await expect(page.getByRole("list", { name: "Listings" }).getByRole("link", { name: "New Listing", exact: true })).toHaveCount(0);
   } finally {
+    if (fresh) await request.delete(`/api/conversations/${fresh}`);
+    await request.delete(`/api/conversations/${other}`);
+  }
+});
+
+test("a new listing started while the initial inventory is still loading still opens Draft and discards when left blank", async ({ page, phone, request }, info) => {
+  const title = `Other ${info.project.name} ${Date.now()}`;
+  const other = await createListing(request, title);
+  let fresh = "";
+  try {
+    let releaseStale!: () => void;
+    const staleHeld = new Promise<void>((resolve) => { releaseStale = resolve; });
+    let stalePending = true;
+    await page.route("**/api/conversations", async (route) => {
+      if (route.request().method() === "GET" && stalePending) {
+        const response = await route.fetch();
+        await staleHeld;
+        try {
+          await route.fulfill({ response });
+        } catch {
+          // StrictMode aborts the superseded initial read before fulfillment.
+        }
+        return;
+      }
+      await route.continue();
+    });
+    await page.goto("/");
+    await showInventory(page, phone);
+    fresh = await newListing(page);
+    expect((await request.get(`/api/conversations/${fresh}`)).status()).toBe(200);
+    stalePending = false;
+    releaseStale();
+    if (phone) await page.getByRole("button", { name: "Inventory", exact: true }).click();
+    await expect(page.getByRole("tablist", { name: "Listing status" }).getByRole("tab", { name: /^Draft\b/ }))
+      .toHaveAttribute("aria-selected", "true");
+    await page.getByRole("list", { name: "Listings" }).getByRole("link", { name: title, exact: true }).click();
+    await expect.poll(async () => (await request.get(`/api/conversations/${fresh}`)).status(), { timeout: 15_000 }).toBe(404);
+    await expect(page.getByRole("list", { name: "Listings" }).getByRole("link", { name: "New Listing", exact: true })).toHaveCount(0);
+  } finally {
+    if (fresh) await request.delete(`/api/conversations/${fresh}`);
     await request.delete(`/api/conversations/${other}`);
   }
 });
