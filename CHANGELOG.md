@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1292 — 2026-11-28
+
+- Surface failed and retried automated browser checks on release runs so regressions are caught faster.
+
 ## 0.1.1291 — 2026-11-28
 
 - Stop a stuck test-report upload from holding up new Anteroom releases for hours.
