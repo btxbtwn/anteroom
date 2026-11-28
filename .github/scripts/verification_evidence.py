@@ -40,6 +40,10 @@ CHECKS = {'Changed components', 'Repo checks', 'Changelog', 'Studio frontend',
           'Studio backend (1/2)', 'Studio backend (2/2)',
           'Studio backend Postgres (1/2)', 'Studio backend Postgres (2/2)',
           'Extension', 'CI', 'Audit locked Python dependencies', 'Webhook relay'}
+PROJECT_CHECKS = {f'Studio browser project ({project})' for project in BROWSER_PROJECTS} | {'Studio browser execution (hosted)'}
+# Immutable contract of the configured historical recovery receipt. Absence of
+# a version declaration on any other blob is not evidence of a legacy layout.
+LEGACY_CI_BLOB = 'be450a74d6fdeb4d309b1156337e0d10397c4406'
 
 
 def digest(value: str) -> str:
@@ -114,10 +118,27 @@ def all_jobs(fetch, run_id: str, attempt: str) -> list[dict]:
     raise ValueError('Job inventory exceeds the bounded page limit.')
 
 
-def validate_jobs(jobs: list[dict]) -> list[dict]:
+def job_contract(ci_blob: str, read_git=git) -> set[str]:
+    require_sha(ci_blob)
+    if ci_blob == LEGACY_CI_BLOB:
+        return CHECKS - PROJECT_CHECKS
+    try:
+        text = read_git('cat-file', 'blob', ci_blob)
+    except subprocess.CalledProcessError as error:
+        raise ValueError('Unknown verification workflow identity.') from error
+    contracts = re.findall(r'^# verification-job-contract: (\S+)$', text, re.MULTILINE)
+    if contracts != ['browser-projects-v1']:
+        raise ValueError('Unknown verification workflow identity or job contract.')
+    return CHECKS
+
+
+def validate_jobs(jobs: list[dict], ci_blob: str | None = None, read_git=git) -> list[dict]:
+    expected = job_contract(ci_blob or git('rev-parse', 'HEAD:.github/workflows/ci.yml'), read_git)
+    if any(not j['name'].startswith('checks / ') and j['name'] not in {'prepare', 'evidence'} for j in jobs):
+        raise ValueError('Unknown job outside the verification contract.')
     checks = [j for j in jobs if j['name'].startswith('checks / ')]
     names = [j['name'].removeprefix('checks / ').removeprefix('Dependency audit / ') for j in checks]
-    if set(names) != CHECKS or len(names) != len(CHECKS):
+    if set(names) != expected or len(names) != len(expected):
         raise ValueError('Expanded jobs do not match the complete verification contract.')
     if any(j.get('status') != 'completed' or j.get('conclusion') != 'success' for j in checks):
         raise ValueError('Every verification job must complete successfully; skips are not evidence.')
@@ -297,7 +318,7 @@ def main() -> None:
                                             capture_output=True, text=True, timeout=30).stdout)
         run = fetch(f"actions/runs/{result['run_id']}")
         validate_run(run, result)
-        result['jobs'] = validate_jobs(all_jobs(fetch, result['run_id'], result['attempt']))
+        result['jobs'] = validate_jobs(all_jobs(fetch, result['run_id'], result['attempt']), result['ci_blob'])
         payloads = [json.loads(p.read_text()) for p in sorted(args.inventories.glob('*.json'))]
         result['backend_inventory'] = validate_inventory(payloads, result)
         browser_payload = json.loads(args.browser.read_text())

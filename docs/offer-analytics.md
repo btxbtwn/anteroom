@@ -213,7 +213,7 @@ and setting/restoring the sandbox theme resolved those harness failures; no
 install or product theme/navigation change was made.
 
 Screenshot filenames are `offer-analytics-{desktop|phone}-{light|dark}.png` in
-the test output. CI's always-uploaded `studio-browser-report-sandbox` artifact
+the test output. CI's always-uploaded `studio-browser-report-sandbox-<project>` artifacts
 retains them. The short resource slot was explicitly returned to the next
 worker after both private Postgres and browser/server processes stopped.
 No duplicate full suite was started. Native refresh/accessibility checks must

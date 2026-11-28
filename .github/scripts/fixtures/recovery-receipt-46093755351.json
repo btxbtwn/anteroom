@@ -1,0 +1,210 @@
+{
+  "artifact_sha256": "2a98eb5e6a9efd67a9c1ca20a5925b134c84390f0bce1415109d4d19762a095d",
+  "receipt": {
+    "target": "be0144a0f218d359c73ed33281f7ff9e5ef32a70",
+    "tree": "513a02d462217033f72b262b9df47263b8cf549b",
+    "workflow_blob": "cc4a53b95a23bc4f02e3e1cb1c50ea672679ae94",
+    "ci_blob": "be450a74d6fdeb4d309b1156337e0d10397c4406",
+    "run_id": "46093755351",
+    "attempt": "1",
+    "jobs": [
+      {
+        "id": 140820391182,
+        "name": "checks / Changelog",
+        "conclusion": "success"
+      },
+      {
+        "id": 140820391214,
+        "name": "checks / Changed components",
+        "conclusion": "success"
+      },
+      {
+        "id": 140820391218,
+        "name": "checks / Repo checks",
+        "conclusion": "success"
+      },
+      {
+        "id": 140820422033,
+        "name": "checks / Studio backend (1/2)",
+        "conclusion": "success"
+      },
+      {
+        "id": 140820422037,
+        "name": "checks / Studio backend Postgres (1/2)",
+        "conclusion": "success"
+      },
+      {
+        "id": 140820422042,
+        "name": "checks / Studio code health",
+        "conclusion": "success"
+      },
+      {
+        "id": 140820422043,
+        "name": "checks / Studio frontend",
+        "conclusion": "success"
+      },
+      {
+        "id": 140820422048,
+        "name": "checks / Extension",
+        "conclusion": "success"
+      },
+      {
+        "id": 140820422056,
+        "name": "checks / Studio backend (2/2)",
+        "conclusion": "success"
+      },
+      {
+        "id": 140820422063,
+        "name": "checks / Studio backend Postgres (2/2)",
+        "conclusion": "success"
+      },
+      {
+        "id": 140820422072,
+        "name": "checks / Studio browser tests (hosted)",
+        "conclusion": "success"
+      },
+      {
+        "id": 140820422089,
+        "name": "checks / Webhook relay",
+        "conclusion": "success"
+      },
+      {
+        "id": 140820422092,
+        "name": "checks / Studio browser tests (sandbox)",
+        "conclusion": "success"
+      },
+      {
+        "id": 140820422171,
+        "name": "checks / Dependency audit / Audit locked Python dependencies",
+        "conclusion": "success"
+      },
+      {
+        "id": 140827615751,
+        "name": "checks / CI",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "jobs": [
+    {
+      "id": 140820349556,
+      "run_id": 46093755351,
+      "name": "prepare",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 140820391182,
+      "run_id": 46093755351,
+      "name": "checks / Changelog",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 140820391214,
+      "run_id": 46093755351,
+      "name": "checks / Changed components",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 140820391218,
+      "run_id": 46093755351,
+      "name": "checks / Repo checks",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 140820422033,
+      "run_id": 46093755351,
+      "name": "checks / Studio backend (1/2)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 140820422037,
+      "run_id": 46093755351,
+      "name": "checks / Studio backend Postgres (1/2)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 140820422042,
+      "run_id": 46093755351,
+      "name": "checks / Studio code health",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 140820422043,
+      "run_id": 46093755351,
+      "name": "checks / Studio frontend",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 140820422048,
+      "run_id": 46093755351,
+      "name": "checks / Extension",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 140820422056,
+      "run_id": 46093755351,
+      "name": "checks / Studio backend (2/2)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 140820422063,
+      "run_id": 46093755351,
+      "name": "checks / Studio backend Postgres (2/2)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 140820422072,
+      "run_id": 46093755351,
+      "name": "checks / Studio browser tests (hosted)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 140820422089,
+      "run_id": 46093755351,
+      "name": "checks / Webhook relay",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 140820422092,
+      "run_id": 46093755351,
+      "name": "checks / Studio browser tests (sandbox)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 140820422171,
+      "run_id": 46093755351,
+      "name": "checks / Dependency audit / Audit locked Python dependencies",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 140827615751,
+      "run_id": 46093755351,
+      "name": "checks / CI",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 140827654147,
+      "run_id": 46093755351,
+      "name": "evidence",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "receipt_fields": "Source and job inventory excerpt; artifact_sha256 pins the complete downloaded receipt ZIP."
+}

@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import BrowserEvidenceReporter from "./browser-evidence-reporter.mjs";
-import { verifyProjectEvidence } from "./browser-project-evidence.mjs";
+import { executionNode, rerunGuidance, verifyProjectEvidence } from "./browser-project-evidence.mjs";
+import { spawnSync } from "node:child_process";
 import {
   BROWSER_REGRESSION,
   buildVerificationInventory,
@@ -34,7 +35,7 @@ test("retains all three projects, retries and runtime skips", () => {
 
 function projectEvidence() {
   const metadata = { sha: "a".repeat(40), tree: "b".repeat(40), workflowBlob: "c".repeat(40),
-    run: "42", attempt: "1", npmLock: "npm", pythonLock: "python", playwright: "pw", node: "node",
+    run: "42", attempt: "1", npmLock: "npm", pythonLock: "python", playwright: "pw", node: executionNode,
     arch: "x64", imageOS: "ubuntu26", imageVersion: "image" };
   return ["desktop", "phone", "phone-webkit"].map((project, index) => {
     const key = Buffer.alloc(32, index + 1);
@@ -65,6 +66,25 @@ test("three independent private namespaces preserve exact union and verification
   });
   assert.equal(receipt.cases[2].shard, 3);
   assert.equal(receipt.target, expected.sha);
+});
+
+test("aggregate runtime drift does not change the vetted execution runtime", () => {
+  const records = projectEvidence();
+  const expected = { ...records[0].metadata, node: "v22.23.6", imageVersion: "next-image", imageOS: "ubuntu28", arch: "arm64" };
+  delete expected.project;
+  delete expected.regression;
+  assert.equal(verifyProjectEvidence(records, expected, "success").full.length, 3);
+  for (const [field, value] of [["node", "v22.23.6"], ["arch", "arm64"], ["imageOS", "ubuntu28"]]) {
+    const unvetted = projectEvidence();
+    for (const record of unvetted) record.metadata[field] = value;
+    assert.throws(() => verifyProjectEvidence(unvetted, expected, "success"), /unvetted/);
+  }
+});
+
+test("CLI failures explain the same-attempt rerun requirement", () => {
+  const result = spawnSync(process.execPath, [new URL("./browser-project-evidence.mjs", import.meta.url).pathname, "verify", "/missing-browser-artifacts"], { encoding: "utf8" });
+  assert.equal(result.status, 1);
+  assert.ok(result.stderr.includes(rerunGuidance));
 });
 
 test("matrix evidence fails closed on missing jobs, mismatched inputs and incomplete collections", () => {
@@ -108,6 +128,7 @@ test("existing browser and required CI gates depend on the project matrix and pr
   assert.doesNotMatch(gate, /^\s+(token|repository|run-id):/m);
   const matrix = text.split("\n  studio-browser-projects:\n")[1].split("\n  studio-browser-hosted:\n")[0];
   assert.match(matrix, /project: \[desktop, phone, phone-webkit\]/);
+  assert.ok(matrix.includes(`node-version: "${executionNode.slice(1)}"`));
   assert.match(matrix, /fail-fast: false/);
   assert.match(matrix, /timeout-minutes: 40/);
   assert.match(matrix, /sandbox-browser\/\*\.json/);

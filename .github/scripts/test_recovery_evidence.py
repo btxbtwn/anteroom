@@ -5,6 +5,7 @@ import io
 import json
 import unittest
 from dataclasses import replace
+from pathlib import Path
 import zipfile
 
 import recovery_evidence as recovery
@@ -20,12 +21,15 @@ def archive(name, value):
 
 class RecoveryEvidenceTests(unittest.TestCase):
     def setUp(self):
+        ci_text = (Path(__file__).parent / '../workflows/ci.yml').read_text()
+        ci_raw = ci_text.encode()
+        ci_blob = hashlib.sha1(b'blob ' + str(len(ci_raw)).encode() + b'\0' + ci_raw).hexdigest()
         self.pin = recovery.EvidencePin(
             repository='example/project', repository_id=10, workflow_id=20,
             target='a'*40, tree='b'*40, production_base='c'*40,
             historical_failure=verification.HISTORICAL,
             correcting_merge=verification.CORRECTED,
-            workflow_blob='d'*40, ci_blob='e'*40, run_id=42, attempt=1,
+            workflow_blob='d'*40, ci_blob=ci_blob, run_id=42, attempt=1,
             receipt_artifact_id=100, receipt_digest='sha256:'+'0'*64,
             browser_regression_blob=verification.BROWSER_REGRESSION_BLOB)
         self.run = {'id': 42, 'workflow_id': 20, 'head_sha': self.pin.target,
@@ -34,6 +38,7 @@ class RecoveryEvidenceTests(unittest.TestCase):
                     'event': 'workflow_dispatch', 'path': verification.WORKFLOW,
                     'status': 'completed', 'conclusion': 'success'}
         self.git_values = {
+            ('cat-file', 'blob', ci_blob): ci_text,
             ('rev-list', '--first-parent', 'origin/main'): '\n'.join(['f'*40, self.pin.target, verification.CORRECTED, verification.HISTORICAL, self.pin.production_base]),
             ('rev-parse', self.pin.target+'^{tree}'): self.pin.tree,
             ('rev-parse', self.pin.target+':'+verification.WORKFLOW): self.pin.workflow_blob,
@@ -83,7 +88,7 @@ class RecoveryEvidenceTests(unittest.TestCase):
                 {**full_browser[2], 'shard': 2, 'attempts': [{'status': 'passed', 'duration': 15, 'retry': 0}]},
             ],
         }
-        self.receipt = {**self.source, 'jobs': verification.validate_jobs(self.jobs),
+        self.receipt = {**self.source, 'jobs': verification.validate_jobs(self.jobs, ci_blob, self.git),
                         'backend_inventory': verification.validate_inventory(self.inventories, self.source),
                         'browser_inventory': verification.validate_browser_inventory(self.browser_inventory, self.source),
                         'scope': 'all Linux CI components; native validation remains separate',

@@ -335,13 +335,25 @@ Each sandbox runner records an unfiltered full collection and its project
 execution. The sandbox gate verifies all three projects against their exact
 expected cases and rejects missing, duplicate, foreign or incomplete cases,
 failed/cancelled/skipped project jobs, missing artifacts and mismatched source,
-workflow, lockfiles, runtime, runner image, run or attempt. Expected skips and
+workflow, lockfiles, execution runtime, runner image, run or attempt. Execution
+runners use vetted Node 22.23.5 on x64 Ubuntu 26 and must agree on image identity.
+The non-executing aggregate records its validator runtime separately; its Node
+patch or rolling image does not have to match execution. Expected skips and
 every retry attempt remain visible. The existing one-retry policy, 40-minute
 test deadline, GitHub annotations, HTML reports, screenshots and failure traces
 remain in effect. Report artifacts are now named
 `studio-browser-report-sandbox-<project>`; profile and full-verification artifact
 names remain unchanged. Upload deadlines and seven-day diagnostic retention
 remain unchanged; full verification evidence retains its 30-day retention.
+
+After fixing a browser verification failure, choose **Re-run all jobs** for the
+workflow at the same commit. **Re-run failed jobs** and named-check reruns leave
+successful project artifacts in an earlier attempt; the gate deliberately
+rejects mixed attempts. The evidence CLI prints this recovery guidance.
+
+Recovery job inventories use the trusted CI workflow blob's declared contract.
+Only the pinned historical blob retains the old job layout. Unknown contracts,
+missing jobs and extra jobs fail closed.
 
 `check.sh` continues to run the two local shards serially; it covers the same
 unfiltered collection and is not a substitute for exercising the CI matrix.

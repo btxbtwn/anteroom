@@ -81,13 +81,16 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
         self.off_branch = "6" * 40
         self.tree = "7" * 40
         self.wf_blob = "8" * 40
-        self.ci_blob = "9" * 40
+        ci_text = (SCRIPTS_DIR / '../workflows/ci.yml').read_text()
+        ci_raw = ci_text.encode()
+        self.ci_blob = hashlib.sha1(b'blob ' + str(len(ci_raw)).encode() + b'\0' + ci_raw).hexdigest()
 
         self.span_to_target = [self.before_hist, self.hist, self.second_hist, self.corr, self.target]
         self.span_to_head = [*self.span_to_target, self.post_merge, self.head]
         self.main_newest_first = list(reversed([self.prod, *self.span_to_head]))
 
         self.git_values = {
+            ("cat-file", "blob", self.ci_blob): ci_text,
             ("rev-parse", self.head): self.head,
             ("rev-parse", self.target): self.target,
             ("rev-parse", self.corr): self.corr,
@@ -190,7 +193,7 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
         }
         self.receipt = {
             **self.source,
-            "jobs": verification.validate_jobs(self.jobs),
+            "jobs": verification.validate_jobs(self.jobs, self.ci_blob, self.fake_git),
             "backend_inventory": verification.validate_inventory(self.inventories, self.source),
             "browser_inventory": verification.validate_browser_inventory(self.browser_inventory, self.source),
             "scope": "all Linux CI components; native validation remains separate",

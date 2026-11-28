@@ -201,7 +201,7 @@ def verify(pin, fetch, download, git):
             or any(j.get('status') != 'completed' or j.get('conclusion') != 'success' for j in jobs)
             or sorted(j['name'] for j in jobs if not j['name'].startswith('checks / ')) != ['evidence', 'prepare']):
         raise ValueError('Final job inventory is incomplete or contains untrusted jobs.')
-    checks = evidence.validate_jobs(jobs)
+    checks = evidence.validate_jobs(jobs, pin.ci_blob, git)
     suffix = f'{pin.run_id}-{pin.attempt}'
     names = {f'verification-receipt-{suffix}': 'verification-receipt.json',
              f'verification-source-{suffix}': 'verification-source.json'}

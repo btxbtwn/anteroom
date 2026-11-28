@@ -6,6 +6,9 @@ import { pathToFileURL } from "node:url";
 import { BROWSER_REGRESSION, regressionIdentity, verifyProjectCollections, buildVerificationInventory } from "./verify-browser-evidence.mjs";
 
 export const projects = ["desktop", "phone", "phone-webkit"];
+export const executionNode = "v22.23.5";
+const runtimeFields = ["node", "arch", "imageOS", "imageVersion"];
+export const rerunGuidance = "After resolving the cause, choose Re-run all jobs for this workflow at the same commit. Do not use Re-run failed jobs or a named browser-check rerun: all three project artifacts must come from one attempt.";
 const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim();
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const read = (path) => {
@@ -34,8 +37,15 @@ function sourceIdentity() {
 export function verifyProjectEvidence(records, expected, dependencyResult) {
   if (dependencyResult !== "success") throw new Error("Every browser project must succeed");
   if (!Array.isArray(records) || records.length !== projects.length) throw new Error("Missing project artifacts");
+  const execution = records[0]?.metadata;
+  if (execution?.node !== executionNode || execution.arch !== "x64" || execution.imageOS !== "ubuntu26" || runtimeFields.some((field) =>
+    typeof execution[field] !== "string" || !/^[a-zA-Z0-9._-]{1,40}$/.test(execution[field]))) {
+    throw new Error("Invalid or unvetted browser execution runtime");
+  }
   for (const record of records) {
-    if (!record.metadata || Object.entries(expected).some(([key, value]) => record.metadata[key] !== value)) {
+    if (!record.metadata || Object.entries(expected).some(([key, value]) =>
+      !runtimeFields.includes(key) && record.metadata[key] !== value)
+      || runtimeFields.some((field) => record.metadata[field] !== execution[field])) {
       throw new Error("Browser source, workflow, locks, runtime or attempt mismatch");
     }
   }
@@ -47,6 +57,7 @@ function main() {
   const expected = sourceIdentity();
   if (mode === "prepare") {
     if (!projects.includes(project)) throw new Error("Unknown browser project");
+    if (expected.node !== executionNode) throw new Error(`Browser execution requires Node ${executionNode}`);
     if (read("node_modules/@playwright/test/package.json").version !== expected.playwright) throw new Error("Unlocked Playwright");
     mkdirSync(directory, { recursive: true });
     const key = randomBytes(32);
@@ -65,7 +76,9 @@ function main() {
     attempts: attempts.map(({ status: outcome, duration, retry }) => ({ status: outcome, duration, retry })),
   })));
   mkdirSync(join(directory, "evidence"));
-  writeFileSync(join(directory, "evidence/profile.json"), JSON.stringify({ schema: 1, provenance: expected, counts, cases }), { flag: "wx" });
+  const execution = Object.fromEntries(runtimeFields.map((field) => [field, records[0].metadata[field]]));
+  const validator = Object.fromEntries(runtimeFields.map((field) => [field, expected[field]]));
+  writeFileSync(join(directory, "evidence/profile.json"), JSON.stringify({ schema: 1, provenance: { ...expected, ...execution }, validator, counts, cases }), { flag: "wx" });
   if (process.env.VERIFICATION_BROWSER_INVENTORY_PATH) {
     const payload = buildVerificationInventory(full, collections, {
       regression: records.find(({ metadata }) => metadata.project === BROWSER_REGRESSION.project).metadata.regression,
@@ -78,4 +91,11 @@ function main() {
   console.log(`Verified ${cases.length} sandbox cases across all three browser projects.`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) main();
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  try { main(); }
+  catch (error) {
+    console.error(`Sandbox browser evidence failed: ${error.message}`);
+    console.error(rerunGuidance);
+    process.exitCode = 1;
+  }
+}
